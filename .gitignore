@@ -2,6 +2,7 @@
 
 # dependencies
 /node_modules
+/.pnpm-store
 /.pnp
 .pnp.*
 .yarn/*
@@ -23,6 +24,13 @@
 # misc
 .DS_Store
 *.pem
+
+# local editor / agent settings (shared rules stay tracked)
+/.claude/settings.local.json
+/.codex/hooks.json
+/.cursor/hooks.json
+/.idea
+/.vscode
 
 # debug
 npm-debug.log*

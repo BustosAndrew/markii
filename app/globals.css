@@ -1,27 +1,71 @@
 @import "tailwindcss";
 
 :root {
-  --background: #0b0510;
-  --foreground: #f6f1f4;
-  --muted: #a08d9d;
-  --surface: #150a1c;
-  --brand-deep: #8e1148;
-  --brand: #e01b7b;
-  --brand-orange: #f98443;
-  --brand-amber: #f9a03f;
+  --background: #fafafa;
+  --foreground: #16161d;
+  --muted: #6b7280;
+  --muted-soft: #9ca3af;
+  --disabled: #c7cbd1;
+  --surface: #ffffff;
+  --surface-elevated: #fcfcfc;
+  --border: #e7e7ea;
+  --border-nav: #ececec;
+  --hover: #f3f4f6;
+  --hover-soft: #f5f5f7;
+  --table-hover: #f8f8f9;
+  --brand-deep: #590d22;
+  --brand-pressed: #800f2f;
+  --brand-hover: #a4133c;
+  --brand: #c9184a;
+  --brand-bubblegum: #ff4d6d;
+  --brand-light: #ff758f;
+  --on-brand: #ffffff;
+  --success-bg: #e8f8f4;
+  --success-text: #0a9396;
+  --warning-bg: #fff7e5;
+  --warning-text: #ee9b00;
+  --error-bg: #fff0f1;
+  --error-text: #c9184a;
+  --info-bg: #eef6ff;
+  --info-text: #3a86ff;
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.04);
+  --shadow-md: 0 4px 12px rgba(16, 24, 40, 0.05);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-muted: var(--muted);
+  --color-muted-soft: var(--muted-soft);
+  --color-disabled: var(--disabled);
   --color-surface: var(--surface);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-border: var(--border);
+  --color-border-nav: var(--border-nav);
+  --color-hover: var(--hover);
+  --color-hover-soft: var(--hover-soft);
+  --color-table-hover: var(--table-hover);
   --color-brand-deep: var(--brand-deep);
+  --color-brand-pressed: var(--brand-pressed);
+  --color-brand-hover: var(--brand-hover);
   --color-brand: var(--brand);
-  --color-brand-orange: var(--brand-orange);
-  --color-brand-amber: var(--brand-amber);
+  --color-brand-bubblegum: var(--brand-bubblegum);
+  --color-brand-light: var(--brand-light);
+  --color-on-brand: var(--on-brand);
+  --color-success-bg: var(--success-bg);
+  --color-success-text: var(--success-text);
+  --color-warning-bg: var(--warning-bg);
+  --color-warning-text: var(--warning-text);
+  --color-error-bg: var(--error-bg);
+  --color-error-text: var(--error-text);
+  --color-info-bg: var(--info-bg);
+  --color-info-text: var(--info-text);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --radius-card: 16px;
+  --radius-control: 12px;
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
 }
 
 body {
@@ -35,7 +79,7 @@ body {
     100deg,
     var(--brand-deep) 0%,
     var(--brand) 45%,
-    var(--brand-amber) 100%
+    var(--brand-light) 100%
   );
   background-clip: text;
   -webkit-background-clip: text;
@@ -47,8 +91,13 @@ body {
     115deg,
     var(--brand-deep) 0%,
     var(--brand) 50%,
-    var(--brand-orange) 100%
+    var(--brand-light) 100%
   );
+}
+
+.bg-dot-grid {
+  background-image: radial-gradient(var(--border) 1px, transparent 1px);
+  background-size: 22px 22px;
 }
 
 @keyframes drift {
@@ -57,21 +106,71 @@ body {
     transform: translate(0, 0) scale(1);
   }
   50% {
-    transform: translate(3rem, -2rem) scale(1.15);
+    transform: translate(2rem, -1.5rem) scale(1.08);
   }
 }
 
 .animate-drift {
-  animation: drift 14s ease-in-out infinite;
+  animation: drift 18s ease-in-out infinite;
 }
 
 .animate-drift-slow {
-  animation: drift 22s ease-in-out infinite reverse;
+  animation: drift 26s ease-in-out infinite reverse;
+}
+
+@keyframes logo-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+.animate-logo-float {
+  animation: logo-float 6s ease-in-out infinite;
+}
+
+@keyframes blink {
+  0%,
+  91%,
+  100% {
+    transform: scaleY(1);
+  }
+  95% {
+    transform: scaleY(0.1);
+  }
+}
+
+.logo-eye {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: blink 5.5s ease-in-out infinite;
+}
+
+/* Agent pings arriving at the storefront. */
+@keyframes beacon {
+  0% {
+    transform: scale(0.55);
+    opacity: 0.35;
+  }
+  100% {
+    transform: scale(1.7);
+    opacity: 0;
+  }
+}
+
+.animate-beacon {
+  animation: beacon 4.5s ease-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .animate-drift,
-  .animate-drift-slow {
+  .animate-drift-slow,
+  .animate-logo-float,
+  .animate-beacon,
+  .logo-eye {
     animation: none;
   }
 }
