@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Check, Download, Upload } from "lucide-react";
 import {
   commitImport,
   importFromCsv,
@@ -171,7 +172,7 @@ export function ImportDialog({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button
         type="button"
-        className="absolute inset-0 bg-foreground/20"
+        className="absolute inset-0 bg-foreground/25 backdrop-blur-[2px]"
         aria-label="Close import dialog"
         onClick={handleClose}
       />
@@ -182,12 +183,65 @@ export function ImportDialog({
         className="relative flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface shadow-[var(--shadow-md)]"
       >
         <div className="border-b border-border px-6 py-4">
-          <h2 id="import-title" className="text-lg font-semibold text-foreground">
-            Import catalog
-          </h2>
-          <p className="mt-1 text-sm text-muted">
-            Upload a CSV or scrape a public Shopify / WooCommerce storefront URL.
-          </p>
+          <div className="flex items-center gap-3">
+            <span
+              aria-hidden
+              className="flex size-9 shrink-0 items-center justify-center rounded-full bg-brand/10 text-brand"
+            >
+              <Download className="size-4.5" strokeWidth={1.75} />
+            </span>
+            <div className="min-w-0">
+              <h2
+                id="import-title"
+                className="text-lg font-semibold tracking-tight text-foreground"
+              >
+                Import catalog
+              </h2>
+              <p className="text-sm text-muted">
+                Upload a CSV or scrape a public Shopify / WooCommerce storefront.
+              </p>
+            </div>
+          </div>
+
+          {/* where you are in the two-phase import */}
+          <ol className="mt-4 flex items-center gap-2 text-xs">
+            {(
+              [
+                { id: "source", label: "1. Source" },
+                { id: "allocate", label: "2. Assign sites" },
+                { id: "done", label: "3. Done" },
+              ] as const
+            ).map((s, i) => {
+              const order = ["source", "allocate", "done"];
+              const state =
+                step === s.id
+                  ? "current"
+                  : order.indexOf(step) > i
+                    ? "done"
+                    : "todo";
+              return (
+                <li key={s.id} className="flex items-center gap-2">
+                  {i > 0 ? (
+                    <span
+                      aria-hidden
+                      className={`h-px w-6 ${state === "todo" ? "bg-border" : "bg-brand"}`}
+                    />
+                  ) : null}
+                  <span
+                    className={`rounded-full px-2.5 py-1 font-medium ${
+                      state === "current"
+                        ? "bg-brand text-on-brand"
+                        : state === "done"
+                          ? "bg-brand/12 text-brand"
+                          : "bg-hover-soft text-muted"
+                    }`}
+                  >
+                    {s.label}
+                  </span>
+                </li>
+              );
+            })}
+          </ol>
         </div>
 
         <div className="overflow-y-auto px-6 py-5">
@@ -204,10 +258,11 @@ export function ImportDialog({
                   />
                   <Button
                     type="button"
+                    className="shrink-0 whitespace-nowrap"
                     disabled={busy || !url.trim()}
                     onClick={() => runParse("url")}
                   >
-                    Scrape URL
+                    {busy ? "Working…" : "Scrape URL"}
                   </Button>
                 </div>
                 <p className="mt-1.5 text-xs text-muted">
@@ -216,13 +271,33 @@ export function ImportDialog({
                 </p>
               </div>
 
+              <div className="relative flex items-center gap-3">
+                <span className="h-px flex-1 bg-border" />
+                <span className="text-xs text-muted">or</span>
+                <span className="h-px flex-1 bg-border" />
+              </div>
+
               <div>
                 <Label htmlFor="csv">CSV file</Label>
+                <label
+                  htmlFor="csv"
+                  className="flex cursor-pointer flex-col items-center rounded-[var(--radius-control)] border border-dashed border-border bg-surface-elevated px-6 py-7 text-center transition-colors hover:border-brand/40 hover:bg-hover-soft"
+                >
+                  <Upload className="size-5 text-muted" strokeWidth={1.75} />
+                  <span className="mt-2 text-sm font-medium text-foreground">
+                    Choose a CSV file
+                  </span>
+                  <span className="mt-1 text-xs text-muted">
+                    Needs a header row with at least{" "}
+                    <span className="font-mono">name</span> and{" "}
+                    <span className="font-mono">price</span> · max 10 MB
+                  </span>
+                </label>
                 <input
                   id="csv"
                   type="file"
                   accept=".csv,text/csv"
-                  className="block w-full text-sm text-muted file:mr-3 file:rounded-[var(--radius-control)] file:border-0 file:bg-hover file:px-3 file:py-2 file:text-sm file:font-medium file:text-foreground hover:file:bg-hover-soft"
+                  className="sr-only"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
                     e.target.value = "";
@@ -296,31 +371,54 @@ export function ImportDialog({
               </div>
 
               {failed.length > 0 ? (
-                <ul className="space-y-1 text-sm text-muted">
-                  {failed.map((f, i) => (
-                    <li key={`${f.row}-${i}`}>
-                      Row {f.row ?? "?"}: {f.reason}
-                    </li>
-                  ))}
-                </ul>
+                <div className="rounded-[var(--radius-control)] border border-warning-text/30 bg-warning-bg px-4 py-3">
+                  <p className="text-sm font-medium text-warning-text">
+                    {failed.length} {failed.length === 1 ? "row" : "rows"} could
+                    not be read and {failed.length === 1 ? "was" : "were"}{" "}
+                    skipped
+                  </p>
+                  <ul className="mt-1.5 space-y-1 text-sm text-warning-text/90">
+                    {failed.map((f, i) => (
+                      <li key={`${f.row}-${i}`}>
+                        {f.row != null ? `Row ${f.row}: ` : ""}
+                        {f.reason}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               ) : null}
             </div>
           ) : null}
 
           {step === "done" ? (
-            <div className="space-y-3 text-sm">
-              <p className="text-foreground">
-                Created {createdCount} product
-                {createdCount === 1 ? "" : "s"}.
-              </p>
+            <div className="space-y-4">
+              <div className="flex flex-col items-center rounded-[var(--radius-control)] border border-border bg-surface-elevated px-6 py-8 text-center">
+                <span
+                  aria-hidden
+                  className="flex size-11 items-center justify-center rounded-full bg-success-bg text-success-text"
+                >
+                  <Check className="size-5.5" strokeWidth={2} />
+                </span>
+                <p className="mt-3 text-lg font-semibold tracking-tight text-foreground">
+                  Imported {createdCount}{" "}
+                  {createdCount === 1 ? "product" : "products"}
+                </p>
+                <p className="mt-1 text-sm text-muted">
+                  They are live in your inventory and ready to assign or edit.
+                </p>
+              </div>
               {commitFailed.length > 0 ? (
-                <ul className="space-y-1 text-muted">
-                  {commitFailed.map((f) => (
-                    <li key={f.tempId}>
-                      {f.tempId}: {f.reason}
-                    </li>
-                  ))}
-                </ul>
+                <div className="rounded-[var(--radius-control)] border border-warning-text/30 bg-warning-bg px-4 py-3">
+                  <p className="text-sm font-medium text-warning-text">
+                    {commitFailed.length}{" "}
+                    {commitFailed.length === 1 ? "item" : "items"} skipped
+                  </p>
+                  <ul className="mt-1.5 space-y-1 text-sm text-warning-text/90">
+                    {commitFailed.map((f) => (
+                      <li key={f.tempId}>{f.reason}</li>
+                    ))}
+                  </ul>
+                </div>
               ) : null}
             </div>
           ) : null}

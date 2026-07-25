@@ -256,33 +256,59 @@ export function CreateWebsiteWizard({ sites }: { sites: Site[] }) {
         }
       />
 
-      <ol className="flex flex-wrap gap-2 text-sm">
+      <ol className="grid gap-3 sm:grid-cols-4">
         {[
-          { n: 1, label: "Catalog" },
-          { n: 2, label: "Site" },
-          { n: 3, label: "Preview" },
-          { n: 4, label: "Deploy" },
-        ].map((s) => (
-          <li
-            key={s.n}
-            className={
-              step === s.n
-                ? "rounded-full bg-brand px-3 py-1 font-medium text-on-brand"
-                : step > s.n
-                  ? "rounded-full bg-hover px-3 py-1 text-foreground"
-                  : "rounded-full bg-hover-soft px-3 py-1 text-muted"
-            }
-          >
-            {s.n}. {s.label}
-          </li>
-        ))}
+          { n: 1, label: "Catalog", hint: "Import or add products" },
+          { n: 2, label: "Site", hint: "Name and address" },
+          { n: 3, label: "Preview", hint: "What agents will read" },
+          { n: 4, label: "Deploy", hint: "Save or go live" },
+        ].map((s) => {
+          const state = step === s.n ? "current" : step > s.n ? "done" : "todo";
+          return (
+            <li
+              key={s.n}
+              aria-current={state === "current" ? "step" : undefined}
+              className="flex items-start gap-2.5 border-t-2 pt-3 transition-colors"
+              style={{
+                borderColor:
+                  state === "todo" ? "var(--border)" : "var(--brand)",
+              }}
+            >
+              <span
+                className={`mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold ${
+                  state === "current"
+                    ? "bg-brand text-on-brand"
+                    : state === "done"
+                      ? "bg-brand/15 text-brand"
+                      : "bg-hover text-muted"
+                }`}
+              >
+                {state === "done" ? "✓" : s.n}
+              </span>
+              <span className="min-w-0">
+                <span
+                  className={`block text-sm font-medium ${
+                    state === "todo" ? "text-muted" : "text-foreground"
+                  }`}
+                >
+                  {s.label}
+                </span>
+                <span className="block text-xs text-muted">{s.hint}</span>
+              </span>
+            </li>
+          );
+        })}
       </ol>
 
       {step === 1 ? (
         <section className="grid gap-6 lg:grid-cols-2">
           <div className="space-y-4 rounded-[var(--radius-card)] border border-border bg-surface p-5">
             <div className="flex flex-wrap gap-2">
-              <Button type="button" onClick={() => setImportOpen(true)}>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setImportOpen(true)}
+              >
                 Import CSV / scrape
               </Button>
             </div>
@@ -327,44 +353,88 @@ export function CreateWebsiteWizard({ sites }: { sites: Site[] }) {
             </div>
           </div>
 
-          <div className="rounded-[var(--radius-card)] border border-border bg-surface p-5">
-            <h2 className="text-sm font-medium text-foreground">Draft catalog</h2>
-            <p className="mt-1 text-sm text-muted">
-              {draft.categories.length} categories · {draft.products.length} products
-            </p>
-            <ul className="mt-4 max-h-80 space-y-2 overflow-y-auto text-sm">
-              {draft.products.map((p) => (
-                <li
-                  key={`${p.slug}-${p.name}`}
-                  className="flex items-start justify-between gap-3 border-b border-border py-2"
-                >
-                  <div>
-                    <p className="font-medium text-foreground">{p.name}</p>
-                    <p className="text-xs text-muted">
-                      {formatCents(p.priceCents)}
-                      {p.categorySlug ? ` · ${p.categorySlug}` : ""}
-                    </p>
-                  </div>
+          <div className="flex flex-col rounded-[var(--radius-card)] border border-border bg-surface p-5">
+            <div className="flex items-baseline justify-between gap-3">
+              <h2 className="text-sm font-medium text-foreground">Draft catalog</h2>
+              <p className="text-sm text-muted">
+                {draft.categories.length}{" "}
+                {draft.categories.length === 1 ? "category" : "categories"} ·{" "}
+                {draft.products.length}{" "}
+                {draft.products.length === 1 ? "product" : "products"}
+              </p>
+            </div>
+
+            {draft.categories.length > 0 ? (
+              <ul className="mt-3 flex flex-wrap gap-1.5">
+                {draft.categories.map((c) => (
+                  <li
+                    key={c.slug ?? c.name}
+                    className="rounded-full bg-hover-soft px-2.5 py-1 text-xs text-foreground"
+                  >
+                    {c.name}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+
+            {draft.products.length === 0 ? (
+              <div className="mt-4 flex flex-1 flex-col items-center justify-center rounded-[var(--radius-control)] border border-dashed border-border px-6 py-10 text-center">
+                <p className="text-sm font-medium text-foreground">
+                  Nothing in the catalog yet
+                </p>
+                <p className="mt-1 max-w-xs text-sm text-muted">
+                  Import a CSV or scrape a storefront, add products by hand, or
+                  start from a filled-in example.
+                </p>
+                <div className="mt-4 flex flex-wrap justify-center gap-2">
+                  <Button type="button" onClick={() => setImportOpen(true)}>
+                    Import CSV / scrape
+                  </Button>
                   <Button
                     type="button"
-                    variant="ghost"
-                    onClick={() =>
-                      setDraft((prev) => ({
-                        ...prev,
-                        products: prev.products.filter(
-                          (x) => !(x.name === p.name && x.slug === p.slug),
-                        ),
-                      }))
-                    }
+                    variant="secondary"
+                    disabled={busy}
+                    onClick={() => void autofillTemplate()}
                   >
-                    Remove
+                    Use a template
                   </Button>
-                </li>
-              ))}
-              {draft.products.length === 0 ? (
-                <li className="text-muted">No products yet.</li>
-              ) : null}
-            </ul>
+                </div>
+              </div>
+            ) : (
+              <ul className="mt-4 max-h-80 divide-y divide-border overflow-y-auto text-sm">
+                {draft.products.map((p) => (
+                  <li
+                    key={`${p.slug}-${p.name}`}
+                    className="flex items-start justify-between gap-3 py-2.5"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate font-medium text-foreground">
+                        {p.name}
+                      </p>
+                      <p className="text-xs text-muted">
+                        {formatCents(p.priceCents)}
+                        {p.categorySlug ? ` · ${p.categorySlug}` : ""}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="shrink-0"
+                      onClick={() =>
+                        setDraft((prev) => ({
+                          ...prev,
+                          products: prev.products.filter(
+                            (x) => !(x.name === p.name && x.slug === p.slug),
+                          ),
+                        }))
+                      }
+                    >
+                      Remove
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         </section>
       ) : null}

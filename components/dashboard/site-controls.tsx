@@ -103,6 +103,7 @@ export function SiteControls({ site }: { site: Site }) {
           />
           <Button
             variant="secondary"
+            className="shrink-0 whitespace-nowrap"
             disabled={busy}
             onClick={() =>
               patch({ customDomain: domain.trim() ? domain.trim() : null })

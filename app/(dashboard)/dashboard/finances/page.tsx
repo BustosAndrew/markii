@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Suspense } from "react";
-import { getFinancesOverview } from "@/lib/api/finances";
+import { getFinancesOverview } from "@/lib/api/server";
 import { firstParam, loadOrError } from "@/lib/api/load";
 import { MoneyText } from "@/components/ui/money-text";
 import { PageHeader } from "@/components/ui/page-header";
@@ -20,7 +20,7 @@ export default async function FinancesPage({
   const to = firstParam(sp.to);
 
   const { data, error } = await loadOrError(() =>
-    getFinancesOverview({ q, from, to }, { cache: "no-store" }),
+    getFinancesOverview({ q, from, to }),
   );
 
   return (

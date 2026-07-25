@@ -1,6 +1,6 @@
-import { listCategories } from "@/lib/api/categories";
-import { getProduct } from "@/lib/api/products";
-import { listSites } from "@/lib/api/sites";
+import { listCategories } from "@/lib/api/server";
+import { getProduct } from "@/lib/api/server";
+import { listSites } from "@/lib/api/server";
 import { firstParam, loadOrError } from "@/lib/api/load";
 import { PageHeader } from "@/components/ui/page-header";
 import { FetchError } from "@/components/dashboard/fetch-error";
@@ -22,15 +22,13 @@ export default async function ProductDetailPage({
     loadOrError(() =>
       getProduct(
         slug,
-        Number.isFinite(siteId) ? { siteId } : undefined,
-        { cache: "no-store" },
-      ),
+        Number.isFinite(siteId) ? { siteId } : undefined),
     ),
     loadOrError(() =>
-      listSites({ limit: 100, sort: "name" }, { cache: "no-store" }),
+      listSites({ limit: 100, sort: "name" }),
     ),
     loadOrError(() =>
-      listCategories({ limit: 100 }, { cache: "no-store" }),
+      listCategories({ limit: 100 }),
     ),
   ]);
 

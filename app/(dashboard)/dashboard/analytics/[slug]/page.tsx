@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Suspense } from "react";
-import { getSiteAnalytics } from "@/lib/api/analytics";
+import { getSiteAnalytics } from "@/lib/api/server";
 import { firstParam, loadOrError, parseLimit, parsePage } from "@/lib/api/load";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
@@ -27,9 +27,7 @@ export default async function AnalyticsDetailPage({
   const { data, error } = await loadOrError(() =>
     getSiteAnalytics(
       slug,
-      { q, from, to, page, limit },
-      { cache: "no-store" },
-    ),
+      { q, from, to, page, limit }),
   );
 
   if (error || !data) {

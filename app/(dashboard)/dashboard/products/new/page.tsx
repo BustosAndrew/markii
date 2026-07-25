@@ -1,5 +1,5 @@
-import { listCategories } from "@/lib/api/categories";
-import { listSites } from "@/lib/api/sites";
+import { listCategories } from "@/lib/api/server";
+import { listSites } from "@/lib/api/server";
 import { loadOrError } from "@/lib/api/load";
 import { PageHeader } from "@/components/ui/page-header";
 import { FetchError } from "@/components/dashboard/fetch-error";
@@ -8,10 +8,10 @@ import { ProductForm } from "@/components/dashboard/product-form";
 export default async function NewProductPage() {
   const [sitesResult, categoriesResult] = await Promise.all([
     loadOrError(() =>
-      listSites({ limit: 100, sort: "name" }, { cache: "no-store" }),
+      listSites({ limit: 100, sort: "name" }),
     ),
     loadOrError(() =>
-      listCategories({ limit: 100 }, { cache: "no-store" }),
+      listCategories({ limit: 100 }),
     ),
   ]);
 

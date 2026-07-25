@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Suspense } from "react";
-import { listCategories } from "@/lib/api/categories";
-import { listSites } from "@/lib/api/sites";
+import { listCategories } from "@/lib/api/server";
+import { listSites } from "@/lib/api/server";
 import { firstParam, loadOrError, parseLimit, parsePage } from "@/lib/api/load";
 import { Badge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
@@ -25,7 +25,7 @@ export default async function CategoriesPage({
   const limit = parseLimit(sp.limit);
 
   const sitesResult = await loadOrError(() =>
-    listSites({ limit: 100, sort: "name" }, { cache: "no-store" }),
+    listSites({ limit: 100, sort: "name" }),
   );
   const sites = sitesResult.data?.items ?? [];
 
@@ -42,9 +42,7 @@ export default async function CategoriesPage({
               : undefined,
         page,
         limit,
-      },
-      { cache: "no-store" },
-    ),
+      }),
   );
 
   return (

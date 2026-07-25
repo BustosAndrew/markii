@@ -182,7 +182,9 @@ One call powers the whole main dashboard grid.
     "x402BalanceCents": 140000,
     "fiatBalanceCents": 12300,
     "orderCount": 87,
-    "bySite": [{ "siteId": 1, "siteName": "Demo Store", "balanceCents": 90000 }]
+    "bySite": [
+      { "siteId": 1, "siteName": "Demo Store", "siteSlug": "demo-store", "balanceCents": 90000 }
+    ]
   }
 }
 ```

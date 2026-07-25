@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { listSites } from "@/lib/api/sites";
+import { listSites } from "@/lib/api/server";
 import { firstParam, loadOrError, parseLimit, parsePage } from "@/lib/api/load";
 import type { SiteStatus } from "@/lib/api/types";
 import { ButtonLink } from "@/components/ui/button";
@@ -32,9 +32,7 @@ export default async function WebsitesPage({
         page,
         limit,
         sort: "-createdAt",
-      },
-      { cache: "no-store" },
-    ),
+      }),
   );
 
   return (

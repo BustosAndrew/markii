@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Suspense } from "react";
-import { getAnalyticsOverview } from "@/lib/api/analytics";
+import { getAnalyticsOverview } from "@/lib/api/server";
 import { firstParam, loadOrError } from "@/lib/api/load";
 import { ButtonLink } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -20,8 +20,16 @@ export default async function AnalyticsPage({
   const to = firstParam(sp.to);
 
   const { data, error } = await loadOrError(() =>
-    getAnalyticsOverview({ q, from, to }, { cache: "no-store" }),
+    getAnalyticsOverview({ q, from, to }),
   );
+
+  const busiest = data?.byDay.length
+    ? data.byDay.reduce((best, d) => (d.count > best.count ? d : best))
+    : null;
+  const topAgentShare =
+    data && data.total > 0 && data.byAgent[0]
+      ? Math.round((data.byAgent[0].count / data.total) * 100)
+      : 0;
 
   return (
     <div>
@@ -40,23 +48,38 @@ export default async function AnalyticsPage({
 
       {!error && data ? (
         <>
-          <div className="mb-6 rounded-[var(--radius-card)] border border-border bg-surface p-5 shadow-[var(--shadow-sm)]">
-            <p className="text-sm text-muted">Total agent hits</p>
-            <p className="mt-2 text-3xl font-semibold tracking-tight">
-              {data.total}
-            </p>
+          <div className="mb-6 grid gap-4 sm:grid-cols-3">
+            <Stat label="Agent hits in range" value={data.total.toLocaleString()} />
+            <Stat
+              label="Busiest day"
+              value={busiest ? formatDay(busiest.date) : "—"}
+              detail={
+                busiest
+                  ? `${busiest.count.toLocaleString()} agent hits`
+                  : "no traffic in range"
+              }
+            />
+            <Stat
+              label="Top agent"
+              value={data.byAgent[0]?.agentName ?? "—"}
+              detail={
+                data.byAgent[0]
+                  ? `${data.byAgent[0].count.toLocaleString()} hits · ${topAgentShare}% of traffic`
+                  : "no traffic in range"
+              }
+            />
           </div>
 
-          <div className="mb-6 grid gap-4 lg:grid-cols-2">
-            <section className="rounded-[var(--radius-card)] border border-border bg-surface p-5">
+          <div className="mb-6 grid gap-4 lg:grid-cols-3">
+            <section className="rounded-[var(--radius-card)] border border-border bg-surface p-5 shadow-[var(--shadow-sm)] lg:col-span-2">
               <h2 className="mb-4 text-sm font-medium text-foreground">
                 Traffic by day
               </h2>
               <DaySparkBars data={data.byDay} />
             </section>
-            <section className="rounded-[var(--radius-card)] border border-border bg-surface p-5">
+            <section className="rounded-[var(--radius-card)] border border-border bg-surface p-5 shadow-[var(--shadow-sm)]">
               <h2 className="mb-4 text-sm font-medium text-foreground">
-                Top agents
+                Which agents are visiting
               </h2>
               <BarChart
                 data={data.byAgent.map((a) => ({
@@ -104,7 +127,9 @@ export default async function AnalyticsPage({
                       <td className="px-4 py-3 tabular-nums text-muted">
                         {site.last7d}
                       </td>
-                      <td className="px-4 py-3 text-muted">{site.topAgent}</td>
+                      <td className="px-4 py-3 text-muted">
+                        {site.topAgent ?? "—"}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -113,6 +138,37 @@ export default async function AnalyticsPage({
           )}
         </>
       ) : null}
+    </div>
+  );
+}
+
+function formatDay(iso: string) {
+  const d = new Date(`${iso}T00:00:00Z`);
+  return Number.isNaN(d.getTime())
+    ? iso
+    : d.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        timeZone: "UTC",
+      });
+}
+
+function Stat({
+  label,
+  value,
+  detail,
+}: {
+  label: string;
+  value: string;
+  detail?: string;
+}) {
+  return (
+    <div className="rounded-[var(--radius-card)] border border-border bg-surface p-5 shadow-[var(--shadow-sm)]">
+      <p className="text-sm text-muted">{label}</p>
+      <p className="mt-2 truncate text-2xl font-semibold tracking-tight text-foreground">
+        {value}
+      </p>
+      {detail ? <p className="mt-1 text-sm text-muted">{detail}</p> : null}
     </div>
   );
 }

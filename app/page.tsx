@@ -530,7 +530,29 @@ function DashboardTour() {
           Catalog, deploys, traffic, payouts, and connections.
         </motion.p>
 
-        <div className="mt-10 grid gap-4 lg:grid-cols-6">
+        <motion.div
+          variants={fadeUp}
+          className="mt-10 grid gap-4 sm:grid-cols-3"
+        >
+          <StatMock
+            label="Sites"
+            value="3"
+            detail="2 live · 1 draft · 0 paused"
+          />
+          <StatMock
+            label="Agent traffic"
+            value="512"
+            detail="287 in the last 7 days"
+            spark
+          />
+          <StatMock
+            label="Total balance"
+            value="$638.00"
+            detail="15 settled orders"
+          />
+        </motion.div>
+
+        <div className="mt-4 grid gap-4 lg:grid-cols-6">
           <Panel
             className="lg:col-span-4"
             title="Site wizard"
@@ -581,6 +603,41 @@ function DashboardTour() {
         </div>
       </motion.div>
     </section>
+  );
+}
+
+function StatMock({
+  label,
+  value,
+  detail,
+  spark,
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  spark?: boolean;
+}) {
+  const bars = [40, 52, 38, 61, 45, 57, 36, 63, 48, 55, 41, 59];
+  const peak = Math.max(...bars);
+  return (
+    <div className="flex flex-col rounded-[var(--radius-card)] border border-border bg-surface p-5 shadow-[var(--shadow-sm)]">
+      <p className="text-sm text-muted">{label}</p>
+      <p className="mt-3 text-3xl font-semibold tracking-tight text-foreground">
+        {value}
+      </p>
+      {spark ? (
+        <div className="mt-3 flex h-8 items-end gap-px" aria-hidden>
+          {bars.map((b, i) => (
+            <span
+              key={i}
+              className="flex-1 rounded-t-[2px] bg-brand"
+              style={{ height: `${(b / peak) * 100}%`, opacity: 0.3 + 0.7 * (b / peak) }}
+            />
+          ))}
+        </div>
+      ) : null}
+      <p className="mt-auto pt-2 text-sm text-muted">{detail}</p>
+    </div>
   );
 }
 
@@ -655,25 +712,43 @@ function CategoryMock() {
 }
 
 function AnalyticsMock() {
+  // one measure → one hue, matching the dashboard's charts
   const rows = [
-    { label: "Claude", pct: 100, tone: "bg-brand" },
-    { label: "GPTBot", pct: 72, tone: "bg-brand-light" },
-    { label: "Perplexity", pct: 48, tone: "bg-brand-pressed" },
-    { label: "Other", pct: 21, tone: "bg-border" },
+    { label: "GPTBot", pct: 100, count: 116 },
+    { label: "Perplexity", pct: 89, count: 103 },
+    { label: "Gemini", pct: 87, count: 101 },
+    { label: "Claude", pct: 84, count: 97 },
   ];
+  const days = [38, 44, 35, 50, 41, 46, 33, 47, 39, 43, 36, 45];
+  const peak = Math.max(...days);
+
   return (
-    <div className="space-y-3">
-      {rows.map((row) => (
-        <div key={row.label} className="flex items-center gap-3 text-xs">
-          <span className="w-16 shrink-0 text-muted">{row.label}</span>
-          <span className="h-2 flex-1 overflow-hidden rounded-full bg-hover">
-            <span
-              className={`block h-full rounded-full ${row.tone}`}
-              style={{ width: `${row.pct}%` }}
-            />
-          </span>
-        </div>
-      ))}
+    <div className="space-y-4">
+      <div className="flex h-14 items-end gap-[3px]" aria-hidden>
+        {days.map((d, i) => (
+          <span
+            key={i}
+            className={`flex-1 rounded-t-[3px] ${d === peak ? "bg-brand" : "bg-brand/55"}`}
+            style={{ height: `${(d / peak) * 100}%` }}
+          />
+        ))}
+      </div>
+      <div className="space-y-2.5">
+        {rows.map((row) => (
+          <div key={row.label} className="flex items-center gap-3 text-xs">
+            <span className="w-16 shrink-0 text-foreground">{row.label}</span>
+            <span className="h-2 flex-1 rounded-full bg-hover">
+              <span
+                className="block h-full rounded-l-full rounded-r-[3px] bg-brand"
+                style={{ width: `${row.pct}%` }}
+              />
+            </span>
+            <span className="w-7 shrink-0 text-right tabular-nums text-muted">
+              {row.count}
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

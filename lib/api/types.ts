@@ -130,7 +130,12 @@ export type OverviewResponse = {
     x402BalanceCents: number;
     fiatBalanceCents: number;
     orderCount: number;
-    bySite: { siteId: number; siteName: string; balanceCents: number }[];
+    bySite: {
+      siteId: number;
+      siteName: string;
+      siteSlug: string;
+      balanceCents: number;
+    }[];
   };
 };
 

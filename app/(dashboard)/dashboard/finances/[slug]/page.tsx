@@ -1,8 +1,6 @@
 import { Suspense } from "react";
-import {
-  getSiteFinances,
-  siteFinancesExportUrl,
-} from "@/lib/api/finances";
+import { siteFinancesExportUrl } from "@/lib/api/finances";
+import { getSiteFinances } from "@/lib/api/server";
 import { firstParam, loadOrError, parseLimit, parsePage } from "@/lib/api/load";
 import type { Order } from "@/lib/api/types";
 import { ButtonLink } from "@/components/ui/button";
@@ -40,9 +38,7 @@ export default async function FinancesDetailPage({
   const { data, error } = await loadOrError(() =>
     getSiteFinances(
       slug,
-      { q, from, to, status, page, limit },
-      { cache: "no-store" },
-    ),
+      { q, from, to, status, page, limit }),
   );
 
   if (error || !data) {

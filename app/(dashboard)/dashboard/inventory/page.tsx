@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Suspense } from "react";
-import { listProducts } from "@/lib/api/products";
-import { listSites } from "@/lib/api/sites";
+import { listProducts } from "@/lib/api/server";
+import { listSites } from "@/lib/api/server";
 import { firstParam, loadOrError, parseLimit, parsePage } from "@/lib/api/load";
 import { formatCents } from "@/lib/api/money";
 import { Badge } from "@/components/ui/badge";
@@ -28,7 +28,7 @@ export default async function InventoryPage({
   const limit = parseLimit(sp.limit);
 
   const sitesResult = await loadOrError(() =>
-    listSites({ limit: 100, sort: "name" }, { cache: "no-store" }),
+    listSites({ limit: 100, sort: "name" }),
   );
   const sites = sitesResult.data?.items ?? [];
 
@@ -47,9 +47,7 @@ export default async function InventoryPage({
         page,
         limit,
         sort: "-createdAt",
-      },
-      { cache: "no-store" },
-    ),
+      }),
   );
 
   return (
