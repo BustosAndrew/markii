@@ -1,0 +1,44 @@
+{
+  "name": "markii",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "@ai-sdk/google": "^4.0.23",
+    "@ai-sdk/openai": "^4.0.20",
+    "@neondatabase/serverless": "^1.1.0",
+    "@vercel/sdk": "^1.28.8",
+    "@x402/core": "^2.19.0",
+    "@x402/fetch": "^2.19.0",
+    "ai": "^7.0.37",
+    "cheerio": "^1.2.0",
+    "clsx": "^2.1.1",
+    "drizzle-orm": "^0.45.2",
+    "googleapis": "^173.0.0",
+    "lucide-react": "^1.26.0",
+    "motion": "^12.42.2",
+    "next": "16.2.11",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "schema-dts": "^2.0.0",
+    "tailwind-merge": "^3.6.0",
+    "viem": "^2.55.8",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "drizzle-kit": "^0.31.10",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.11",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
