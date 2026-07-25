@@ -1,5 +1,5 @@
 import type { Product as SchemaProduct, WithContext } from "schema-dts";
-import { slugify } from "@/lib/api";
+import { slugify, tenantBaseUrl } from "@/lib/api";
 import type { Category, Product, Site } from "@/lib/db";
 
 /**
@@ -275,10 +275,7 @@ ${cards}
 export function generatePreview(bundle: Bundle) {
   const slug = bundle.site.slug || slugify(bundle.site.name);
   const withSlug: Bundle = { ...bundle, site: { ...bundle.site, slug } };
-  const root = process.env.ROOT_DOMAIN;
-  const baseUrl = root
-    ? `https://${slug}.${root}`
-    : `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/_sites/${slug}`;
+  const baseUrl = tenantBaseUrl(slug);
   return {
     html: generateStorefrontHtml(withSlug, baseUrl),
     llmsTxt: generateLlmsTxt(withSlug, baseUrl),

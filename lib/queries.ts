@@ -1,5 +1,5 @@
 import { and, count, eq, gte, ilike, lte, or, sql, type SQL } from "drizzle-orm";
-import { badRequest, dateRange, notFound } from "@/lib/api";
+import { badRequest, dateRange, notFound, tenantBaseUrl } from "@/lib/api";
 import {
   agentTraffic,
   categories,
@@ -17,10 +17,7 @@ import {
 
 export function storefrontUrl(site: Pick<Site, "slug" | "customDomain">): string {
   if (site.customDomain) return `https://${site.customDomain}`;
-  const root = process.env.ROOT_DOMAIN;
-  if (root) return `https://${site.slug}.${root}`;
-  const base = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-  return `${base}/_sites/${site.slug}`;
+  return tenantBaseUrl(site.slug);
 }
 
 // ---------- resolvers (id or slug) ----------
