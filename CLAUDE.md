@@ -31,8 +31,11 @@ light brand system (`DESIGN.md`). Route map and data model live in `docs/PLAN.md
 
 - `app/api/` — dashboard REST API (contract: `docs/API.md`)
 - `app/(dashboard)/` — admin UI (sites, inventory, analytics, finances, integrations)
-- `app/_sites/[site]/` — multi-tenant storefront renderer + `llms.txt` / `agent.md` /
-  `sitemap.xml` / `api/checkout` (x402) routes
+- `app/%5Fsites/[site]/` — multi-tenant storefront renderer + `llms.txt` / `agent.md` /
+  `sitemap.xml` / `api/checkout` (x402) routes. **The folder must stay `%5Fsites`**: a
+  literal `_sites` is a Next.js *private folder* and is dropped from routing entirely
+  (every storefront 404s). `%5F` is the documented escape hatch; the public URL is
+  still `/_sites/{slug}/…`.
 - `proxy.ts` — Host-header → site rewrite (platform hosts pass through; `{slug}.{ROOT_DOMAIN}`,
   `{slug}.localhost`, custom domains → `/_sites/[slug]`)
 - `lib/` — Drizzle schema (`db/`), api helpers, queries/serializers, importer, x402,

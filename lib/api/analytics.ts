@@ -11,7 +11,8 @@ export type AnalyticsOverview = {
     siteSlug: string;
     total: number;
     last7d: number;
-    topAgent: string;
+    /** null when the site has no traffic in range */
+    topAgent: string | null;
   }[];
 };
 

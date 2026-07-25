@@ -1,5 +1,6 @@
+import { lookup } from "node:dns/promises";
 import * as cheerio from "cheerio";
-import { slugify } from "@/lib/api";
+import { badRequest, slugify } from "@/lib/api";
 
 export type StagedProduct = {
   tempId: string;
@@ -120,6 +121,75 @@ export function importFromCsv(text: string): ImportResult {
     });
   });
   return { source: "csv", imported, categories: collectCategories(imported), failed };
+}
+
+// ---------- SSRF protection ----------
+
+function isPrivateAddress(ip: string): boolean {
+  if (ip.includes(":")) {
+    const v6 = ip.toLowerCase();
+    // loopback, link-local, unique-local; ::ffff:a.b.c.d is checked as IPv4 below
+    if (v6 === "::1" || v6 === "::" || v6.startsWith("fe80") || /^f[cd]/.test(v6)) return true;
+    const mapped = v6.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+    if (mapped) return isPrivateAddress(mapped[1]);
+    return false;
+  }
+  const p = ip.split(".").map(Number);
+  if (p.length !== 4 || p.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return true;
+  const [a, b] = p;
+  return (
+    a === 0 || // this-network
+    a === 10 || // private
+    a === 127 || // loopback
+    (a === 169 && b === 254) || // link-local / cloud metadata
+    (a === 172 && b >= 16 && b <= 31) || // private
+    (a === 192 && b === 168) || // private
+    (a === 100 && b >= 64 && b <= 127) || // carrier-grade NAT
+    a >= 224 // multicast / reserved
+  );
+}
+
+/**
+ * Importer fetches are server-side requests to a user-supplied host, so they must
+ * not be usable to reach internal services or cloud metadata endpoints.
+ */
+export async function assertPublicUrl(raw: string): Promise<URL> {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw badRequest("not a valid URL");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw badRequest("only http and https URLs can be imported");
+  }
+  if (url.username || url.password) {
+    throw badRequest("URLs with embedded credentials are not allowed");
+  }
+
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host.endsWith(".local") ||
+    host.endsWith(".internal") ||
+    host === "metadata.google.internal"
+  ) {
+    throw badRequest(`refusing to import from internal host "${host}"`);
+  }
+
+  // resolve first so DNS names pointing at private space are rejected too
+  try {
+    const addresses = await lookup(host, { all: true });
+    if (addresses.some((a) => isPrivateAddress(a.address))) {
+      throw badRequest(`refusing to import from private address for "${host}"`);
+    }
+  } catch (e) {
+    if (e instanceof Error && e.message.startsWith("refusing")) throw e;
+    throw badRequest(`could not resolve host "${host}"`);
+  }
+
+  return url;
 }
 
 // ---------- URL scrape: Shopify → WooCommerce → JSON-LD ----------
@@ -260,7 +330,9 @@ async function fromScrape(origin: string, startUrl: string): Promise<StagedProdu
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 export async function importFromUrl(rawUrl: string): Promise<ImportResult> {
-  const url = new URL(rawUrl);
+  // Note: redirects are still followed, so a public host that 302s into private
+  // space remains a residual vector; the direct-address case is closed here.
+  const url = await assertPublicUrl(rawUrl);
   const origin = url.origin;
 
   const shopify = await fetchJson(`${origin}/products.json?limit=250`);
@@ -285,7 +357,7 @@ export async function importFromUrl(rawUrl: string): Promise<ImportResult> {
     };
   }
 
-  const scraped = await fromScrape(origin, rawUrl);
+  const scraped = await fromScrape(origin, url.href);
   if (scraped.length > 0) {
     return { source: "scrape", imported: scraped, categories: collectCategories(scraped), failed: [] };
   }

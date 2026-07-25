@@ -18,6 +18,11 @@ these endpoints, never touch `lib/db` or Drizzle directly.
 - **IDs & slugs:** every entity has a numeric `id` and a string `slug`. Any path segment
   written as `:idOrSlug` accepts either (`/api/products/42` and `/api/products/blue-tee`
   both work). Slugs are unique per scope (site slugs globally; product/category slugs per site).
+- **Scoping by-slug calls (important):** because product and category slugs are only unique
+  *per site*, every by-slug request — reads **and** writes (`PATCH`, `DELETE`, `/duplicate`) —
+  must pass `?siteId=`. Without it the API resolves an arbitrary same-slug row, which on a
+  write silently edits another site's record. By-id calls need no `siteId`. Site endpoints
+  are exempt (site slugs are globally unique).
 - **Money:** integer cents (`priceCents: 1999` = $19.99). `currency` is ISO 4217 (`"USD"`).
   x402 balances are USDC on Base Sepolia, reported in cents-equivalent (6-decimal USDC
   normalized to cents) plus raw amount.
@@ -403,7 +408,9 @@ Response (`200`, even with partial failures):
 ```
 
 `422 IMPORT_FAILED` only if **nothing** could be parsed (bad CSV / unreachable URL /
-unrecognized platform) — message explains why.
+unrecognized platform) — message explains why. Scrape URLs are SSRF-filtered: `localhost`,
+`*.local`/`*.internal`, cloud-metadata hosts, and any hostname resolving to a private or
+link-local address are rejected with `400 VALIDATION_ERROR`.
 
 ### `POST /api/import/commit`
 The allocation step. Frontend sends where each staged item should land (drag-and-drop /
@@ -421,6 +428,11 @@ different `siteId`s to duplicate it into several sites):
   ]
 }
 ```
+
+If an item names a `categoryTempId` that wasn't allocated to that item's `siteId`, the
+category is created on the target site automatically (reusing a same-slug category there
+if one exists) rather than rejecting the item — so you don't have to allocate every staged
+category to every site its products land on.
 
 → `201`
 

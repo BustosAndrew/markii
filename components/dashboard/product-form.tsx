@@ -91,7 +91,9 @@ export function ProductForm({
           `/dashboard/products/${created.slug}?siteId=${created.siteId}`,
         );
       } else if (product) {
-        const updated = await updateProduct(product.slug, body);
+        const updated = await updateProduct(product.slug, body, {
+          siteId: product.siteId,
+        });
         if (updated.slug !== product.slug) {
           router.replace(
             `/dashboard/products/${updated.slug}?siteId=${updated.siteId}`,
@@ -303,7 +305,9 @@ export function ProductForm({
                 setBusy(true);
                 setError(null);
                 try {
-                  const copy = await duplicateProduct(product.slug);
+                  const copy = await duplicateProduct(product.slug, undefined, {
+                    siteId: product.siteId,
+                  });
                   router.push(
                     `/dashboard/products/${copy.slug}?siteId=${copy.siteId}`,
                   );
@@ -344,7 +348,7 @@ export function ProductForm({
           onConfirm={async () => {
             setBusy(true);
             try {
-              await deleteProduct(product.slug);
+              await deleteProduct(product.slug, { siteId: product.siteId });
               router.push("/dashboard/inventory");
               router.refresh();
             } catch (err) {

@@ -93,8 +93,9 @@ export type Product = {
 
 export type Order = {
   id: number;
-  siteId: number;
-  productId: number;
+  // null once the referenced site/product has been deleted (order history is kept)
+  siteId: number | null;
+  productId: number | null;
   quantity: number;
   status: "pending" | "success" | "cancel" | "failed";
   amountCents: number;
@@ -106,8 +107,8 @@ export type Order = {
     name: string;
     walletAddress: string | null;
   };
-  product: { id: number; name: string; slug: string };
-  site: { id: number; name: string; slug: string };
+  product: { id: number; name: string; slug: string } | null;
+  site: { id: number; name: string; slug: string } | null;
   createdAt: string;
 };
 

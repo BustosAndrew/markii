@@ -6,11 +6,35 @@ export function buildQuery(params?: Record<string, QueryValue>): string {
   if (!params) return "";
   const sp = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
-    if (value === undefined || value === null || value === "") continue;
-    sp.set(key, String(value));
+    if (value === undefined || value === "") continue;
+    // null is meaningful to the API (e.g. parentId=null → top-level only)
+    sp.set(key, value === null ? "null" : String(value));
   }
   const q = sp.toString();
   return q ? `?${q}` : "";
+}
+
+/**
+ * Server components run on Node, where fetch() rejects relative URLs — resolve
+ * them against the request host (falling back to the configured app URL).
+ */
+async function absoluteUrl(path: string): Promise<string> {
+  if (typeof window !== "undefined" || !path.startsWith("/")) return path;
+
+  let origin = process.env.NEXT_PUBLIC_APP_URL;
+  try {
+    const { headers } = await import("next/headers");
+    const h = await headers();
+    const host = h.get("x-forwarded-host") ?? h.get("host");
+    if (host) {
+      const proto = h.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
+      origin = `${proto}://${host}`;
+    }
+  } catch {
+    // outside a request scope (build-time prerender) — use the configured URL
+  }
+
+  return `${(origin ?? "http://localhost:3000").replace(/\/$/, "")}${path}`;
 }
 
 async function parseError(res: Response): Promise<ApiClientError> {
@@ -34,7 +58,7 @@ export async function apiFetch<T>(
   path: string,
   init?: RequestInit,
 ): Promise<T> {
-  const res = await fetch(path, {
+  const res = await fetch(await absoluteUrl(path), {
     ...init,
     headers: {
       Accept: "application/json",

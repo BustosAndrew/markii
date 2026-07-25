@@ -30,6 +30,41 @@ export const POST = handler(async (req) => {
   // staged category tempId + target site → created category id
   const createdCategoryIds = new Map<string, number>();
 
+  async function createStagedCategory(
+    staged: { tempId: string; name: string },
+    siteId: number,
+    parentCategoryId?: number | null,
+  ): Promise<number> {
+    const key = `${staged.tempId}:${siteId}`;
+    const existing = createdCategoryIds.get(key);
+    if (existing != null) return existing;
+
+    // reuse a same-named category already on the site rather than duplicating it
+    const slug = slugify(staged.name);
+    const [present] = await db
+      .select({ id: categories.id })
+      .from(categories)
+      .where(and(eq(categories.siteId, siteId), eq(categories.slug, slug)))
+      .limit(1);
+    if (present) {
+      createdCategoryIds.set(key, present.id);
+      return present.id;
+    }
+
+    const [row] = await db
+      .insert(categories)
+      .values({
+        siteId,
+        parentId: parentCategoryId ?? null,
+        name: staged.name,
+        slug: await uniqueCategorySlug(siteId, slug),
+      })
+      .returning();
+    createdCategories.push(row);
+    createdCategoryIds.set(key, row.id);
+    return row.id;
+  }
+
   // categories first so products can land inside them
   for (const alloc of input.allocations.filter((a) => categoryByTempId.has(a.tempId))) {
     const staged = categoryByTempId.get(alloc.tempId)!;
@@ -51,18 +86,7 @@ export const POST = handler(async (req) => {
         continue;
       }
     }
-    const slug = await uniqueCategorySlug(alloc.siteId, slugify(staged.name));
-    const [row] = await db
-      .insert(categories)
-      .values({
-        siteId: alloc.siteId,
-        parentId: alloc.parentCategoryId ?? null,
-        name: staged.name,
-        slug,
-      })
-      .returning();
-    createdCategories.push(row);
-    createdCategoryIds.set(`${alloc.tempId}:${alloc.siteId}`, row.id);
+    await createStagedCategory(staged, alloc.siteId, alloc.parentCategoryId);
   }
 
   for (const alloc of input.allocations.filter((a) => itemByTempId.has(a.tempId))) {
@@ -88,14 +112,17 @@ export const POST = handler(async (req) => {
       }
       categoryId = cat.id;
     } else if (alloc.categoryTempId) {
-      categoryId = createdCategoryIds.get(`${alloc.categoryTempId}:${alloc.siteId}`) ?? null;
-      if (categoryId == null) {
+      const staged = categoryByTempId.get(alloc.categoryTempId);
+      if (!staged) {
         failed.push({
           tempId: alloc.tempId,
-          reason: `staged category "${alloc.categoryTempId}" was not allocated to site ${alloc.siteId}`,
+          reason: `unknown staged category "${alloc.categoryTempId}"`,
         });
         continue;
       }
+      // the category may have been allocated to a different site than this item;
+      // give the item's target site its own copy rather than dropping the item
+      categoryId = await createStagedCategory(staged, alloc.siteId);
     }
 
     const slug = item.slug ?? slugify(item.name);

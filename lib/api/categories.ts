@@ -1,5 +1,13 @@
-import { apiDelete, apiGet, apiPatch, apiPost } from "./client";
+import { apiDelete, apiGet, apiPatch, apiPost, buildQuery } from "./client";
 import type { Category, Paginated } from "./types";
+
+/**
+ * Category slugs are unique per site, not globally — every by-slug call must carry
+ * siteId or the API may resolve a same-slug category on a different site.
+ */
+type Scope = { siteId?: number };
+const scoped = (idOrSlug: string, scope?: Scope) =>
+  `/api/categories/${encodeURIComponent(idOrSlug)}${buildQuery(scope)}`;
 
 export type CategoriesQuery = {
   q?: string;
@@ -36,29 +44,28 @@ export function createCategory(
 export function updateCategory(
   idOrSlug: string,
   body: Partial<Category>,
+  scope?: Scope,
   init?: RequestInit,
 ) {
-  return apiPatch<Category>(
-    `/api/categories/${encodeURIComponent(idOrSlug)}`,
-    body,
-    init,
-  );
+  return apiPatch<Category>(scoped(idOrSlug, scope), body, init);
 }
 
-export function deleteCategory(idOrSlug: string, init?: RequestInit) {
-  return apiDelete<{ deleted: boolean; id: number }>(
-    `/api/categories/${encodeURIComponent(idOrSlug)}`,
-    init,
-  );
+export function deleteCategory(
+  idOrSlug: string,
+  scope?: Scope,
+  init?: RequestInit,
+) {
+  return apiDelete<{ deleted: boolean; id: number }>(scoped(idOrSlug, scope), init);
 }
 
 export function duplicateCategory(
   idOrSlug: string,
   body?: { siteId?: number; includeProducts?: boolean },
+  scope?: Scope,
   init?: RequestInit,
 ) {
   return apiPost<Category>(
-    `/api/categories/${encodeURIComponent(idOrSlug)}/duplicate`,
+    `/api/categories/${encodeURIComponent(idOrSlug)}/duplicate${buildQuery(scope)}`,
     body ?? {},
     init,
   );

@@ -75,7 +75,9 @@ export function CategoryForm({
           `/dashboard/categories/${created.slug}?siteId=${created.siteId}`,
         );
       } else if (category) {
-        const updated = await updateCategory(category.slug, body);
+        const updated = await updateCategory(category.slug, body, {
+          siteId: category.siteId,
+        });
         if (updated.slug !== category.slug) {
           router.replace(
             `/dashboard/categories/${updated.slug}?siteId=${updated.siteId}`,
@@ -202,7 +204,9 @@ export function CategoryForm({
                 setBusy(true);
                 setError(null);
                 try {
-                  const copy = await duplicateCategory(category.slug);
+                  const copy = await duplicateCategory(category.slug, undefined, {
+                    siteId: category.siteId,
+                  });
                   router.push(
                     `/dashboard/categories/${copy.slug}?siteId=${copy.siteId}`,
                   );
@@ -243,7 +247,7 @@ export function CategoryForm({
           onConfirm={async () => {
             setBusy(true);
             try {
-              await deleteCategory(category.slug);
+              await deleteCategory(category.slug, { siteId: category.siteId });
               router.push("/dashboard/categories");
               router.refresh();
             } catch (err) {
