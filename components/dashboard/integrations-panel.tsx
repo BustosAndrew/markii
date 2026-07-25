@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
+import { CreditCard, ShoppingBag, Wallet, type LucideIcon } from "lucide-react";
 import {
   disconnectIntegration,
   putGoogle,
@@ -65,6 +66,7 @@ export function IntegrationsPanel({
         title="x402 wallet"
         description="Default receiving wallet for new sites (Base Sepolia)."
         status={x402}
+        icon={Wallet}
       >
         {x402.status === "connected" && x402.walletAddress ? (
           <p className="mb-3 break-all font-mono text-xs text-muted">
@@ -107,6 +109,7 @@ export function IntegrationsPanel({
         title="Google Merchant Center"
         description="Optional product sync. Service account JSON is never stored in the browser after submit."
         status={google}
+        icon={ShoppingBag}
       >
         {google.status === "connected" && google.merchantId ? (
           <p className="mb-3 text-sm text-muted">
@@ -188,6 +191,7 @@ export function IntegrationsPanel({
         title="Stripe"
         description="Optional fiat checkout. Paste a test secret key only — cleared from the form after connect."
         status={stripe}
+        icon={CreditCard}
       >
         {stripe.status === "connected" && stripe.accountId ? (
           <p className="mb-3 text-sm text-muted">Account {stripe.accountId}</p>
@@ -273,22 +277,37 @@ function ProviderCard({
   title,
   description,
   status,
+  icon: Icon,
   children,
 }: {
   title: string;
   description: string;
   status: X402Integration | GoogleIntegration | StripeIntegration;
+  icon: LucideIcon;
   children: React.ReactNode;
 }) {
+  const connected = status.status === "connected";
   return (
     <section className="rounded-[var(--radius-card)] border border-border bg-surface p-5 shadow-[var(--shadow-sm)]">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-base font-semibold text-foreground">{title}</h2>
-          <p className="mt-1 text-sm text-muted">{description}</p>
-          {status.status === "error" && status.message ? (
-            <p className="mt-2 text-sm text-error-text">{status.message}</p>
-          ) : null}
+        <div className="flex min-w-0 gap-3">
+          <span
+            aria-hidden
+            className={`flex size-10 shrink-0 items-center justify-center rounded-[var(--radius-control)] ${
+              connected ? "bg-brand/10 text-brand" : "bg-hover text-muted"
+            }`}
+          >
+            <Icon className="size-5" strokeWidth={1.75} />
+          </span>
+          <div className="min-w-0">
+            <h2 className="text-base font-semibold tracking-tight text-foreground">
+              {title}
+            </h2>
+            <p className="mt-1 text-sm text-muted">{description}</p>
+            {status.status === "error" && status.message ? (
+              <p className="mt-2 text-sm text-error-text">{status.message}</p>
+            ) : null}
+          </div>
         </div>
         <Badge variant={statusBadge(status.status)}>
           {statusLabel(status.status)}

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Suspense } from "react";
-import { listProducts } from "@/lib/api/server";
-import { listSites } from "@/lib/api/server";
+import { ImageIcon } from "lucide-react";
+import { listProducts, listSites } from "@/lib/api/server";
 import { firstParam, loadOrError, parseLimit, parsePage } from "@/lib/api/load";
 import { formatCents } from "@/lib/api/money";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +24,8 @@ export default async function InventoryPage({
   const siteId = siteIdRaw ? Number(siteIdRaw) : undefined;
   const enabledRaw = firstParam(sp.enabled);
   const inStockRaw = firstParam(sp.inStock);
+  const categoryIdRaw = firstParam(sp.categoryId);
+  const categoryId = categoryIdRaw ? Number(categoryIdRaw) : undefined;
   const page = parsePage(sp.page);
   const limit = parseLimit(sp.limit);
 
@@ -37,6 +39,7 @@ export default async function InventoryPage({
       {
         q,
         siteId: Number.isFinite(siteId) ? siteId : undefined,
+        categoryId: Number.isFinite(categoryId) ? categoryId : undefined,
         enabled:
           enabledRaw === "true"
             ? true
@@ -120,15 +123,35 @@ export default async function InventoryPage({
                     className="border-t border-border hover:bg-table-hover"
                   >
                     <td className="px-4 py-3">
-                      <Link
-                        href={`/dashboard/products/${product.slug}?siteId=${product.siteId}`}
-                        className="font-medium text-foreground hover:text-brand"
-                      >
-                        {product.name}
-                      </Link>
-                      <p className="font-mono text-xs text-muted">
-                        {product.sku || product.slug}
-                      </p>
+                      <div className="flex items-center gap-3">
+                        {product.images[0] ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={product.images[0]}
+                            alt=""
+                            loading="lazy"
+                            className="size-10 shrink-0 rounded-[var(--radius-control)] border border-border object-cover"
+                          />
+                        ) : (
+                          <span
+                            aria-hidden
+                            className="flex size-10 shrink-0 items-center justify-center rounded-[var(--radius-control)] border border-dashed border-border text-muted-soft"
+                          >
+                            <ImageIcon className="size-4" strokeWidth={1.75} />
+                          </span>
+                        )}
+                        <div className="min-w-0">
+                          <Link
+                            href={`/dashboard/products/${product.slug}?siteId=${product.siteId}`}
+                            className="font-medium text-foreground hover:text-brand"
+                          >
+                            {product.name}
+                          </Link>
+                          <p className="font-mono text-xs text-muted">
+                            {product.sku || product.slug}
+                          </p>
+                        </div>
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-muted">
                       {product.site?.name ?? "—"}
@@ -139,11 +162,27 @@ export default async function InventoryPage({
                     <td className="px-4 py-3 tabular-nums">
                       {formatCents(product.priceCents, product.currency)}
                     </td>
-                    <td className="px-4 py-3 tabular-nums">{product.stock}</td>
                     <td className="px-4 py-3">
-                      <Badge variant={product.enabled ? "success" : "neutral"}>
-                        {product.enabled ? "Enabled" : "Disabled"}
-                      </Badge>
+                      {/* stock only matters when it's running out — say so */}
+                      {product.stock === 0 ? (
+                        <Badge variant="error">Out of stock</Badge>
+                      ) : product.stock <= 15 ? (
+                        <span className="tabular-nums text-warning-text">
+                          {product.stock} left
+                        </span>
+                      ) : (
+                        <span className="tabular-nums text-foreground">
+                          {product.stock}
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {/* only flag the exception — a badge on every row carries no signal */}
+                      {product.enabled ? (
+                        <span className="text-muted">Enabled</span>
+                      ) : (
+                        <Badge variant="neutral">Disabled</Badge>
+                      )}
                     </td>
                   </tr>
                 ))}

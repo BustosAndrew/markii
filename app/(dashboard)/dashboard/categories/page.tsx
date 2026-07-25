@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { Suspense } from "react";
-import { listCategories } from "@/lib/api/server";
-import { listSites } from "@/lib/api/server";
+import { listCategories, listSites } from "@/lib/api/server";
 import { firstParam, loadOrError, parseLimit, parsePage } from "@/lib/api/load";
+import type { Category } from "@/lib/api/types";
 import { Badge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -10,6 +10,28 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Pagination } from "@/components/ui/pagination";
 import { ListFilters } from "@/components/ui/list-filters";
 import { FetchError } from "@/components/dashboard/fetch-error";
+
+/**
+ * Orders the page of categories so children follow their parent, indented.
+ * Categories whose parent isn't on this page stay at the top level.
+ */
+function nest(items: Category[]): { category: Category; depth: number }[] {
+  const present = new Set(items.map((c) => c.id));
+  const childrenOf = new Map<number | null, Category[]>();
+  for (const c of items) {
+    const key = c.parentId != null && present.has(c.parentId) ? c.parentId : null;
+    childrenOf.set(key, [...(childrenOf.get(key) ?? []), c]);
+  }
+  const out: { category: Category; depth: number }[] = [];
+  const walk = (parentId: number | null, depth: number) => {
+    for (const c of childrenOf.get(parentId) ?? []) {
+      out.push({ category: c, depth });
+      walk(c.id, depth + 1);
+    }
+  };
+  walk(null, 0);
+  return out;
+}
 
 export default async function CategoriesPage({
   searchParams,
@@ -109,21 +131,37 @@ export default async function CategoriesPage({
                 </tr>
               </thead>
               <tbody>
-                {data.items.map((category) => (
+                {nest(data.items).map(({ category, depth }) => (
                   <tr
                     key={category.id}
                     className="border-t border-border hover:bg-table-hover"
                   >
                     <td className="px-4 py-3">
-                      <Link
-                        href={`/dashboard/categories/${category.slug}?siteId=${category.siteId}`}
-                        className="font-medium text-foreground hover:text-brand"
+                      <div
+                        className="flex items-baseline gap-2"
+                        style={{ paddingLeft: depth * 20 }}
                       >
-                        {category.name}
-                      </Link>
-                      <p className="font-mono text-xs text-muted">
-                        {category.slug}
-                      </p>
+                        {depth > 0 ? (
+                          <span
+                            aria-hidden
+                            className="text-muted-soft"
+                            title={`Subcategory of ${category.parent?.name ?? ""}`}
+                          >
+                            ↳
+                          </span>
+                        ) : null}
+                        <div className="min-w-0">
+                          <Link
+                            href={`/dashboard/categories/${category.slug}?siteId=${category.siteId}`}
+                            className="font-medium text-foreground hover:text-brand"
+                          >
+                            {category.name}
+                          </Link>
+                          <p className="font-mono text-xs text-muted">
+                            {category.slug}
+                          </p>
+                        </div>
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-muted">
                       {category.site?.name ?? "—"}
@@ -132,12 +170,24 @@ export default async function CategoriesPage({
                       {category.parent?.name ?? "—"}
                     </td>
                     <td className="px-4 py-3 tabular-nums">
-                      {category.productCount}
+                      {category.productCount > 0 ? (
+                        <Link
+                          href={`/dashboard/inventory?categoryId=${category.id}`}
+                          className="text-foreground hover:text-brand"
+                        >
+                          {category.productCount}
+                        </Link>
+                      ) : (
+                        <span className="text-muted">0</span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
-                      <Badge variant={category.enabled ? "success" : "neutral"}>
-                        {category.enabled ? "Enabled" : "Disabled"}
-                      </Badge>
+                      {/* only flag the exception — a badge on every row carries no signal */}
+                      {category.enabled ? (
+                        <span className="text-muted">Enabled</span>
+                      ) : (
+                        <Badge variant="neutral">Disabled</Badge>
+                      )}
                     </td>
                   </tr>
                 ))}
