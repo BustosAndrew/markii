@@ -369,7 +369,9 @@ stock copied. → `201` **Product**.
 ### `POST /api/uploads`
 Image upload for the product form. `multipart/form-data` with field `file` (png/jpg/webp,
 max 5 MB). → `201` `{ "url": "https://…" }` — put that URL into `images`.
-(External image URLs can also be used directly without uploading.)
+Stored in Vercel Blob in production (local `public/uploads` in dev) — either way, treat
+the returned `url` as opaque. (External image URLs can also be used directly without
+uploading.)
 
 ---
 

@@ -10,23 +10,32 @@ Merchants import catalogs; Markii serves machine-readable storefronts (HTML + JS
 pnpm dev        # dev server (Turbopack)
 pnpm build      # production build — run before considering work done
 pnpm lint       # eslint
+pnpm db:push    # push Drizzle schema to Neon (needs DATABASE_URL in .env.local)
+pnpm db:seed    # seed demo data (3 sites, ~30 products, orders, traffic)
 ```
 
 Package manager is **pnpm** (v11; build-script approvals live in `pnpm-workspace.yaml`).
 
 ## Current status
 
-Only the **landing page** (`app/page.tsx`) exists. `/dashboard` is linked but not built.
-The full route map, data model, and hour-by-hour plan are in `docs/PLAN.md` — follow it,
-build in that order, and leave the "save for last" list for the end.
+**Backend is complete**: DB layer (Neon + Drizzle, `lib/db/`), every `/api/*` route,
+storefront renderer (`app/_sites/[site]/`), host-routing proxy (`proxy.ts`), x402 checkout,
+importer, and seed script. The **dashboard UI (`app/(dashboard)/`) is not built** — it is
+owned by a separate frontend agent, whose source of truth is **`docs/API.md`** (the full
+API contract). Frontend work must call those endpoints only, never `lib/db` directly.
+Landing page (`app/page.tsx`) exists. Requires `DATABASE_URL` in `.env.local`
+(see `.env.example`); until then DB-backed endpoints return 500.
 
-## Architecture (planned)
+## Architecture
 
-- `app/(dashboard)/` — admin UI (sites, inventory, analytics, finances, integrations)
+- `app/api/` — dashboard REST API (contract: `docs/API.md`)
+- `app/(dashboard)/` — admin UI (sites, inventory, analytics, finances, integrations) — TODO
 - `app/_sites/[site]/` — multi-tenant storefront renderer + `llms.txt` / `agent.md` /
-  `api/checkout` (x402) routes
-- `middleware.ts` — Host-header → site rewrite (`app.*` → dashboard, else `/_sites/[siteId]`)
-- `lib/` — Drizzle schema (`db/`), importer, x402 helpers, generators, vercel/GMC wrappers
+  `sitemap.xml` / `api/checkout` (x402) routes
+- `proxy.ts` — Host-header → site rewrite (platform hosts pass through; `{slug}.{ROOT_DOMAIN}`,
+  `{slug}.localhost`, custom domains → `/_sites/[slug]`)
+- `lib/` — Drizzle schema (`db/`), api helpers, queries/serializers, importer, x402,
+  generators, integrations, storefront loader
 
 ## Rules
 

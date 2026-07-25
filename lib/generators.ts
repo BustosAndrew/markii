@@ -1,0 +1,291 @@
+import type { Product as SchemaProduct, WithContext } from "schema-dts";
+import { slugify } from "@/lib/api";
+import type { Category, Product, Site } from "@/lib/db";
+
+/**
+ * A site + catalog snapshot every generator works from. Built either from the DB
+ * (saved sites) or from the create-site wizard's draft payload (unsaved).
+ */
+export type Bundle = {
+  site: {
+    name: string;
+    slug: string;
+    description?: string | null;
+    indexed?: boolean;
+    googleSiteVerification?: string | null;
+  };
+  categories: {
+    name: string;
+    slug: string;
+    parentSlug?: string | null;
+    description?: string | null;
+  }[];
+  products: {
+    name: string;
+    slug: string;
+    priceCents: number;
+    currency: string;
+    description?: string | null;
+    categorySlug?: string | null;
+    sku?: string | null;
+    stock: number;
+    images: string[];
+  }[];
+};
+
+export function bundleFromDb(site: Site, cats: Category[], prods: Product[]): Bundle {
+  const catById = new Map(cats.map((c) => [c.id, c]));
+  return {
+    site: {
+      name: site.name,
+      slug: site.slug,
+      indexed: site.indexed,
+      googleSiteVerification: site.googleSiteVerification,
+    },
+    categories: cats
+      .filter((c) => c.enabled)
+      .map((c) => ({
+        name: c.name,
+        slug: c.slug,
+        parentSlug: c.parentId != null ? (catById.get(c.parentId)?.slug ?? null) : null,
+        description: c.description,
+      })),
+    products: prods
+      .filter((p) => p.enabled)
+      .map((p) => ({
+        name: p.name,
+        slug: p.slug,
+        priceCents: p.priceCents,
+        currency: p.currency,
+        description: p.description,
+        categorySlug: p.categoryId != null ? (catById.get(p.categoryId)?.slug ?? null) : null,
+        sku: p.sku,
+        stock: p.stock,
+        images: p.images,
+      })),
+  };
+}
+
+export function formatPrice(cents: number, currency: string): string {
+  const value = (cents / 100).toFixed(2);
+  return currency === "USD" || currency === "USDC" ? `$${value}` : `${value} ${currency}`;
+}
+
+export function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+const strip = (s: string | null | undefined) =>
+  (s ?? "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+
+// ---------- llms.txt ----------
+
+export function generateLlmsTxt(bundle: Bundle, baseUrl: string): string {
+  const { site, products, categories } = bundle;
+  const lines: string[] = [
+    `# ${site.name}`,
+    "",
+    site.description?.trim() ||
+      `${site.name} is an agent-friendly store. Every page is plain HTML with JSON-LD; purchases settle over the x402 protocol (USDC on Base Sepolia).`,
+    "",
+    `- Store: ${baseUrl}/`,
+    `- Agent protocol: ${baseUrl}/agent.md`,
+    `- Sitemap: ${baseUrl}/sitemap.xml`,
+    `- Checkout API: POST ${baseUrl}/api/checkout`,
+    "",
+  ];
+  if (categories.length) {
+    lines.push("## Categories", "");
+    for (const c of categories) {
+      lines.push(`- [${c.name}](${baseUrl}/c/${c.slug})${c.description ? `: ${strip(c.description)}` : ""}`);
+    }
+    lines.push("");
+  }
+  lines.push("## Products", "");
+  for (const p of products) {
+    const desc = strip(p.description).slice(0, 160);
+    lines.push(
+      `- [${p.name}](${baseUrl}/p/${p.slug}) — ${formatPrice(p.priceCents, p.currency)}${
+        p.stock > 0 ? ` (${p.stock} in stock)` : " (out of stock)"
+      }${desc ? ` — ${desc}` : ""}`,
+    );
+  }
+  return lines.join("\n") + "\n";
+}
+
+// ---------- agent.md ----------
+
+export function generateAgentMd(
+  bundle: Bundle,
+  baseUrl: string,
+  opts: { payTo?: string | null } = {},
+): string {
+  const { site, products } = bundle;
+  return `# ${site.name} — agent protocol
+
+This store is machine-readable and agent-purchasable.
+
+## Discover
+
+- \`GET ${baseUrl}/llms.txt\` — catalog summary
+- \`GET ${baseUrl}/sitemap.xml\` — all URLs
+- Every product page (\`${baseUrl}/p/{slug}\`) embeds Schema.org Product JSON-LD.
+
+## Purchase (x402)
+
+1. \`POST ${baseUrl}/api/checkout\` with JSON body \`{ "productSlug": "...", "quantity": 1 }\`.
+2. Without payment you receive \`402 Payment Required\` with an \`accepts\` array:
+   scheme \`exact\`, network \`base-sepolia\`, asset USDC
+   (\`0x036CbD53842c5426634e7929541eC2318f3dCF7e\`), \`payTo\` ${opts.payTo ?? "(store wallet)"} and
+   \`maxAmountRequired\` in USDC base units (6 decimals).
+3. Transfer the exact USDC amount to \`payTo\` on Base Sepolia.
+4. Retry the same request with header
+   \`X-PAYMENT: base64({"txHash":"0x...","from":"0x..."})\`.
+5. On verification you receive \`200\` with a fulfillment receipt and the order id.
+
+## Catalog
+
+${products
+  .map((p) => `- \`${p.slug}\` — ${p.name} — ${formatPrice(p.priceCents, p.currency)} — stock ${p.stock}`)
+  .join("\n")}
+`;
+}
+
+// ---------- JSON-LD ----------
+
+export function productJsonLd(
+  bundle: Bundle,
+  product: Bundle["products"][number],
+  baseUrl: string,
+): WithContext<SchemaProduct> {
+  return {
+    "@context": "https://schema.org",
+    "@type": "Product",
+    name: product.name,
+    description: strip(product.description) || undefined,
+    image: product.images.length ? product.images : undefined,
+    sku: product.sku ?? undefined,
+    url: `${baseUrl}/p/${product.slug}`,
+    offers: {
+      "@type": "Offer",
+      price: (product.priceCents / 100).toFixed(2),
+      priceCurrency: product.currency,
+      availability:
+        product.stock > 0 ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
+      url: `${baseUrl}/p/${product.slug}`,
+      seller: { "@type": "Organization", name: bundle.site.name },
+    },
+  };
+}
+
+// ---------- sitemap ----------
+
+export type SitemapNode = { title: string; path: string; children?: SitemapNode[] };
+
+export function sitemapTree(bundle: Bundle): { pages: SitemapNode[] } {
+  const topCats = bundle.categories.filter((c) => !c.parentSlug);
+  const childCats = (parent: string) => bundle.categories.filter((c) => c.parentSlug === parent);
+  const productNodes = (categorySlug: string | null) =>
+    bundle.products
+      .filter((p) => (p.categorySlug ?? null) === categorySlug)
+      .map((p) => ({ title: p.name, path: `/p/${p.slug}` }));
+
+  const catNode = (c: Bundle["categories"][number]): SitemapNode => ({
+    title: c.name,
+    path: `/c/${c.slug}`,
+    children: [...childCats(c.slug).map(catNode), ...productNodes(c.slug)],
+  });
+
+  return {
+    pages: [
+      { title: "Home", path: "/" },
+      ...topCats.map(catNode),
+      ...productNodes(null),
+    ],
+  };
+}
+
+export function generateSitemapXml(bundle: Bundle, baseUrl: string): string {
+  const urls = [
+    `${baseUrl}/`,
+    ...bundle.categories.map((c) => `${baseUrl}/c/${c.slug}`),
+    ...bundle.products.map((p) => `${baseUrl}/p/${p.slug}`),
+  ];
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${urls.map((u) => `  <url><loc>${escapeHtml(u)}</loc></url>`).join("\n")}
+</urlset>
+`;
+}
+
+// ---------- crawler-friendly HTML (storefront landing / preview) ----------
+
+const HTML_STYLE = `body{font-family:system-ui,sans-serif;margin:0;background:#fff;color:#111;line-height:1.5}
+main{max-width:960px;margin:0 auto;padding:2rem 1rem}header{border-bottom:1px solid #eee;padding:1rem}
+header a{color:#111;text-decoration:none;font-weight:700;font-size:1.25rem}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:1rem;margin-top:1rem}
+.card{border:1px solid #eee;border-radius:8px;padding:1rem}.card img{max-width:100%;border-radius:4px}
+.price{font-weight:700}.muted{color:#666;font-size:.875rem}nav a{margin-right:.75rem;color:#444}`;
+
+export function generateStorefrontHtml(bundle: Bundle, baseUrl: string): string {
+  const { site, categories, products } = bundle;
+  const nav = categories
+    .filter((c) => !c.parentSlug)
+    .map((c) => `<a href="${baseUrl}/c/${escapeHtml(c.slug)}">${escapeHtml(c.name)}</a>`)
+    .join("");
+  const cards = products
+    .map(
+      (p) => `<article class="card">
+${p.images[0] ? `<img src="${escapeHtml(p.images[0])}" alt="${escapeHtml(p.name)}" loading="lazy">` : ""}
+<h2><a href="${baseUrl}/p/${escapeHtml(p.slug)}">${escapeHtml(p.name)}</a></h2>
+<p class="price">${formatPrice(p.priceCents, p.currency)}</p>
+<p class="muted">${p.stock > 0 ? `${p.stock} in stock` : "Out of stock"}</p>
+</article>`,
+    )
+    .join("\n");
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${escapeHtml(site.name)}</title>
+${site.indexed === false ? `<meta name="robots" content="noindex">` : ""}
+${site.googleSiteVerification ? `<meta name="google-site-verification" content="${escapeHtml(site.googleSiteVerification)}">` : ""}
+<meta name="description" content="${escapeHtml(strip(site.description) || `${site.name} — agent-friendly store`)}">
+<style>${HTML_STYLE}</style>
+</head>
+<body>
+<header><a href="${baseUrl}/">${escapeHtml(site.name)}</a> <nav>${nav}</nav></header>
+<main>
+<h1>${escapeHtml(site.name)}</h1>
+<p class="muted">Agent-readable store — see <a href="${baseUrl}/llms.txt">llms.txt</a> and <a href="${baseUrl}/agent.md">agent.md</a>.</p>
+<div class="grid">
+${cards}
+</div>
+</main>
+</body>
+</html>`;
+}
+
+/** Everything the create-site wizard's live preview panes need, in one object. */
+export function generatePreview(bundle: Bundle) {
+  const slug = bundle.site.slug || slugify(bundle.site.name);
+  const withSlug: Bundle = { ...bundle, site: { ...bundle.site, slug } };
+  const root = process.env.ROOT_DOMAIN;
+  const baseUrl = root
+    ? `https://${slug}.${root}`
+    : `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/_sites/${slug}`;
+  return {
+    html: generateStorefrontHtml(withSlug, baseUrl),
+    llmsTxt: generateLlmsTxt(withSlug, baseUrl),
+    agentMd: generateAgentMd(withSlug, baseUrl),
+    sitemap: sitemapTree(withSlug),
+    jsonLd: withSlug.products[0]
+      ? productJsonLd(withSlug, withSlug.products[0], baseUrl)
+      : null,
+  };
+}

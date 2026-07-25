@@ -32,6 +32,13 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+
+# user-uploaded product images (local dev storage)
+/public/uploads
+
+# drizzle-kit migration snapshots
+/drizzle
 
 # vercel
 .vercel
