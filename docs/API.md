@@ -1,4 +1,4 @@
-# Markii API Contract — v1
+# Markii API Contract — v2
 
 **Audience:** the frontend coding agent building `app/(dashboard)/`.
 This document is the source of truth for every backend endpoint. The backend (API routes,
@@ -6,8 +6,50 @@ DB, importers, x402, generators) is owned separately — the frontend should **o
 these endpoints, never touch `lib/db` or Drizzle directly.
 
 - **Database:** Neon Postgres (serverless) via Drizzle. Requires `DATABASE_URL` in `.env.local`.
-- **Auth:** none (single-tenant hackathon admin). All `/api/*` routes are open.
+- **Auth:** none (single-tenant hackathon admin). All `/api/*` routes are open. The role model in
+  §15 is a **UI construct only** — nothing is enforced server-side yet.
 - **Base path:** all dashboard endpoints live under `/api/*` as Next.js route handlers.
+
+## Status legend
+
+v2 reframes Markii as a merchant control plane for AI commerce (see `docs/PLAN.md`). Sections
+carry an explicit status — **never call a `PLANNED` endpoint and never fake its response**:
+
+| Badge | Meaning |
+|---|---|
+| ✅ **LIVE** | Implemented in `app/api/*` today. Call it. |
+| 🟡 **PLANNED** | Contract agreed, route not built. Frontend defines the typed service; screens show *configuration required* / *not yet measured* until it lands. |
+
+| § | Area | Status | Phase |
+|---|---|---|---|
+| 1–8 | Overview, sites, categories, products, import, analytics, finances, integrations | ✅ LIVE | — |
+| 9 | Readiness & catalog health | 🟡 PLANNED | E |
+| 10 | Channels | 🟡 PLANNED | E |
+| 11 | Product agent-data extension | 🟡 PLANNED | E |
+| 12 | Agent Test Lab | 🟡 PLANNED | E |
+| 13 | Orders (promoted) | partial — `GET /api/orders/:id` is LIVE, the rest PLANNED | C |
+| 14 | Analytics v2 (funnel, channels, failures) | 🟡 PLANNED | E |
+| 15 | Automations, activity, notifications, team | 🟡 PLANNED | E |
+| 16 | Accounts, organizations, staff | 🟡 PLANNED | **A** |
+| 17 | Billing, plans, metering, threshold fees | 🟡 PLANNED | B |
+| 18 | Commerce core (variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping) | 🟡 PLANNED | C |
+| 19 | Site builder & content | 🟡 PLANNED | D |
+| 20 | Disputes & chargebacks | 🟡 PLANNED | F |
+| 21 | Agent Ops add-on | 🟡 PLANNED | F (last) |
+| 22 | **Action registry & MCP** — agent-native architecture | 🟡 PLANNED | **D, not F** |
+
+**v3 note.** Markii is now a full commerce platform (`docs/PLAN.md` v3). §16 is a **breaking
+change to everything above it**: today `/api/*` is unauthenticated and single-tenant: once orgs
+land, every route becomes org-scoped and requires a session. Treat §1–15 shapes as stable and
+their auth model as provisional.
+
+**Payment-rail neutrality.** x402/USDC is **one rail among several** (card, Stripe, PayPal,
+external processor), not the product identity. Anywhere a payment appears, the rail is a labeled
+field — never an assumption.
+
+**No mock data.** Do not add fixtures or mock route handlers for PLANNED areas. Ship real
+loading/empty/error states instead. If fixtures are introduced later they sit behind a global Demo
+Mode flag with a persistent indicator, and must never be presented as production results.
 
 ---
 
@@ -36,6 +78,12 @@ these endpoints, never touch `lib/db` or Drizzle directly.
   ```
 
 - **Search:** `?q=` does case-insensitive substring match on name/slug (and SKU for products).
+- **Environment:** `?environment=test|production` (default: both) on every analytics, channel,
+  order, and overview read. Responses echo `"environment"` on any object that has one so the UI
+  can badge it. Test/sandbox data must never be silently summed into production totals.
+- **Data provenance:** any response containing numbers that are not production-sourced carries
+  `"dataSource": "production" | "test" | "demo"` at the top level. The UI labels anything that
+  isn't `"production"`.
 - **Errors:** non-2xx responses are always:
 
   ```json
@@ -58,7 +106,7 @@ these endpoints, never touch `lib/db` or Drizzle directly.
 {
   id: number,
   name: string,
-  slug: string,                  // used as subdomain: {slug}.markii.app
+  slug: string,                  // used as subdomain: {slug}.markii.shop
   customDomain: string | null,
   status: "draft" | "live" | "paused",
   indexed: boolean,              // include in sitemap / allow crawler indexing
@@ -69,7 +117,7 @@ these endpoints, never touch `lib/db` or Drizzle directly.
   googleSiteVerification: string | null,
   productCount: number,          // computed, read-only
   categoryCount: number,         // computed, read-only
-  storefrontUrl: string,         // computed, e.g. "https://demo-store.markii.app"
+  storefrontUrl: string,         // computed, e.g. "https://demo-store.markii.shop"
   createdAt: string,
   updatedAt: string
 }
@@ -247,7 +295,7 @@ Cards for the website slug page:
 
 ### `POST /api/sites/:idOrSlug/deploy`
 Marks the site `live` (and, when the Vercel domain integration lands, attaches the custom
-domain). → `200` `{ "status": "live", "storefrontUrl": "https://demo-store.markii.app" }`
+domain). → `200` `{ "status": "live", "storefrontUrl": "https://demo-store.markii.shop" }`
 
 ### Previews (create-site wizard live panes)
 
@@ -548,44 +596,964 @@ Columns: `id,date,product,quantity,amount,currency,provider,status,tx_hash,agent
 ### `POST /api/integrations/google/sync` — push all live products to GMC. → `{ "synced": 42, "failed": 0 }`
 
 ### `PUT /api/integrations/stripe`
-`{ "secretKey": "sk_test_…" }` → `200` status object. (Stripe is optional — build the UI,
-expect `not_connected` in the demo.)
+`{ "secretKey": "sk_test_…" }` → `200` status object.
+
+**v3 note (`docs/DECISIONS.md` §D4):** this endpoint is superseded by **Connect Standard OAuth** —
+the merchant authorizes Markii and keeps their own Stripe account, rates, dashboard, and payouts.
+Markii stores a revocable token and `stripe_account_id`, **never a merchant secret key**, and
+charges are created with `Stripe-Account`.
+
+Markii takes **no `application_fee_amount`, ever**: platform fees are billed on Markii's own
+subscription invoice (§17) and never skimmed from the merchant's payment flow. Credentials are
+write-only — never echoed by `GET /api/integrations`, never logged, never placed in a prompt.
+Status returns `{ mode: "connect_standard", accountId, chargesEnabled, payoutsEnabled, connectedAt }`.
 
 ### `DELETE /api/integrations/:provider`
 Disconnect. → `{ "status": "not_connected" }`
 
 ---
 
-## 9. Storefront routes (FYI — do not build these)
+## 9. Readiness & catalog health 🟡 PLANNED
+
+Service: `ReadinessService` — `getOverview`, `getIssues`, `getHistory`, `resolveIssue`,
+`dismissIssue`. Powers the Overview score card and `/dashboard/health`.
+
+### Entities
+
+```ts
+// AgentReadinessReport
+{
+  scope: "organization" | "site" | "product",
+  scopeId: number | null,          // null for organization
+  score: number,                   // 0–100
+  grade: "critical" | "needs_work" | "good" | "excellent",
+  trend: { delta: number, since: string } | null,
+  components: [                    // always these five keys, in this order
+    { key: "product_data" | "inventory" | "policies" | "checkout" | "protocol_coverage",
+      label: "Product data", score: 72, weight: 0.3,
+      issueCounts: { critical: 2, warning: 5, opportunity: 3 } }
+  ],
+  counts: { critical: 4, warning: 11, opportunity: 6 },
+  computedAt: string
+}
+
+// ReadinessIssue
+{
+  id: string,
+  severity: "critical" | "warning" | "opportunity",
+  component: "product_data" | "inventory" | "policies" | "checkout" | "protocol_coverage",
+  code: string,                    // "MISSING_DESCRIPTION", "NO_SHIPPING_POLICY", …
+  title: string,
+  status: "open" | "resolved" | "dismissed" | "assigned",
+  scope: { siteId: number | null, productId: number | null, categoryId: number | null,
+           channelId: string | null },
+  affectedFields: string[],        // ["description", "gtin"]
+  evidence: { field: string, current: string | null, expected: string }[],
+  recommendation: string,
+  expectedImpact: string,          // plain-language, e.g. "Improves retrieval by ChatGPT/ACP"
+  assignedTo: string | null,
+  detectedAt: string,
+  updatedAt: string
+}
+```
+
+### `GET /api/readiness/overview`
+Query: `siteId`, `productId`, `environment`. → **AgentReadinessReport**.
+
+### `GET /api/readiness/issues`
+Query: `severity`, `status`, `siteId`, `productId`, `categoryId`, `channelId`, `component`,
+`q`, `page`, `limit`, `sort` (`-severity|detectedAt`).
+→ paginated **ReadinessIssue** plus `"counts": { critical, warning, opportunity }`.
+
+### `GET /api/readiness/issues/:id`
+→ single **ReadinessIssue** (drawer payload: evidence, affected fields, recommendation, impact).
+
+### `POST /api/readiness/issues/bulk`
+Bulk actions from the health table.
+
+```json
+{ "ids": ["iss_1", "iss_2"], "action": "resolve" | "dismiss" | "assign", "assignee": "user_1" }
+```
+
+→ `200` `{ "updated": 2, "issues": [ ReadinessIssue, ... ], "failed": [] }`
+
+### `GET /api/readiness/issues/export`
+Same filters as the list. → `text/csv`.
+
+### `GET /api/readiness/history`
+Query: `scope`, `scopeId`, `from`, `to`.
+→ `{ "points": [{ "date": "2026-07-18", "score": 68, "components": { … } }] }`
+
+### `GET /api/readiness/products` — completeness matrix (FR-CM-01)
+Query: `siteId`, `categoryId`, `q`, `page`, `limit`, `sort`.
+
+```json
+{
+  "columns": [
+    { "group": "core", "label": "Core", "fields": ["name", "description", "price", "images"] },
+    { "group": "shipping", "label": "Shipping", "fields": ["weight", "dimensions", "shipsFrom"] },
+    { "group": "policies", "label": "Policies", "fields": ["returns", "warranty"] },
+    { "group": "specifications", "label": "Specifications", "fields": ["attributes"] },
+    { "group": "compatibility", "label": "Compatibility", "fields": ["compatibleWith"] },
+    { "group": "agent_data", "label": "Agent data", "fields": ["useCases", "faqs", "machineSummary"] }
+  ],
+  "items": [
+    { "productId": 9, "name": "Blue Tee", "slug": "blue-tee", "siteId": 1, "score": 64,
+      "groups": { "core": { "complete": 4, "total": 4, "state": "complete" },
+                  "agent_data": { "complete": 1, "total": 3, "state": "partial" } },
+      "issueCount": 3 }
+  ],
+  "total": 128, "page": 1, "limit": 20
+}
+```
+
+`state`: `"complete" | "partial" | "empty" | "conflict"`.
+
+**Scope note:** the first version may compute scores client-side from real `/api/products` data.
+That is honest (it is derived from the merchant's actual catalog). Persisted resolve/dismiss and
+score history require these endpoints.
+
+---
+
+## 10. Channels 🟡 PLANNED
+
+Service: `ChannelService` — `listChannels`, `getChannel`, `validateConfig`, `connectChannel`,
+`getSyncHistory`. Powers `/dashboard/channels`.
+
+`kind` is what keeps the UI honest about what a thing *is* (FR-CH-06):
+
+| kind | Members |
+|---|---|
+| `protocol` | `mcp`, `acp`, `ucp`, `a2a`, `json_ld`, `llms_txt`, `agent_md` |
+| `marketplace` | `chatgpt`, `google_ai`, `microsoft` |
+| `feed` | `google_merchant` |
+| `payment_rail` | `x402`, `stripe`, `paypal` |
+
+### Entities
+
+```ts
+// CommerceChannel
+{
+  id: string,                      // "chatgpt_acp", "google_merchant", "x402"
+  name: string,
+  kind: "protocol" | "marketplace" | "feed" | "payment_rail",
+  status: "connected" | "action_required" | "syncing" | "error" | "test_mode"
+        | "ready" | "coming_soon" | "not_connected",
+  statusMessage: string | null,
+  environment: "test" | "production" | null,
+  publishedProductCount: number | null,   // null = not applicable / unknown
+  errorCount: number,
+  lastSyncAt: string | null,
+  docsUrl: string | null,
+  capabilities: { discovery: boolean, checkout: boolean, feedSync: boolean },
+  configFields: [                  // renders the connect/configure form
+    { key: "merchantId", label: "Merchant ID", type: "text" | "password" | "select" | "url",
+      required: true, help: string | null, options: string[] | null }
+  ],
+  siteIds: number[]                // which sites this channel is enabled for
+}
+
+// ChannelSyncEvent
+{
+  id: string,
+  channelId: string,
+  type: "sync" | "validation" | "connect" | "error",
+  status: "success" | "partial" | "failed",
+  itemsProcessed: number,
+  itemsFailed: number,
+  message: string | null,
+  startedAt: string,
+  finishedAt: string | null
+}
+```
+
+### `GET /api/channels`
+Query: `kind`, `status`, `siteId`, `environment`. → `{ "items": [ CommerceChannel, ... ] }`
+(unpaginated — the list is a fixed registry).
+
+### `GET /api/channels/:id`
+→ **CommerceChannel** plus `"preview"`:
+`{ "format": "json_ld" | "llms_txt" | "agent_md" | "mcp" | "acp" | "ucp", "content": "…" }[]`
+— the technical preview pane (FR-CH-04).
+
+### `POST /api/channels/:id/validate`
+Body: `{ "config": { … } }` → `200`
+
+```json
+{ "valid": false,
+  "errors": [ { "field": "merchantId", "message": "Account not found" } ],
+  "warnings": [ { "field": "feedUrl", "message": "Feed has 12 products without GTIN" } ] }
+```
+
+Validation must not mutate anything.
+
+### `PUT /api/channels/:id/connect`
+Body: `{ "config": { … }, "environment": "test" | "production", "siteIds": [1, 2] }`
+→ `200` **CommerceChannel**. Secrets are write-only — never echoed back in `GET`.
+
+### `DELETE /api/channels/:id/connect`
+Disconnect. → `200` **CommerceChannel** with `status: "not_connected"`.
+
+### `POST /api/channels/:id/sync`
+→ `202` `{ "syncId": "sync_1", "status": "syncing" }`
+
+### `GET /api/channels/:id/history`
+Query: `from`, `to`, `page`, `limit`. → paginated **ChannelSyncEvent**.
+
+**Today, without these routes:** `json_ld`, `llms_txt`, and `agent_md` statuses are derivable from
+real site config (`agentDiscovery`, `indexed`, `status`) via `GET /api/sites`, and `x402` /
+`stripe` / `google_merchant` from `GET /api/integrations`. Everything else renders `coming_soon`.
+No live protocol connection is in scope.
+
+---
+
+## 11. Product agent-data extension 🟡 PLANNED
+
+Extends the **Product** entity in §4 for the universal product detail tabs (FR-PD-01/02).
+All fields optional; `PATCH /api/products/:idOrSlug` accepts them as partials.
+
+```ts
+{
+  // …existing Product fields…
+  attributes: [{ key: "material", label: "Material", value: "Organic cotton",
+                 unit: string | null, source: "merchant" | "import" | "inferred" }],
+  useCases: string[],              // "Everyday wear", "Gifting"
+  compatibility: [{ label: "Fits", value: "US sizes 6–12" }],
+  restrictions: [{ type: "age" | "region" | "license" | "shipping", value: "Not shipped to EU" }],
+  faqs: [{ question: string, answer: string }],
+  machineSummary: string | null,   // one-paragraph agent-facing description
+  policies: { returns: string | null, warranty: string | null, shipping: string | null },
+  gtin: string | null,
+  brand: string | null,
+  condition: "new" | "refurbished" | "used" | null,
+  availability: "in_stock" | "out_of_stock" | "preorder" | "backorder",
+  freshness: { lastVerifiedAt: string | null, staleAfterDays: number | null }
+}
+```
+
+### `GET /api/products/:idOrSlug/health` (Health tab)
+
+```json
+{
+  "score": 64,
+  "components": [ { "key": "product_data", "score": 70 } ],
+  "fields": [
+    { "field": "description", "state": "complete" | "partial" | "empty" | "conflict" | "stale",
+      "message": null, "severity": null }
+  ],
+  "issues": [ ReadinessIssue, ... ],
+  "conflicts": [ { "field": "price", "sources": ["markii", "shopify"], "values": ["19.99", "24.99"] } ]
+}
+```
+
+### `GET /api/products/:idOrSlug/preview` (Channel Preview tab)
+Query: `format=human|json_ld|llms_txt|agent_md|mcp|acp|ucp` (repeatable).
+
+```json
+{ "previews": [ { "format": "json_ld", "contentType": "application/ld+json", "content": "{…}" } ] }
+```
+
+Deterministic serialization of the **saved** product — same input, same output.
+
+---
+
+## 12. Agent Test Lab 🟡 PLANNED
+
+Service: `AgentTestService` — `listProfiles`, `runScenario`, `saveScenario`, `getScenario`.
+
+```ts
+// AgentTestScenario
+{ id: string, name: string, query: string, profileId: string, siteId: number | null,
+  createdAt: string }
+
+// AgentTestResult
+{
+  id: string, scenarioId: string | null, query: string, profileId: string,
+  dataSource: "production" | "test" | "demo",
+  retrieved: [{ productId: number, name: string, slug: string, score: number }],
+  selected: [{ productId: number, name: string, reason: string }],
+  rejected: [{ productId: number, name: string, reason: string,
+               missingFields: string[] }],
+  constraintsUsed: [{ constraint: "budget", value: "< $50", satisfiedBy: [9, 12] }],
+  attributesUsed: string[],
+  missingInformation: [{ field: string, productIds: number[], impact: string }],
+  conflicts: [{ field: string, productIds: number[], detail: string }],
+  confidence: number,              // 0–1
+  checkoutReadiness: {
+    ready: boolean,
+    blockers: [{ code: string, message: string }],
+    availableRails: ["x402", "stripe", "card"]
+  },
+  protocolOutput: [{ format: string, content: string }],
+  runAt: string
+}
+```
+
+### `GET /api/test-lab/profiles`
+→ `{ "items": [ { "id": "budget_shopper", "name": "Budget shopper",
+      "description": "Optimizes for lowest total cost",
+      "constraints": [{ "key": "maxPrice", "label": "Max price", "value": "50" }] } ] }`
+
+### `POST /api/test-lab/run`
+Body: `{ "query": "waterproof running shoes under $120", "profileId": "budget_shopper",
+"siteId": 1, "environment": "test" }` → `200` **AgentTestResult**.
+
+### `GET /api/test-lab/scenarios` · `POST /api/test-lab/scenarios` · `GET /api/test-lab/scenarios/:id`
+List / save / load. Save body: `{ "name", "query", "profileId", "siteId" }` → `201`.
+
+**Rules.** `rejected[].reason` and `constraintsUsed` are **structured product reasoning** —
+evidence about catalog data, never model chain-of-thought (FR-TL-06 scope note). Runs against a
+site with no products return `retrieved: []` with a real empty state, not invented matches. Until
+this ships, the Test Lab UI is interface-only and must say so.
+
+---
+
+## 13. Orders (promoted from Finances) — partial
+
+`GET /api/orders/:id` is ✅ LIVE (§7). The list, timeline, and the extended fields below are
+🟡 PLANNED. Service: `OrderService` — `listOrders`, `getOrder`, `getTimeline`.
+Settlement history moves under Orders as a tab (FR-OR-06); §7's finances endpoints stay live and
+back it.
+
+### Extended Order entity
+
+```ts
+{
+  // …existing Order fields from §"Order (transaction)"…
+  channelId: string | null,        // "chatgpt_acp" — where the order originated
+  environment: "test" | "production",
+  paymentRail: "x402" | "card" | "stripe" | "paypal" | "external",
+  paymentStatus: "pending" | "authorized" | "captured" | "failed" | "refunded" | "partially_refunded",
+  fulfillmentStatus: "unfulfilled" | "processing" | "shipped" | "delivered" | "blocked" | "cancelled",
+  exception: {                     // null when healthy (FR-OR-05)
+    code: "authorization_failed" | "inventory_changed" | "payment_pending" | "fulfillment_blocked",
+    message: string,
+    since: string
+  } | null,
+  items: [{ productId: number, name: string, slug: string, quantity: number,
+            unitPriceCents: number, totalCents: number }],
+  payment: {                       // PaymentSummary
+    rail: string, status: string, amountCents: number, currency: string,
+    processorReference: string | null,   // tx hash, Stripe PI id, …
+    authorizedAt: string | null, capturedAt: string | null,
+    refundedCents: number
+  },
+  fulfillment: {                   // FulfillmentSummary
+    status: string, carrier: string | null, trackingNumber: string | null,
+    shippingAddress: { line1, line2, city, region, postalCode, country } | null,
+    shippedAt: string | null, deliveredAt: string | null
+  },
+  buyerAuthorization: {            // what the agent was permitted to do
+    agentName: string, principal: string | null,
+    method: "x402_signature" | "delegated_token" | "api_key" | "unknown",
+    scope: string | null, authorizedAt: string | null, verified: boolean
+  }
+}
+```
+
+### `GET /api/orders`
+Query: `q`, `siteId`, `channelId`, `paymentRail`, `paymentStatus`, `fulfillmentStatus`,
+`status`, `exception` (`true` = only orders with an exception), `environment`, `from`, `to`,
+`page`, `limit`, `sort` (`-createdAt|amountCents`).
+→ paginated **Order** + `"totals": { "amountCents": 152300, "orderCount": 87 }`.
+
+### `GET /api/orders/:id/timeline`
+
+```json
+{ "events": [
+  { "id": "evt_1", "type": "order_created" | "payment_authorized" | "payment_captured"
+        | "payment_failed" | "inventory_reserved" | "fulfillment_updated" | "refund_issued"
+        | "exception_raised" | "note",
+    "status": "success" | "warning" | "error" | "info",
+    "message": "Agent authorized 145.00 USDC",
+    "actor": { "type": "agent" | "merchant" | "system", "name": "ClaudeBot" },
+    "metadata": { }, "occurredAt": "2026-07-26T18:00:00.000Z" } ] }
+```
+
+### `GET /api/orders/export`
+Same filters as the list. → `text/csv`.
+
+Operational mutations (refund, cancel, mark fulfilled) are an **open decision** — Orders is
+read-only until that is settled. Do not build mutation controls yet.
+
+---
+
+## 14. Analytics v2 🟡 PLANNED
+
+Service: `AnalyticsService` — `getOverview`, `getFunnel`, `getChannelPerformance`, `getFailures`.
+§6's endpoints stay ✅ LIVE and keep backing crawl-traffic views.
+
+**Honesty constraint:** `agent_traffic` currently records **crawls only**. Impressions,
+recommendations, sessions, and checkout attempts have no source events yet. Any metric without a
+backing event returns `null` — not `0` — and the UI renders *not yet measured*.
+
+### `GET /api/analytics/metrics`
+Query: `siteId`, `channelId`, `agentName`, `productId`, `categoryId`, `environment`, `from`, `to`.
+
+```json
+{
+  "dataSource": "production",
+  "metrics": {
+    "impressions": null, "retrievals": 1240, "recommendations": null, "sessions": null,
+    "checkoutAttempts": 42, "orders": 31, "revenueCents": 152300,
+    "conversionRate": 0.0250, "averageOrderValueCents": 4913
+  },
+  "comparison": { "from": "2026-06-28", "to": "2026-07-25", "deltas": { "retrievals": 0.18 } },
+  "byDay": [{ "date": "2026-07-18", "retrievals": 40, "orders": 2, "revenueCents": 9800 }]
+}
+```
+
+### `GET /api/analytics/funnel`
+Same filters. Stages are fixed and ordered (FR-OV-03).
+
+```json
+{ "stages": [
+    { "key": "retrieved", "label": "Retrieved", "count": 1240, "conversionFromPrevious": null },
+    { "key": "recommended", "label": "Recommended", "count": null, "measured": false },
+    { "key": "checkout_started", "label": "Checkout started", "count": 42 },
+    { "key": "authorized", "label": "Authorized", "count": 35 },
+    { "key": "purchased", "label": "Purchased", "count": 31 } ] }
+```
+
+`measured: false` ⇒ render "not yet measured", never zero.
+
+### `GET /api/analytics/channels`
+→ `{ "items": [ { "channelId": "chatgpt_acp", "name": "ChatGPT / ACP", "retrievals": 800,
+      "orders": 18, "revenueCents": 88000, "conversionRate": 0.0225 } ] }`
+
+### `GET /api/analytics/failures`
+```json
+{ "reasons": [ { "code": "no_match", "label": "No matching product", "count": 64,
+                 "sampleQueries": ["waterproof boots size 15"] },
+               { "code": "missing_attribute", "label": "Missing required attribute",
+                 "count": 22, "affectedProductIds": [9, 12] } ],
+  "noMatchQueries": [ { "query": "vegan hiking boots", "count": 12, "lastSeenAt": "…" } ] }
+```
+
+### `GET /api/analytics/export`
+Same filters. → `text/csv` (FR-AN-06 — no backend report generation required beyond the rows).
+
+---
+
+## 15. Automations, activity, notifications, team 🟡 PLANNED (P2)
+
+### AutomationService — `listTasks`, `approveTask`, `rejectTask`
+
+```ts
+// AutomationTask
+{
+  id: string,
+  type: "missing_attributes" | "stale_inventory" | "bundle_suggestion" | "substitution"
+      | "sync_failure" | "failed_checkout_investigation",
+  title: string,
+  explanation: string,             // why this is suggested
+  expectedImpact: string,
+  status: "suggested" | "approved" | "rejected" | "applied" | "awaiting_backend",
+  affectedProducts: [{ id: number, name: string, slug: string }],
+  proposedChanges: [{ field: string, current: string | null, proposed: string }],
+  createdAt: string
+}
+```
+
+- `GET /api/automations/tasks` — query `type`, `status`, `siteId`, `page`, `limit`.
+- `POST /api/automations/tasks/:id/approve` → `200` **AutomationTask**. If execution is not wired,
+  it must return `status: "awaiting_backend"` — never `"applied"` (FR-AU-04).
+- `POST /api/automations/tasks/:id/reject` — body `{ "reason": string | null }`.
+- `GET /api/automations/history` — paginated **ApprovalEvent**
+  `{ id, taskId, action: "approved"|"rejected"|"applied", actor, note, occurredAt }`.
+
+No autonomous execution is in scope.
+
+### ActivityService — `listEvents`, `listNotifications`, `resolveNotification`
+
+- `GET /api/activity` — query `category` (`catalog|channel|agent|deployment|order|error`),
+  `siteId`, `from`, `to`, `page`, `limit`. → paginated **ActivityEvent**
+  `{ id, category, type, message, actor: { type, name }, severity, link, occurredAt }`.
+- `GET /api/notifications` — query `severity` (`critical|warning|info`), `status`
+  (`unread|read|resolved`). → paginated **Notification**
+  `{ id, severity, title, message, status, action: { label, href } | null, createdAt }`.
+- `POST /api/notifications/:id/resolve` → `200` **Notification**.
+
+### Team & settings
+
+- `GET /api/team` → `{ "items": [ TeamMember ] }` —
+  `{ id, name, email, role, status: "active"|"invited"|"disabled", lastActiveAt }`.
+- `POST /api/team/invite` — `{ "email", "role" }` → `201` **TeamMember** (`status: "invited"`).
+- `PATCH /api/team/:id` — `{ "role" }` · `DELETE /api/team/:id`.
+- `GET /api/roles` → `{ "items": [ { "key": "catalog_manager", "label": "Catalog Manager",
+  "permissions": ["catalog.read", "catalog.write"] } ] }`
+
+Roles: `owner`, `administrator`, `catalog_manager`, `commerce_manager`, `analyst`, `developer`,
+`viewer`. **UI model only** — no enforcement until auth exists. Never imply an invitation was
+delivered when no mail service is wired.
+
+---
+
+## 16. Accounts, organizations, staff 🟡 PLANNED — Phase A
+
+**Blocking dependency for §17–21.** Tenancy model: `Organization → Stores → Staff`. An org owns
+billing; stores are the existing `sites`. Recommend a managed auth provider (see `docs/PLAN.md` §4).
+
+```ts
+interface Organization {
+  id: string; name: string; slug: string;
+  ownerId: string;
+  billingEmail: string;
+  currency: string;                // billing currency, ISO 4217
+  country: string;
+  planId: string;
+  entitlements: Entitlements;      // §17
+  createdAt: string;
+}
+
+interface StaffMember {
+  id: string; orgId: string; userId: string;
+  name: string; email: string;
+  role: "owner" | "administrator" | "catalog_manager" | "commerce_manager"
+      | "analyst" | "developer" | "viewer";
+  storeIds: number[] | "all";      // per-store scoping
+  status: "active" | "invited" | "disabled";
+  lastActiveAt: string | null;
+}
+```
+
+| Method | Route | Notes |
+|---|---|---|
+| `GET` | `/api/me` | Current user, org, role, entitlements — one call to boot the dashboard |
+| `GET`/`PATCH` | `/api/org` | Org profile, billing email, currency |
+| `GET` | `/api/org/staff` | List staff |
+| `POST` | `/api/org/staff/invite` | `{ email, role, storeIds }` → `201`, `status: "invited"` |
+| `PATCH`/`DELETE` | `/api/org/staff/:id` | Change role/scope, remove |
+| `GET` | `/api/org/audit` | Audit log: actor, action, entity, before/after, IP, `occurredAt` |
+| `GET` | `/api/org/sessions` · `DELETE /api/org/sessions/:id` | Active sessions, revoke |
+| `GET`/`POST` | `/api/org/tokens` · `DELETE /api/org/tokens/:id` | Scoped API/MCP tokens (§22) |
+
+### Auth requirements
+
+Merchant accounts are now a confirmed requirement, so this is a real auth surface, not a shim:
+
+- **Sign-up, sign-in, sign-out, password reset, email verification**, and session refresh — provided
+  by the auth provider, not hand-rolled. Recommend a managed provider (Clerk via the Vercel
+  Marketplace, or Auth0/Descope): billing data and customer PII make DIY credential storage a
+  liability, and MFA/SSO arrive free.
+- **Sessions** are httpOnly, secure, SameSite cookies. Never store tokens in `localStorage` — the
+  storefronts run custom merchant code, and any XSS there must not reach an admin session.
+- **MFA** available on all plans; enforceable org-wide by an Owner. SSO/SAML is a later
+  enterprise-tier concern, but the role model should not foreclose it.
+- **A user may belong to multiple orgs** (agencies build stores for clients) — the session carries
+  an active org, switchable, and every request derives scope from it.
+- **Programmatic access** uses scoped tokens with an explicit role, never a user's session cookie.
+  Same permission checks, same audit log; this is what MCP clients and CI use (§22).
+
+Storefront **customer** accounts (§18.3) are a completely separate identity domain — different
+users, different sessions, different store scope. Never let the two share a session, a cookie
+namespace, or a token audience.
+
+**Rules.** Every §1–15 route gains implicit org scoping from the session — never accept `orgId`
+from the client. Role checks are enforced **server-side**; the UI role model mirrors but never
+substitutes for it. Audit every mutation with actor identity, including agent and token callers.
+Never return an invitation as "delivered" unless a mail provider actually accepted it.
+
+---
+
+## 17. Billing, plans, metering, threshold fees 🟡 PLANNED — Phase B
+
+Full model in **`docs/PRICING.md`**. Processor: Stripe Billing (subscriptions) + Stripe Connect
+(merchant payouts). Markii never holds merchant funds.
+
+```ts
+interface Entitlements {           // gate features on THIS, never on plan name
+  storeLimit: number; staffSeatLimit: number | null;
+  gmvThresholdMinor: number;       // annual threshold in billing currency minor units
+  overageRateBps: number;          // e.g. 50 = 0.50%
+  addOns: { agentOps: boolean; chargebackAssist: boolean };
+}
+
+interface Subscription {
+  planId: "starter" | "growth" | "scale";
+  interval: "month" | "year";
+  status: "trialing" | "active" | "past_due" | "canceled" | "unpaid";
+  currentPeriodStart: string; currentPeriodEnd: string;
+  trialEndsAt: string | null;
+  cancelAtPeriodEnd: boolean;
+  paymentMethod: { brand: string; last4: string; expMonth: number; expYear: number } | null;
+}
+
+interface UsageRecord {            // immutable; written at event time, never derived later
+  id: string; orgId: string; storeId: number; orderId: number;
+  type: "sale" | "refund" | "chargeback_lost";
+  amountMinor: number; currency: string;          // original
+  convertedMinor: number; fxRate: number;         // billing currency
+  environment: "test" | "production";             // test NEVER counts
+  occurredAt: string;
+}
+```
+
+| Method | Route | Notes |
+|---|---|---|
+| `GET` | `/api/billing/plans` | Public plan catalog + prices. Competitor comparisons are **data with a `verifiedAt`**, never hardcoded copy |
+| `GET` | `/api/billing/subscription` | Current subscription + entitlements |
+| `POST` | `/api/billing/subscription` | Create/change plan. Returns proration preview before commit |
+| `DELETE` | `/api/billing/subscription` | Cancel at period end |
+| `GET` | `/api/billing/usage` | **The threshold meter** — see below |
+| `GET` | `/api/billing/invoices` · `/:id` | History + line-itemized detail |
+| `POST` | `/api/billing/payment-method` | Stripe SetupIntent client secret; card data never touches Markii |
+| `POST` | `/api/billing/addons/:addon` · `DELETE` | Toggle add-on entitlement |
+| `POST` | `/api/webhooks/stripe` | Signature-verified, idempotent, retry-safe |
+
+### `GET /api/billing/usage` — threshold meter
+
+```json
+{
+  "currency": "USD",
+  "trailing12NetSalesMinor": 48200000,
+  "thresholdMinor": 50000000,
+  "overageRateBps": 40,
+  "state": "below" | "approaching" | "above",
+  "period": { "start": "2026-07-01", "end": "2026-07-31" },
+  "periodNetSalesMinor": 6000000,
+  "billableThisPeriodMinor": 0,
+  "feeAccruedMinor": 0,
+  "projectedPeriodFeeMinor": 64000,
+  "projectionBasis": "run_rate_to_period_end",
+  "upgradeSuggestion": { "planId": "scale", "monthlyDeltaMinor": 10000,
+                         "projectedAnnualSavingMinor": 42000 } | null,
+  "processorFeesNote": "Charged by your payment provider, not part of your Markii bill.",
+  "dataSource": "production"
+}
+```
+
+**Contract rules.** `billableThisPeriodMinor` uses the marginal formula in `docs/PRICING.md` §3.3 —
+only the slice above the threshold, never the whole period. Projections are always labeled as
+projections and never presented as owed. Before a first sale exists, values are `null` and the UI
+shows *not yet measured*, never `0`. Trial orgs see accrual with "would have been charged" framing.
+`upgradeSuggestion` is surfaced even when it lowers Markii's revenue.
+
+---
+
+## 18. Commerce core 🟡 PLANNED — Phase C
+
+The gap between "catalog" and "store". Everything here is prerequisite to a real shopper checking
+out. Extends §4's Product.
+
+### 18.1 Variants & inventory
+
+```ts
+interface ProductOption { name: string; position: number; values: string[] }   // Size, Color
+
+interface Variant {
+  id: number; productId: number;
+  title: string;                   // "Navy / L"
+  optionValues: Record<string, string>;
+  sku: string | null; barcode: string | null;
+  priceMinor: number; compareAtMinor: number | null; costMinor: number | null;
+  weightGrams: number | null;
+  requiresShipping: boolean; taxable: boolean; taxCode: string | null;
+  imageId: string | null;
+  inventoryPolicy: "deny" | "continue";   // sell past zero?
+  inventoryLevels: { locationId: string; available: number; committed: number }[];
+  position: number;
+}
+```
+
+| Method | Route |
+|---|---|
+| `GET`/`POST` | `/api/products/:id/variants` |
+| `PATCH`/`DELETE` | `/api/variants/:id` |
+| `POST` | `/api/products/:id/options` — regenerates the variant matrix |
+| `GET`/`POST` | `/api/locations` — inventory locations |
+| `POST` | `/api/inventory/adjust` — `{ variantId, locationId, delta, reason }`, appends a ledger entry |
+| `GET` | `/api/inventory/levels` — filter by location/variant/low-stock |
+
+Inventory is an **append-only ledger**, not a mutable integer — reconciliation and audit depend on
+it, and so does the Agent Ops undo path.
+
+### 18.2 Collections
+
+```ts
+interface Collection {
+  id: number; storeId: number; title: string; handle: string;
+  description: string | null; imageUrl: string | null;
+  type: "manual" | "automated";
+  rules?: { field: "title"|"tag"|"price"|"stock"|"vendor"|"type";
+            op: "eq"|"contains"|"gt"|"lt"|"starts_with"; value: string }[];
+  rulesMatch?: "all" | "any";
+  sortOrder: "manual" | "best_selling" | "price_asc" | "price_desc" | "created_desc";
+  productCount: number; publishedAt: string | null;
+}
+```
+
+`GET`/`POST` `/api/collections`, `GET`/`PATCH`/`DELETE` `/api/collections/:idOrHandle`,
+`POST /api/collections/:id/products` (manual membership + reorder).
+Collections coexist with the existing §3 categories: **categories are catalog taxonomy, collections
+are merchandising.** Do not merge them; do document the distinction in the UI.
+
+### 18.3 Customers
+
+`Customer { id, storeId, email, firstName, lastName, phone, addresses[], defaultAddressId,
+acceptsMarketing, marketingConsentAt, tags[], note, ordersCount, totalSpentMinor, createdAt }`
+
+`GET`/`POST` `/api/customers`, `GET`/`PATCH`/`DELETE` `/api/customers/:id`,
+`GET /api/customers/:id/orders`, `POST /api/customers/:id/addresses`.
+
+PII rules: never log or prompt-inject customer records; support export and deletion requests;
+marketing consent is explicit, timestamped, and never defaulted on.
+
+### 18.4 Cart & checkout
+
+**The single biggest gap** — today only agent-driven x402 checkout exists.
+
+```ts
+interface Cart {
+  id: string; storeId: number; token: string;
+  lines: { variantId: number; quantity: number; unitPriceMinor: number;
+           addOnIds?: number[] }[];
+  customerId: number | null; email: string | null;
+  discountCodes: string[];
+  subtotalMinor: number; discountMinor: number; taxMinor: number;
+  shippingMinor: number; totalMinor: number; currency: string;
+  shippingAddress: Address | null; shippingRateId: string | null;
+  status: "open" | "abandoned" | "converted";
+  expiresAt: string;
+}
+```
+
+| Method | Route | Notes |
+|---|---|---|
+| `POST` | `/api/storefront/cart` | Create cart |
+| `GET`/`PATCH` | `/api/storefront/cart/:token` | Read, add/update/remove lines |
+| `POST` | `/api/storefront/cart/:token/discount` | Apply/remove code |
+| `POST` | `/api/storefront/cart/:token/shipping-rates` | Quote rates for an address |
+| `POST` | `/api/storefront/checkout` | Start checkout → Stripe PaymentIntent/Checkout Session |
+| `POST` | `/api/storefront/checkout/:id/complete` | Confirm → reserve inventory → create Order → **write UsageRecord (§17)** |
+
+Prices, discounts, tax, and totals are **always recomputed server-side** at checkout — never trust
+client-supplied amounts. Inventory is reserved at payment authorization and released on
+expiry/failure. Card data goes to Stripe-hosted elements only (PCI SAQ-A). The x402 agent checkout
+in `app/%5Fsites/[site]/api/checkout/` remains a peer path into the same order pipeline and must
+write the same usage records.
+
+### 18.5 Discounts & gift cards
+
+`Discount { id, code | automatic, type: "percentage"|"fixed"|"free_shipping"|"bogo", valueMinor |
+percentage, appliesTo: {scope, ids[]}, minimumSubtotalMinor, customerEligibility, usageLimit,
+usageLimitPerCustomer, usedCount, combinesWith: {product, order, shipping}, startsAt, endsAt,
+status }`
+
+`GET`/`POST` `/api/discounts`, `GET`/`PATCH`/`DELETE` `/api/discounts/:id`,
+`POST /api/discounts/validate`. Gift cards: `/api/gift-cards` — issue, check balance, redeem
+(count toward net sales at **redemption**, not purchase — see `docs/PRICING.md` §3.1).
+
+### 18.6 Tax & shipping rates
+
+Rate *configuration*, not logistics. `GET`/`PUT` `/api/settings/tax` (provider config, nexus,
+product tax codes, prices-include-tax flag), `POST /api/tax/calculate`;
+`GET`/`POST` `/api/shipping/zones` and `/api/shipping/rates` (flat, weight-based, price-based,
+free-over-threshold).
+
+Out of scope: carrier rate shopping, label purchase, tracking sync (`docs/PLAN.md` §3).
+
+### 18.7 Order operations
+
+Extends §13. `POST /api/orders/:id/refund` (partial/full, restock flag → inventory ledger +
+`UsageRecord{type:"refund"}`), `POST /api/orders/:id/cancel`,
+`POST /api/orders/:id/fulfillment` (**manual only**: status, tracking number, carrier name, notify
+customer), `POST /api/orders/:id/notes`, `POST /api/orders/:id/resend-confirmation`.
+
+---
+
+## 19. Site builder & content 🟡 PLANNED — Phase D
+
+Architecture in **`docs/BUILDER.md`**. Pages are versioned JSON node trees, never HTML strings.
+
+| Method | Route | Notes |
+|---|---|---|
+| `GET`/`POST` | `/api/pages` | List/create page or template documents |
+| `GET`/`PATCH`/`DELETE` | `/api/pages/:id` | Draft edits; `PATCH` bumps draft version |
+| `POST` | `/api/pages/:id/publish` | Atomic publish; runs pre-publish checks; invalidates cache tags |
+| `GET` | `/api/pages/:id/versions` · `POST /api/pages/:id/versions/:v/restore` | History, diff, restore |
+| `POST` | `/api/pages/:id/preview` | Render draft tree → HTML for the canvas/preview link |
+| `GET` | `/api/blocks` | Component registry: schemas + editor panel specs (drives the UI) |
+| `GET`/`PUT` | `/api/themes/:id` | Theme tokens, global regions, theme CSS |
+| `GET`/`POST` | `/api/menus` · `/api/redirects` · `/api/blog/posts` | Navigation, redirects, content |
+| `POST` | `/api/media` | Asset upload → media library (supersedes §4's `/api/uploads`) |
+
+Publish response includes check results:
+
+```json
+{ "published": true, "version": 12,
+  "checks": { "errors": [], "warnings": [
+    { "code": "MISSING_ALT", "nodeId": "n_18", "message": "Image has no alt text" },
+    { "code": "HEADING_SKIP", "nodeId": "n_22", "message": "h2 followed by h4" } ] } }
+```
+
+Errors block publishing; warnings inform. Custom code is sanitized server-side on save and must
+never be injectable into `llms.txt`, `agent.md`, `sitemap.xml`, or checkout.
+
+---
+
+## 20. Disputes & chargebacks 🟡 PLANNED — Phase F
+
+Stance and tiering in `docs/PLAN.md` §6. **Visibility is free; assisted response is the add-on;
+financial guarantees are not offered.**
+
+```ts
+interface Dispute {
+  id: string; orderId: number; storeId: number;
+  processor: "stripe" | "paypal" | "other";
+  reasonCode: string; reason: string;
+  amountMinor: number; currency: string;
+  status: "needs_response" | "under_review" | "won" | "lost" | "warning_closed";
+  evidenceDueBy: string | null;
+  evidenceSubmittedAt: string | null;
+  paymentRail: "card" | "stripe" | "paypal" | "external";   // x402 never appears here
+  openedAt: string;
+}
+```
+
+| Method | Route | Tier |
+|---|---|---|
+| `GET` | `/api/disputes` · `/api/disputes/:id` | Included |
+| `GET` | `/api/disputes/:id/evidence-checklist` | Included |
+| `POST` | `/api/disputes/:id/evidence` | Add-on: auto-assembled packet |
+| `POST` | `/api/disputes/:id/submit` | Add-on |
+| `GET` | `/api/disputes/stats` | Add-on: win rate, reason breakdown |
+
+**Rail honesty.** x402/USDC settlements are irreversible and have no chargeback path — surface that
+plainly in the UI rather than implying uniform dispute coverage across rails. Evidence packets for
+agent-originated orders should include the `buyerAuthorization` record from §13, which is often the
+strongest response to an "unauthorized transaction" claim.
+
+Never display a projected win probability as a guarantee, and never auto-submit evidence without
+explicit merchant confirmation.
+
+---
+
+## 21. Agent Ops add-on 🟡 PLANNED — Phase F (build last)
+
+Full spec, safety model, and endpoint list in **`docs/AGENT-OPS.md`**.
+
+Summary: `/api/agent/chat` (streaming), `/api/agent/sessions`, `/api/agent/proposals/:id/approve|reject`,
+`/api/agent/executions/:id/undo`, `/api/agent/audit`, `/api/agent/usage`, `/api/agent/settings`.
+
+Three contract rules that belong here rather than only in the spec:
+
+1. **Agent tools call `/api/*`, never `lib/db`** — the agent gets exactly the human's permissions,
+   validation, and audit trail, with no privileged path and no duplicated business rules.
+2. **Every mutation is a proposal first.** High-risk capabilities (pricing, discounts, publishing,
+   bulk edits, channel config) cannot be configured to auto-execute.
+3. **Retrieved content is data, never instruction.** Product descriptions, imported catalogs,
+   customer notes, and form submissions are untrusted input; tool authorization never depends on
+   anything the model read.
+
+---
+
+## 22. Action registry & MCP 🟡 PLANNED — Phase D (architecture, not a feature)
+
+Markii is **agent-native**: humans and agents operate the product through the same actions,
+permissions, and audit trail. Architecture in `docs/BUILDER.md` §2–3. This section is the contract.
+
+**This is not deferred to Phase F with the chat UI.** The action layer must exist when the builder
+is built — agent-nativeness cannot be retrofitted onto a mutation layer that assumed a single UI
+caller. What ships in Phase F is the chat product, not the architecture.
+
+### The primitive
+
+An action is defined once and becomes every surface at once — UI mutation, HTTP endpoint, agent
+tool, MCP tool, CLI:
+
+```ts
+defineAction({
+  id: "builder.setNodeStyle",
+  description: string,             // written for an agent as much as a human
+  input: ZodSchema,                // single source of validation truth, everywhere
+  permission: "cms.write",         // checked server-side regardless of caller
+  riskTier: "read" | "low" | "medium" | "high",
+  undoable: boolean,               // records an inverse; powers human undo AND agent rollback
+  run(input, ctx): Promise<Result>,
+});
+```
+
+### Endpoints
+
+| Method | Route | Notes |
+|---|---|---|
+| `GET` | `/api/actions` | Registry: id, description, JSON schema, permission, risk tier. Filtered to what the caller may invoke |
+| `POST` | `/api/actions/:id` | Invoke. Same validation, permissions, and audit for every caller |
+| `POST` | `/api/actions/:id/dry-run` | Return the diff an invocation *would* produce, without writing |
+| `POST` | `/api/actions/:id/undo` | Invert a prior invocation by `invocationId`, when `undoable` |
+| `GET` | `/api/actions/invocations` | Audit trail: actor (`user` \| `agent` \| `token`), input, result, `occurredAt` |
+| `ALL` | `/api/mcp` | MCP server: registry as tools, store/page context as resources |
+
+Invocation response:
+
+```json
+{ "invocationId": "inv_8f2a", "ok": true, "result": { },
+  "diff": [ { "entity": "page", "entityId": "pg_1", "path": "tree.n_18.styles.sm.paddingY",
+              "before": "8px", "after": "24px" } ],
+  "undoable": true, "auditId": "aud_411" }
+```
+
+### Contract rules
+
+1. **Actions are the only mutation path.** No route handler mutates state directly — otherwise the
+   agent and the UI drift apart, which is the failure mode this whole design exists to prevent.
+2. **`dry-run` is how proposals are built.** The agent proposal flow (§21, `docs/AGENT-OPS.md`) is
+   `dry-run` → render diff → human approves → invoke. No separate proposal engine.
+3. **Risk tier governs execution, not the caller's confidence.** `high` actions (publishing,
+   pricing, discounts, custom code, bulk edits) always require human approval and cannot be
+   configured to auto-run.
+4. **Identical permissions for humans, agents, and tokens.** An agent can never do something the
+   staff member behind it could not.
+5. **Every invocation is audited** with actor identity, whether it came from a click, a chat turn,
+   an MCP client, or CI.
+6. **MCP tokens are scoped and role-bound** (§16), never a user's session cookie.
+
+---
+
+## 23. Storefront routes (FYI — do not build these)
 
 Owned by the backend; listed so the frontend can link to them (e.g. "view live site",
 preview tabs):
 
-| URL (on the site's domain) | What it serves |
-|---|---|
-| `/` | server-rendered HTML catalog |
-| `/c/{categorySlug}` | category page |
-| `/p/{productSlug}` | product page + JSON-LD |
-| `/llms.txt` | LLM-readable store summary |
-| `/agent.md` | agent protocol + x402 purchase instructions |
-| `/sitemap.xml` | sitemap |
-| `/api/checkout` | x402 payment endpoint (402 challenge → settle) |
+| URL (on the site's domain) | What it serves | Status |
+|---|---|---|
+| `/` | server-rendered HTML catalog | ✅ LIVE |
+| `/c/{categorySlug}` | category page | ✅ LIVE |
+| `/p/{productSlug}` | product page + JSON-LD | ✅ LIVE |
+| `/llms.txt` | LLM-readable store summary | ✅ LIVE |
+| `/agent.md` | agent protocol + purchase instructions | ✅ LIVE |
+| `/sitemap.xml` | sitemap | ✅ LIVE |
+| `/api/checkout` | x402 payment endpoint (402 challenge → settle) | ✅ LIVE |
+| `/cart` · `/checkout` | human cart + Stripe-hosted checkout | 🟡 PLANNED (§18.4) |
+| `/collections/{handle}` | merchandising collection page | 🟡 PLANNED (§18.2) |
+| `/blog` · `/pages/{handle}` | builder-authored content | 🟡 PLANNED (§19) |
+| `/account` | customer account area | 🟡 PLANNED (§18.3) |
 
 In local dev, storefronts are reachable at `http://localhost:3000/_sites/{siteSlug}/…`.
 
 ---
 
-## Build-order notes for the frontend
+## Build-order notes
 
-Backend endpoints will land in this order (matching `docs/PLAN.md`); mock or defer screens
-whose endpoints aren't up yet:
+**§1–8 are built.** Seed data (3 sites, ~30 products, categories, orders + traffic) ships via
+`pnpm db:seed`, so every live list/analytics/finances screen renders non-empty.
 
-1. Sites, Products, Categories CRUD + `/api/overview` + `/api/template`
-2. Import (parse + commit)
-3. Preview endpoints (`/api/preview`)
-4. Finances + orders (populated once x402 checkout works; seed data provided before that)
-5. Analytics (seeded traffic data first, real agent logging after)
-6. Integrations (x402 wallet real; Google/Stripe status-only)
+Remaining order follows the v3 phases in `docs/PLAN.md` §7 — **not** the section numbering here:
 
-Seed data (3 sites, ~30 products, categories, fake orders + traffic) ships with step 1 via
-`pnpm db:seed`, so every list/analytics/finances screen renders non-empty from day one.
+| Phase | Sections | Why this order |
+|---|---|---|
+| **A** | §16 | Auth/orgs block everything; every existing route becomes org-scoped |
+| **B** | §17 | Metering must be designed into the order pipeline, not retrofitted over it |
+| **C** | §18, §13 | Cart, checkout, variants, customers — the actual commerce gap |
+| **D** | **§22**, then §19 | Action registry **first**, then the builder on top of it |
+| **E** | §9–12, §14, §15 | The AI layer, on top of a real platform |
+| **F** | §20, then §21 | Chargeback Assist, then the Agent Ops chat product **last** |
+
+**Frontend rule while any of this is pending:** define the typed service in `lib/api/*` with the
+method names from `docs/PLAN.md`, and render *configuration required* / *not yet measured* /
+*coming soon*. Do not add fixtures, mock route handlers, or placeholder numbers.
+
+**Money rule, everywhere:** integer minor units, explicit currency on every amount, no float math,
+and `Minor`-suffixed field names on all new fields. §1–8 use the older `Cents` suffix — leave those
+alone rather than churning a live contract.

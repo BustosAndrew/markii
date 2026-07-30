@@ -139,6 +139,72 @@ No glow, no multi-layer dramatic shadows.
 - **Empty states:** white / `#FAFAFA` / `#16161D` / logo gradient only.
 - **Preview panes:** sandboxed iframe for storefront HTML; monospace panes for `llms.txt` / `agent.md`.
 
+## v2 patterns (control plane)
+
+The PRD directs **reuse** of this visual language — same tokens, same light palette, no redesign.
+New surfaces add patterns, not a new look:
+
+- **Readiness score:** single number + five component bars (product data, inventory, policies,
+  checkout, protocol coverage). Score band uses the status palette, not a rainbow gradient;
+  `#C9184A` for critical, warning amber, success teal. Trend shown as a signed delta, never a
+  decorative sparkline without axis context.
+- **Severity badges:** Critical → `error-bg`/`error-text`; Warning → `warning-bg`/`warning-text`;
+  Opportunity → `info-bg`/`info-text`. Always pair the color with a text label — status is never
+  color-only.
+- **Channel status:** pill + `status-dot`. `connected` success, `syncing` info, `action_required`
+  warning, `error` error, `test_mode` info with an explicit "Test" word, `coming_soon` disabled
+  neutral (`#C7CBD1`). Group channels by kind — protocols, marketplaces, feeds, payment rails
+  never share a section header.
+- **Issue drawer:** right-side drawer (not a modal) so the table stays visible. Evidence rows use
+  mono for field names and current values.
+- **Steppers:** the 6-step deployment wizard uses a numbered horizontal stepper; completed steps
+  get a check, current step brand rose, future steps neutral.
+- **Timelines:** order events as a vertical rail with status-colored nodes; timestamps in mono.
+- **Tabs:** product detail (Basic Information · Commerce · Agent Data · Channel Preview · Health)
+  uses underline tabs with the active underline in `#C9184A`.
+- **Environment labeling:** any test/sandbox/demo surface carries a persistent visible badge.
+  A global Demo Mode indicator sits in the top bar when demo data is ever introduced. Never rely
+  on tone alone to signal "this isn't real".
+- **Unmeasured data:** render an em dash with a "not yet measured" label in `text-muted` — never a
+  `0`, never a flat placeholder chart.
+
+## v3 patterns (commerce platform)
+
+The palette and tokens above are unchanged. v3 adds four surface families:
+
+**Billing & the threshold meter.** The meter is the most emotionally loaded component in the
+product — it tells a merchant what they're about to pay. Use a horizontal progress bar with the
+threshold as a labeled marker, filled in `chart-1`, switching to `warning-text` in the
+"approaching" band and `brand-primary` once past. Always render three numbers together: trailing
+12-month sales, threshold, and fee accrued. Projections use a dashed/hatched fill and the word
+"projected" — never a solid fill implying settled fact. Processor fees appear in a visually
+separate row labeled as the provider's, never blended into a Markii total. Before any sale exists,
+the meter shows *not yet measured*, not an empty bar at zero. Follow the existing chart tokens for
+any accompanying trend or breakdown visuals.
+
+**Commerce surfaces.** Variant matrices use a compact table with sticky option headers and
+inline stock counts; out-of-stock reads as text plus `disabled` styling, never color alone.
+Order status pairs payment and fulfillment as two distinct badges — merging them hides state.
+Exception states (`authorization_failed`, `inventory_changed`) use `error-bg`/`warning-bg` with an
+explicit next action. Discount and price fields always show currency; refunds render as negative
+amounts in `error-text` with the original alongside.
+
+**The site builder** breaks the dashboard's normal chrome — it's a full-bleed workspace, not a
+page in the shell. Canvas sits on `#F3F4F6` so white sections read as the page. Selection outline
+is `brand-primary` at 2px; hover outline is 1px at 40% opacity; drop indicators are a 2px
+`brand-primary` line with generous hit targets. The layer tree, inspector, and block library use
+the standard panel styling. Every drag affordance has a visible focus state and a keyboard path.
+Breakpoint switcher, publish state (draft / unpublished changes / published), and version history
+live in the top bar; "unpublished changes" is the one persistent state merchants must never lose
+track of.
+
+**The ops agent chat panel** is a right-side dock, `surface` on `border`. Proposals render as
+inline diff cards — old value struck through in `muted`, new value in `foreground`, affected count
+as a badge — with Approve / Reject / Edit as real buttons, never a bare "OK". Executed actions show
+a receipt with an Undo affordance and audit link. Streaming uses a subtle `brand-primary` caret;
+no typing-dot theater. Errors from tool calls render verbatim in a mono block. Never style an
+agent proposal as if it were already applied.
+
 ## Do's and Don'ts
 
 **Do**
@@ -152,5 +218,11 @@ No glow, no multi-layer dramatic shadows.
 - Recolor the whole chrome with the logo gradient.
 - Dark-theme the product (binding plan is light).
 - Invent an AI chat UI without an API contract.
-- Put secrets (Stripe keys, service-account JSON) in URLs, logs, or localStorage.
+- Put secrets (Stripe keys, service-account JSON, channel credentials) in URLs, logs, or
+  localStorage — and never echo them back in a GET response.
 - Build storefront `_sites` pages or mock `/api` handlers in the frontend track.
+- Let x402 or crypto imagery dominate — rails are peers, shown as labeled configuration.
+- Show a number, success state, or chart for something the backend never measured.
+- Present a projected fee as an amount owed, or blend processor fees into a Markii total.
+- Ship a builder interaction that only works with a mouse.
+- Render an agent proposal as though it were already applied.
