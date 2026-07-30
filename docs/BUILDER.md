@@ -36,11 +36,19 @@ The five principles, and what each concretely means here:
 | **Protocol-ready** | A first-class MCP server exposes the action registry, so Claude Code, Cursor, and other MCP clients can build a Markii storefront without a bespoke integration. |
 | **Governed execution** | Agents inherit the human permission model exactly (`docs/API.md` §16 roles). Every action is scoped, audited, and reversible via the version history. |
 
-**Sequencing consequence — important.** `docs/PLAN.md` puts the Agent Ops *chat product* last
-(Phase F). Agent-nativeness is **not** deferred with it: the action layer and MCP surface are built
-**with** the builder in Phase D, because the article's core claim is right — you cannot bolt this
-on afterward without rewriting the mutation layer. What ships last is the chat UI and the ops
-agent's product packaging, not the architecture underneath it.
+**Sequencing consequence — important, and revised 2026-07-29.** Agent-nativeness cannot be bolted
+on afterward without rewriting the mutation layer, so the pieces are split across phases rather than
+all landing with the builder:
+
+| Piece | When | Why |
+|---|---|---|
+| **`defineAction` primitive + registry** | **Phase C** (commerce) | ~a day of work. If Phase C's commerce mutations ship as plain route handlers they all get refactored later — the exact bolt-on failure this design prevents. See `docs/BACKEND.md` §1 |
+| Builder-specific actions | Phase D | Depend on the node model |
+| **MCP server** | Phase D | Cheap once the registry exists; validates parity early |
+| Agent Ops chat UI | Phase F | Product packaging, not architecture |
+
+So the registry is in use from the first commerce mutation onward, and Phase D adds the builder's
+actions and the protocol surface on top of something already proven.
 
 ## 3. The action model
 
@@ -303,7 +311,9 @@ from reading products directly to reading the published tree plus catalog data.
 
 ## 15. Build order
 
-1. **Action registry + `defineAction` primitive** — first, because everything else routes through it
+0. **Action registry + `defineAction` primitive** — built back in **Phase C** (`docs/BACKEND.md` §1),
+   so it already exists and commerce mutations already use it
+1. Builder-specific actions registered against it
 2. Node model, zod schemas, versioned persistence, migrations
 3. Server renderer + default theme ported from current templates
 4. Component registry with the layout/content launch set

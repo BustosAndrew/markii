@@ -5,14 +5,17 @@ This document is the source of truth for every backend endpoint. The backend (AP
 DB, importers, x402, generators) is owned separately — the frontend should **only** call
 these endpoints, never touch `lib/db` or Drizzle directly.
 
-- **Database:** Neon Postgres (serverless) via Drizzle. Requires `DATABASE_URL` in `.env.local`.
+- **Database:** Postgres via Drizzle, hosted on **Supabase** (which also provides auth and file
+  storage). Requires `DATABASE_URL` in `.env.local`. Migration from Neon is a driver swap with the
+  schema unchanged — `docs/DECISIONS.md` §D6.
 - **Auth:** none (single-tenant hackathon admin). All `/api/*` routes are open. The role model in
   §15 is a **UI construct only** — nothing is enforced server-side yet.
 - **Base path:** all dashboard endpoints live under `/api/*` as Next.js route handlers.
 
 ## Status legend
 
-v2 reframes Markii as a merchant control plane for AI commerce (see `docs/PLAN.md`). Sections
+Markii is a full commerce platform (`docs/PLAN.md` v3); the AI-legibility layer is its
+differentiator rather than its whole scope. Sections
 carry an explicit status — **never call a `PLANNED` endpoint and never fake its response**:
 
 | Badge | Meaning |
@@ -36,7 +39,7 @@ carry an explicit status — **never call a `PLANNED` endpoint and never fake it
 | 19 | Site builder & content | 🟡 PLANNED | D |
 | 20 | Disputes & chargebacks | 🟡 PLANNED | F |
 | 21 | Agent Ops add-on | 🟡 PLANNED | F (last) |
-| 22 | **Action registry & MCP** — agent-native architecture | 🟡 PLANNED | **D, not F** |
+| 22 | **Action registry & MCP** — agent-native architecture | 🟡 PLANNED | **Registry: C · MCP: D** |
 
 **v3 note.** Markii is now a full commerce platform (`docs/PLAN.md` v3). §16 is a **breaking
 change to everything above it**: today `/api/*` is unauthenticated and single-tenant: once orgs
@@ -424,9 +427,10 @@ stock copied. → `201` **Product**.
 ### `POST /api/uploads`
 Image upload for the product form. `multipart/form-data` with field `file` (png/jpg/webp,
 max 5 MB). → `201` `{ "url": "https://…" }` — put that URL into `images`.
-Stored in Vercel Blob in production (local `public/uploads` in dev) — either way, treat
-the returned `url` as opaque. (External image URLs can also be used directly without
-uploading.)
+Stored in **Supabase Storage** in production (local `public/uploads` in dev) — either way, treat
+the returned `url` as **opaque**. That rule is why the storage backend can change without any
+frontend edit. (External image URLs can also be used directly without uploading.)
+Superseded by `/api/media` (§19) once the media library lands.
 
 ---
 
@@ -1453,9 +1457,12 @@ Three contract rules that belong here rather than only in the spec:
 Markii is **agent-native**: humans and agents operate the product through the same actions,
 permissions, and audit trail. Architecture in `docs/BUILDER.md` §2–3. This section is the contract.
 
-**This is not deferred to Phase F with the chat UI.** The action layer must exist when the builder
-is built — agent-nativeness cannot be retrofitted onto a mutation layer that assumed a single UI
-caller. What ships in Phase F is the chat product, not the architecture.
+**The registry primitive lands in Phase C, with the first commerce mutations** (revised
+2026-07-29) — not with the builder in D, and certainly not with the chat UI in F. Agent-nativeness
+cannot be retrofitted onto a mutation layer that assumed a single UI caller, and routing Phase C's
+mutations through the registry from the start avoids refactoring every one of them later. Phase D
+adds builder actions and the MCP server on top; Phase F adds the chat product. See
+`docs/BACKEND.md` §1.
 
 ### The primitive
 
@@ -1545,8 +1552,8 @@ Remaining order follows the v3 phases in `docs/PLAN.md` §7 — **not** the sect
 |---|---|---|
 | **A** | §16 | Auth/orgs block everything; every existing route becomes org-scoped |
 | **B** | §17 | Metering must be designed into the order pipeline, not retrofitted over it |
-| **C** | §18, §13 | Cart, checkout, variants, customers — the actual commerce gap |
-| **D** | **§22**, then §19 | Action registry **first**, then the builder on top of it |
+| **C** | §18, §13, **§22 registry** | Cart, checkout, variants, customers — the actual commerce gap. Build `defineAction` here so mutations never need refactoring later |
+| **D** | §19 + §22's MCP server | Builder actions and MCP on top of the registry already built in C |
 | **E** | §9–12, §14, §15 | The AI layer, on top of a real platform |
 | **F** | §20, then §21 | Chargeback Assist, then the Agent Ops chat product **last** |
 

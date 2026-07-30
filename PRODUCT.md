@@ -56,7 +56,7 @@ A commerce platform, not an AI product and not a crypto storefront builder. The 
 
 - **Built:** overview, inventory, categories, products, websites (list / create wizard / detail), analytics, finances, integrations. Import with allocate-then-commit; create-site wizard with live HTML / `llms.txt` / `agent.md` / sitemap previews.
 - **Planned — platform (v3):** organizations/staff/roles, billing with the threshold fee meter, variants and inventory, collections, customers, cart and human checkout, discounts and gift cards, tax and shipping rate config, order refunds/cancellations/manual fulfillment, the drag-and-drop site builder with custom code, blog/pages/menus/redirects, dispute inbox.
-- **Planned — AI layer (v2):** Agent Readiness Score, Catalog Health, Channels, Agent Test Lab, analytics funnel, universal product detail tabs.
+- **Planned — AI layer:** the rule-based Agent Readiness Score and Catalog Health ship at launch; Channels, Agent Test Lab, the analytics funnel, and universal product-detail tabs come after.
 - **Planned — add-ons:** Chargeback Assist, then the Agent Ops chat assistant (**built last**).
 
 **Hard boundaries**

@@ -10,7 +10,11 @@ when it's made, with the date — then update the doc it affects.
 
 ---
 
-## 🔴 Blocking — meaningful work cannot start
+> **Status as of 2026-07-29: all items resolved.** Nothing blocks the start of build. The tables
+> below keep each decision with its reasoning so it can be revisited rather than re-argued; struck
+> rows link to the detail section that records the call. New decisions get appended here.
+
+## 🔴 Was blocking — resolved
 
 | ID | Decision | Recommendation | Blocks |
 |---|---|---|---|
@@ -214,7 +218,7 @@ onboarding, templates, demo data, and landing page are built for.
 
 ---
 
-## 🔵 Gaps — not planned anywhere yet
+## 🔵 Gaps that were unplanned — now resolved
 
 These need a decision before they can even be specced.
 

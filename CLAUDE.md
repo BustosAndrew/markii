@@ -42,12 +42,24 @@ Always check the **status legend at the top of `docs/API.md`** before calling an
 open and single-tenant — Phase A fixes this and re-scopes every existing endpoint), and there is
 **no human checkout** (only agent-driven x402 — Phase C fixes this).
 
+## Launch scope
+
+Team is two people (one frontend, one backend), so launch is a **subset** of the full plan:
+**Phase A** (auth/orgs) + **B** (billing, threshold fees) + **C** (commerce core, digital delivery)
++ **3–4 storefront themes** + the **rule-based readiness score**. Roughly 4–6 months.
+
+**Deferred past launch — do not start:** the site builder and action registry (Phase D), Channels,
+Agent Test Lab, the analytics funnel (E), Chargeback Assist and Agent Ops chat (F), native email
+campaigns. Rationale in `docs/DECISIONS.md` §G10.
+
 ## Planning docs
 
 | Doc | Covers |
 |---|---|
-| `docs/PLAN.md` | v3 direction, scope, phases A–F, out-of-scope |
-| `docs/DECISIONS.md` | **Open decision register** — blocking / phase-gated / unplanned gaps. Check before planning anything |
+| **`docs/FRONTEND.md`** | **Frontend start-here** — scope, build order, rules. Read first if you are building screens |
+| **`docs/BACKEND.md`** | **Backend start-here** — scope, build order, traps. Read first if you are building `/api/*`, DB, auth, billing |
+| `docs/PLAN.md` | v3 direction, scope, launch subset, phases A–F, out-of-scope |
+| `docs/DECISIONS.md` | **Decision register** — every settled decision with its reasoning. Check before re-arguing anything |
 | `docs/API.md` | Endpoint contracts with LIVE/PLANNED status per section; §22 = action registry |
 | `docs/PRICING.md` | Plans, threshold fee engine, GMV definition, billing UX |
 | `docs/COMPETITORS.md` | **Verified** competitor pricing with sources and dates |
@@ -83,8 +95,9 @@ open and single-tenant — Phase A fixes this and re-scopes every existing endpo
 - **Agent-native, not agent-compatible.** Every mutating capability is defined **once** via
   `defineAction` and serves the UI, HTTP API, agent tools, and MCP simultaneously. No route handler
   mutates state outside the registry; no agent gets a privileged path around validation or
-  permissions. This is Phase D architecture, **not** deferred with the Phase F chat product —
-  it cannot be retrofitted (`docs/API.md` §22, `docs/BUILDER.md` §2).
+  permissions. The **registry primitive is built in Phase C** with the first commerce mutations —
+  it cannot be retrofitted, so it does not wait for the builder (D) or the chat product (F)
+  (`docs/API.md` §22, `docs/BACKEND.md` §1).
 - **Money:** integer minor units, explicit currency, no float math. New fields use a `Minor`
   suffix; the older `Cents` fields in `docs/API.md` §1–8 stay as they are.
 - **Never hold merchant funds** and never mark up processor fees. Markii's fee is separate, named,

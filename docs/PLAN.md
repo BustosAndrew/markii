@@ -47,8 +47,9 @@ It also creates two hard constraints worth naming up front:
 - **The platform is agent-native, not agent-compatible.** Every capability in the admin is defined
   once as an *action* that serves the UI, the HTTP API, agent tools, and MCP simultaneously — so an
   agent can do anything a human can, under the same permissions and audit trail. This cannot be
-  bolted on later, which is why the action layer lands in Phase D with the builder rather than in
-  Phase F with the chat product (`docs/API.md` §22).
+  bolted on later, which is why the **registry primitive lands in Phase C** with the first commerce
+  mutations — not in Phase D with the builder, and certainly not in Phase F with the chat product
+  (`docs/API.md` §22, `docs/BACKEND.md` §1).
 
 Two distinct agent audiences follow from this, and both matter: **agents that shop the storefront**
 and **agents that build and operate the store**.
@@ -134,6 +135,12 @@ change to the current open API that must land before any public exposure.
 tools, MCP server, and CLI. Actions carry a zod input schema, a server-checked permission, a risk
 tier, and an undo inverse. `dry-run` produces the diff that becomes an agent proposal — there is no
 second proposal engine, and no privileged agent path around validation (`docs/API.md` §22).
+
+**The registry primitive is built in Phase C, not D** (revised 2026-07-29). It is about a day of
+work, and routing Phase C's commerce mutations through it from the start avoids refactoring every
+one of them later — which would be precisely the bolt-on failure agent-native architecture exists to
+prevent. Phase D adds the builder's actions and the MCP server on top of a registry already in
+production use.
 
 **Payments & PCI.** Stripe-hosted elements/Checkout so card data never touches Markii servers
 (SAQ-A scope). Merchants connect via **Connect Standard** (D4): they keep their own Stripe account,
@@ -282,10 +289,10 @@ packet should include the agent authorization record from `docs/API.md` §13.
 roughly **9–14 months** at that size, which is too long without revenue. So launch on a deliberate
 subset and sequence the rest behind it:
 
-**In launch (~4–6 months):** **A** (auth, orgs, roles) · **B** (plans, billing, metering, threshold
-fees) · **C** (variants, inventory, cart, human checkout, customers, discounts, tax, orders,
-digital delivery) · a handful of **polished themes** on the existing storefront renderer · the
-**rule-based readiness score**.
+**In launch (~4–6 months):** the **Supabase migration** · the **`defineAction` registry primitive** ·
+**A** (auth, orgs, roles) · **B** (plans, billing, metering, threshold fees) · **C** (variants,
+inventory, cart, human checkout, customers, discounts, tax, orders, digital delivery) · a handful of
+**polished themes** on the existing storefront renderer · the **rule-based readiness score**.
 
 **Deferred past launch:** **D** (site builder + action registry) · **E** (Channels, Test Lab, full
 analytics funnel) · **F** (Chargeback Assist, then Agent Ops chat).

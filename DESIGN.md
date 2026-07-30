@@ -139,7 +139,7 @@ No glow, no multi-layer dramatic shadows.
 - **Empty states:** white / `#FAFAFA` / `#16161D` / logo gradient only.
 - **Preview panes:** sandboxed iframe for storefront HTML; monospace panes for `llms.txt` / `agent.md`.
 
-## v2 patterns (control plane)
+## AI-layer patterns (readiness, channels, test lab)
 
 The PRD directs **reuse** of this visual language — same tokens, same light palette, no redesign.
 New surfaces add patterns, not a new look:

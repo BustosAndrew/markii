@@ -24,16 +24,27 @@ output, x402 checkout, catalog importer, seed data. Needs `DATABASE_URL` in `.en
 **v3 is the plan, not the code.** The platform scope below is specified and contracted, not
 implemented. Two gaps matter most: there is **no auth or tenancy** and **no human checkout** yet.
 
-| Phase | Scope | Doc |
-|---|---|---|
-| A | Auth, organizations, staff, roles, scoped tokens | `docs/API.md` §16 |
-| B | Plans, billing, GMV metering, threshold fees | `docs/PRICING.md` |
-| C | Variants, inventory, collections, customers, cart, checkout, discounts | `docs/API.md` §18 |
-| D | Action registry + MCP, then the agent-native site builder | `docs/BUILDER.md` |
-| E | AI layer: readiness, channels, test lab, analytics | `docs/API.md` §9–15 |
-| F | Chargeback Assist, then the Agent Ops chat add-on (last) | `docs/AGENT-OPS.md` |
+| Phase | Scope | Launch? | Doc |
+|---|---|---|---|
+| A | Auth, organizations, staff, roles, scoped tokens | ✅ | `docs/API.md` §16 |
+| B | Plans, billing, GMV metering, threshold fees | ✅ | `docs/PRICING.md` |
+| C | Variants, inventory, collections, customers, cart, checkout, discounts, digital delivery | ✅ | `docs/API.md` §18 |
+| — | 3–4 storefront themes · rule-based readiness score | ✅ | `docs/FRONTEND.md` |
+| D | Action registry + MCP, then the agent-native site builder | after | `docs/BUILDER.md` |
+| E | AI layer: channels, test lab, analytics funnel | after | `docs/API.md` §9–15 |
+| F | Chargeback Assist, then the Agent Ops chat add-on (last) | after | `docs/AGENT-OPS.md` |
 
-Check the status legend at the top of [docs/API.md](docs/API.md) before calling any endpoint.
+Launch is a deliberate subset — the team is two people (`docs/DECISIONS.md` §G10). Check the status
+legend at the top of [docs/API.md](docs/API.md) before calling any endpoint.
+
+## Start here
+
+| You are… | Read |
+|---|---|
+| **Building screens** | **[docs/FRONTEND.md](docs/FRONTEND.md)** → `CLAUDE.md` → `docs/API.md` status legend → `DESIGN.md` |
+| **Building the API, DB, auth, billing** | **[docs/BACKEND.md](docs/BACKEND.md)** → `CLAUDE.md` → `docs/API.md` → `docs/DECISIONS.md` |
+| **An AI agent in this repo** | `CLAUDE.md` first — it is binding |
+| **Deciding product direction** | `docs/PLAN.md` → `docs/DECISIONS.md` → `docs/COMPETITORS.md` |
 
 ## Stack
 
@@ -70,12 +81,14 @@ app/
 components/          # UI primitives + dashboard components
 lib/                 # db/, api client, importer, x402, generators, integrations
 docs/
-  PLAN.md            # v3 direction, scope, phases
-  DECISIONS.md       # Open decision register (blocking / phase-gated / gaps)
+  FRONTEND.md        # Frontend start-here: scope, build order, rules
+  BACKEND.md         # Backend start-here: scope, build order, traps
+  PLAN.md            # v3 direction, launch subset, phases
+  DECISIONS.md       # Decision register — every settled call, with reasoning
   API.md             # API contract with LIVE/PLANNED status legend
   PRICING.md         # Plans, threshold fee engine, billing UX
   COMPETITORS.md     # Verified competitor pricing (sources + dates)
-  BUILDER.md         # Agent-native site builder architecture
+  BUILDER.md         # Agent-native site builder architecture (post-launch)
   AGENT-OPS.md       # Ops agent add-on (chat ships last)
 CLAUDE.md            # Working rules for agents
 DESIGN.md            # Design tokens and visual rules

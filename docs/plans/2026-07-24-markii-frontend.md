@@ -1,6 +1,8 @@
 # Markii Frontend Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> ⚠️ **SUPERSEDED — historical record only. Do not execute this plan.**
+> It describes the v1 dashboard build (Neon-era stack, v1 API surface) and is already complete.
+> Current frontend guidance is **`docs/FRONTEND.md`**. Do not follow the task list below.
 
 **Goal:** Ship the Markii merchant dashboard + light landing against real `/api/*`, with resilient empty/error states until the backend lands.
 

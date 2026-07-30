@@ -1,7 +1,12 @@
 # Markii Frontend Design
 
+> ⚠️ **SUPERSEDED — historical record only. Do not build from this.**
+> Written for the v1 dashboard against the Neon-era stack. Current frontend guidance is
+> **`docs/FRONTEND.md`**; current contracts are `docs/API.md`; current decisions are
+> `docs/DECISIONS.md`. Kept for context on why the v1 dashboard looks the way it does.
+
 **Date:** 2026-07-24  
-**Status:** Approved  
+**Status:** Superseded (was: Approved)  
 **Approach:** Shell-first, API-honest (Approach 1)
 
 ## Problem
