@@ -408,7 +408,7 @@ not hypotheticals. Check each against current Neon Auth documentation rather tha
 
 | # | Requirement | Where it comes from |
 |---|---|---|
-| 1 | **httpOnly cookie sessions**, not `localStorage` tokens | Hard rule in `CLAUDE.md` — merchant custom code runs on storefronts, and XSS there must never reach an admin session. Supabase's JS client defaults to browser storage; use the **SSR/cookie-based** integration, not the default browser client |
+| 1 | **httpOnly cookie sessions**, not `localStorage` tokens | Hard rule in `CLAUDE.md` — merchant custom code runs on storefronts, and XSS there must never reach an admin session. ✅ **Resolved in detail by D30** — "use the SSR integration" was too loose a phrasing and was read as `createBrowserClient`, which cannot set `HttpOnly`. See §"Session transport — D30" |
 | 2 | **A user belonging to multiple organizations** | Agencies building stores for clients (`docs/API.md` §16). If unsupported natively, org membership becomes Markii's own table with Neon Auth only supplying identity — workable, but decide deliberately |
 | 3 | **MFA**, and org-wide enforcement by an Owner | `docs/API.md` §16 |
 | 4 | **Two isolated identity domains** — staff vs storefront customers | Staff auth and shopper accounts must share no session, cookie namespace, or token audience. If Neon Auth cannot cleanly host two separate user pools, **customer accounts need their own solution** (Phase C, §18.3). This is the most likely gap |
@@ -424,6 +424,45 @@ it. Note it so the coupling is a choice rather than a surprise.
 Descope) remains the alternative. Requirement 4 is the one most likely to force a split — in which
 case the clean shape is Neon Auth for staff, and a separate, simpler mechanism for storefront
 customers, which is a normal arrangement for commerce platforms.
+
+---
+
+## Session transport — D30 (resolves D3 item 1)
+
+**Decision: every auth mutation runs server-side, and the browser never holds a Supabase session**
+(assistant call, 2026-07-30 — owner may override).
+
+**The conflict this settles.** D3 item 1 said "use the SSR/cookie-based integration, not the default
+browser client." That phrasing is ambiguous, and the first implementation took the ambiguous reading:
+[`components/auth/auth-form.tsx`](../components/auth/auth-form.tsx) calls
+`supabase.auth.signInWithPassword()` on `@supabase/ssr`'s `createBrowserClient`. That *is* the SSR
+package, and it *does* keep the session in cookies rather than `localStorage` — so it satisfies the
+letter of the rule. It cannot satisfy the intent: **a cookie written by `document.cookie` can never
+carry `HttpOnly`.** The session stays readable by any script on the origin, which is the exact
+exposure `CLAUDE.md` bans, because merchant custom code runs on storefronts.
+
+The lesson worth keeping: "SSR integration" is not the requirement. **Where the mutation runs** is.
+
+| | Settled shape |
+|---|---|
+| Where auth mutations run | **Server only** — route handlers under `/api/auth/*` using `createServerClient` (`docs/API.md` §16) |
+| What the browser does | Posts credentials to Markii's own origin. The client never calls Supabase Auth directly |
+| Cookie flags | `httpOnly: true`, `secure: true`, `sameSite: "lax"` — set on the response, server-side |
+| `createBrowserClient` | **Not used anywhere in the dashboard.** Its presence is the smell that this decision was bypassed |
+| Session refresh | `proxy.ts` runs the SSR middleware helper on dashboard requests; expiry is never the client's problem |
+| How the UI learns who you are | `GET /api/me` — never a client-side session read |
+| Cookie adapter shape | `getAll` / `setAll`. The `get`/`set`/`remove` triple is deprecated in `@supabase/ssr` ≥ 0.10 and loses chunked-cookie handling for large sessions |
+
+**The trade-off, stated plainly:** httpOnly sessions mean the browser cannot talk to Supabase
+directly — no client-side queries, no Realtime channel authenticated as the user. That is already
+the architecture (`CLAUDE.md`: screens call `/api/*` only, never `lib/db`), so today it costs
+nothing. Deciding it now is what stops something from quietly coming to depend on browser-side
+Supabase and making the fix expensive later.
+
+**Storefront customer auth (§18.3) inherits the same shape** and remains a separate identity domain
+— separate Supabase project (§"Email"), separate cookie-name prefix, separate route namespace. The
+two flows share no cookie, no session, and no token audience. That is D3 item 4, and this decision
+does not relax it.
 
 ---
 
@@ -1065,3 +1104,5 @@ then measure** — that guidance holds regardless of which Postgres vendor wins.
 | G2 (revised) | 2026-07-29 | **EU is a fast follow, not a deferral.** Merchant is seller of record (Connect Standard) so Markii is not the taxpayer; Stripe Tax covers rates, location evidence, VAT ID validation, reverse charge, and OSS monitoring. Real costs are support load and a legal check on deemed-supplier status | `docs/DECISIONS.md` §G2, `docs/PLAN.md` §3 |
 | G10 | 2026-07-29 | **Two people (1 FE, 1 BE).** Launch scope cut to **A + B + C + themes + rule-based readiness** (~4–6 months); builder, Channels/Test Lab, and add-ons deferred past launch | `docs/DECISIONS.md` §G10, `docs/PLAN.md` §7 |
 | D29 | 2026-07-30 | **Launch storefront themes on the fixed renderer** via Site.`themeId` (`studio` \| `atlas` \| `noir` \| `bloom`, default `studio`). Distinct from Phase D `/api/themes` builder tokens. Preview payloads accept the same field. | `docs/API.md` §Entities/§2, `docs/FRONTEND.md` step 1 |
+| D30 | 2026-07-30 | **Auth mutations are server-side only.** Sign-in/up/out/reset run in `/api/auth/*` route handlers via `createServerClient`; cookies are set server-side with `httpOnly`. No `createBrowserClient` in the dashboard. Resolves the ambiguity in D3 item 1 that produced a browser-client sign-in — see §"Session transport — D30" | `docs/DECISIONS.md` §"Session transport", `docs/API.md` §16, `docs/BACKEND.md` §Phase A, `docs/FRONTEND.md`, `CLAUDE.md` |
+| D31 | 2026-07-30 | **Minor-unit formatters derive their exponent from the currency**, never assume 2 decimals. `Organization.currency` (§16) is merchant-set, so JPY/KRW would render 100× wrong under a hardcoded `/100`. Applies to all new `Minor` fields; legacy `Cents` fields in §1–8 stay USD-shaped | `docs/API.md` §Conventions, `docs/FRONTEND.md` §Known gaps |

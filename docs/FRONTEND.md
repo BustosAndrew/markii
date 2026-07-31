@@ -23,11 +23,11 @@ endpoints return 500 and screens should show their error state (that is correct 
 to hide).
 
 **Assume Supabase is in place.** The backend migration from Neon lands before your Phase A work, so
-build against it directly — **Supabase Auth (SSR/cookie integration) for all auth screens**, and
-Supabase Storage behind uploads. You do not need to sequence around the migration or build a
-fallback. Uploads need no change from you either way: the API contract already says treat the
-`url` as **opaque**, which is exactly why the storage backend could be swapped without touching a
-screen.
+build against it directly — **auth screens post to `/api/auth/*`** (never to Supabase from the
+browser — D30, and see the rules below), and Supabase Storage sits behind uploads. You do not need
+to sequence around the migration or build a fallback. Uploads need no change from you either way:
+the API contract already says treat the `url` as **opaque**, which is exactly why the storage
+backend could be swapped without touching a screen.
 
 **Built and working:** the marketing landing page, and a dashboard covering overview, inventory,
 categories, products, websites (list / create wizard / detail), analytics, finances, and
@@ -47,6 +47,36 @@ lib/api/              typed client per domain (products, sites, categories, orde
 ```
 
 **Add new API calls as a typed service in `lib/api/*`.** Never `fetch()` inline in a component.
+
+---
+
+## Known gaps in the current shell
+
+The shell shipped 2026-07-30 (screens, themes, design-system additions, typed services for the
+planned sections). It is honest — no mock data, no fabricated numbers, every planned surface shows a
+real state. These are the open items, recorded so they are not rediscovered later.
+
+| Gap | Where | Fix |
+|---|---|---|
+| **Sign-in runs in the browser** | `components/auth/auth-form.tsx` calls `signInWithPassword` on `createBrowserClient` | Post to `/api/auth/*` (§16) once Phase A lands; delete `lib/supabase/client.ts`. **D30** — the session cookie cannot be `HttpOnly` as written |
+| **Threshold meter hardcodes `/100`** | `components/dashboard/threshold-meter.tsx` | Currency-aware minor-unit formatter before billing UI is real. **D31** — billing currency is merchant-set |
+| **No cart, variant picker, or checkout** | `components/storefront/` has card, header, theme root, paused | Phase C. The variant picker's shell needs no backend and can start early |
+| **Screens still stubbed** | Collections tab, customers, discounts, team, invoices, orders list, org switcher | Correct today — each is built when its API section flips to ✅ LIVE, not before |
+| **Session refresh is unwired** | `lib/supabase/middleware.ts` is imported nowhere | Backend owns this — it belongs in `proxy.ts`. Nothing guards `/dashboard` until it lands |
+
+**Going LIVE is a two-sided flip.** Each planned service gates on a local constant —
+`ORG_API_LIVE`, `BILLING_API_LIVE`, `READINESS_API_LIVE`, and the commerce equivalent — so a screen
+throws `PlannedError` and renders its placeholder instead of calling a route that does not exist.
+When the backend moves a status badge in `docs/API.md`, **the matching constant flips in the same
+change**, or the endpoint ships to nobody.
+
+`GET /api/me`'s response shape is now pinned in §16 to what `lib/api/org.ts` already assumes, so
+that one is settled rather than assumed.
+
+**Themes are done end-to-end** — four defined in `lib/storefront/themes.ts`, wired through the
+create wizard, site controls, `PATCH /api/sites`, and the generators. They depend on the
+`sites.themeId` column, so if every websites screen 500s against a database provisioned before
+2026-07-30, that migration is the reason (`docs/BACKEND.md` §0), not your code.
 
 ---
 
@@ -90,9 +120,9 @@ Collections), `finances` → `orders/settlements`. Add nav entries for the launc
 permanent redirects from old paths.
 
 ### 4. Auth & org screens (Phase A)
-Supabase Auth with the **SSR/cookie integration** — not the browser client (see rules). Org
-switcher, staff, invites, roles. Contract: `docs/API.md` §16. Supabase is already migrated by this
-point, so build against it directly.
+**Forms post to `/api/auth/*`** — Markii's own routes, listed in `docs/API.md` §16. No Supabase call
+from a component, no `createBrowserClient`, no client-side session read; identity comes from
+`GET /api/me`. Then org switcher, staff, invites, roles. Contract: §16.
 
 ### 5. Billing (Phase B)
 Start with the **threshold meter** — it is the most important component in the product and the one
@@ -129,8 +159,18 @@ Markii. Dashboards can be as client-rich as you like.
 **Money:** integer minor units, explicit currency, no float maths. Use `lib/api/money.ts` and
 `components/ui/money-text.tsx`. New fields use a `Minor` suffix; older `Cents` fields in §1–8 stay.
 
-**Sessions are httpOnly cookies, never `localStorage`.** Merchant custom code runs on storefronts,
-and XSS there must never reach an admin session. Use Supabase's SSR integration.
+**Never call Supabase Auth from the browser.** Sessions are httpOnly cookies, never `localStorage`,
+because merchant custom code runs on storefronts and XSS there must not reach an admin session — and
+`createBrowserClient` cannot deliver that, whatever package it ships in. Cookies written by
+`document.cookie` **cannot be `HttpOnly`**, so a browser-side `signInWithPassword` looks compliant
+and isn't. Post to `/api/auth/*` and let the server set the cookie (D30). The same rule covers
+storefront customer accounts in Phase C.
+
+**Money formatting derives its exponent from the currency.** Never hardcode `/100` or
+`minimumFractionDigits: 2` — `Organization.currency` is merchant-set, and JPY/KRW have no minor
+digits, so a fixed divisor renders them 100× wrong (D31). `formatCents` in `lib/api/money.ts` is
+USD-shaped by design and stays that way for the legacy §1–8 `Cents` fields; everything with a
+`Minor` suffix needs the currency-aware formatter.
 
 **Every data surface covers loading, empty, error, partial, and permission states.** Not optional —
 this is the definition of done.

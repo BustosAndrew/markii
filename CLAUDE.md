@@ -99,7 +99,9 @@ campaigns. Rationale in `docs/DECISIONS.md` §G10.
   it cannot be retrofitted, so it does not wait for the builder (D) or the chat product (F)
   (`docs/API.md` §22, `docs/BACKEND.md` §1).
 - **Money:** integer minor units, explicit currency, no float math. New fields use a `Minor`
-  suffix; the older `Cents` fields in `docs/API.md` §1–8 stay as they are.
+  suffix; the older `Cents` fields in `docs/API.md` §1–8 stay as they are. **Formatters derive the
+  decimal exponent from the currency** — never hardcode `/100` or two fraction digits, since JPY and
+  KRW have none and billing currency is merchant-set (D31).
 - **Never hold merchant funds** and never mark up processor fees. Markii's fee is separate, named,
   and visible; Stripe's is Stripe's (`docs/PRICING.md`).
 - Validate product input with **zod** before generating HTML or JSON-LD; type JSON-LD with
@@ -122,8 +124,12 @@ campaigns. Rationale in `docs/DECISIONS.md` §G10.
   fees from $29/mo, so "no transaction fees" alone is parity, not advantage — the real gaps are
   processor lock-in (Shopify/BigCommerce charge up to 2%) and digital goods (Squarespace takes 5%).
 - **Auth:** sessions are httpOnly cookies, never `localStorage` — merchant custom code runs on
-  storefronts and XSS there must never reach an admin session. Staff auth and storefront customer
-  auth are separate identity domains that share nothing.
+  storefronts and XSS there must never reach an admin session. **Auth mutations therefore run
+  server-side only**: sign-in/up/out/reset go through `/api/auth/*` with Supabase's
+  `createServerClient`, never `createBrowserClient` (`docs/DECISIONS.md` D30 — a cookie set from
+  `document.cookie` cannot be `HttpOnly`, so browser-side auth fails the rule while appearing to
+  satisfy it). Staff auth and storefront customer auth are separate identity domains that share
+  nothing.
 - **Merchant-side AI writes go through propose → approve → execute**, with an audit entry and an
   undo path. Retrieved catalog/customer content is untrusted data, never instruction
   (`docs/AGENT-OPS.md` §3).

@@ -71,6 +71,13 @@ Mode flag with a persistent indicator, and must never be presented as production
 - **Money:** integer cents (`priceCents: 1999` = $19.99). `currency` is ISO 4217 (`"USD"`).
   x402 balances are USDC on Base Sepolia, reported in cents-equivalent (6-decimal USDC
   normalized to cents) plus raw amount.
+- **Minor units are currency-defined (D31).** New fields carry a `Minor` suffix and their exponent
+  comes from the currency, not from a constant: USD has 2 decimals, **JPY and KRW have 0**, BHD and
+  KWD have 3. Any formatter that hardcodes `/100` or forces two fraction digits renders JPY 100×
+  wrong. Derive it — `Intl.NumberFormat(locale, { style: "currency", currency })` already knows the
+  exponent when you don't override `minimumFractionDigits`. The legacy `Cents` fields in §1–8 stay
+  as they are and remain USD-shaped; the rule binds everything from §16 onward, where
+  `Organization.currency` is merchant-set.
 - **Dates:** ISO 8601 strings (`2026-07-24T18:00:00.000Z`). Date-range filters are
   `?from=` / `?to=` (ISO date or datetime; inclusive).
 - **Pagination:** `?page=1&limit=20` (default `page=1`, `limit=20`, max `limit=100`).
@@ -1128,6 +1135,12 @@ interface StaffMember {
 
 | Method | Route | Notes |
 |---|---|---|
+| `POST` | `/api/auth/sign-up` | `{ email, password }` → creates the user *and* their first org. Server-side (D30) |
+| `POST` | `/api/auth/sign-in` | `{ email, password }` → sets the session cookie. Server-side (D30) |
+| `POST` | `/api/auth/sign-out` | Clears the session cookie |
+| `POST` | `/api/auth/reset-password` | `{ email }` → sends the reset mail. Always `200`, even for an unknown address — never confirm whether an account exists |
+| `POST` | `/api/auth/update-password` | `{ password }`, authorized by the recovery session |
+| `GET` | `/api/auth/callback` | Exchanges the emailed code for a session, then redirects. Confirmation, recovery, and any future OAuth land here |
 | `GET` | `/api/me` | Current user, org, role, entitlements — one call to boot the dashboard |
 | `GET`/`PATCH` | `/api/org` | Org profile, billing email, currency |
 | `GET` | `/api/org/staff` | List staff |
@@ -1137,16 +1150,35 @@ interface StaffMember {
 | `GET` | `/api/org/sessions` · `DELETE /api/org/sessions/:id` | Active sessions, revoke |
 | `GET`/`POST` | `/api/org/tokens` · `DELETE /api/org/tokens/:id` | Scoped API/MCP tokens (§22) |
 
+`GET /api/me` — the shape the dashboard boots from, and the **only** way a screen learns who the
+user is. Never read identity from a client-side session:
+
+```json
+{
+  "user": { "id": "...", "name": null, "email": "merchant@example.com" },
+  "org": { "...": "Organization, above" },
+  "role": "owner",
+  "entitlements": { "...": "§17 Entitlements — mirrors org.entitlements" }
+}
+```
+
+`401` when unauthenticated: `{ "error": { "code": "UNAUTHENTICATED", "message": "..." } }`. The
+dashboard treats that as "redirect to sign-in", not as an error state.
+
 ### Auth requirements
 
 Merchant accounts are now a confirmed requirement, so this is a real auth surface, not a shim:
 
-- **Sign-up, sign-in, sign-out, password reset, email verification**, and session refresh — provided
-  by the auth provider, not hand-rolled. Recommend a managed provider (Clerk via the Vercel
-  Marketplace, or Auth0/Descope): billing data and customer PII make DIY credential storage a
-  liability, and MFA/SSO arrive free.
-- **Sessions** are httpOnly, secure, SameSite cookies. Never store tokens in `localStorage` — the
-  storefronts run custom merchant code, and any XSS there must not reach an admin session.
+- **Sign-up, sign-in, sign-out, password reset, email verification**, and session refresh come from
+  **Supabase Auth** (D3), never hand-rolled credential storage.
+- **Auth mutations run server-side only** (D30). The routes above are Markii's own origin, using
+  Supabase's `createServerClient`; the browser never calls Supabase Auth and no
+  `createBrowserClient` exists in the dashboard. This is not a style preference: a cookie set from
+  `document.cookie` **cannot be `HttpOnly`**, so a browser-side sign-in silently fails the rule
+  below while appearing to satisfy it.
+- **Sessions** are httpOnly, secure, SameSite cookies, written by the server. Never store tokens in
+  `localStorage` — the storefronts run custom merchant code, and any XSS there must not reach an
+  admin session. Refresh happens in `proxy.ts`, not in the client.
 - **MFA** available on all plans; enforceable org-wide by an Owner. SSO/SAML is a later
   enterprise-tier concern, but the role model should not foreclose it.
 - **A user may belong to multiple orgs** (agencies build stores for clients) — the session carries

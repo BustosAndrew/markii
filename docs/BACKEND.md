@@ -61,6 +61,17 @@ migrations** (a pooled connection cannot run DDL) · **fix, don't port, the prox
 the seed script · new env vars · move to `drizzle-kit generate` + reviewed SQL · Supabase Auth ·
 uploads → Supabase Storage · SMTP config · drop the Neon project.
 
+**One schema change is already outstanding.** `sites.themeId` (D29) landed in `lib/db/schema.ts`
+with the theme work, so any database provisioned before it is missing the column — and every sites
+query selects all columns, so §2 fails outright until it exists. Apply it as the **last**
+`db:push`, then switch to generated migrations.
+
+**Env vars the code already reads but `.env.example` does not list:** `ROOT_DOMAIN` (both
+[`proxy.ts`](../proxy.ts) and [`lib/api.ts`](../lib/api.ts) depend on it), plus the ones this phase
+adds — `SUPABASE_SERVICE_ROLE_KEY` (server-only, never `NEXT_PUBLIC_*`), a session-mode
+`DIRECT_URL` for migrations alongside the pooled `DATABASE_URL`, `STRIPE_WEBHOOK_SECRET`, and the
+SES/Resend credentials. Update the example file in the same commit that starts reading each one.
+
 **Fix `proxy.ts` while you are here.** [`proxy.ts:31`](../proxy.ts#L31) runs a blocking SQL query on
 **every custom-domain request**, before rendering — a shopper in Singapore pays a trans-Pacific
 round trip to resolve a hostname. Move host→slug resolution to Edge Config or KV, written on domain
@@ -105,8 +116,27 @@ orgId = …` clause to thirty files — one miss is a cross-tenant data leak.
 > take `orgId` as a required argument and never export an unscoped variant. Structure beats
 > discipline; a code review will not reliably catch the one route that forgot.
 
-Use Supabase's **SSR/cookie integration**, not the browser client — sessions are httpOnly cookies,
-never `localStorage`, because merchant custom code runs on storefronts.
+**You own the auth routes, not just the tenancy model.** Sessions are httpOnly cookies, never
+`localStorage`, because merchant custom code runs on storefronts — and **D30 settles what that
+requires**: every auth mutation runs server-side in `/api/auth/*` (`docs/API.md` §16) using
+`createServerClient`. "Use the SSR package" is *not* sufficient; `@supabase/ssr` also exports
+`createBrowserClient`, whose cookies are written by `document.cookie` and therefore **cannot be
+`HttpOnly`**. Deliver these four so the frontend never needs a browser-side Supabase client:
+
+1. `POST /api/auth/sign-up` · `sign-in` · `sign-out` · `reset-password` · `update-password`, plus
+   `GET /api/auth/callback` for emailed codes. Set cookies with `httpOnly`, `secure`,
+   `sameSite: "lax"`.
+2. **Wire session refresh into [`proxy.ts`](../proxy.ts).** `lib/supabase/middleware.ts` already has
+   `updateSupabaseSession`, written by the frontend and currently imported nowhere — so today
+   nothing refreshes a session and nothing guards `/dashboard`. `proxy.ts` is yours; it must do host
+   routing *and* session refresh without a DB round trip (see §0).
+3. `GET /api/me` in the shape §16 pins — one call, the dashboard's only identity source.
+4. Use the **`getAll` / `setAll`** cookie adapter. The `get`/`set`/`remove` triple that
+   `lib/supabase/` currently uses is deprecated in `@supabase/ssr` ≥ 0.10 and drops chunked-cookie
+   handling, which large sessions need.
+
+Delete `lib/supabase/client.ts` as part of this. A browser client in the tree is how this decision
+gets quietly reversed later.
 
 ### 3. Phase B — billing and metering
 
@@ -221,6 +251,7 @@ goes live — that badge is the frontend's only signal that something is callabl
 | Trap | Cost if missed |
 |---|---|
 | Forgetting an org filter on one route | Cross-tenant data leak |
+| Any auth mutation running in the browser | The session cookie cannot be `HttpOnly` (D30) — XSS in merchant custom code reaches an admin session |
 | Computing fees from `orders` instead of usage records | Wrong invoices after any refund |
 | Non-idempotent webhook handling | Double-charged merchants |
 | Read-then-write inventory checks | Overselling the last unit |
