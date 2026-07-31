@@ -12,6 +12,7 @@ import {
   type Product,
   type Site,
 } from "@/lib/db";
+import { ownSites, siteScope, type OrgId } from "@/lib/tenancy";
 
 // ---------- URLs ----------
 
@@ -24,31 +25,60 @@ export function storefrontUrl(site: Pick<Site, "slug" | "customDomain">): string
 
 const isNumeric = (s: string) => /^\d+$/.test(s);
 
-export async function resolveSite(idOrSlug: string): Promise<Site> {
+/**
+ * Resolvers take `orgId` as a **required** argument. There is no unscoped
+ * variant, so "forgot the org filter" is not a mistake this file permits.
+ *
+ * All three answer `404`, never `403`, for a row belonging to another org.
+ * A 403 would confirm the id exists, turning these into an enumeration oracle
+ * across tenants.
+ */
+
+export async function resolveSite(idOrSlug: string, orgId: OrgId): Promise<Site> {
   const cond = isNumeric(idOrSlug) ? eq(sites.id, Number(idOrSlug)) : eq(sites.slug, idOrSlug);
-  const [row] = await db.select().from(sites).where(cond).limit(1);
+  const [row] = await db
+    .select()
+    .from(sites)
+    .where(and(cond, ownSites(orgId)))
+    .limit(1);
   if (!row) throw notFound("Site");
   return row;
 }
 
-export async function resolveCategory(idOrSlug: string, siteId?: number): Promise<Category> {
+export async function resolveCategory(
+  idOrSlug: string,
+  orgId: OrgId,
+  siteId?: number,
+): Promise<Category> {
   const cond = isNumeric(idOrSlug)
     ? eq(categories.id, Number(idOrSlug))
     : siteId != null
       ? and(eq(categories.slug, idOrSlug), eq(categories.siteId, siteId))
       : eq(categories.slug, idOrSlug);
-  const [row] = await db.select().from(categories).where(cond).limit(1);
+  const [row] = await db
+    .select()
+    .from(categories)
+    .where(and(cond, siteScope(orgId, categories.siteId)))
+    .limit(1);
   if (!row) throw notFound("Category");
   return row;
 }
 
-export async function resolveProduct(idOrSlug: string, siteId?: number): Promise<Product> {
+export async function resolveProduct(
+  idOrSlug: string,
+  orgId: OrgId,
+  siteId?: number,
+): Promise<Product> {
   const cond = isNumeric(idOrSlug)
     ? eq(products.id, Number(idOrSlug))
     : siteId != null
       ? and(eq(products.slug, idOrSlug), eq(products.siteId, siteId))
       : eq(products.slug, idOrSlug);
-  const [row] = await db.select().from(products).where(cond).limit(1);
+  const [row] = await db
+    .select()
+    .from(products)
+    .where(and(cond, siteScope(orgId, products.siteId)))
+    .limit(1);
   if (!row) throw notFound("Product");
   return row;
 }
@@ -219,17 +249,23 @@ export async function serializeOrders(list: Order[]) {
 
 // ---------- aggregates ----------
 
-type RangeOpts = { siteId?: number; from?: Date; to?: Date };
+/**
+ * Every aggregate is org-scoped. `orgId` is required and first, so an
+ * accidental `trafficStats({ from })` is a compile error rather than a query
+ * that quietly totals every tenant on the platform.
+ */
+type RangeOpts = { orgId: OrgId; siteId?: number; from?: Date; to?: Date };
 
-function trafficWhere({ siteId, from, to }: RangeOpts): SQL | undefined {
-  const conds: SQL[] = [];
+function trafficWhere({ orgId, siteId, from, to }: RangeOpts): SQL | undefined {
+  // Org scope is unconditional and first — `siteId` narrows it, never replaces it.
+  const conds: SQL[] = [siteScope(orgId, agentTraffic.siteId)];
   if (siteId != null) conds.push(eq(agentTraffic.siteId, siteId));
   if (from) conds.push(sql`${agentTraffic.createdAt} >= ${from.toISOString()}`);
   if (to) conds.push(sql`${agentTraffic.createdAt} <= ${to.toISOString()}`);
   return conds.length ? and(...conds) : undefined;
 }
 
-export async function trafficStats(opts: RangeOpts = {}) {
+export async function trafficStats(opts: RangeOpts) {
   const where = trafficWhere(opts);
   const [totalRow] = await db.select({ c: count() }).from(agentTraffic).where(where);
   const last7dWhere = trafficWhere({
@@ -260,8 +296,8 @@ export async function trafficStats(opts: RangeOpts = {}) {
   };
 }
 
-function ordersWhere({ siteId, from, to }: RangeOpts, extra?: SQL): SQL | undefined {
-  const conds: SQL[] = [];
+function ordersWhere({ orgId, siteId, from, to }: RangeOpts, extra?: SQL): SQL | undefined {
+  const conds: SQL[] = [siteScope(orgId, orders.siteId)];
   if (siteId != null) conds.push(eq(orders.siteId, siteId));
   if (from) conds.push(sql`${orders.createdAt} >= ${from.toISOString()}`);
   if (to) conds.push(sql`${orders.createdAt} <= ${to.toISOString()}`);
@@ -270,7 +306,7 @@ function ordersWhere({ siteId, from, to }: RangeOpts, extra?: SQL): SQL | undefi
 }
 
 /** Successful-order balances, split x402 vs fiat, optionally per site. */
-export async function balanceStats(opts: RangeOpts = {}) {
+export async function balanceStats(opts: RangeOpts) {
   const where = ordersWhere(opts, eq(orders.status, "success"));
   const rows = await db
     .select({
@@ -353,11 +389,11 @@ export async function uniqueCategorySlug(siteId: number, base: string): Promise<
   for (let n = 2; ; n++) if (!taken.has(`${base}-${n}`)) return `${base}-${n}`;
 }
 
-export async function pendingCountsBySite(): Promise<Map<number, number>> {
+export async function pendingCountsBySite(orgId: OrgId): Promise<Map<number, number>> {
   const rows = await db
     .select({ siteId: orders.siteId, c: count() })
     .from(orders)
-    .where(eq(orders.status, "pending"))
+    .where(and(eq(orders.status, "pending"), siteScope(orgId, orders.siteId)))
     .groupBy(orders.siteId);
   const map = new Map<number, number>();
   for (const r of rows) if (r.siteId != null) map.set(r.siteId, Number(r.c));

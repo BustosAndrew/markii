@@ -58,15 +58,16 @@ real state. These are the open items, recorded so they are not rediscovered late
 
 | Gap | Where | Fix |
 |---|---|---|
-| **Sign-in runs in the browser** | `components/auth/auth-form.tsx` calls `signInWithPassword` on `createBrowserClient` | Post to `/api/auth/*` (§16) once Phase A lands; delete `lib/supabase/client.ts`. **D30** — the session cookie cannot be `HttpOnly` as written |
-| **Threshold meter hardcodes `/100`** | `components/dashboard/threshold-meter.tsx` | Currency-aware minor-unit formatter before billing UI is real. **D31** — billing currency is merchant-set |
+| ~~Sign-in runs in the browser~~ ✅ **fixed 2026-07-30** | `components/auth/auth-form.tsx` | Now posts to `/api/auth/*` through `lib/api/auth.ts`, gated on `AUTH_API_LIVE`; `lib/supabase/client.ts` is deleted, so no `createBrowserClient` exists in the tree (**D30**). The form stays disabled behind an API §16 notice until the backend ships the routes |
+| ~~Threshold meter hardcodes `/100`~~ ✅ **fixed 2026-07-30** | `components/dashboard/threshold-meter.tsx` | Uses `formatMinor(amountMinor, currency)` from `lib/api/money.ts`, which derives the exponent from the currency (**D31**). `formatCents` stays USD-shaped for the legacy §1–8 `Cents` fields |
 | **No cart, variant picker, or checkout** | `components/storefront/` has card, header, theme root, paused | Phase C. The variant picker's shell needs no backend and can start early |
 | **Screens still stubbed** | Collections tab, customers, discounts, team, invoices, orders list, org switcher | Correct today — each is built when its API section flips to ✅ LIVE, not before |
 | **Session refresh is unwired** | `lib/supabase/middleware.ts` is imported nowhere | Backend owns this — it belongs in `proxy.ts`. Nothing guards `/dashboard` until it lands |
 
 **Going LIVE is a two-sided flip.** Each planned service gates on a local constant —
-`ORG_API_LIVE`, `BILLING_API_LIVE`, `READINESS_API_LIVE`, and the commerce equivalent — so a screen
-throws `PlannedError` and renders its placeholder instead of calling a route that does not exist.
+`AUTH_API_LIVE`, `ORG_API_LIVE`, `BILLING_API_LIVE`, `READINESS_API_LIVE`, and the commerce
+equivalent — so a screen throws `PlannedError` and renders its placeholder instead of calling a
+route that does not exist.
 When the backend moves a status badge in `docs/API.md`, **the matching constant flips in the same
 change**, or the endpoint ships to nobody.
 

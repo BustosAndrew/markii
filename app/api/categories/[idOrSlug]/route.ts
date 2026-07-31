@@ -1,6 +1,8 @@
 import { and, eq, inArray, ne } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { badRequest, conflict, handler, intParam, notFound } from "@/lib/api";
+import { badRequest, conflict, intParam, notFound } from "@/lib/api";
+import { orgHandler } from "@/lib/auth/handler";
+import { ownSites, siteScope } from "@/lib/tenancy";
 import { categories, db, products, sites, type Category } from "@/lib/db";
 import {
   resolveCategory,
@@ -29,17 +31,17 @@ async function subtree(category: Category): Promise<Category[]> {
   return result;
 }
 
-export const GET = handler(async (req, { params }) => {
+export const GET = orgHandler(async (req, { params, orgId }) => {
   const { idOrSlug } = await params;
   const sp = new URL(req.url).searchParams;
-  const category = await resolveCategory(idOrSlug, intParam(sp, "siteId"));
+  const category = await resolveCategory(idOrSlug, orgId, intParam(sp, "siteId"));
   return NextResponse.json(await serializeCategoryDetail(category));
 });
 
-export const PATCH = handler(async (req, { params }) => {
+export const PATCH = orgHandler(async (req, { params, orgId }) => {
   const { idOrSlug } = await params;
   const sp = new URL(req.url).searchParams;
-  const category = await resolveCategory(idOrSlug, intParam(sp, "siteId"));
+  const category = await resolveCategory(idOrSlug, orgId, intParam(sp, "siteId"));
   const input = categoryUpdateSchema.parse(await req.json());
 
   const targetSiteId = input.siteId ?? category.siteId;
@@ -114,10 +116,10 @@ export const PATCH = handler(async (req, { params }) => {
   return NextResponse.json(await serializeCategoryDetail(row));
 });
 
-export const DELETE = handler(async (req, { params }) => {
+export const DELETE = orgHandler(async (req, { params, orgId }) => {
   const { idOrSlug } = await params;
   const sp = new URL(req.url).searchParams;
-  const category = await resolveCategory(idOrSlug, intParam(sp, "siteId"));
+  const category = await resolveCategory(idOrSlug, orgId, intParam(sp, "siteId"));
   // FK rules: products.categoryId → null, children.parentId → null (promoted)
   await db.delete(categories).where(eq(categories.id, category.id));
   return NextResponse.json({ deleted: true, id: category.id });

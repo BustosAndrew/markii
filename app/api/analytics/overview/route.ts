@@ -1,19 +1,21 @@
 import { and, count, gte, ilike, lte, type SQL } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { dateRange, daysAgo, handler } from "@/lib/api";
+import { dateRange, daysAgo } from "@/lib/api";
+import { orgHandler } from "@/lib/auth/handler";
+import { ownSites, siteScope } from "@/lib/tenancy";
 import { agentTraffic, db, sites } from "@/lib/db";
 import { trafficStats } from "@/lib/queries";
 
-export const GET = handler(async (req) => {
+export const GET = orgHandler(async (req, { orgId }) => {
   const sp = new URL(req.url).searchParams;
   const range = dateRange(sp);
   const from = range.from ?? daysAgo(28);
   const to = range.to;
   const q = sp.get("q");
 
-  const global = await trafficStats({ from, to });
+  const global = await trafficStats({ orgId, from, to });
 
-  const rangeConds: SQL[] = [gte(agentTraffic.createdAt, from)];
+  const rangeConds: SQL[] = [siteScope(orgId, agentTraffic.siteId), gte(agentTraffic.createdAt, from)];
   if (to) rangeConds.push(lte(agentTraffic.createdAt, to));
 
   const totals = await db
@@ -44,7 +46,7 @@ export const GET = handler(async (req) => {
   const siteRows = await db
     .select({ id: sites.id, name: sites.name, slug: sites.slug })
     .from(sites)
-    .where(q ? ilike(sites.name, `%${q}%`) : undefined);
+    .where(q ? and(ownSites(orgId), ilike(sites.name, `%${q}%`)) : ownSites(orgId));
 
   return NextResponse.json({
     total: global.total,

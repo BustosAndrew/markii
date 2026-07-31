@@ -1,12 +1,13 @@
 import { and, count, eq, gte, isNotNull, lte, sql, type SQL } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { dateRange, daysAgo, handler, pagination } from "@/lib/api";
+import { dateRange, daysAgo, pagination } from "@/lib/api";
+import { orgHandler } from "@/lib/auth/handler";
 import { agentTraffic, db, products } from "@/lib/db";
 import { resolveSite, siteRef, trafficStats } from "@/lib/queries";
 
-export const GET = handler(async (req, { params }) => {
+export const GET = orgHandler(async (req, { params, orgId }) => {
   const { idOrSlug } = await params;
-  const site = await resolveSite(idOrSlug);
+  const site = await resolveSite(idOrSlug, orgId);
   const sp = new URL(req.url).searchParams;
   const range = dateRange(sp);
   const from = range.from ?? daysAgo(28);
@@ -14,7 +15,7 @@ export const GET = handler(async (req, { params }) => {
   const q = sp.get("q")?.toLowerCase();
   const { page, limit } = pagination(sp);
 
-  const stats = await trafficStats({ siteId: site.id, from, to });
+  const stats = await trafficStats({ orgId, siteId: site.id, from, to });
 
   const conds: SQL[] = [
     eq(agentTraffic.siteId, site.id),

@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { handler } from "@/lib/api";
+import { orgHandler } from "@/lib/auth/handler";
 
 /**
  * Placeholder data for the wizard's "autofill from template" button.
  * Shape matches the POST /api/preview request body exactly.
  */
-export const GET = handler(async () => {
+export const GET = orgHandler(async () => {
   return NextResponse.json({
     site: {
       name: "Aurora Supply Co.",

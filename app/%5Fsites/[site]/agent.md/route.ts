@@ -13,7 +13,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ site: st
     path: "/agent.md",
     userAgent: req.headers.get("user-agent"),
   });
-  const payTo = data.site.walletAddress ?? (await defaultWallet());
+  const payTo = data.site.walletAddress ?? (await defaultWallet(data.site.orgId));
   return new Response(generateAgentMd(data.bundle, data.baseUrl, { payTo }), {
     headers: {
       "content-type": "text/markdown; charset=utf-8",

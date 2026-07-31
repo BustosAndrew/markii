@@ -55,6 +55,28 @@ fulfillment logistics, POS.
 Before anything else, while there is no production data. Schema is unchanged (both are Postgres);
 this is a driver and services swap. Full task list in `docs/DECISIONS.md` §"Data architecture".
 
+> **Progress (2026-07-30) — the code half is done; the provisioning half is not.**
+>
+> ✅ Driver swapped to `postgres.js` / `drizzle-orm/postgres-js` (`lib/db/index.ts`), with
+> `prepare: false` — mandatory on the transaction pooler — and a per-process pool.
+> ✅ `DATABASE_URL` (6543) vs `DIRECT_URL` (5432) split, with `drizzle.config.ts` refusing to
+> migrate over the pooler.
+> ✅ Migrations moved to `drizzle-kit generate`: `0000_init` (baseline, **includes `sites.themeId`**,
+> so a fresh database no longer needs the outstanding D29 `db:push`) and `0001_action_invocations`.
+> Both end with hand-authored **RLS deny-by-default**. `pnpm db:generate` / `db:migrate` added.
+> ✅ Proxy custom-domain lookup cached in `lib/domains.ts`, with negative caching and invalidation
+> on site create/update/delete — no more database query per storefront request.
+> ✅ Seed script closes its connection; `.env.example` rewritten to match what the code reads.
+>
+> ⏳ **Blocked on a provisioned Supabase project** (needs credentials, not code): running
+> `pnpm db:migrate`, uploads → Supabase Storage (task 8, still Vercel Blob), SMTP config,
+> regenerating seed data, dropping the Neon project.
+>
+> ⚠️ **Edge Config was not used.** `lib/domains.ts` caches in-process with a 5-minute TTL, which
+> removes the per-request query but means an invalidation only clears the instance that served the
+> write; other instances correct within one TTL. Moving to Edge Config needs a provisioned store —
+> the module is shaped so that becomes a lookup swap, not a rewrite.
+
 Ten tasks in brief: swap `@neondatabase/serverless` → `postgres.js` and `drizzle-orm/neon-http` →
 `drizzle-orm/postgres-js` · **transaction pooler (6543) for queries, session mode (5432) for
 migrations** (a pooled connection cannot run DDL) · **fix, don't port, the proxy lookup** · update
@@ -82,6 +104,13 @@ connect/disconnect. Biggest latency win available, small change.
 `markii.shop`.
 
 ### 1. The action primitive — earlier than the original plan said
+
+> **Built 2026-07-30** — `lib/actions/` (`registry.ts`, `invoke.ts`, `types.ts`) plus the
+> `action_invocations` audit table. Dry run is the real action in a rolled-back transaction;
+> `ctx.effect()` defers anything the database cannot undo until after commit; authorization is
+> injected via `setAuthorizationResolver` and **denies everything** until Phase A installs the real
+> resolver. No action definitions and no `/api/actions*` routes yet — both need an actor, so they
+> land with §16. Full status in `docs/API.md` §22.
 
 `docs/BUILDER.md` puts the action registry in Phase D with the site builder. **Build the primitive
 now instead.** It is roughly a day of work, and if Phase C's commerce mutations are written as plain

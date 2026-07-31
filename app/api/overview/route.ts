@@ -1,13 +1,16 @@
 import { count } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { daysAgo, handler } from "@/lib/api";
+import { daysAgo } from "@/lib/api";
+import { orgHandler } from "@/lib/auth/handler";
+import { ownSites } from "@/lib/tenancy";
 import { db, sites } from "@/lib/db";
 import { balanceStats, trafficStats } from "@/lib/queries";
 
-export const GET = handler(async () => {
+export const GET = orgHandler(async (_req, { orgId }) => {
   const siteRows = await db
     .select({ status: sites.status, c: count() })
     .from(sites)
+    .where(ownSites(orgId))
     .groupBy(sites.status);
   const siteCounts = { total: 0, live: 0, draft: 0, paused: 0 };
   for (const r of siteRows) {
@@ -16,13 +19,14 @@ export const GET = handler(async () => {
     siteCounts[r.status] += n;
   }
 
-  const traffic = await trafficStats({});
-  const recent = await trafficStats({ from: daysAgo(14) });
-  const balances = await balanceStats({});
+  const traffic = await trafficStats({ orgId });
+  const recent = await trafficStats({ orgId, from: daysAgo(14) });
+  const balances = await balanceStats({ orgId });
 
   const allSites = await db
     .select({ id: sites.id, name: sites.name, slug: sites.slug })
-    .from(sites);
+    .from(sites)
+    .where(ownSites(orgId));
   const bySite = allSites.map((s) => {
     const b = balances.bySite.get(s.id);
     return {

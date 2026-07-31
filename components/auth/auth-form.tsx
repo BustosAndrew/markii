@@ -1,11 +1,18 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { Logo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/field";
-import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import {
+  isAuthApiLive,
+  requestPasswordReset,
+  signIn,
+  signUp,
+} from "@/lib/api/auth";
+import { isPlannedError } from "@/lib/api/planned";
 
 type AuthMode = "sign-in" | "sign-up" | "reset-password";
 
@@ -26,7 +33,7 @@ const copy: Record<
   },
   "sign-up": {
     title: "Create account",
-    description: "Supabase Auth will power merchant sign-up once the environment is configured.",
+    description: "Merchant sign-up opens when Phase A auth is live.",
     submitLabel: "Create account",
     secondary: { href: "/sign-in", label: "Already have an account?" },
   },
@@ -39,6 +46,7 @@ const copy: Record<
 };
 
 export function AuthForm({ mode }: { mode: AuthMode }) {
+  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [pending, setPending] = useState(false);
@@ -46,53 +54,41 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
   const [error, setError] = useState<string | null>(null);
 
   const content = useMemo(() => copy[mode], [mode]);
-  const configured = isSupabaseConfigured();
+  const live = isAuthApiLive();
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setMessage(null);
     setError(null);
-
-    const supabase = getSupabaseBrowserClient();
-    if (!supabase) {
-      setError("Configuration required: NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.");
-      return;
-    }
-
     setPending(true);
+
     try {
+      // Every branch posts to Markii's own origin; the server sets the
+      // httpOnly session cookie (D30). No Supabase call from the browser.
       if (mode === "sign-in") {
-        const { error: signInError } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-
-        if (signInError) {
-          setError(signInError.message);
-        } else {
-          setMessage("Signed in. Refresh the dashboard once protected routes are wired.");
-        }
+        await signIn({ email, password });
+        router.replace("/dashboard");
+        router.refresh();
       } else if (mode === "sign-up") {
-        const { error: signUpError } = await supabase.auth.signUp({
-          email,
-          password,
-        });
-
-        if (signUpError) {
-          setError(signUpError.message);
-        } else {
-          setMessage("Account created. Check your inbox if email confirmation is enabled.");
-        }
+        await signUp({ email, password });
+        setMessage(
+          "Account created. If email confirmation is enabled, check your inbox to finish.",
+        );
       } else {
-        const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
-          redirectTo: `${window.location.origin}/sign-in`,
-        });
-
-        if (resetError) {
-          setError(resetError.message);
-        } else {
-          setMessage("Password reset email requested.");
-        }
+        await requestPasswordReset({ email });
+        setMessage(
+          "If an account exists for that address, a reset link is on its way.",
+        );
+      }
+    } catch (caught) {
+      if (isPlannedError(caught)) {
+        setError(
+          "Merchant auth is not live yet (API §16, Phase A). Nothing was submitted.",
+        );
+      } else if (caught instanceof Error) {
+        setError(caught.message);
+      } else {
+        setError("Request failed. Try again.");
       }
     } finally {
       setPending(false);
@@ -113,46 +109,57 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">{content.title}</h1>
         <p className="mt-2 text-sm leading-6 text-muted">{content.description}</p>
 
-        {!configured ? (
+        {!live ? (
           <div className="mt-6 rounded-[var(--radius-control)] border border-border bg-surface-elevated p-4 text-sm leading-6 text-muted">
-            Configuration required. Add `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-            to enable merchant auth.
+            <p>
+              Merchant auth is planned, not live. Accounts, sessions, and password reset
+              arrive with Phase A.
+            </p>
+            <span className="mt-3 inline-flex rounded-full bg-surface px-2.5 py-1 text-xs font-medium text-muted">
+              API §16 · Accounts, organizations, staff
+            </span>
           </div>
         ) : null}
 
         <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
-          <div>
-            <Label htmlFor="email">Email</Label>
-            <Input
-              id="email"
-              type="email"
-              autoComplete="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              required
-            />
-          </div>
-
-          {mode !== "reset-password" ? (
+          <fieldset disabled={!live || pending} className="space-y-4">
             <div>
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="email">Email</Label>
               <Input
-                id="password"
-                type="password"
-                autoComplete={mode === "sign-in" ? "current-password" : "new-password"}
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
+                id="email"
+                name="email"
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
                 required
               />
             </div>
-          ) : null}
 
-          {error ? <p className="text-sm text-error-text">{error}</p> : null}
-          {message ? <p className="text-sm text-success-text">{message}</p> : null}
+            {mode !== "reset-password" ? (
+              <div>
+                <Label htmlFor="password">Password</Label>
+                <Input
+                  id="password"
+                  name="password"
+                  type="password"
+                  autoComplete={mode === "sign-in" ? "current-password" : "new-password"}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  required
+                />
+              </div>
+            ) : null}
 
-          <Button type="submit" className="w-full" disabled={pending}>
-            {pending ? "Working..." : content.submitLabel}
-          </Button>
+            <Button type="submit" className="w-full">
+              {pending ? "Working..." : content.submitLabel}
+            </Button>
+          </fieldset>
+
+          <p aria-live="polite" className="empty:hidden">
+            {error ? <span className="text-sm text-error-text">{error}</span> : null}
+            {message ? <span className="text-sm text-success-text">{message}</span> : null}
+          </p>
         </form>
 
         <div className="mt-6 flex items-center justify-between gap-3 text-sm">

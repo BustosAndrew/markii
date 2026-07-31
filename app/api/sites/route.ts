@@ -1,15 +1,19 @@
 import { and, asc, count, desc, eq, ilike, or, type SQL } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { badRequest, conflict, handler, pagination, slugify } from "@/lib/api";
+import { badRequest, conflict, pagination, slugify } from "@/lib/api";
+import { orgHandler } from "@/lib/auth/handler";
 import { db, sites } from "@/lib/db";
+import { invalidateCustomDomain } from "@/lib/domains";
 import { serializeSite, serializeSites } from "@/lib/queries";
+import { ownSitesForStaff } from "@/lib/tenancy";
 import { siteCreateSchema } from "@/lib/validation";
 
-export const GET = handler(async (req) => {
+export const GET = orgHandler(async (req, { session, orgId }) => {
   const sp = new URL(req.url).searchParams;
   const { page, limit, offset } = pagination(sp);
 
-  const conds: SQL[] = [];
+  // Org scope first, and unconditionally — every other filter narrows it further.
+  const conds: SQL[] = [ownSitesForStaff(orgId, session.staff.storeIds)];
   const q = sp.get("q");
   if (q) conds.push(or(ilike(sites.name, `%${q}%`), ilike(sites.slug, `%${q}%`))!);
   const status = sp.get("status");
@@ -17,7 +21,7 @@ export const GET = handler(async (req) => {
     if (!["draft", "live", "paused"].includes(status)) throw badRequest("invalid status filter");
     conds.push(eq(sites.status, status as "draft" | "live" | "paused"));
   }
-  const where = conds.length ? and(...conds) : undefined;
+  const where = and(...conds);
 
   const sort = sp.get("sort") ?? "-createdAt";
   const orderBy =
@@ -44,14 +48,26 @@ export const GET = handler(async (req) => {
   });
 });
 
-export const POST = handler(async (req) => {
-  const input = siteCreateSchema.parse(await req.json());
-  const slug = input.slug ?? slugify(input.name);
-  const [existing] = await db.select({ id: sites.id }).from(sites).where(eq(sites.slug, slug)).limit(1);
-  if (existing) throw conflict(`site slug "${slug}" is already taken`);
-  const [row] = await db
-    .insert(sites)
-    .values({ ...input, slug })
-    .returning();
-  return NextResponse.json(await serializeSite(row), { status: 201 });
-});
+export const POST = orgHandler(
+  async (req, { orgId }) => {
+    const input = siteCreateSchema.parse(await req.json());
+    const slug = input.slug ?? slugify(input.name);
+    // Site slugs are globally unique (they are subdomains), so this check stays
+    // deliberately unscoped — another org holding the slug is still a conflict.
+    const [existing] = await db
+      .select({ id: sites.id })
+      .from(sites)
+      .where(eq(sites.slug, slug))
+      .limit(1);
+    if (existing) throw conflict(`site slug "${slug}" is already taken`);
+    const [row] = await db
+      .insert(sites)
+      // orgId comes from the session, never the request body (§16).
+      .values({ ...input, slug, orgId })
+      .returning();
+    // Clears any negative entry cached while the host was still unconnected.
+    invalidateCustomDomain(row.customDomain);
+    return NextResponse.json(await serializeSite(row), { status: 201 });
+  },
+  { permission: "cms.write" },
+);

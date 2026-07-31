@@ -1,15 +1,18 @@
 import { and, asc, count, desc, eq, gt, ilike, or, type SQL } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { boolParam, conflict, handler, intParam, notFound, pagination, slugify } from "@/lib/api";
+import { boolParam, conflict, intParam, notFound, pagination, slugify } from "@/lib/api";
+import { orgHandler } from "@/lib/auth/handler";
+import { ownSites, siteScope, siteScopeForStaff } from "@/lib/tenancy";
 import { categories, db, products, sites } from "@/lib/db";
 import { serializeProductDetail, serializeProducts } from "@/lib/queries";
 import { productCreateSchema } from "@/lib/validation";
 
-export const GET = handler(async (req) => {
+export const GET = orgHandler(async (req, { session, orgId }) => {
   const sp = new URL(req.url).searchParams;
   const { page, limit, offset } = pagination(sp);
 
-  const conds: SQL[] = [];
+  // Org scope first and unconditional; every filter below narrows it.
+  const conds: SQL[] = [siteScopeForStaff(orgId, session.staff.storeIds, products.siteId)];
   const q = sp.get("q");
   if (q)
     conds.push(
@@ -26,7 +29,7 @@ export const GET = handler(async (req) => {
   const enabled = boolParam(sp, "enabled");
   if (enabled !== undefined) conds.push(eq(products.enabled, enabled));
   if (boolParam(sp, "inStock") === true) conds.push(gt(products.stock, 0));
-  const where = conds.length ? and(...conds) : undefined;
+  const where = and(...conds);
 
   const sortMap: Record<string, SQL | ReturnType<typeof asc>> = {
     name: asc(products.name),
@@ -54,17 +57,17 @@ export const GET = handler(async (req) => {
   });
 });
 
-export const POST = handler(async (req) => {
+export const POST = orgHandler(async (req, { orgId }) => {
   const input = productCreateSchema.parse(await req.json());
 
-  const [site] = await db.select({ id: sites.id }).from(sites).where(eq(sites.id, input.siteId)).limit(1);
+  const [site] = await db.select({ id: sites.id }).from(sites).where(and(eq(sites.id, input.siteId), ownSites(orgId))).limit(1);
   if (!site) throw notFound("Site");
 
   if (input.categoryId != null) {
     const [cat] = await db
       .select({ id: categories.id, siteId: categories.siteId })
       .from(categories)
-      .where(eq(categories.id, input.categoryId))
+      .where(and(eq(categories.id, input.categoryId), siteScope(orgId, categories.siteId)))
       .limit(1);
     if (!cat) throw notFound("Category");
     if (cat.siteId !== input.siteId) throw conflict("category belongs to a different site");

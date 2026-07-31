@@ -1,7 +1,7 @@
 /* Seed demo data: 3 sites, categories, ~30 products, orders, agent traffic.
    Run with: pnpm db:seed (after pnpm db:push) */
 import { eq } from "drizzle-orm";
-import { agentTraffic, categories, db, integrations, orders, products, sites } from "../lib/db";
+import { agentTraffic, categories, db, integrations, orders, organizations, products, sites, staff, sql } from "../lib/db";
 
 if (!process.env.DATABASE_URL) {
   console.error("DATABASE_URL is not set — create .env.local (see .env.example) first.");
@@ -15,6 +15,10 @@ const pick = <T>(arr: T[]): T => arr[Math.floor(rand() * arr.length)];
 const daysAgo = (n: number) =>
   new Date(Date.now() - n * 24 * 3600 * 1000 + Math.floor(rand() * 20 * 3600 * 1000));
 
+const DEMO_ORG_ID = "org_demo0000000000000000";
+const DEMO_ORG_SLUG = "markii-demo";
+/** Placeholder owner: no Supabase user exists for seeded data. */
+const DEMO_OWNER_ID = "00000000-0000-0000-0000-000000000000";
 const DEMO_WALLET = "0x1a6f8be821d047fcf4dc1bd5c66aa00000000001";
 
 const img = (s: string) => [`https://picsum.photos/seed/${s}/800/600`];
@@ -28,8 +32,39 @@ async function main() {
   await db.delete(sites);
   await db.delete(integrations);
 
+  // Everything below hangs off an org now (§16). Without one, seeded sites
+  // would have a null orgId and be invisible to every signed-in user — which is
+  // correct behaviour, but makes for a confusing empty dashboard.
+  console.log("Creating demo organization…");
+  await db.delete(organizations).where(eq(organizations.slug, DEMO_ORG_SLUG));
+  const [demoOrg] = await db
+    .insert(organizations)
+    .values({
+      id: DEMO_ORG_ID,
+      name: "Markii Demo",
+      slug: DEMO_ORG_SLUG,
+      // No auth user owns the demo org. Sign up, then attach yourself with:
+      //   update staff set user_id = '<auth user id>' where org_id = '<this id>';
+      ownerId: DEMO_OWNER_ID,
+      billingEmail: "demo@markii.shop",
+    })
+    .returning();
+
+  await db.insert(staff).values({
+    id: `${DEMO_ORG_ID}-owner`,
+    orgId: demoOrg.id,
+    userId: DEMO_OWNER_ID,
+    name: "Demo Owner",
+    email: "demo@markii.shop",
+    role: "owner",
+    storeIds: "all",
+    status: "active",
+  });
+
   console.log("Creating integrations…");
   await db.insert(integrations).values({
+    id: `${DEMO_ORG_ID}-x402`,
+    orgId: demoOrg.id,
     provider: "x402",
     status: "connected",
     config: { walletAddress: DEMO_WALLET },
@@ -40,13 +75,14 @@ async function main() {
     .insert(sites)
     .values([
       {
+        orgId: demoOrg.id,
         name: "Aurora Supply Co.",
         slug: "aurora-supply",
         status: "live",
         walletAddress: DEMO_WALLET,
       },
-      { name: "Pixel Threads", slug: "pixel-threads", status: "live", walletAddress: DEMO_WALLET },
-      { name: "Brew Haus", slug: "brew-haus", status: "draft" },
+      { orgId: demoOrg.id, name: "Pixel Threads", slug: "pixel-threads", status: "live", walletAddress: DEMO_WALLET },
+      { orgId: demoOrg.id, name: "Brew Haus", slug: "brew-haus", status: "draft" },
     ])
     .returning();
 
@@ -183,8 +219,14 @@ async function main() {
 }
 
 main()
-  .then(() => process.exit(0))
-  .catch((e) => {
+  .then(async () => {
+    // postgres.js holds sockets open; close them rather than relying on
+    // process.exit to sever a live connection mid-flight.
+    await sql.end();
+    process.exit(0);
+  })
+  .catch(async (e) => {
     console.error(e);
+    await sql.end({ timeout: 5 }).catch(() => {});
     process.exit(1);
   });

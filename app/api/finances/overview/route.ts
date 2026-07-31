@@ -1,20 +1,22 @@
-import { ilike } from "drizzle-orm";
+import { and, ilike } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { dateRange, handler } from "@/lib/api";
+import { dateRange } from "@/lib/api";
+import { orgHandler } from "@/lib/auth/handler";
+import { ownSites } from "@/lib/tenancy";
 import { db, sites } from "@/lib/db";
 import { balanceStats, pendingCountsBySite } from "@/lib/queries";
 
-export const GET = handler(async (req) => {
+export const GET = orgHandler(async (req, { orgId }) => {
   const sp = new URL(req.url).searchParams;
   const { from, to } = dateRange(sp);
   const q = sp.get("q");
 
-  const balances = await balanceStats({ from, to });
-  const pending = await pendingCountsBySite();
+  const balances = await balanceStats({ orgId, from, to });
+  const pending = await pendingCountsBySite(orgId);
   const siteRows = await db
     .select({ id: sites.id, name: sites.name, slug: sites.slug })
     .from(sites)
-    .where(q ? ilike(sites.name, `%${q}%`) : undefined);
+    .where(q ? and(ownSites(orgId), ilike(sites.name, `%${q}%`)) : ownSites(orgId));
 
   return NextResponse.json({
     totalBalanceCents: balances.totalCents,

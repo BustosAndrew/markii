@@ -33,18 +33,18 @@ carry an explicit status — **never call a `PLANNED` endpoint and never fake it
 | 13 | Orders (promoted) | partial — `GET /api/orders/:id` is LIVE, the rest PLANNED | C |
 | 14 | Analytics v2 (funnel, channels, failures) | 🟡 PLANNED | E |
 | 15 | Automations, activity, notifications, team | 🟡 PLANNED | E |
-| 16 | Accounts, organizations, staff | 🟡 PLANNED | **A** |
+| 16 | Accounts, organizations, staff | partial — `/api/auth/*`, `/api/me`, `/api/org`, `/api/org/staff*`, and **org scoping of §1–8** are ✅ LIVE; audit, sessions, tokens, MFA, org switching PLANNED | **A** |
 | 17 | Billing, plans, metering, threshold fees | 🟡 PLANNED | B |
 | 18 | Commerce core (variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping) | 🟡 PLANNED | C |
 | 19 | Site builder & content | 🟡 PLANNED | D |
 | 20 | Disputes & chargebacks | 🟡 PLANNED | F |
 | 21 | Agent Ops add-on | 🟡 PLANNED | F (last) |
-| 22 | **Action registry & MCP** — agent-native architecture | 🟡 PLANNED | **Registry: C · MCP: D** |
+| 22 | **Action registry & MCP** — agent-native architecture | 🟡 PLANNED — **primitive built** (`lib/actions/`), endpoints await §16 | **Registry: C · MCP: D** |
 
-**v3 note.** Markii is now a full commerce platform (`docs/PLAN.md` v3). §16 is a **breaking
-change to everything above it**: today `/api/*` is unauthenticated and single-tenant: once orgs
-land, every route becomes org-scoped and requires a session. Treat §1–15 shapes as stable and
-their auth model as provisional.
+**v3 note.** Markii is now a full commerce platform (`docs/PLAN.md` v3). §16 was a **breaking change
+to everything above it**, and as of 2026-07-31 that change has landed: **every `/api/*` route
+except `/api/auth/*` now requires a session and is org-scoped**. Unauthenticated calls get `401`;
+rows belonging to another org get `404`. Response shapes are unchanged.
 
 **Payment-rail neutrality.** x402/USDC is **one rail among several** (card, Stripe, PayPal,
 external processor), not the product identity. Anywhere a payment appears, the rail is a labeled
@@ -100,8 +100,12 @@ Mode flag with a persistent indicator, and must never be presented as production
   { "error": { "code": "NOT_FOUND", "message": "Product not found" } }
   ```
 
-  Codes: `VALIDATION_ERROR` (400, includes `details` array from zod), `NOT_FOUND` (404),
+  Codes: `VALIDATION_ERROR` (400, includes `details` array from zod), `UNAUTHORIZED` (401,
+  no session), `FORBIDDEN` (403, session lacks the permission), `NOT_FOUND` (404),
   `CONFLICT` (409, e.g. duplicate slug), `IMPORT_FAILED` (422), `INTERNAL` (500).
+  `UNAUTHORIZED` and `FORBIDDEN` exist in the envelope from now on but are only *returned*
+  once §16 lands — today no route authenticates. The distinction matters to the UI:
+  401 means "sign in", 403 means "signing in again will not help".
 - **Mutations:** `POST` create → `201` with the created object. `PATCH` partial update →
   `200` with the updated object. `DELETE` → `200` with `{ "deleted": true, "id": 42 }`.
   All `PATCH` bodies are partial — send only the fields you're changing.
@@ -1105,7 +1109,41 @@ delivered when no mail service is wired.
 
 ---
 
-## 16. Accounts, organizations, staff 🟡 PLANNED — Phase A
+## 16. Accounts, organizations, staff — partial (Phase A in progress)
+
+> **Status (2026-07-31).** ✅ **LIVE:** `POST /api/auth/sign-up · sign-in · sign-out ·
+> reset-password · update-password`, `GET /api/auth/callback`, and `GET /api/me`. Sessions are
+> httpOnly/`sameSite=lax` cookies written server-side (D30, verified end to end); `proxy.ts`
+> refreshes them and redirects signed-out `/dashboard` traffic to `/sign-in`. Sign-up provisions the
+> user's first org and an `owner` staff row in one transaction, idempotently. Roles resolve to
+> permissions in `lib/auth/permissions.ts`, and the action registry's authorization resolver
+> (§22) now reads the staff record instead of denying everything.
+>
+> ✅ **§1–8 are now org-scoped.** Every data route requires a session and derives scope from it —
+> `orgId` is never accepted from the client. `sites.orgId` is the single root; categories, products,
+> orders, and traffic reach their org through `siteId`, so there is one choke point rather than five
+> denormalized copies that can disagree. `integrations` moved from a `provider` primary key (which
+> made it silently single-tenant) to `(orgId, provider)`.
+>
+> Verified with two live tenants: every list returns `n=0` for the non-owner, every by-id read
+> returns **404** (never 403 — that would confirm the id exists), and cross-tenant `PATCH`/`DELETE`/
+> `deploy` all fail with the target row unchanged.
+>
+> ✅ **`GET`/`PATCH /api/org`, `GET /api/org/staff`, `POST /api/org/staff/invite`, and
+> `PATCH`/`DELETE /api/org/staff/:id` are live.** `planId` is not settable through `PATCH /api/org` —
+> plans change through billing (§17), not by editing the profile. `owner` is not an assignable role:
+> there is one owner, recorded on `organizations.ownerId`, changed only by explicit transfer, and
+> neither the owner's staff row nor your own may be edited through the staff routes.
+>
+> **Invitations do not send email yet.** `POST /api/org/staff/invite` creates a real `invited`
+> record and returns `invitationEmail: { sent: false, reason }` — §16 requires that an invitation is
+> never reported as delivered unless a provider accepted it, and `lib/email/` is `docs/BACKEND.md` §6.
+>
+> ✅ `sites.orgId` and `integrations.orgId` are now **`NOT NULL`** (migration `0005`, with a guard
+> that names any orphans rather than failing on a bare constraint violation).
+>
+> 🟡 **Still PLANNED:** `/api/org/audit`, `/api/org/sessions*`, `/api/org/tokens*`, MFA, and org
+> switching (the active-org cookie exists; there is no route to change it yet).
 
 **Blocking dependency for §17–21.** Tenancy model: `Organization → Stores → Staff`. An org owns
 billing; stores are the existing `sites`. Recommend a managed auth provider (see `docs/PLAN.md` §4).
@@ -1500,6 +1538,30 @@ cannot be retrofitted onto a mutation layer that assumed a single UI caller, and
 mutations through the registry from the start avoids refactoring every one of them later. Phase D
 adds builder actions and the MCP server on top; Phase F adds the chat product. See
 `docs/BACKEND.md` §1.
+
+### Status — primitive built, HTTP surface pending
+
+**The `defineAction` primitive exists** in [`lib/actions/`](../lib/actions/) as of 2026-07-30, with
+its audit table (`action_invocations`, migration `0001`). What it provides today:
+
+- `defineAction` / `getAction` / `allActions` / `describeAction` — the registry, with `input`
+  exported as JSON Schema so an agent can call an action it has never seen.
+- `invokeAction(id, input, { actor, dryRun })` — one pipeline: permission check → zod parse →
+  transactional run → audit write. **Dry run is the real action inside a transaction that is rolled
+  back**, not a parallel "what would happen" implementation, because a second implementation drifts
+  from the first and a proposal that does not match its execution is worse than no proposal.
+- `ctx.effect()` — side effects the database cannot roll back (email, Stripe) queue here and flush
+  only after commit, so a rolled-back or dry-run action never sends anything.
+- Authorization is **injected** via `setAuthorizationResolver`. Until Phase A installs the real one,
+  the resolver **denies everything**.
+
+**Not built yet, and deliberately:** there are **no action definitions**, and the endpoints below
+are unrouted. Both wait on §16 — every one of them needs an actor to authorize, so shipping them
+today would mean routes that can only answer 401. The first definitions land with Phase C's commerce
+mutations, which is the whole reason the primitive was built ahead of them.
+
+**Existing §1–8 routes still mutate directly.** They are converted in Phase A, which re-scopes every
+one of them for tenancy anyway — doing it twice would be the more expensive path.
 
 ### The primitive
 

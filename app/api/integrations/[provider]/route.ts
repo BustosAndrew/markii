@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { badRequest, handler } from "@/lib/api";
+import { badRequest } from "@/lib/api";
+import { orgHandler } from "@/lib/auth/handler";
 import {
   getIntegration,
   integrationStatus,
@@ -23,7 +24,7 @@ function parseProvider(raw: string): Provider {
   return raw;
 }
 
-export const PUT = handler(async (req, { params }) => {
+export const PUT = orgHandler(async (req, { params, orgId }) => {
   const provider = parseProvider((await params).provider);
   const config = configSchemas[provider].parse(await req.json());
   if (provider === "google") {
@@ -33,16 +34,16 @@ export const PUT = handler(async (req, { params }) => {
       throw badRequest("serviceAccountJson is not valid JSON");
     }
   }
-  const existing = await getIntegration(provider);
-  const row = await upsertIntegration(provider, "connected", {
+  const existing = await getIntegration(orgId, provider);
+  const row = await upsertIntegration(orgId, provider, "connected", {
     ...existing?.config,
     ...config,
   });
   return NextResponse.json(integrationStatus(provider, row));
 });
 
-export const DELETE = handler(async (_req, { params }) => {
+export const DELETE = orgHandler(async (_req, { params, orgId }) => {
   const provider = parseProvider((await params).provider);
-  const row = await upsertIntegration(provider, "not_connected", {});
+  const row = await upsertIntegration(orgId, provider, "not_connected", {});
   return NextResponse.json(integrationStatus(provider, row));
 });

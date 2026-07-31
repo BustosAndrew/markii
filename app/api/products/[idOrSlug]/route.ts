@@ -1,27 +1,35 @@
 import { and, eq, ne } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { badRequest, conflict, handler, intParam, notFound } from "@/lib/api";
+import { badRequest, conflict, intParam, notFound } from "@/lib/api";
+import { orgHandler } from "@/lib/auth/handler";
+import { ownSites, siteScope } from "@/lib/tenancy";
 import { categories, db, products, sites } from "@/lib/db";
 import { resolveProduct, serializeProductDetail, uniqueProductSlug } from "@/lib/queries";
 import { productUpdateSchema } from "@/lib/validation";
 
-export const GET = handler(async (req, { params }) => {
+export const GET = orgHandler(async (req, { params, orgId }) => {
   const { idOrSlug } = await params;
   const sp = new URL(req.url).searchParams;
-  const product = await resolveProduct(idOrSlug, intParam(sp, "siteId"));
+  const product = await resolveProduct(idOrSlug, orgId, intParam(sp, "siteId"));
   return NextResponse.json(await serializeProductDetail(product));
 });
 
-export const PATCH = handler(async (req, { params }) => {
+export const PATCH = orgHandler(async (req, { params, orgId }) => {
   const { idOrSlug } = await params;
   const sp = new URL(req.url).searchParams;
-  const product = await resolveProduct(idOrSlug, intParam(sp, "siteId"));
+  const product = await resolveProduct(idOrSlug, orgId, intParam(sp, "siteId"));
   const input = productUpdateSchema.parse(await req.json());
 
   const siteChanged = input.siteId != null && input.siteId !== product.siteId;
   const targetSiteId = input.siteId ?? product.siteId;
   if (siteChanged) {
-    const [site] = await db.select({ id: sites.id }).from(sites).where(eq(sites.id, targetSiteId)).limit(1);
+    // Org-scoped: without `ownSites` this reassigns a product into another
+    // tenant's store — a cross-tenant *write*, not merely a read leak.
+    const [site] = await db
+      .select({ id: sites.id })
+      .from(sites)
+      .where(and(eq(sites.id, targetSiteId), ownSites(orgId)))
+      .limit(1);
     if (!site) throw notFound("Target site");
   }
 
@@ -35,7 +43,7 @@ export const PATCH = handler(async (req, { params }) => {
     const [cat] = await db
       .select({ id: categories.id, siteId: categories.siteId })
       .from(categories)
-      .where(eq(categories.id, categoryId))
+      .where(and(eq(categories.id, categoryId), siteScope(orgId, categories.siteId)))
       .limit(1);
     if (!cat) throw notFound("Category");
     if (cat.siteId !== targetSiteId) throw badRequest("category belongs to a different site");
@@ -63,10 +71,10 @@ export const PATCH = handler(async (req, { params }) => {
   return NextResponse.json(await serializeProductDetail(row));
 });
 
-export const DELETE = handler(async (req, { params }) => {
+export const DELETE = orgHandler(async (req, { params, orgId }) => {
   const { idOrSlug } = await params;
   const sp = new URL(req.url).searchParams;
-  const product = await resolveProduct(idOrSlug, intParam(sp, "siteId"));
+  const product = await resolveProduct(idOrSlug, orgId, intParam(sp, "siteId"));
 
   // scrub references from sibling products' suggestions and add-ons
   const siblings = await db.select().from(products).where(eq(products.siteId, product.siteId));

@@ -1,7 +1,9 @@
 import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { handler, slugify } from "@/lib/api";
+import { slugify } from "@/lib/api";
+import { orgHandler } from "@/lib/auth/handler";
 import { categories, db, products, sites, type Category, type Product } from "@/lib/db";
+import { ownSites } from "@/lib/tenancy";
 import { serializeCategories, serializeProducts, uniqueCategorySlug } from "@/lib/queries";
 import { importCommitSchema } from "@/lib/validation";
 
@@ -10,7 +12,7 @@ import { importCommitSchema } from "@/lib/validation";
  * (and optionally categories). The same tempId may appear in several allocations —
  * that's the drag-to-duplicate behavior.
  */
-export const POST = handler(async (req) => {
+export const POST = orgHandler(async (req, { orgId }) => {
   const input = importCommitSchema.parse(await req.json());
 
   const itemByTempId = new Map(input.items.map((i) => [i.tempId, i]));
@@ -18,7 +20,7 @@ export const POST = handler(async (req) => {
   const siteExists = new Map<number, boolean>();
   const ensureSite = async (siteId: number): Promise<boolean> => {
     if (!siteExists.has(siteId)) {
-      const [s] = await db.select({ id: sites.id }).from(sites).where(eq(sites.id, siteId)).limit(1);
+      const [s] = await db.select({ id: sites.id }).from(sites).where(and(eq(sites.id, siteId), ownSites(orgId))).limit(1);
       siteExists.set(siteId, !!s);
     }
     return siteExists.get(siteId)!;

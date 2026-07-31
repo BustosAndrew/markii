@@ -2,7 +2,8 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { put } from "@vercel/blob";
 import { NextResponse } from "next/server";
-import { badRequest, handler } from "@/lib/api";
+import { badRequest } from "@/lib/api";
+import { orgHandler } from "@/lib/auth/handler";
 
 const MAX_BYTES = 5 * 1024 * 1024;
 const EXT_BY_TYPE: Record<string, string> = {
@@ -13,7 +14,7 @@ const EXT_BY_TYPE: Record<string, string> = {
 
 // Vercel Blob when BLOB_READ_WRITE_TOKEN is set (production); local filesystem
 // under public/uploads otherwise (dev). Both return { url } for the images array.
-export const POST = handler(async (req) => {
+export const POST = orgHandler(async (req) => {
   const form = await req.formData();
   const file = form.get("file");
   if (!(file instanceof File)) throw badRequest('multipart field "file" is required');

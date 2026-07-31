@@ -1,7 +1,9 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { badRequest, handler, intParam, notFound } from "@/lib/api";
+import { badRequest, intParam, notFound } from "@/lib/api";
+import { orgHandler } from "@/lib/auth/handler";
+import { ownSites, siteScope } from "@/lib/tenancy";
 import { categories, db, products, sites } from "@/lib/db";
 import { resolveProduct, serializeProductDetail, uniqueProductSlug } from "@/lib/queries";
 
@@ -12,16 +14,16 @@ const bodySchema = z
   })
   .default({});
 
-export const POST = handler(async (req, { params }) => {
+export const POST = orgHandler(async (req, { params, orgId }) => {
   const { idOrSlug } = await params;
   const sp = new URL(req.url).searchParams;
-  const product = await resolveProduct(idOrSlug, intParam(sp, "siteId"));
+  const product = await resolveProduct(idOrSlug, orgId, intParam(sp, "siteId"));
 
   const raw = await req.text();
   const body = bodySchema.parse(raw ? JSON.parse(raw) : undefined);
   const targetSiteId = body.siteId ?? product.siteId;
   if (targetSiteId !== product.siteId) {
-    const [site] = await db.select({ id: sites.id }).from(sites).where(eq(sites.id, targetSiteId)).limit(1);
+    const [site] = await db.select({ id: sites.id }).from(sites).where(and(eq(sites.id, targetSiteId), ownSites(orgId))).limit(1);
     if (!site) throw notFound("Target site");
   }
 
@@ -32,7 +34,7 @@ export const POST = handler(async (req, { params }) => {
     const [cat] = await db
       .select({ id: categories.id, siteId: categories.siteId })
       .from(categories)
-      .where(eq(categories.id, categoryId))
+      .where(and(eq(categories.id, categoryId), siteScope(orgId, categories.siteId)))
       .limit(1);
     if (!cat) throw notFound("Category");
     if (cat.siteId !== targetSiteId) throw badRequest("category belongs to a different site");

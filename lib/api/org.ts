@@ -2,7 +2,18 @@ import { apiDelete, apiGet, apiPatch, apiPost } from "./client";
 import { callWhenLive } from "./planned";
 
 const ORG_SECTION = "API §16";
-const ORG_API_LIVE = false;
+
+/**
+ * §16 is landing in pieces. `GET /api/me`, the org profile, and staff
+ * management are live. Audit, sessions, and scoped tokens are not built yet, so
+ * they keep failing loudly rather than returning a shape nobody wrote.
+ */
+const ME_API_LIVE = true;
+const ORG_API_LIVE = true;
+const STAFF_API_LIVE = true;
+const ORG_AUDIT_API_LIVE = false;
+const ORG_SESSIONS_API_LIVE = false;
+const ORG_TOKENS_API_LIVE = false;
 
 export type StaffRole =
   | "owner"
@@ -84,7 +95,7 @@ export type ScopedToken = {
 };
 
 export function getMe(init?: RequestInit) {
-  return callWhenLive(ORG_API_LIVE, ORG_SECTION, () =>
+  return callWhenLive(ME_API_LIVE, ORG_SECTION, () =>
     apiGet<MeResponse>("/api/me", undefined, init),
   );
 }
@@ -105,7 +116,7 @@ export function updateOrg(
 }
 
 export function listStaff(init?: RequestInit) {
-  return callWhenLive(ORG_API_LIVE, ORG_SECTION, () =>
+  return callWhenLive(STAFF_API_LIVE, ORG_SECTION, () =>
     apiGet<{ items: StaffMember[] }>("/api/org/staff", undefined, init),
   );
 }
@@ -114,7 +125,7 @@ export function inviteStaff(
   body: { email: string; role: StaffRole; storeIds: number[] | "all" },
   init?: RequestInit,
 ) {
-  return callWhenLive(ORG_API_LIVE, ORG_SECTION, () =>
+  return callWhenLive(STAFF_API_LIVE, ORG_SECTION, () =>
     apiPost<StaffMember>("/api/org/staff/invite", body, init),
   );
 }
@@ -124,13 +135,13 @@ export function updateStaff(
   body: Partial<Pick<StaffMember, "role" | "storeIds" | "status">>,
   init?: RequestInit,
 ) {
-  return callWhenLive(ORG_API_LIVE, ORG_SECTION, () =>
+  return callWhenLive(STAFF_API_LIVE, ORG_SECTION, () =>
     apiPatch<StaffMember>(`/api/org/staff/${encodeURIComponent(id)}`, body, init),
   );
 }
 
 export function deleteStaff(id: string, init?: RequestInit) {
-  return callWhenLive(ORG_API_LIVE, ORG_SECTION, () =>
+  return callWhenLive(STAFF_API_LIVE, ORG_SECTION, () =>
     apiDelete<{ deleted: boolean; id: string }>(
       `/api/org/staff/${encodeURIComponent(id)}`,
       init,
@@ -139,19 +150,19 @@ export function deleteStaff(id: string, init?: RequestInit) {
 }
 
 export function listOrgAudit(init?: RequestInit) {
-  return callWhenLive(ORG_API_LIVE, ORG_SECTION, () =>
+  return callWhenLive(ORG_AUDIT_API_LIVE, ORG_SECTION, () =>
     apiGet<{ items: OrgAuditEntry[] }>("/api/org/audit", undefined, init),
   );
 }
 
 export function listSessions(init?: RequestInit) {
-  return callWhenLive(ORG_API_LIVE, ORG_SECTION, () =>
+  return callWhenLive(ORG_SESSIONS_API_LIVE, ORG_SECTION, () =>
     apiGet<{ items: SessionRecord[] }>("/api/org/sessions", undefined, init),
   );
 }
 
 export function revokeSession(id: string, init?: RequestInit) {
-  return callWhenLive(ORG_API_LIVE, ORG_SECTION, () =>
+  return callWhenLive(ORG_SESSIONS_API_LIVE, ORG_SECTION, () =>
     apiDelete<{ deleted: boolean; id: string }>(
       `/api/org/sessions/${encodeURIComponent(id)}`,
       init,
@@ -160,7 +171,7 @@ export function revokeSession(id: string, init?: RequestInit) {
 }
 
 export function listTokens(init?: RequestInit) {
-  return callWhenLive(ORG_API_LIVE, ORG_SECTION, () =>
+  return callWhenLive(ORG_TOKENS_API_LIVE, ORG_SECTION, () =>
     apiGet<{ items: ScopedToken[] }>("/api/org/tokens", undefined, init),
   );
 }
@@ -169,13 +180,13 @@ export function createToken(
   body: { label: string; role: StaffRole },
   init?: RequestInit,
 ) {
-  return callWhenLive(ORG_API_LIVE, ORG_SECTION, () =>
+  return callWhenLive(ORG_TOKENS_API_LIVE, ORG_SECTION, () =>
     apiPost<ScopedToken>("/api/org/tokens", body, init),
   );
 }
 
 export function deleteToken(id: string, init?: RequestInit) {
-  return callWhenLive(ORG_API_LIVE, ORG_SECTION, () =>
+  return callWhenLive(ORG_TOKENS_API_LIVE, ORG_SECTION, () =>
     apiDelete<{ deleted: boolean; id: string }>(
       `/api/org/tokens/${encodeURIComponent(id)}`,
       init,

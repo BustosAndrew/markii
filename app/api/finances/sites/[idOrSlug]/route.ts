@@ -1,6 +1,7 @@
 import { count, desc, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { handler, pagination } from "@/lib/api";
+import { pagination } from "@/lib/api";
+import { orgHandler } from "@/lib/auth/handler";
 import { db, orders, products } from "@/lib/db";
 import {
   balanceStats,
@@ -10,9 +11,9 @@ import {
   transactionFilters,
 } from "@/lib/queries";
 
-export const GET = handler(async (req, { params }) => {
+export const GET = orgHandler(async (req, { params, orgId }) => {
   const { idOrSlug } = await params;
-  const site = await resolveSite(idOrSlug);
+  const site = await resolveSite(idOrSlug, orgId);
   const sp = new URL(req.url).searchParams;
   const { page, limit, offset } = pagination(sp);
 
@@ -31,7 +32,7 @@ export const GET = handler(async (req, { params }) => {
     .limit(limit)
     .offset(offset);
 
-  const balances = await balanceStats({ siteId: site.id });
+  const balances = await balanceStats({ orgId, siteId: site.id });
 
   return NextResponse.json({
     site: siteRef(site),

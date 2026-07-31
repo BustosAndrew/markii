@@ -1,18 +1,14 @@
 import type { UsageResponse } from "@/lib/api/billing";
 import { ComingSoon } from "@/components/ui/coming-soon";
+import { formatMinor } from "@/lib/api/money";
 import { cn } from "@/lib/utils";
 
-function formatMinor(amount: number | null, currency: string) {
+function money(amount: number | null, currency: string) {
   if (amount === null) {
     return "Not yet measured";
   }
 
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency,
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(amount / 100);
+  return formatMinor(amount, currency);
 }
 
 export function ThresholdMeter({
@@ -98,13 +94,13 @@ export function ThresholdMeter({
             <div>
               <p className="text-muted">Trailing 12-month net sales</p>
               <p className="mt-1 text-2xl font-semibold tracking-tight text-foreground">
-                {formatMinor(usage.trailing12NetSalesMinor, usage.currency)}
+                {money(usage.trailing12NetSalesMinor, usage.currency)}
               </p>
             </div>
             <div className="text-right">
               <p className="text-muted">Threshold</p>
               <p className="mt-1 font-medium text-foreground">
-                {formatMinor(usage.thresholdMinor, usage.currency)}
+                {money(usage.thresholdMinor, usage.currency)}
               </p>
             </div>
           </div>
@@ -126,19 +122,19 @@ export function ThresholdMeter({
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <Metric
               label="This period net sales"
-              value={formatMinor(usage.periodNetSalesMinor, usage.currency)}
+              value={money(usage.periodNetSalesMinor, usage.currency)}
             />
             <Metric
               label="Fee accrued this period"
-              value={formatMinor(usage.feeAccruedMinor, usage.currency)}
+              value={money(usage.feeAccruedMinor, usage.currency)}
             />
             <Metric
               label="Billable this period"
-              value={formatMinor(usage.billableThisPeriodMinor, usage.currency)}
+              value={money(usage.billableThisPeriodMinor, usage.currency)}
             />
             <Metric
               label="Projected period fee"
-              value={formatMinor(usage.projectedPeriodFeeMinor, usage.currency)}
+              value={money(usage.projectedPeriodFeeMinor, usage.currency)}
               note={usage.projectedPeriodFeeMinor !== null ? "Projected, not owed" : undefined}
             />
           </div>
@@ -159,8 +155,8 @@ export function ThresholdMeter({
               </p>
               <p className="mt-1 text-sm leading-6 text-muted">
                 The suggested plan changes monthly price by{" "}
-                {formatMinor(usage.upgradeSuggestion.monthlyDeltaMinor, usage.currency)} and could save{" "}
-                {formatMinor(
+                {money(usage.upgradeSuggestion.monthlyDeltaMinor, usage.currency)} and could save{" "}
+                {money(
                   usage.upgradeSuggestion.projectedAnnualSavingMinor,
                   usage.currency,
                 )}{" "}

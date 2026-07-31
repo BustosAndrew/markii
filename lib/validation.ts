@@ -1,5 +1,28 @@
 import { z } from "zod";
 
+// ---------- auth (§16) ----------
+
+/**
+ * 8 characters minimum — above Supabase's default of 6. Length is the only
+ * requirement: composition rules (a digit, a symbol) measurably push people
+ * toward `Password1!` and are not worth the usability cost. The 72-byte ceiling
+ * is bcrypt's, and silently truncating past it would make a long password weaker
+ * than it looks.
+ */
+export const passwordSchema = z
+  .string()
+  .min(8, "Password must be at least 8 characters")
+  .refine((v) => new TextEncoder().encode(v).length <= 72, "Password is too long");
+
+export const credentialsSchema = z.object({
+  email: z.email().max(255),
+  password: passwordSchema,
+});
+
+export const emailOnlySchema = z.object({ email: z.email().max(255) });
+
+export const updatePasswordSchema = z.object({ password: passwordSchema });
+
 export const paymentProvidersSchema = z.object({
   x402: z.boolean(),
   stripe: z.boolean(),

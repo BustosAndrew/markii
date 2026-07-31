@@ -1,7 +1,9 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { handler, intParam, notFound } from "@/lib/api";
+import { intParam, notFound } from "@/lib/api";
+import { orgHandler } from "@/lib/auth/handler";
+import { ownSites } from "@/lib/tenancy";
 import { categories, db, products, sites } from "@/lib/db";
 import {
   resolveCategory,
@@ -17,16 +19,16 @@ const bodySchema = z
   })
   .default({ includeProducts: true });
 
-export const POST = handler(async (req, { params }) => {
+export const POST = orgHandler(async (req, { params, orgId }) => {
   const { idOrSlug } = await params;
   const sp = new URL(req.url).searchParams;
-  const category = await resolveCategory(idOrSlug, intParam(sp, "siteId"));
+  const category = await resolveCategory(idOrSlug, orgId, intParam(sp, "siteId"));
 
   const raw = await req.text();
   const { siteId, includeProducts } = bodySchema.parse(raw ? JSON.parse(raw) : undefined);
   const targetSiteId = siteId ?? category.siteId;
   if (targetSiteId !== category.siteId) {
-    const [site] = await db.select({ id: sites.id }).from(sites).where(eq(sites.id, targetSiteId)).limit(1);
+    const [site] = await db.select({ id: sites.id }).from(sites).where(and(eq(sites.id, targetSiteId), ownSites(orgId))).limit(1);
     if (!site) throw notFound("Target site");
   }
 

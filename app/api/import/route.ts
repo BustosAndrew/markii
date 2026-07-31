@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { ApiError, badRequest, handler } from "@/lib/api";
+import { ApiError, badRequest } from "@/lib/api";
+import { orgHandler } from "@/lib/auth/handler";
 import { importFromCsv, importFromUrl, type ImportResult } from "@/lib/importer";
 import { importUrlSchema } from "@/lib/validation";
 
@@ -7,7 +8,7 @@ import { importUrlSchema } from "@/lib/validation";
  * Phase 1 of the CSV/scrape popup: parse only, nothing is saved.
  * Send either multipart form-data with a `file` (CSV) or JSON `{ "url": "..." }`.
  */
-export const POST = handler(async (req) => {
+export const POST = orgHandler(async (req) => {
   const contentType = req.headers.get("content-type") ?? "";
   let result: ImportResult;
 

@@ -33,7 +33,7 @@ async function checkout(req: Request, siteSlug: string, input: unknown) {
     );
   }
 
-  const payTo = site.walletAddress ?? (await defaultWallet());
+  const payTo = site.walletAddress ?? (await defaultWallet(site.orgId));
   if (!payTo) {
     return NextResponse.json(
       { error: "store has no receiving wallet configured" },

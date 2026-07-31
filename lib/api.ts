@@ -3,7 +3,14 @@ import { ZodError } from "zod";
 
 export class ApiError extends Error {
   constructor(
-    public code: "VALIDATION_ERROR" | "NOT_FOUND" | "CONFLICT" | "IMPORT_FAILED" | "INTERNAL",
+    public code:
+      | "VALIDATION_ERROR"
+      | "UNAUTHORIZED"
+      | "FORBIDDEN"
+      | "NOT_FOUND"
+      | "CONFLICT"
+      | "IMPORT_FAILED"
+      | "INTERNAL",
     public status: number,
     message: string,
     public details?: unknown,
@@ -16,6 +23,9 @@ export const notFound = (what: string) => new ApiError("NOT_FOUND", 404, `${what
 export const conflict = (message: string) => new ApiError("CONFLICT", 409, message);
 export const badRequest = (message: string, details?: unknown) =>
   new ApiError("VALIDATION_ERROR", 400, message, details);
+export const unauthorized = (message = "Authentication required") =>
+  new ApiError("UNAUTHORIZED", 401, message);
+export const forbidden = (message: string) => new ApiError("FORBIDDEN", 403, message);
 
 export function errorResponse(e: unknown): NextResponse {
   if (e instanceof ZodError) {

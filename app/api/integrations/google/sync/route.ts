@@ -1,19 +1,21 @@
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { badRequest, handler } from "@/lib/api";
+import { badRequest } from "@/lib/api";
+import { orgHandler } from "@/lib/auth/handler";
+import { ownSites } from "@/lib/tenancy";
 import { db, products, sites } from "@/lib/db";
 import { getIntegration, upsertIntegration } from "@/lib/integrations";
 import { storefrontUrl } from "@/lib/queries";
 
 /** Push live sites' enabled products to Google Merchant Center (Content API v2.1). */
-export const POST = handler(async () => {
-  const integration = await getIntegration("google");
+export const POST = orgHandler(async (_req, { orgId }) => {
+  const integration = await getIntegration(orgId, "google");
   if (integration?.status !== "connected" || !integration.config.serviceAccountJson) {
     throw badRequest("Google Merchant Center is not connected");
   }
   const merchantId = integration.config.merchantId;
 
-  const liveSites = await db.select().from(sites).where(eq(sites.status, "live"));
+  const liveSites = await db.select().from(sites).where(and(eq(sites.status, "live"), ownSites(orgId)));
   const siteById = new Map(liveSites.map((s) => [s.id, s]));
   const rows = liveSites.length
     ? await db
@@ -60,6 +62,7 @@ export const POST = handler(async () => {
   }
 
   await upsertIntegration(
+    orgId,
     "google",
     failed > 0 && synced === 0 ? "error" : "connected",
     { ...integration.config, lastSyncAt: new Date().toISOString() },

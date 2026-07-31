@@ -1,5 +1,5 @@
 import { desc, eq } from "drizzle-orm";
-import { handler } from "@/lib/api";
+import { orgHandler } from "@/lib/auth/handler";
 import { db, orders, products } from "@/lib/db";
 import { resolveSite, serializeOrders, transactionFilters } from "@/lib/queries";
 
@@ -8,9 +8,9 @@ const csvCell = (v: unknown): string => {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 
-export const GET = handler(async (req, { params }) => {
+export const GET = orgHandler(async (req, { params, orgId }) => {
   const { idOrSlug } = await params;
-  const site = await resolveSite(idOrSlug);
+  const site = await resolveSite(idOrSlug, orgId);
   const sp = new URL(req.url).searchParams;
 
   const rows = await db
