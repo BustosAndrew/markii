@@ -112,6 +112,7 @@ Mode flag with a persistent indicator, and must never be presented as production
   slug: string,                  // used as subdomain: {slug}.markii.shop
   customDomain: string | null,
   status: "draft" | "live" | "paused",
+  themeId: "studio" | "atlas" | "noir" | "bloom", // launch storefront theme; default "studio"
   indexed: boolean,              // include in sitemap / allow crawler indexing
   agentDiscovery: boolean,       // serve llms.txt / agent.md
   purchasesEnabled: boolean,     // allow x402 checkout
@@ -125,6 +126,9 @@ Mode flag with a persistent indicator, and must never be presented as production
   updatedAt: string
 }
 ```
+
+Launch themes (`studio` · `atlas` · `noir` · `bloom`) are applied by the fixed renderer in
+`app/%5Fsites/`. They are **not** Phase D builder themes (`/api/themes` stays 🟡 PLANNED).
 
 ### Category
 
@@ -255,6 +259,7 @@ Body (only `name` required; everything else defaults):
 {
   "name": "Demo Store",
   "slug": "demo-store",            // auto-generated from name if omitted
+  "themeId": "studio",             // studio | atlas | noir | bloom; default studio
   "indexed": true,
   "agentDiscovery": true,
   "purchasesEnabled": true,
@@ -270,8 +275,8 @@ Body (only `name` required; everything else defaults):
 → **Site** (with counts and `storefrontUrl`).
 
 ### `PATCH /api/sites/:idOrSlug`
-Any subset of the `POST` fields plus `status`, `walletAddress`, `googleSiteVerification`.
-Use this for every toggle on the website slug page:
+Any subset of the `POST` fields plus `status`, `walletAddress`, `googleSiteVerification`,
+`themeId`. Use this for every toggle on the website slug page:
 
 - pause/enable site → `{ "status": "paused" }` / `{ "status": "live" }`
 - indexed toggle → `{ "indexed": false }`
@@ -310,7 +315,7 @@ Body:
 
 ```json
 {
-  "site": { "name": "Demo Store", "slug": "demo-store", "indexed": true },
+  "site": { "name": "Demo Store", "slug": "demo-store", "indexed": true, "themeId": "studio" },
   "categories": [{ "name": "Shirts", "slug": "shirts" }],
   "products": [{ "name": "Blue Tee", "slug": "blue-tee", "priceCents": 1999,
                  "description": "…", "categorySlug": "shirts", "stock": 10,

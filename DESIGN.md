@@ -137,6 +137,12 @@ No glow, no multi-layer dramatic shadows.
 - **Badges:** status palette above.
 - **AI affordances** (when contracted): typing/stream/status/avatar ring use `#C9184A` — not ChatGPT green.
 - **Empty states:** white / `#FAFAFA` / `#16161D` / logo gradient only.
+- **Drawer:** use a right-side panel for detail while keeping the parent table or page visible.
+- **Tabs:** use restrained segmented tabs for peer views like catalog sections or settings subnavs.
+- **Stepper:** use numbered progress steps for ordered flows and setup sequences.
+- **Timeline:** use a vertical rail for chronological events with status-colored nodes.
+- **Diff card:** use before/after or proposed-change comparisons without implying the change is already applied.
+- **Coming soon:** use the honest planned-state empty for any contracted API surface that is not live yet.
 - **Preview panes:** sandboxed iframe for storefront HTML; monospace panes for `llms.txt` / `agent.md`.
 
 ## AI-layer patterns (readiness, channels, test lab)
