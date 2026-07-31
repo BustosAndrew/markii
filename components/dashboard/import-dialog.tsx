@@ -442,10 +442,10 @@ export function ImportDialog({
             <Button
               onClick={() => {
                 handleClose();
-                router.push("/dashboard/inventory");
+                router.push("/dashboard/catalog");
               }}
             >
-              View inventory
+              View catalog
             </Button>
           ) : null}
         </div>

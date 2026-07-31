@@ -112,6 +112,7 @@ export async function serializeSites(list: Site[]) {
   }
   return list.map((s) => ({
     ...s,
+    themeId: s.themeId ?? "studio",
     productCount: prodCounts.get(s.id) ?? 0,
     categoryCount: catCounts.get(s.id) ?? 0,
     storefrontUrl: storefrontUrl(s),

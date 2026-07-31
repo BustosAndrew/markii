@@ -1,17 +1,21 @@
 import type { Product as SchemaProduct, WithContext } from "schema-dts";
 import { slugify, tenantBaseUrl } from "@/lib/api";
 import type { Category, Product, Site } from "@/lib/db";
+import { getTheme, themeStylesheet } from "@/lib/storefront/themes";
 
 /**
  * A site + catalog snapshot every generator works from. Built either from the DB
  * (saved sites) or from the create-site wizard's draft payload (unsaved).
  */
+export type ThemeId = "studio" | "atlas" | "noir" | "bloom";
+
 export type Bundle = {
   site: {
     name: string;
     slug: string;
     description?: string | null;
     indexed?: boolean;
+    themeId?: ThemeId;
     googleSiteVerification?: string | null;
   };
   categories: {
@@ -40,6 +44,7 @@ export function bundleFromDb(site: Site, cats: Category[], prods: Product[]): Bu
       name: site.name,
       slug: site.slug,
       indexed: site.indexed,
+      themeId: (site.themeId as ThemeId | undefined) ?? "studio",
       googleSiteVerification: site.googleSiteVerification,
     },
     categories: cats
@@ -224,27 +229,24 @@ ${urls.map((u) => `  <url><loc>${escapeHtml(u)}</loc></url>`).join("\n")}
 
 // ---------- crawler-friendly HTML (storefront landing / preview) ----------
 
-const HTML_STYLE = `body{font-family:system-ui,sans-serif;margin:0;background:#fff;color:#111;line-height:1.5}
-main{max-width:960px;margin:0 auto;padding:2rem 1rem}header{border-bottom:1px solid #eee;padding:1rem}
-header a{color:#111;text-decoration:none;font-weight:700;font-size:1.25rem}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:1rem;margin-top:1rem}
-.card{border:1px solid #eee;border-radius:8px;padding:1rem}.card img{max-width:100%;border-radius:4px}
-.price{font-weight:700}.muted{color:#666;font-size:.875rem}nav a{margin-right:.75rem;color:#444}`;
-
 export function generateStorefrontHtml(bundle: Bundle, baseUrl: string): string {
   const { site, categories, products } = bundle;
+  const theme = getTheme(site.themeId);
   const nav = categories
     .filter((c) => !c.parentSlug)
-    .map((c) => `<a href="${baseUrl}/c/${escapeHtml(c.slug)}">${escapeHtml(c.name)}</a>`)
+    .map(
+      (c) =>
+        `<a href="${baseUrl}/c/${escapeHtml(c.slug)}">${escapeHtml(c.name)}</a>`,
+    )
     .join("");
   const cards = products
     .map(
-      (p) => `<article class="card">
+      (p) => `<li><a class="sf-card" href="${baseUrl}/p/${escapeHtml(p.slug)}">
 ${p.images[0] ? `<img src="${escapeHtml(p.images[0])}" alt="${escapeHtml(p.name)}" loading="lazy">` : ""}
-<h2><a href="${baseUrl}/p/${escapeHtml(p.slug)}">${escapeHtml(p.name)}</a></h2>
-<p class="price">${formatPrice(p.priceCents, p.currency)}</p>
-<p class="muted">${p.stock > 0 ? `${p.stock} in stock` : "Out of stock"}</p>
-</article>`,
+<h2>${escapeHtml(p.name)}</h2>
+<p class="sf-price">${formatPrice(p.priceCents, p.currency)}</p>
+<p class="sf-muted">${p.stock > 0 ? `${p.stock} in stock` : "Out of stock"}</p>
+</a></li>`,
     )
     .join("\n");
   return `<!doctype html>
@@ -256,17 +258,22 @@ ${p.images[0] ? `<img src="${escapeHtml(p.images[0])}" alt="${escapeHtml(p.name)
 ${site.indexed === false ? `<meta name="robots" content="noindex">` : ""}
 ${site.googleSiteVerification ? `<meta name="google-site-verification" content="${escapeHtml(site.googleSiteVerification)}">` : ""}
 <meta name="description" content="${escapeHtml(strip(site.description) || `${site.name} — agent-friendly store`)}">
-<style>${HTML_STYLE}</style>
+<style>${themeStylesheet(theme)}</style>
 </head>
 <body>
-<header><a href="${baseUrl}/">${escapeHtml(site.name)}</a> <nav>${nav}</nav></header>
-<main>
-<h1>${escapeHtml(site.name)}</h1>
-<p class="muted">Agent-readable store — see <a href="${baseUrl}/llms.txt">llms.txt</a> and <a href="${baseUrl}/agent.md">agent.md</a>.</p>
-<div class="grid">
+<div class="sf-shell" data-theme="${theme.id}">
+<header class="sf-header"><div class="sf-header-inner">
+<a class="sf-brand" href="${baseUrl}/">${escapeHtml(site.name)}</a>
+<nav class="sf-nav">${nav}</nav>
+</div></header>
+<main class="sf-main">
+<h1 class="sf-title">${escapeHtml(site.name)}</h1>
+<p class="sf-lede">Agent-readable store — see <a href="${baseUrl}/llms.txt">llms.txt</a> and <a href="${baseUrl}/agent.md">agent.md</a>.</p>
+<ul class="sf-grid">
 ${cards}
-</div>
+</ul>
 </main>
+</div>
 </body>
 </html>`;
 }

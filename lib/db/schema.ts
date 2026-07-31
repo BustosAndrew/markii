@@ -24,6 +24,11 @@ export const sites = pgTable(
     status: text("status", { enum: ["draft", "live", "paused"] })
       .notNull()
       .default("draft"),
+    themeId: text("theme_id", {
+      enum: ["studio", "atlas", "noir", "bloom"],
+    })
+      .notNull()
+      .default("studio"),
     indexed: boolean("indexed").notNull().default(true),
     agentDiscovery: boolean("agent_discovery").notNull().default(true),
     purchasesEnabled: boolean("purchases_enabled").notNull().default(true),

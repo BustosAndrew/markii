@@ -1,5 +1,16 @@
 export type SiteStatus = "draft" | "live" | "paused";
 
+export type ThemeId = "studio" | "atlas" | "noir" | "bloom";
+
+export const THEME_IDS: ThemeId[] = ["studio", "atlas", "noir", "bloom"];
+
+export const THEME_LABELS: Record<ThemeId, string> = {
+  studio: "Studio",
+  atlas: "Atlas",
+  noir: "Noir",
+  bloom: "Bloom",
+};
+
 export type ApiErrorCode =
   | "VALIDATION_ERROR"
   | "NOT_FOUND"
@@ -28,6 +39,7 @@ export type Site = {
   slug: string;
   customDomain: string | null;
   status: SiteStatus;
+  themeId: ThemeId;
   indexed: boolean;
   agentDiscovery: boolean;
   purchasesEnabled: boolean;

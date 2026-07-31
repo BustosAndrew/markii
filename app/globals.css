@@ -174,3 +174,171 @@ body {
     animation: none;
   }
 }
+
+/* Storefront themes — tokens set inline on .sf-shell */
+.sf-shell a {
+  color: inherit;
+}
+.sf-header {
+  border-bottom: 1px solid var(--sf-border);
+  padding: 1rem 1.25rem;
+}
+.sf-header-inner {
+  max-width: var(--sf-max);
+  margin: 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 1rem 1.5rem;
+}
+.sf-brand {
+  font-family: var(--sf-font-display);
+  font-weight: 700;
+  font-size: 1.35rem;
+  text-decoration: none;
+  letter-spacing: -0.02em;
+}
+.sf-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  font-size: 0.9rem;
+  color: var(--sf-muted);
+}
+.sf-nav a {
+  text-decoration: none;
+}
+.sf-nav a:hover {
+  color: var(--sf-fg);
+}
+.sf-main {
+  max-width: var(--sf-max);
+  margin: 0 auto;
+  padding: 2rem 1.25rem 4rem;
+}
+.sf-title {
+  font-family: var(--sf-font-display);
+  font-size: clamp(1.75rem, 4vw, 2.75rem);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  margin: 0 0 0.75rem;
+}
+.sf-lede {
+  color: var(--sf-muted);
+  max-width: 36rem;
+  margin: 0 0 1.5rem;
+}
+.sf-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--sf-grid-min), 1fr));
+  gap: 1rem;
+  list-style: none;
+  padding: 0;
+  margin: 1.5rem 0 0;
+}
+.sf-card {
+  display: block;
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  padding: var(--sf-card-pad);
+  text-decoration: none;
+  color: inherit;
+  height: 100%;
+}
+.sf-card img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: calc(var(--sf-radius) * 0.5);
+  margin-bottom: 0.75rem;
+  background: var(--sf-border);
+}
+.sf-card h2 {
+  font-family: var(--sf-font-display);
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin: 0 0 0.35rem;
+  letter-spacing: -0.02em;
+}
+.sf-price {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.sf-muted {
+  color: var(--sf-muted);
+  font-size: 0.875rem;
+}
+.sf-crumb {
+  font-size: 0.875rem;
+  color: var(--sf-muted);
+  margin: 0 0 1rem;
+}
+.sf-crumb a {
+  color: inherit;
+}
+.sf-product-media {
+  display: grid;
+  gap: 0.5rem;
+  margin: 1rem 0 1.5rem;
+}
+.sf-product-media img {
+  max-width: 100%;
+  border-radius: var(--sf-radius);
+  background: var(--sf-border);
+}
+.sf-buy {
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  padding: 1rem;
+  overflow-x: auto;
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+  margin: 1rem 0;
+}
+.sf-btn {
+  display: inline-block;
+  background: var(--sf-accent);
+  color: var(--sf-accent-text);
+  padding: 0.65rem 1.1rem;
+  border-radius: var(--sf-radius);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.9rem;
+  border: none;
+}
+.sf-list {
+  list-style: none;
+  padding: 0;
+  margin: 1rem 0 0;
+}
+.sf-list li {
+  border-bottom: 1px solid var(--sf-border);
+  padding: 0.85rem 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  justify-content: space-between;
+  align-items: baseline;
+}
+[data-theme="atlas"] .sf-card h2 {
+  font-family: ui-monospace, monospace;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+[data-theme="atlas"] .sf-price {
+  font-family: ui-monospace, monospace;
+}
+[data-theme="studio"] .sf-main {
+  padding-top: 3rem;
+}
+[data-theme="noir"] .sf-card {
+  background: transparent;
+}
+[data-theme="bloom"] .sf-btn {
+  border-radius: 999px;
+}

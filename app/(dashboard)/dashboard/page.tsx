@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { getOverview } from "@/lib/api/server";
+import { getReadinessOverview, type ReadinessReport } from "@/lib/api/readiness";
+import { isPlannedError } from "@/lib/api/planned";
 import { ApiClientError } from "@/lib/api/types";
+import { ReadinessCard } from "@/components/dashboard/readiness-card";
 import { ButtonLink } from "@/components/ui/button";
 import { BarChart, DaySparkBars, Sparkline } from "@/components/ui/charts";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -11,6 +14,9 @@ import { OverviewError } from "./overview-error";
 export default async function DashboardOverviewPage() {
   let data: Awaited<ReturnType<typeof getOverview>> | null = null;
   let errorMessage: string | null = null;
+  let readinessReport: ReadinessReport | null = null;
+  let readinessPlanned = false;
+  let readinessError: string | null = null;
 
   try {
     data = await getOverview();
@@ -21,6 +27,18 @@ export default async function DashboardOverviewPage() {
       errorMessage = err.message;
     } else {
       errorMessage = "Could not reach the overview API.";
+    }
+  }
+
+  try {
+    readinessReport = await getReadinessOverview();
+  } catch (err) {
+    if (isPlannedError(err)) {
+      readinessPlanned = true;
+    } else if (err instanceof Error) {
+      readinessError = err.message;
+    } else {
+      readinessError = "Could not reach the readiness API.";
     }
   }
 
@@ -76,10 +94,16 @@ export default async function DashboardOverviewPage() {
               detail={`${data.finances.orderCount} settled ${
                 data.finances.orderCount === 1 ? "order" : "orders"
               }`}
-              href="/dashboard/finances"
+              href="/dashboard/orders/settlements"
             />
             <CreateSiteCard />
           </div>
+
+          <ReadinessCard
+            report={readinessReport}
+            planned={readinessPlanned}
+            error={readinessError}
+          />
 
           <div className="grid gap-4 lg:grid-cols-3">
             <section className="rounded-[var(--radius-card)] border border-border bg-surface p-5 shadow-[var(--shadow-sm)] lg:col-span-2">
@@ -117,10 +141,10 @@ export default async function DashboardOverviewPage() {
                 Balance by site
               </h2>
               <Link
-                href="/dashboard/finances"
+                href="/dashboard/orders/settlements"
                 className="text-sm text-muted hover:text-brand"
               >
-                All finances →
+                All settlements →
               </Link>
             </div>
             {topBalanceSites.length === 0 ? (
@@ -133,7 +157,7 @@ export default async function DashboardOverviewPage() {
                 {topBalanceSites.map((site) => (
                   <li key={site.siteId}>
                     <Link
-                      href={`/dashboard/finances/${site.siteSlug}`}
+                      href={`/dashboard/orders/settlements/${site.siteSlug}`}
                       className="-mx-2 flex items-center justify-between gap-3 rounded-[var(--radius-control)] px-2 py-2.5 hover:bg-hover-soft"
                     >
                       <span className="truncate text-sm font-medium text-foreground">

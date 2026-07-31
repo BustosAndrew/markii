@@ -91,7 +91,7 @@ export default async function WebsiteDetailPage({
               ? `${summary.purchases.last7d} in the last 7 days`
               : "Unavailable"
           }
-          href={`/dashboard/finances/${site.slug}`}
+          href={`/dashboard/orders/settlements/${site.slug}`}
         />
         <SummaryCard
           label="Balance"
@@ -112,7 +112,7 @@ export default async function WebsiteDetailPage({
               "Unavailable"
             )
           }
-          href={`/dashboard/finances/${site.slug}`}
+          href={`/dashboard/orders/settlements/${site.slug}`}
         />
       </div>
 

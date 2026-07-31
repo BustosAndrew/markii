@@ -349,7 +349,7 @@ export function ProductForm({
             setBusy(true);
             try {
               await deleteProduct(product.slug, { siteId: product.siteId });
-              router.push("/dashboard/inventory");
+              router.push("/dashboard/catalog");
               router.refresh();
             } catch (err) {
               setError(

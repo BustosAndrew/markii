@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
+import { ProductCard } from "@/components/storefront/product-card";
+import { SiteHeader } from "@/components/storefront/site-header";
+import { StorePaused } from "@/components/storefront/paused";
+import { ThemeRoot } from "@/components/storefront/theme-root";
 import { logTraffic } from "@/lib/agents";
-import { formatPrice } from "@/lib/generators";
 import { loadSite } from "@/lib/storefront";
 
 type Props = { params: Promise<{ site: string }> };
@@ -24,53 +27,51 @@ export default async function StorePage({ params }: Props) {
   const data = await loadSite((await params).site);
   if (!data) notFound();
   const { site, bundle, baseUrl } = data;
+  const themeId = site.themeId ?? "studio";
 
   if (site.status === "paused") {
-    return (
-      <main style={{ fontFamily: "system-ui", background: "#fff", color: "#111", minHeight: "100vh", padding: "4rem 1rem", textAlign: "center" }}>
-        <h1>{site.name}</h1>
-        <p>This store is temporarily paused. Please check back later.</p>
-      </main>
-    );
+    return <StorePaused siteName={site.name} themeId={themeId} />;
   }
 
-  await logTraffic({ siteId: site.id, path: "/", userAgent: (await headers()).get("user-agent") });
+  await logTraffic({
+    siteId: site.id,
+    path: "/",
+    userAgent: (await headers()).get("user-agent"),
+  });
 
   const topCategories = bundle.categories.filter((c) => !c.parentSlug);
+
   return (
-    <main style={{ fontFamily: "system-ui", background: "#fff", color: "#111", minHeight: "100vh", padding: "2rem 1rem", maxWidth: 960, margin: "0 auto" }}>
-      <h1>{site.name}</h1>
-      <p>
-        Agent-readable store — see <a href={`${baseUrl}/llms.txt`}>llms.txt</a> and{" "}
-        <a href={`${baseUrl}/agent.md`}>agent.md</a>.
-      </p>
-      {topCategories.length > 0 && (
-        <nav>
-          {topCategories.map((c) => (
-            <a key={c.slug} href={`${baseUrl}/c/${c.slug}`} style={{ marginRight: "0.75rem" }}>
-              {c.name}
-            </a>
+    <ThemeRoot themeId={themeId}>
+      <SiteHeader
+        siteName={site.name}
+        homeHref={`${baseUrl}/`}
+        nav={topCategories.map((c) => ({
+          name: c.name,
+          href: `${baseUrl}/c/${c.slug}`,
+        }))}
+      />
+      <main className="sf-main">
+        <h1 className="sf-title">{site.name}</h1>
+        <p className="sf-lede">
+          Agent-readable store — see{" "}
+          <a href={`${baseUrl}/llms.txt`}>llms.txt</a> and{" "}
+          <a href={`${baseUrl}/agent.md`}>agent.md</a>.
+        </p>
+        <ul className="sf-grid">
+          {bundle.products.map((p) => (
+            <ProductCard
+              key={p.slug}
+              name={p.name}
+              href={`${baseUrl}/p/${p.slug}`}
+              priceCents={p.priceCents}
+              currency={p.currency}
+              stock={p.stock}
+              imageUrl={p.images[0]}
+            />
           ))}
-        </nav>
-      )}
-      <ul style={{ listStyle: "none", padding: 0, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: "1rem" }}>
-        {bundle.products.map((p) => (
-          <li key={p.slug} style={{ border: "1px solid #eee", borderRadius: 8, padding: "1rem" }}>
-            {p.images[0] && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={p.images[0]} alt={p.name} loading="lazy" style={{ maxWidth: "100%", borderRadius: 4 }} />
-            )}
-            <h2 style={{ fontSize: "1rem" }}>
-              <a href={`${baseUrl}/p/${p.slug}`}>{p.name}</a>
-            </h2>
-            <p>
-              <strong>{formatPrice(p.priceCents, p.currency)}</strong>
-              {" — "}
-              {p.stock > 0 ? `${p.stock} in stock` : "out of stock"}
-            </p>
-          </li>
-        ))}
-      </ul>
-    </main>
+        </ul>
+      </main>
+    </ThemeRoot>
   );
 }

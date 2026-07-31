@@ -4,11 +4,13 @@ export function EmptyState({
   title,
   description,
   action,
+  children,
   className,
 }: {
   title: string;
   description?: string;
   action?: React.ReactNode;
+  children?: React.ReactNode;
   className?: string;
 }) {
   return (
@@ -22,6 +24,7 @@ export function EmptyState({
       {description ? (
         <p className="mt-2 max-w-md text-sm leading-6 text-muted">{description}</p>
       ) : null}
+      {children ? <div className="mt-3 text-sm text-muted">{children}</div> : null}
       {action ? <div className="mt-6">{action}</div> : null}
     </div>
   );

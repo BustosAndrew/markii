@@ -2,6 +2,7 @@ import { listCategories } from "@/lib/api/server";
 import { getProduct } from "@/lib/api/server";
 import { listSites } from "@/lib/api/server";
 import { firstParam, loadOrError } from "@/lib/api/load";
+import { ComingSoon } from "@/components/ui/coming-soon";
 import { PageHeader } from "@/components/ui/page-header";
 import { FetchError } from "@/components/dashboard/fetch-error";
 import { ProductForm } from "@/components/dashboard/product-form";
@@ -64,6 +65,13 @@ export default async function ProductDetailPage({
         sites={sites}
         categories={categories}
       />
+      <div className="mt-6">
+        <ComingSoon
+          title="Variants are planned"
+          description="Variant matrices, option regeneration, and location-aware inventory will appear here when API §18 is live."
+          apiSection="API §18 · Commerce core (variants and inventory)"
+        />
+      </div>
     </div>
   );
 }

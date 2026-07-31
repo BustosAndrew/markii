@@ -12,7 +12,14 @@ import {
 import { createCategory } from "@/lib/api/categories";
 import { createProduct } from "@/lib/api/products";
 import { createSite, deploySite } from "@/lib/api/sites";
-import { ApiClientError, type Site } from "@/lib/api/types";
+import {
+  ApiClientError,
+  THEME_IDS,
+  THEME_LABELS,
+  type Site,
+  type ThemeId,
+} from "@/lib/api/types";
+import { THEMES } from "@/lib/storefront/themes";
 import { formatCents } from "@/lib/api/money";
 import type { ImportedCategory, ImportedItem } from "@/lib/api/import";
 import { Button } from "@/components/ui/button";
@@ -32,7 +39,7 @@ function slugify(value: string) {
 }
 
 const emptyDraft: PreviewDraft = {
-  site: { name: "", slug: "", indexed: true },
+  site: { name: "", slug: "", indexed: true, themeId: "studio" },
   categories: [],
   products: [],
 };
@@ -70,6 +77,7 @@ export function CreateWebsiteWizard({ sites }: { sites: Site[] }) {
         name,
         slug: draft.site.slug?.trim() || slugify(name),
         indexed: draft.site.indexed ?? true,
+        themeId: draft.site.themeId ?? "studio",
       },
     } satisfies PreviewDraft;
   }, [draft]);
@@ -197,6 +205,7 @@ export function CreateWebsiteWizard({ sites }: { sites: Site[] }) {
       const site = await createSite({
         name,
         slug: draft.site.slug?.trim() || slugify(name),
+        themeId: draft.site.themeId ?? "studio",
         indexed: draft.site.indexed ?? true,
         agentDiscovery: true,
         purchasesEnabled: true,
@@ -479,6 +488,40 @@ export function CreateWebsiteWizard({ sites }: { sites: Site[] }) {
               Subdomain: {(draft.site.slug || "your-site")}.markii.app
             </p>
           </div>
+          <fieldset>
+            <legend className="mb-2 text-sm font-medium text-foreground">
+              Theme
+            </legend>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {THEME_IDS.map((id) => {
+                const selected = (draft.site.themeId ?? "studio") === id;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() =>
+                      setDraft((prev) => ({
+                        ...prev,
+                        site: { ...prev.site, themeId: id as ThemeId },
+                      }))
+                    }
+                    className={`rounded-[var(--radius-control)] border px-3 py-3 text-left transition-colors ${
+                      selected
+                        ? "border-brand bg-hover-soft"
+                        : "border-border bg-surface hover:bg-hover-soft"
+                    }`}
+                  >
+                    <span className="block text-sm font-medium text-foreground">
+                      {THEME_LABELS[id]}
+                    </span>
+                    <span className="mt-0.5 block text-xs text-muted">
+                      {THEMES[id].description}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </fieldset>
           <div className="rounded-[var(--radius-card)] border border-border px-4">
             <Toggle
               label="Indexed"

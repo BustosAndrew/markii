@@ -3,7 +3,14 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { deleteSite, deploySite, updateSite } from "@/lib/api/sites";
-import { ApiClientError, type Site } from "@/lib/api/types";
+import {
+  ApiClientError,
+  THEME_IDS,
+  THEME_LABELS,
+  type Site,
+  type ThemeId,
+} from "@/lib/api/types";
+import { THEMES } from "@/lib/storefront/themes";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { FieldError, Input, Label } from "@/components/ui/field";
@@ -38,6 +45,25 @@ export function SiteControls({ site }: { site: Site }) {
 
   return (
     <div className="space-y-6">
+      <section className="rounded-[var(--radius-card)] border border-border bg-surface p-5">
+        <Label htmlFor="theme-id">Storefront theme</Label>
+        <select
+          id="theme-id"
+          className="mt-1.5 w-full rounded-[var(--radius-control)] border border-border bg-surface px-3 py-2.5 text-sm text-foreground"
+          value={current.themeId ?? "studio"}
+          disabled={busy}
+          onChange={(e) =>
+            void patch({ themeId: e.target.value as ThemeId })
+          }
+        >
+          {THEME_IDS.map((id) => (
+            <option key={id} value={id}>
+              {THEME_LABELS[id]} — {THEMES[id].description}
+            </option>
+          ))}
+        </select>
+      </section>
+
       <section className="rounded-[var(--radius-card)] border border-border bg-surface px-5">
         <Toggle
           label="Agent discovery"

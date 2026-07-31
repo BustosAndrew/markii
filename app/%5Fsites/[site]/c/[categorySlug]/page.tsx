@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
+import { SiteHeader } from "@/components/storefront/site-header";
+import { ThemeRoot } from "@/components/storefront/theme-root";
 import { logTraffic } from "@/lib/agents";
 import { formatPrice } from "@/lib/generators";
 import { loadSite } from "@/lib/storefront";
@@ -22,7 +24,7 @@ export default async function CategoryPage({ params }: Props) {
   const { site: siteSlug, categorySlug } = await params;
   const data = await loadSite(siteSlug);
   if (!data) notFound();
-  const { site, cats, prods, baseUrl } = data;
+  const { site, cats, prods, bundle, baseUrl } = data;
   const category = cats.find((c) => c.slug === categorySlug && c.enabled);
   if (!category || site.status === "paused") notFound();
 
@@ -37,32 +39,53 @@ export default async function CategoryPage({ params }: Props) {
   const items = prods.filter(
     (p) => p.enabled && p.categoryId != null && categoryIds.includes(p.categoryId),
   );
+  const topCategories = bundle.categories.filter((c) => !c.parentSlug);
+  const themeId = site.themeId ?? "studio";
 
   return (
-    <main style={{ fontFamily: "system-ui", background: "#fff", color: "#111", minHeight: "100vh", padding: "2rem 1rem", maxWidth: 960, margin: "0 auto" }}>
-      <p>
-        <a href={`${baseUrl}/`}>{site.name}</a> / {category.name}
-      </p>
-      <h1>{category.name}</h1>
-      {category.description && <p>{category.description}</p>}
-      {children.length > 0 && (
-        <nav>
-          {children.map((c) => (
-            <a key={c.slug} href={`${baseUrl}/c/${c.slug}`} style={{ marginRight: "0.75rem" }}>
-              {c.name}
-            </a>
+    <ThemeRoot themeId={themeId}>
+      <SiteHeader
+        siteName={site.name}
+        homeHref={`${baseUrl}/`}
+        nav={topCategories.map((c) => ({
+          name: c.name,
+          href: `${baseUrl}/c/${c.slug}`,
+        }))}
+      />
+      <main className="sf-main">
+        <p className="sf-crumb">
+          <a href={`${baseUrl}/`}>{site.name}</a> / {category.name}
+        </p>
+        <h1 className="sf-title">{category.name}</h1>
+        {category.description ? (
+          <p className="sf-lede">{category.description}</p>
+        ) : null}
+        {children.length > 0 ? (
+          <nav className="sf-nav" aria-label="Subcategories">
+            {children.map((c) => (
+              <a key={c.slug} href={`${baseUrl}/c/${c.slug}`}>
+                {c.name}
+              </a>
+            ))}
+          </nav>
+        ) : null}
+        <ul className="sf-list">
+          {items.map((p) => (
+            <li key={p.id}>
+              <a href={`${baseUrl}/p/${p.slug}`}>{p.name}</a>
+              <span>
+                <strong className="sf-price">
+                  {formatPrice(p.priceCents, p.currency)}
+                </strong>
+                <span className="sf-muted">
+                  {" "}
+                  — {p.stock > 0 ? `${p.stock} in stock` : "out of stock"}
+                </span>
+              </span>
+            </li>
           ))}
-        </nav>
-      )}
-      <ul style={{ listStyle: "none", padding: 0 }}>
-        {items.map((p) => (
-          <li key={p.id} style={{ borderBottom: "1px solid #eee", padding: "0.75rem 0" }}>
-            <a href={`${baseUrl}/p/${p.slug}`}>{p.name}</a> —{" "}
-            <strong>{formatPrice(p.priceCents, p.currency)}</strong> —{" "}
-            {p.stock > 0 ? `${p.stock} in stock` : "out of stock"}
-          </li>
-        ))}
-      </ul>
-    </main>
+        </ul>
+      </main>
+    </ThemeRoot>
   );
 }

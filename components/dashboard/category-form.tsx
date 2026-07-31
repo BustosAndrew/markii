@@ -248,7 +248,7 @@ export function CategoryForm({
             setBusy(true);
             try {
               await deleteCategory(category.slug, { siteId: category.siteId });
-              router.push("/dashboard/categories");
+              router.push("/dashboard/catalog?tab=categories");
               router.refresh();
             } catch (err) {
               setError(

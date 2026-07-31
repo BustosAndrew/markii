@@ -1,4 +1,5 @@
 import { apiGet, apiPost } from "./client";
+import type { ThemeId } from "./types";
 
 export type PreviewDraftProduct = {
   name: string;
@@ -16,7 +17,12 @@ export type PreviewDraftCategory = {
 };
 
 export type PreviewDraft = {
-  site: { name: string; slug?: string; indexed?: boolean };
+  site: {
+    name: string;
+    slug?: string;
+    indexed?: boolean;
+    themeId?: ThemeId;
+  };
   categories: PreviewDraftCategory[];
   products: PreviewDraftProduct[];
 };

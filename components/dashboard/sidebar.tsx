@@ -4,23 +4,29 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   BarChart3,
-  Boxes,
-  FolderTree,
   Globe,
+  LayoutList,
   LayoutGrid,
+  Percent,
   Plug,
-  Wallet,
+  Settings,
+  ShieldCheck,
+  ShoppingBag,
+  Users,
 } from "lucide-react";
 import { Logo } from "@/components/logo";
 import { cn } from "@/lib/utils";
 
 const nav = [
   { href: "/dashboard", label: "Overview", icon: LayoutGrid },
-  { href: "/dashboard/inventory", label: "Inventory", icon: Boxes },
-  { href: "/dashboard/categories", label: "Categories", icon: FolderTree },
+  { href: "/dashboard/catalog", label: "Catalog", icon: ShoppingBag },
+  { href: "/dashboard/orders", label: "Orders", icon: LayoutList },
+  { href: "/dashboard/customers", label: "Customers", icon: Users },
+  { href: "/dashboard/discounts", label: "Discounts", icon: Percent },
   { href: "/dashboard/websites", label: "Websites", icon: Globe },
   { href: "/dashboard/analytics", label: "Analytics", icon: BarChart3 },
-  { href: "/dashboard/finances", label: "Finances", icon: Wallet },
+  { href: "/dashboard/settings", label: "Settings", icon: Settings },
+  { href: "/dashboard/health", label: "Health", icon: ShieldCheck },
   { href: "/dashboard/integrations", label: "Integrations", icon: Plug },
 ] as const;
 
@@ -69,6 +75,17 @@ export function DashboardSidebar() {
           );
         })}
       </nav>
+      <div className="border-t border-border p-3">
+        <div className="rounded-[var(--radius-card)] border border-dashed border-border bg-surface-elevated p-3">
+          <p className="text-xs font-medium uppercase tracking-[0.12em] text-muted">
+            Organization
+          </p>
+          <p className="mt-2 text-sm font-medium text-foreground">Single workspace</p>
+          <p className="mt-1 text-sm leading-6 text-muted">
+            Org switching is coming soon with Phase A auth.
+          </p>
+        </div>
+      </div>
     </aside>
   );
 }

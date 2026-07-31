@@ -13,11 +13,14 @@ const slugSchema = z
 
 // ---------- sites ----------
 
+export const themeIdSchema = z.enum(["studio", "atlas", "noir", "bloom"]);
+
 export const siteCreateSchema = z.object({
   name: z.string().min(1).max(200),
   slug: slugSchema.optional(),
   customDomain: z.string().max(255).nullish(),
   status: z.enum(["draft", "live", "paused"]).optional(),
+  themeId: themeIdSchema.optional(),
   indexed: z.boolean().optional(),
   agentDiscovery: z.boolean().optional(),
   purchasesEnabled: z.boolean().optional(),
@@ -94,6 +97,7 @@ export const previewSchema = z.object({
     slug: slugSchema.optional(),
     description: z.string().nullish(),
     indexed: z.boolean().default(true),
+    themeId: themeIdSchema.default("studio"),
   }),
   categories: z.array(bundleCategorySchema).default([]),
   products: z.array(bundleProductSchema).default([]),
