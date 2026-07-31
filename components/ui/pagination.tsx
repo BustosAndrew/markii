@@ -40,7 +40,7 @@ export function Pagination({
         {page > 1 ? (
           <Link
             href={hrefFor(page - 1)}
-            className="rounded-[var(--radius-control)] border border-border bg-surface px-3 py-1.5 text-foreground hover:bg-hover-soft"
+            className="cursor-pointer rounded-[var(--radius-control)] border border-border bg-surface px-3 py-1.5 text-foreground hover:bg-hover"
           >
             Previous
           </Link>
@@ -48,7 +48,7 @@ export function Pagination({
         {page < totalPages ? (
           <Link
             href={hrefFor(page + 1)}
-            className="rounded-[var(--radius-control)] border border-border bg-surface px-3 py-1.5 text-foreground hover:bg-hover-soft"
+            className="cursor-pointer rounded-[var(--radius-control)] border border-border bg-surface px-3 py-1.5 text-foreground hover:bg-hover"
           >
             Next
           </Link>

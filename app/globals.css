@@ -74,6 +74,34 @@ body {
   font-family: var(--font-sans), system-ui, sans-serif;
 }
 
+/* Interactive affordance — Tailwind preflight leaves buttons on the default arrow. */
+a[href],
+button:not(:disabled),
+summary,
+label[for],
+select:not(:disabled),
+input[type="button"]:not(:disabled),
+input[type="submit"]:not(:disabled),
+input[type="reset"]:not(:disabled),
+input[type="checkbox"]:not(:disabled),
+input[type="radio"]:not(:disabled),
+input[type="file"]:not(:disabled),
+[role="button"]:not([aria-disabled="true"]),
+[role="tab"]:not([aria-disabled="true"]),
+[role="switch"]:not(:disabled),
+[role="menuitem"],
+[role="option"] {
+  cursor: pointer;
+}
+
+button:disabled,
+select:disabled,
+input:disabled,
+[aria-disabled="true"],
+[role="button"][aria-disabled="true"] {
+  cursor: not-allowed;
+}
+
 .text-gradient {
   background: linear-gradient(
     100deg,

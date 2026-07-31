@@ -41,7 +41,7 @@ export function Select({
   return (
     <select
       className={cn(
-        "w-full rounded-[var(--radius-control)] border border-border bg-surface px-3 py-2.5 text-sm text-foreground outline-none transition-shadow focus:border-brand focus:ring-4 focus:ring-brand/10 disabled:bg-hover disabled:text-disabled",
+        "w-full cursor-pointer rounded-[var(--radius-control)] border border-border bg-surface px-3 py-2.5 text-sm text-foreground outline-none transition-shadow focus:border-brand focus:ring-4 focus:ring-brand/10 disabled:cursor-not-allowed disabled:bg-hover disabled:text-disabled",
         className,
       )}
       {...props}

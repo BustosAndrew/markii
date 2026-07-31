@@ -102,10 +102,10 @@ export function TabsTrigger({
       tabIndex={selected ? 0 : -1}
       onClick={() => setValue(value)}
       className={cn(
-        "rounded-[calc(var(--radius-control)-4px)] px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand/10",
+        "cursor-pointer rounded-[calc(var(--radius-control)-4px)] px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand/10",
         selected
           ? "bg-surface text-foreground shadow-[var(--shadow-sm)]"
-          : "text-muted hover:text-foreground",
+          : "text-muted hover:bg-hover-soft hover:text-foreground",
         className,
       )}
     >

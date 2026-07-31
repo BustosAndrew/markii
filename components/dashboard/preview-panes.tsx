@@ -55,9 +55,9 @@ export function PreviewPanes({
             type="button"
             onClick={() => onTabChange(tab.id)}
             className={cn(
-              "rounded-[var(--radius-control)] px-3 py-1.5 text-sm transition-colors",
+              "cursor-pointer rounded-[var(--radius-control)] px-3 py-1.5 text-sm transition-colors",
               active === tab.id
-                ? "bg-hover font-medium text-foreground"
+                ? "bg-hover font-medium text-foreground hover:bg-hover"
                 : "text-muted hover:bg-hover-soft hover:text-foreground",
             )}
           >

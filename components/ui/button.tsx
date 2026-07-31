@@ -6,10 +6,10 @@ type ButtonVariant = "primary" | "secondary" | "ghost";
 
 const variants: Record<ButtonVariant, string> = {
   primary:
-    "bg-brand text-on-brand hover:bg-brand-hover active:bg-brand-pressed shadow-[var(--shadow-sm)]",
+    "bg-brand text-on-brand hover:bg-brand-hover active:bg-brand-pressed shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)]",
   secondary:
-    "bg-surface text-foreground border border-border hover:bg-hover-soft",
-  ghost: "bg-transparent text-foreground hover:bg-hover-soft",
+    "bg-surface text-foreground border border-border hover:bg-hover hover:border-border",
+  ghost: "bg-transparent text-foreground hover:bg-hover",
 };
 
 type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
@@ -26,7 +26,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         ref={ref}
         type={type}
         className={cn(
-          "inline-flex items-center justify-center gap-2 rounded-[var(--radius-control)] px-4 py-2.5 text-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-50",
+          "inline-flex cursor-pointer items-center justify-center gap-2 rounded-[var(--radius-control)] px-4 py-2.5 text-sm font-medium transition-[color,background-color,border-color,box-shadow,opacity] disabled:cursor-not-allowed disabled:opacity-50",
           variants[variant],
           className,
         )}
@@ -48,7 +48,7 @@ export function ButtonLink({
   return (
     <Link
       className={cn(
-        "inline-flex items-center justify-center gap-2 rounded-[var(--radius-control)] px-4 py-2.5 text-sm font-medium transition-colors",
+        "inline-flex cursor-pointer items-center justify-center gap-2 rounded-[var(--radius-control)] px-4 py-2.5 text-sm font-medium transition-[color,background-color,border-color,box-shadow,opacity]",
         variants[variant],
         className,
       )}

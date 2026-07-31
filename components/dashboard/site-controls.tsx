@@ -49,7 +49,7 @@ export function SiteControls({ site }: { site: Site }) {
         <Label htmlFor="theme-id">Storefront theme</Label>
         <select
           id="theme-id"
-          className="mt-1.5 w-full rounded-[var(--radius-control)] border border-border bg-surface px-3 py-2.5 text-sm text-foreground"
+          className="mt-1.5 w-full cursor-pointer rounded-[var(--radius-control)] border border-border bg-surface px-3 py-2.5 text-sm text-foreground disabled:cursor-not-allowed"
           value={current.themeId ?? "studio"}
           disabled={busy}
           onChange={(e) =>
