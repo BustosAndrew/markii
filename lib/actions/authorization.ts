@@ -1,7 +1,7 @@
 import "server-only";
 
-import { and, eq } from "drizzle-orm";
-import { db, staff } from "../db";
+import { and, eq, isNull } from "drizzle-orm";
+import { apiTokens, db, staff } from "../db";
 import { roleHasPermission } from "../auth/permissions";
 import { setAuthorizationResolver } from "./registry";
 import type { Actor } from "./types";
@@ -23,13 +23,27 @@ async function resolve(actor: Actor, permission: string): Promise<boolean> {
 
   if (!actor.orgId) return false;
 
-  const userId =
-    actor.type === "agent" ? actor.onBehalfOfUserId : actor.type === "user" ? actor.id : null;
+  /**
+   * Scoped tokens carry their own role rather than a user's (§16: "never a
+   * user's session cookie"). A revoked token authorizes nothing, which is why
+   * `revokedAt` is re-checked here and not only at request parse time.
+   */
+  if (actor.type === "token") {
+    const [token] = await db
+      .select({ role: apiTokens.role })
+      .from(apiTokens)
+      .where(
+        and(
+          eq(apiTokens.id, actor.id),
+          eq(apiTokens.orgId, actor.orgId),
+          isNull(apiTokens.revokedAt),
+        ),
+      )
+      .limit(1);
+    return token ? roleHasPermission(token.role, permission) : false;
+  }
 
-  // Scoped tokens carry their own role rather than a user's (§16: "never a
-  // user's session cookie"). Phase A does not issue them yet, so until the
-  // token store exists the honest answer is no.
-  if (userId === null) return false;
+  const userId = actor.type === "agent" ? actor.onBehalfOfUserId : actor.id;
 
   const [member] = await db
     .select({ role: staff.role, status: staff.status })

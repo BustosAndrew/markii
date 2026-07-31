@@ -35,11 +35,11 @@ carry an explicit status — **never call a `PLANNED` endpoint and never fake it
 | 15 | Automations, activity, notifications, team | 🟡 PLANNED | E |
 | 16 | Accounts, organizations, staff | partial — `/api/auth/*`, `/api/me`, `/api/org`, `/api/org/staff*`, and **org scoping of §1–8** are ✅ LIVE; audit, sessions, tokens, MFA, org switching PLANNED | **A** |
 | 17 | Billing, plans, metering, threshold fees | 🟡 PLANNED | B |
-| 18 | Commerce core (variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping) | 🟡 PLANNED | C |
+| 18 | Commerce core (variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping) | partial — §18.1 variants & inventory ✅ LIVE (writes via §22 actions); §18.2–18.6 PLANNED | C |
 | 19 | Site builder & content | 🟡 PLANNED | D |
 | 20 | Disputes & chargebacks | 🟡 PLANNED | F |
 | 21 | Agent Ops add-on | 🟡 PLANNED | F (last) |
-| 22 | **Action registry & MCP** — agent-native architecture | 🟡 PLANNED — **primitive built** (`lib/actions/`), endpoints await §16 | **Registry: C · MCP: D** |
+| 22 | **Action registry & MCP** — agent-native architecture | ✅ LIVE (registry, invoke, dry-run, audit; 4 actions). Undo + MCP server PLANNED | **Registry: C · MCP: D** |
 
 **v3 note.** Markii is now a full commerce platform (`docs/PLAN.md` v3). §16 was a **breaking change
 to everything above it**, and as of 2026-07-31 that change has landed: **every `/api/*` route
@@ -1142,8 +1142,23 @@ delivered when no mail service is wired.
 > ✅ `sites.orgId` and `integrations.orgId` are now **`NOT NULL`** (migration `0005`, with a guard
 > that names any orphans rather than failing on a bare constraint violation).
 >
-> 🟡 **Still PLANNED:** `/api/org/audit`, `/api/org/sessions*`, `/api/org/tokens*`, MFA, and org
-> switching (the active-org cookie exists; there is no route to change it yet).
+> ✅ **Scoped API/MCP tokens are live** — `GET`/`POST /api/org/tokens`,
+> `DELETE /api/org/tokens/:id`. `Authorization: Bearer mk_live_…` authenticates any `/api/*` route,
+> with the **same permission checks as a human** (§22 rule 4) and the token's own role, never a
+> user's session. Only a SHA-256 is stored: the plaintext is returned once at creation and is
+> unrecoverable, `owner` is not a mintable role, and revocation is a soft delete so past audit
+> entries stay attributable.
+>
+> ✅ **Org switching** — `POST /api/org/switch { orgId }`. `GET /api/me` now also returns
+> `organizations: [{ id, name, slug, role, active }]` so the dashboard can render a switcher from
+> one call. Membership is re-checked server-side on every switch and every request, which is why the
+> active-org cookie is a preference rather than a credential.
+>
+> 🟡 **Still PLANNED:** `/api/org/audit`, `/api/org/sessions*`, and MFA.
+>
+> ⚠️ **`/api/org/audit` is blocked on there being anything to audit.** The `action_invocations`
+> table exists (§22), but no route mutation is defined as an action yet, so the log would be
+> permanently empty. It lands with the first Phase C actions rather than as an empty endpoint.
 
 **Blocking dependency for §17–21.** Tenancy model: `Organization → Stores → Staff`. An org owns
 billing; stores are the existing `sites`. Recommend a managed auth provider (see `docs/PLAN.md` §4).
@@ -1224,9 +1239,12 @@ Merchant accounts are now a confirmed requirement, so this is a real auth surfac
 - **Programmatic access** uses scoped tokens with an explicit role, never a user's session cookie.
   Same permission checks, same audit log; this is what MCP clients and CI use (§22).
 
-Storefront **customer** accounts (§18.3) are a completely separate identity domain — different
-users, different sessions, different store scope. Never let the two share a session, a cookie
-namespace, or a token audience.
+Storefront **customer** accounts (§18.3) are a separate identity domain — different users,
+different sessions, different store scope — but **share one Supabase project with staff** (D32), so
+`auth.users` stays joinable. Because they no longer get separate token audiences for free, three
+things are binding: authorization always resolves through a membership/`customers` lookup and never
+`auth.getUser()` alone; session cookies are host-only, never scoped to the parent domain; and
+`user_kind` is explicit on the user record rather than inferred.
 
 **Rules.** Every §1–15 route gains implicit org scoping from the session — never accept `orgId`
 from the client. Role checks are enforced **server-side**; the UI role model mirrors but never
@@ -1314,6 +1332,26 @@ shows *not yet measured*, never `0`. Trial orgs see accrual with "would have bee
 
 The gap between "catalog" and "store". Everything here is prerequisite to a real shopper checking
 out. Extends §4's Product.
+
+### 18.1 Variants & inventory — ✅ partially LIVE
+
+> **Live (2026-07-31).** Reads: `GET /api/products/:idOrSlug/variants` (matrix + option axes +
+> ledger-derived levels), `GET /api/inventory/levels` (filters: `siteId`, `productId`, `locationId`,
+> `lowStock`), `GET /api/locations`.
+>
+> **Writes go through the action registry (§22), not REST verbs** — `catalog.setProductOptions`,
+> `catalog.updateVariant`, `inventory.adjust`, `inventory.createLocation`. There is deliberately no
+> `POST /api/products/:id/variants`: a variant that does not correspond to an option combination has
+> no coherent identity, so variants are created by regenerating the matrix.
+>
+> **Regeneration preserves.** Adding a value creates only the new combinations and keeps existing
+> variants' price, SKU, and stock. Removing a value **reports orphans rather than deleting them** —
+> deleting a variant cascades away its inventory ledger, which is not a side effect an option edit
+> should have.
+>
+> Levels are always summed from the ledger, never stored. Still planned: `PATCH`/`DELETE
+> /api/variants/:id` as REST aliases, and multi-location committed-stock flows (which arrive with
+> checkout, §18.4).
 
 ### 18.1 Variants & inventory
 
@@ -1539,7 +1577,24 @@ mutations through the registry from the start avoids refactoring every one of th
 adds builder actions and the MCP server on top; Phase F adds the chat product. See
 `docs/BACKEND.md` §1.
 
-### Status — primitive built, HTTP surface pending
+### Status — ✅ LIVE (registry, invoke, dry-run, audit)
+
+**As of 2026-07-31 the registry is wired end to end.** `GET /api/actions` (filtered to what the
+caller may invoke), `POST /api/actions/:id` (with `?dryRun=1`), and `GET /api/actions/invocations`
+are live. Four actions are defined — `catalog.setProductOptions`, `catalog.updateVariant`,
+`inventory.adjust`, `inventory.createLocation` — and they are the **only** way those mutations
+happen.
+
+Verified behaviour: a dry run returns the full diff and writes nothing (not even an audit row);
+failures are audited while dry runs are not; an `analyst` token is refused a write action **and**
+does not see it in the registry listing; cross-tenant invocation is a `404`; and each org's audit
+log contains its own invocations only, including its own refused attempts.
+
+Undo (`POST /api/actions/:id/undo`) and the MCP server remain planned. `catalog.updateVariant` and
+`inventory.adjust` are marked `undoable` because their inverse is well-defined — the endpoint to
+apply it is not built yet.
+
+### Historical note — why the primitive shipped before the routes
 
 **The `defineAction` primitive exists** in [`lib/actions/`](../lib/actions/) as of 2026-07-30, with
 its audit table (`action_invocations`, migration `0001`). What it provides today:

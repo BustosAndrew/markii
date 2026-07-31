@@ -128,7 +128,8 @@ membership, MFA, isolated staff/customer identity domains, SSO headroom, machine
 (`docs/DECISIONS.md` §D3). Sessions are
 httpOnly cookies, never `localStorage` — merchant custom code runs on storefronts, and XSS there
 must never reach an admin session. Storefront **customer** accounts are a separate identity domain
-that shares nothing with staff auth. Every existing `/api/*` route becomes org-scoped: a breaking
+sharing one Supabase project with staff (D32), isolated by explicit `user_kind`, membership-lookup
+authorization, and host-only cookies rather than by a separate token audience. Every existing `/api/*` route becomes org-scoped: a breaking
 change to the current open API that must land before any public exposure.
 
 **Action layer (agent-native core).** One `defineAction` registry backs the UI, HTTP API, agent
@@ -227,8 +228,8 @@ confirm. Monitor DKIM/DMARC health per merchant and alert on breakage.
 **Shopper account mail** routes through Supabase Auth's **Send Email Hook** rather than its built-in
 SMTP, because that SMTP allows only one from-address per project. The hook hands the handler the
 user object; `store_id` in user metadata selects the merchant's verified sender, and the mail goes
-out via SES. Staff and shoppers live in **separate Supabase projects** — the hard isolation the auth
-model requires. Watch shopper MAU cost as a scaling line.
+out via SES. Staff and shoppers share **one Supabase project** (D32) — the hook, not project
+separation, is what gives each merchant its own sender. Watch shopper MAU cost as a scaling line.
 
 Transactional and marketing mail stay on separate streams with separate consent handling; they carry
 different legal obligations.

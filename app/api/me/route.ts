@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { handler } from "@/lib/api";
 import { serializeOrg } from "@/lib/auth/serialize";
-import { requireSession } from "@/lib/auth/session";
+import { listMemberships, requireSession } from "@/lib/auth/session";
 import { entitlementsFor } from "@/lib/plans";
 
 /**
@@ -16,10 +16,21 @@ export const GET = handler(async () => {
   const { user, org, role } = await requireSession();
   const entitlements = entitlementsFor(org);
 
+  // Every org this user belongs to, so the dashboard can render a switcher
+  // without a second call. `POST /api/org/switch` changes the active one.
+  const memberships = await listMemberships(user.id);
+
   return NextResponse.json({
     user,
     org: serializeOrg(org),
     role,
+    organizations: memberships.map((m) => ({
+      id: m.org.id,
+      name: m.org.name,
+      slug: m.org.slug,
+      role: m.staff.role,
+      active: m.org.id === org.id,
+    })),
     // Mirrors org.entitlements, as §16 pins the shape. Same object, so the two
     // cannot disagree.
     entitlements,

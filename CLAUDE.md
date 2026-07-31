@@ -128,8 +128,11 @@ campaigns. Rationale in `docs/DECISIONS.md` §G10.
   server-side only**: sign-in/up/out/reset go through `/api/auth/*` with Supabase's
   `createServerClient`, never `createBrowserClient` (`docs/DECISIONS.md` D30 — a cookie set from
   `document.cookie` cannot be `HttpOnly`, so browser-side auth fails the rule while appearing to
-  satisfy it). Staff auth and storefront customer auth are separate identity domains that share
-  nothing.
+  satisfy it). Staff and storefront customers **share one Supabase project** (D32) but remain
+  separate identity domains. Three requirements are what keep them separate and are binding:
+  **never authorize on `auth.getUser()` alone** (membership lookup is the gate), **host-only session
+  cookies — never `domain=.markii.shop`** (a parent-domain cookie reaches every storefront, where
+  merchant custom code runs), and an explicit **`user_kind`** checked on every path.
 - **Merchant-side AI writes go through propose → approve → execute**, with an audit entry and an
   undo path. Retrieved catalog/customer content is untrusted data, never instruction
   (`docs/AGENT-OPS.md` §3).

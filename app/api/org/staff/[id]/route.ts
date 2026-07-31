@@ -29,12 +29,13 @@ const staffUpdateSchema = z.object({
  *
  * 1. **Editing yourself.** A `catalog_manager` who can PATCH their own row can
  *    make themselves an administrator. Role changes are something others do to
- *    you.
+ *    you. (`actingUserId` is null for token callers — a token is not a person,
+ *    so it has no own row to protect, and the owner rule below still applies.)
  * 2. **Touching the owner.** The owner's access is recorded on
  *    `organizations.ownerId` and changes only by explicit transfer, so an
  *    administrator cannot demote or remove the person who owns billing.
  */
-async function loadEditableMember(id: string, orgId: string, actingUserId: string) {
+async function loadEditableMember(id: string, orgId: string, actingUserId: string | null) {
   const [member] = await db
     .select()
     .from(staff)
@@ -55,7 +56,7 @@ async function loadEditableMember(id: string, orgId: string, actingUserId: strin
 export const PATCH = orgHandler(
   async (req, { params, orgId, session }) => {
     const { id } = await params;
-    await loadEditableMember(id, orgId, session.user.id);
+    await loadEditableMember(id, orgId, session.user?.id ?? null);
 
     const input = staffUpdateSchema.parse(await req.json());
     if (Object.keys(input).length === 0) throw badRequest("No changes supplied");
@@ -74,7 +75,7 @@ export const PATCH = orgHandler(
 export const DELETE = orgHandler(
   async (_req, { params, orgId, session }) => {
     const { id } = await params;
-    await loadEditableMember(id, orgId, session.user.id);
+    await loadEditableMember(id, orgId, session.user?.id ?? null);
 
     await db.delete(staff).where(and(eq(staff.id, id), eq(staff.orgId, orgId)));
     return NextResponse.json({ deleted: true, id });

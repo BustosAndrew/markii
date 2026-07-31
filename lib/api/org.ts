@@ -5,15 +5,16 @@ const ORG_SECTION = "API §16";
 
 /**
  * §16 is landing in pieces. `GET /api/me`, the org profile, and staff
- * management are live. Audit, sessions, and scoped tokens are not built yet, so
- * they keep failing loudly rather than returning a shape nobody wrote.
+ * management, scoped tokens, and org switching are live. Audit, sessions, and MFA
+ * are not built yet, so they keep failing loudly rather than returning a shape
+ * nobody wrote.
  */
 const ME_API_LIVE = true;
 const ORG_API_LIVE = true;
 const STAFF_API_LIVE = true;
 const ORG_AUDIT_API_LIVE = false;
 const ORG_SESSIONS_API_LIVE = false;
-const ORG_TOKENS_API_LIVE = false;
+const ORG_TOKENS_API_LIVE = true;
 
 export type StaffRole =
   | "owner"
@@ -55,6 +56,14 @@ export type StaffMember = {
   lastActiveAt: string | null;
 };
 
+export type OrgMembership = {
+  id: string;
+  name: string;
+  slug: string;
+  role: StaffRole;
+  active: boolean;
+};
+
 export type MeResponse = {
   user: {
     id: string;
@@ -63,6 +72,8 @@ export type MeResponse = {
   };
   org: Organization;
   role: StaffRole;
+  /** Every org this user belongs to — render the switcher from this, no second call. */
+  organizations: OrgMembership[];
   entitlements: Organization["entitlements"];
 };
 
@@ -90,9 +101,19 @@ export type ScopedToken = {
   id: string;
   label: string;
   role: StaffRole;
+  /** Leading characters, for telling tokens apart in a list. Not a secret. */
+  prefix: string;
+  storeIds: number[] | "all";
   createdAt: string;
   lastUsedAt: string | null;
 };
+
+/**
+ * `POST /api/org/tokens` only. `token` is the plaintext and is returned **once** —
+ * the server stores only a SHA-256, so it cannot be fetched again. Show it, let
+ * the user copy it, and never persist it client-side.
+ */
+export type CreatedToken = ScopedToken & { token: string; tokenNote: string };
 
 export function getMe(init?: RequestInit) {
   return callWhenLive(ME_API_LIVE, ORG_SECTION, () =>
@@ -112,6 +133,17 @@ export function updateOrg(
 ) {
   return callWhenLive(ORG_API_LIVE, ORG_SECTION, () =>
     apiPatch<Organization>("/api/org", body, init),
+  );
+}
+
+/**
+ * Change the active organization. Membership is re-checked server-side, so a
+ * `403` here means the user genuinely is not a member — not a stale cookie.
+ * Refetch `getMe()` afterwards; every subsequent request is scoped to the new org.
+ */
+export function switchOrg(body: { orgId: string }, init?: RequestInit) {
+  return callWhenLive(ORG_API_LIVE, ORG_SECTION, () =>
+    apiPost<{ orgId: string; name: string; slug: string }>("/api/org/switch", body, init),
   );
 }
 
@@ -177,11 +209,11 @@ export function listTokens(init?: RequestInit) {
 }
 
 export function createToken(
-  body: { label: string; role: StaffRole },
+  body: { label: string; role: StaffRole; storeIds?: number[] | "all" },
   init?: RequestInit,
 ) {
   return callWhenLive(ORG_TOKENS_API_LIVE, ORG_SECTION, () =>
-    apiPost<ScopedToken>("/api/org/tokens", body, init),
+    apiPost<CreatedToken>("/api/org/tokens", body, init),
   );
 }
 

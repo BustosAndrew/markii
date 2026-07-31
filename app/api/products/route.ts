@@ -12,7 +12,7 @@ export const GET = orgHandler(async (req, { session, orgId }) => {
   const { page, limit, offset } = pagination(sp);
 
   // Org scope first and unconditional; every filter below narrows it.
-  const conds: SQL[] = [siteScopeForStaff(orgId, session.staff.storeIds, products.siteId)];
+  const conds: SQL[] = [siteScopeForStaff(orgId, session.storeIds, products.siteId)];
   const q = sp.get("q");
   if (q)
     conds.push(

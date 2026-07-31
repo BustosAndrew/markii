@@ -11,7 +11,7 @@ export const GET = orgHandler(async (req, { session, orgId }) => {
   const sp = new URL(req.url).searchParams;
   const { page, limit, offset } = pagination(sp);
 
-  const conds: SQL[] = [siteScopeForStaff(orgId, session.staff.storeIds, categories.siteId)];
+  const conds: SQL[] = [siteScopeForStaff(orgId, session.storeIds, categories.siteId)];
   const q = sp.get("q");
   if (q) conds.push(or(ilike(categories.name, `%${q}%`), ilike(categories.slug, `%${q}%`))!);
   const siteId = intParam(sp, "siteId");

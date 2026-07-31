@@ -13,7 +13,7 @@ export const GET = orgHandler(async (req, { session, orgId }) => {
   const { page, limit, offset } = pagination(sp);
 
   // Org scope first, and unconditionally — every other filter narrows it further.
-  const conds: SQL[] = [ownSitesForStaff(orgId, session.staff.storeIds)];
+  const conds: SQL[] = [ownSitesForStaff(orgId, session.storeIds)];
   const q = sp.get("q");
   if (q) conds.push(or(ilike(sites.name, `%${q}%`), ilike(sites.slug, `%${q}%`))!);
   const status = sp.get("status");

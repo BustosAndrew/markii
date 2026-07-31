@@ -285,6 +285,173 @@ export const staff = pgTable(
   ],
 );
 
+// ---------------------------------------------------------------------------
+// Commerce core — variants & inventory (§18.1, Phase C)
+// ---------------------------------------------------------------------------
+
+/**
+ * A product's option axes — "Size", "Color". `values` is ordered; the variant
+ * matrix is the cartesian product of every option's values.
+ */
+export const productOptions = pgTable(
+  "product_options",
+  {
+    id: serial("id").primaryKey(),
+    productId: integer("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    position: integer("position").notNull().default(0),
+    values: jsonb("values").$type<string[]>().notNull().default([]),
+  },
+  (t) => [
+    uniqueIndex("product_options_product_name_uq").on(t.productId, t.name),
+    index("product_options_product_idx").on(t.productId),
+  ],
+);
+
+/**
+ * A sellable variant. **Money is in minor units with a `Minor` suffix** (D31) —
+ * the exponent comes from the currency, never a hardcoded 100.
+ */
+export const variants = pgTable(
+  "variants",
+  {
+    id: serial("id").primaryKey(),
+    productId: integer("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    /** Display title, derived from `optionValues` — "Navy / L". */
+    title: text("title").notNull(),
+    /** `{ Color: "Navy", Size: "L" }`. The identity of a variant within its product. */
+    optionValues: jsonb("option_values").$type<Record<string, string>>().notNull().default({}),
+    sku: text("sku"),
+    barcode: text("barcode"),
+    priceMinor: integer("price_minor").notNull(),
+    compareAtMinor: integer("compare_at_minor"),
+    costMinor: integer("cost_minor"),
+    weightGrams: integer("weight_grams"),
+    requiresShipping: boolean("requires_shipping").notNull().default(true),
+    taxable: boolean("taxable").notNull().default(true),
+    taxCode: text("tax_code"),
+    imageId: text("image_id"),
+    /** `deny` stops at zero; `continue` allows overselling deliberately. */
+    inventoryPolicy: text("inventory_policy", { enum: ["deny", "continue"] })
+      .notNull()
+      .default("deny"),
+    position: integer("position").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("variants_product_idx").on(t.productId),
+    // A product cannot have two variants for the same option combination.
+    uniqueIndex("variants_product_options_uq").on(t.productId, t.optionValues),
+  ],
+);
+
+/** Stock-holding locations. One default per store until multi-location matters. */
+export const locations = pgTable(
+  "locations",
+  {
+    id: serial("id").primaryKey(),
+    siteId: integer("site_id")
+      .notNull()
+      .references(() => sites.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    isDefault: boolean("is_default").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("locations_site_idx").on(t.siteId)],
+);
+
+/**
+ * Inventory as an **append-only ledger**, never a mutable integer (§18.1).
+ *
+ * A running total you overwrite cannot answer "why is this number 3?", cannot be
+ * reconciled against a physical count, and cannot be undone — and reconciliation,
+ * audit, and the Agent Ops undo path all depend on being able to. Levels are
+ * derived by summing this table.
+ *
+ * Rows are **never updated or deleted**. A mistake is corrected by appending its
+ * inverse, which is also what makes an agent's action reversible.
+ */
+export const inventoryLedger = pgTable(
+  "inventory_ledger",
+  {
+    id: serial("id").primaryKey(),
+    variantId: integer("variant_id")
+      .notNull()
+      .references(() => variants.id, { onDelete: "cascade" }),
+    locationId: integer("location_id")
+      .notNull()
+      .references(() => locations.id, { onDelete: "cascade" }),
+    /** Change to on-hand stock. Negative for sales and shrinkage. */
+    availableDelta: integer("available_delta").notNull().default(0),
+    /**
+     * Change to stock reserved for unpaid orders. Reserved at payment
+     * authorization, released on expiry or failure (§18.4).
+     */
+    committedDelta: integer("committed_delta").notNull().default(0),
+    reason: text("reason").notNull(),
+    /** Ties the entry to the action that caused it (§22), so undo can find it. */
+    invocationId: text("invocation_id"),
+    actorType: text("actor_type", { enum: ["user", "agent", "token", "system"] }).notNull(),
+    actorId: text("actor_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("inventory_ledger_variant_idx").on(t.variantId),
+    index("inventory_ledger_location_idx").on(t.locationId),
+    index("inventory_ledger_created_idx").on(t.createdAt),
+  ],
+);
+
+/**
+ * Scoped API / MCP tokens (§16, §22 rule 6): programmatic access carries an
+ * explicit role and is **never** a user's session cookie.
+ *
+ * Only a SHA-256 hash is stored. The plaintext is shown once at creation and is
+ * unrecoverable afterwards — a token table that can be read back is a list of
+ * live credentials waiting for one bad backup.
+ */
+export const apiTokens = pgTable(
+  "api_tokens",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    label: text("label").notNull(),
+    /** Same role vocabulary as staff: a token can never exceed what a human could do. */
+    role: text("role", {
+      enum: [
+        "owner",
+        "administrator",
+        "catalog_manager",
+        "commerce_manager",
+        "analyst",
+        "developer",
+        "viewer",
+      ],
+    }).notNull(),
+    /** SHA-256 of the plaintext. Unique so a lookup is a single indexed probe. */
+    tokenHash: text("token_hash").notNull(),
+    /** Leading characters, for telling tokens apart in a list. Not a secret. */
+    prefix: text("prefix").notNull(),
+    storeIds: jsonb("store_ids").$type<number[] | "all">().notNull().default(sql`'"all"'::jsonb`),
+    createdByUserId: text("created_by_user_id"),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    /** Soft revoke: the row stays so past audit entries remain attributable. */
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("api_tokens_hash_uq").on(t.tokenHash),
+    index("api_tokens_org_idx").on(t.orgId),
+  ],
+);
+
 /**
  * Audit trail for the action registry (`docs/API.md` §22 rule 5): every
  * invocation, whether it came from a click, an agent turn, an MCP client, or CI.
@@ -343,3 +510,8 @@ export type Integration = typeof integrations.$inferSelect;
 export type ActionInvocation = typeof actionInvocations.$inferSelect;
 export type Organization = typeof organizations.$inferSelect;
 export type Staff = typeof staff.$inferSelect;
+export type ApiToken = typeof apiTokens.$inferSelect;
+export type ProductOption = typeof productOptions.$inferSelect;
+export type Variant = typeof variants.$inferSelect;
+export type Location = typeof locations.$inferSelect;
+export type InventoryEntry = typeof inventoryLedger.$inferSelect;

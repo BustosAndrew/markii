@@ -459,10 +459,51 @@ the architecture (`CLAUDE.md`: screens call `/api/*` only, never `lib/db`), so t
 nothing. Deciding it now is what stops something from quietly coming to depend on browser-side
 Supabase and making the fix expensive later.
 
-**Storefront customer auth (§18.3) inherits the same shape** and remains a separate identity domain
-— separate Supabase project (§"Email"), separate cookie-name prefix, separate route namespace. The
-two flows share no cookie, no session, and no token audience. That is D3 item 4, and this decision
-does not relax it.
+**Storefront customer auth (§18.3) inherits the same shape** — server-side mutations, httpOnly
+cookies, separate cookie name and route namespace. **Superseded in part by D32:** shoppers and staff
+now share one Supabase project, so they no longer have separate token audiences. The isolation
+requirement survives; the mechanism changed from "different project" to "explicit `user_kind` guard
+plus host-only cookies."
+
+---
+
+## Identity isolation — D32 (supersedes part of G1-identity and D3 item 4)
+
+**Decision: one Supabase project for both staff and storefront shoppers** (owner, 2026-07-31,
+reversing the two-project split in G1-identity).
+
+**What changed the answer.** Two arguments were originally made for separate projects. On
+re-examination only one survives:
+
+| Original argument | Holds? |
+|---|---|
+| One project allows only one SMTP from-address, so merchant-domain shopper mail needs its own project | **No — this was overstated.** G1 already specifies Supabase's **Send Email Hook**, which picks the sender per merchant from user metadata *within a single project*. The hook solves it; separation was never required for this |
+| Separate projects mean separate JWT signing keys, so a shopper token cannot be a structurally valid staff token | **Yes**, but it is defence in depth rather than a fix for a live hole — `getSession()` already resolves a user through their `staff` row, so a shopper with no membership gets `null` → 401. It fails closed today |
+
+**Why one project wins here.** `auth.users` becomes joinable: `customers` can carry a real foreign
+key, deletes cascade, and "this shopper and their orders" is one query instead of a reconciliation
+against an external directory. Against that, the team is two people with a single support address,
+and a second project is a second bill and a second set of credentials to operate.
+
+**Three mitigations are binding, not advisory.** They are what the project split was providing for
+free, and they now have to be held deliberately:
+
+1. **Never authorize on `supabase.auth.getUser()` alone.** Membership lookup is the gate. This is
+   already how `lib/auth/session.ts` works; the change is that it becomes load-bearing rather than
+   incidental, so it must not be bypassed by any future route.
+2. **Host-only session cookies — never `domain=.markii.shop`.** A cookie scoped to the parent domain
+   flows to every `{slug}.markii.shop` storefront, where merchant custom code runs. That is the D30
+   exposure reappearing through a different door.
+3. **An explicit `user_kind` on the user record**, checked on every path, so "shopper" and "staff"
+   are a stated property rather than something inferred from which table happens to have a row.
+
+**Cost of being wrong, stated plainly.** Splitting later means recreating shopper auth users in a
+new project and forcing password resets on real customers. Unpleasant, not impossible. The decision
+does not bind until customer accounts ship (§18.3) — nothing built for Phase A assumes either
+answer.
+
+**Revisit if** a merchant brings a genuine enterprise security review, or shopper volume starts
+driving the auth bill and rate limits in a way that makes separate metering worthwhile.
 
 ---
 
@@ -500,7 +541,8 @@ they are the decisions Resend does not make for you.
 ### Verify during build
 
 - **Supabase Auth SMTP is configured per project with a single from-address.** That works for staff
-  auth on Resend. **Storefront customer auth is a separate identity domain** (§"Auth — D3" item 4)
+  auth on Resend. **Storefront customer auth is a separate identity domain** (§"Auth — D3" item 4,
+  §D32 — same project, isolated by guard rather than by token audience)
   and needs *per-merchant* from-addresses — which Supabase's built-in mailer likely cannot do.
   Expect to send shopper account mail through Markii's own SES path rather than Supabase's mailer.
 - **Digital delivery mail is the highest-stakes stream** given the D5 beachhead: a download link in
@@ -1087,7 +1129,8 @@ then measure** — that guidance holds regardless of which Postgres vendor wins.
 | D26 | 2026-07-29 | **Both** — public source *and* hosted cloud. Largely resolves D15. Self-hosters bring their own infra/payments/DB/auth/email | `docs/DECISIONS.md` §"Distribution" |
 | D26-licence | 2026-07-29 | **FSL-1.1-ALv2** — permits self-hosting and contribution, blocks resale-as-a-service, converts to Apache 2.0 after 2 years. Ship with CLA + TRADEMARK.md. **Counsel review before launch** | `docs/DECISIONS.md` §"Distribution" |
 | D5 | 2026-07-29 | **Beachhead: creators & digital-goods / membership sellers** (assistant call — owner may override). Fulfillment exclusion becomes irrelevant; Squarespace charges 5% where Markii charges 0%. Adds digital-delivery features to Phase C | `docs/DECISIONS.md` §"Beachhead" |
-| G1 (identity) | 2026-07-29 | **Merchant mail sends from the merchant's own verified domain.** Test mode may use Markii's domain; **a verified domain is required to go live**. Shopper auth mail routes through Supabase's **Send Email Hook** → SES, with the sender chosen per merchant from user metadata; shoppers live in a **separate Supabase project** from staff | `docs/DECISIONS.md` §"Email", `docs/PLAN.md` §4 |
+| G1 (identity) | 2026-07-29 | **Merchant mail sends from the merchant's own verified domain.** Test mode may use Markii's domain; **a verified domain is required to go live**. Shopper auth mail routes through Supabase's **Send Email Hook** → SES, with the sender chosen per merchant from user metadata. ~~Shoppers live in a separate Supabase project~~ — **superseded by D32** | `docs/DECISIONS.md` §"Email", `docs/PLAN.md` §4 |
+| D32 | 2026-07-31 | **One Supabase project for staff and shoppers**, reversing G1-identity's split. The single-from-address argument was overstated (the Send Email Hook already solves it); joinable `auth.users` and a smaller operational surface win. Three binding mitigations: membership-lookup authorization, host-only cookies, explicit `user_kind`. Does not bind until §18.3 ships | `docs/DECISIONS.md` §"Identity isolation — D32", §D30, `CLAUDE.md`, `docs/API.md` §16/§18.3, `docs/PLAN.md` |
 | G5 | 2026-07-29 | **Media gated per plan — storage *and* egress** (10/50/250 GB stored; 50/250 GB/1 TB delivered), overage $0.20 / $0.12 per GB. Signed URLs direct from storage; **no video hosting** — embeds instead | `docs/DECISIONS.md` §G5, `docs/PRICING.md` §3 |
 | D27 | 2026-07-29 | **No native campaigns at launch** — integrate Klaviyo/Omnisend/Mailchimp as Channels; abandoned cart free and uncounted; native campaigns a later paid add-on | `docs/DECISIONS.md` §D27, `docs/PLAN.md` §3 |
 | G2 | 2026-07-29 | **Launch US, CA, UK, AU.** EU deferred until Stripe Tax handles VAT OSS — digital goods make EU VAT non-trivial. One currency per store | `docs/DECISIONS.md` §"Remaining gaps" |

@@ -6,14 +6,19 @@
  * caller, so Phase C's commerce mutations are defined here from their first
  * commit rather than refactored into it later.
  *
- * **Status.** The primitive is complete; there are no action definitions yet,
- * and no HTTP surface. `/api/actions*` (§22) waits for Phase A, because every
- * one of those endpoints needs an actor to authorize and there is no auth yet —
- * shipping them now would mean four routes that can only answer 401.
+ * **Status.** The primitive is complete and the first Phase C mutations are
+ * defined against it (`definitions/catalog.ts`, `definitions/inventory.ts`).
+ * Authorization is installed by `./authorization`, which resolves staff and
+ * token callers identically (§22 rule 4).
  *
- * Definitions live in `lib/actions/definitions/` and must be imported from this
- * barrel to register themselves.
+ * Definitions live in `lib/actions/definitions/` and **must be imported here**
+ * to register themselves — an action nobody imports does not exist.
  */
+
+// Side-effect imports: registration happens at module load.
+import "./authorization";
+import "./definitions/catalog";
+import "./definitions/inventory";
 
 export { defineAction, getAction, allActions, describeAction } from "./registry";
 export {
