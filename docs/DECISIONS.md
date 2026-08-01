@@ -536,6 +536,13 @@ is the only field a checkout button should read.
 §18.6 lands. That is deliberate and is the strongest argument for doing §18.6 next. Digital goods
 and every product predating §18.1 variants check out today, which is also the D5 beachhead.
 
+**Updated 2026-07-31 (§18.6 shipped).** Shipping and tax now come from real configuration, and the
+gate widened by one: **tax `not_configured` also blocks**, because a merchant who selected a tax
+provider is telling us they collect tax, and completing a sale without it leaves them owing money
+they never charged. A store on `provider: "none"` is unaffected and still checks out — the D33
+tax-inclusive default is now an explicit setting rather than a hardcoded assumption. Discounts still
+never block.
+
 ---
 
 ## Overselling — D34 (decided while building §18.4, 2026-07-31)
@@ -564,6 +571,30 @@ round and never 4.
 decrement `products.stock` and are **not** protected by this lock. Reading the wrong one of the two
 stock sources oversells, which is why `lib/commerce/pricing.ts` picks the source in exactly one
 place. The gap closes by migrating products to variants, not by inventing a ledger they never had.
+
+---
+
+## Free-shipping thresholds — D35 (decided while building §18.6, 2026-07-31)
+
+**Decision: `minSubtotalMinor` means one thing — an eligibility bound — for every rate type.**
+
+The first implementation overloaded it: a *bound* for `price_based`, and a *free-at line* for
+`free_over_threshold`, with `priceMinor` charged below it. A verification harness caught the result
+immediately — a rate named "Free over $50" **failed to appear at $40 and charged money at $60**,
+which is the opposite of both halves of its name.
+
+`free_over_threshold` is now offered **only** at or above its threshold and is always free;
+`priceMinor` is forced to `0` by the action layer so nobody configures a number that can never be
+charged. A merchant wanting a price below a threshold and a lower one above it creates two
+`price_based` rates, which is what that type is for.
+
+**The general rule this is an instance of:** one field, one meaning. A field whose semantics depend
+on a sibling's value cannot be validated coherently, and the failure mode is silent — the rate looks
+configured and quietly misprices.
+
+Related: **a selected rate is always re-quoted, never trusted from the cart.** A cart that shrinks
+below a free-shipping threshold loses the selection and returns to `provisional` rather than
+staying free, which is the same "recompute, never trust" rule as D33 applied to shipping.
 
 ---
 

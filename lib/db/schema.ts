@@ -885,6 +885,127 @@ export const usageRecords = pgTable(
   ],
 );
 
+// ---------------------------------------------------------------------------
+// Shipping & tax rates (§18.6)
+// ---------------------------------------------------------------------------
+
+/**
+ * A shipping zone: the set of destinations one group of rates applies to.
+ *
+ * This is rate **configuration**, not logistics. Carrier rate shopping, label
+ * purchase, and tracking sync are permanently out of scope (`docs/PLAN.md` §3) —
+ * Markii does everything Shopify does *except fulfillment logistics*.
+ */
+export const shippingZones = pgTable(
+  "shipping_zones",
+  {
+    id: serial("id").primaryKey(),
+    siteId: integer("site_id")
+      .notNull()
+      .references(() => sites.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /** ISO 3166-1 alpha-2, uppercase. Empty means "everywhere not matched by another zone". */
+    countries: jsonb("countries").$type<string[]>().notNull().default([]),
+    /**
+     * Optional province/state codes narrowing the countries above. A zone with
+     * provinces is more specific than one without, and wins when both match —
+     * otherwise "California" and "United States" would be ambiguous.
+     */
+    provinces: jsonb("provinces").$type<string[]>().notNull().default([]),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("shipping_zones_site_idx").on(t.siteId)],
+);
+
+/**
+ * A rate a shopper can choose within a zone.
+ *
+ * Conditions are stored as explicit bounds rather than a rule expression: a
+ * merchant setting up shipping is not writing a query, and a bounded numeric
+ * range is something the pricing code can evaluate without an interpreter.
+ */
+export const shippingRates = pgTable(
+  "shipping_rates",
+  {
+    id: serial("id").primaryKey(),
+    zoneId: integer("zone_id")
+      .notNull()
+      .references(() => shippingZones.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    /**
+     * `free_over_threshold` is `price_based` with a zero price, but merchants
+     * think of it as its own thing and mislabelling it in the UI is how a store
+     * ends up giving away shipping it meant to charge for.
+     */
+    type: text("type", {
+      enum: ["flat", "weight_based", "price_based", "free_over_threshold"],
+    }).notNull(),
+    priceMinor: integer("price_minor").notNull().default(0),
+    /** Inclusive lower / exclusive upper bounds. Null means unbounded. */
+    minWeightGrams: integer("min_weight_grams"),
+    maxWeightGrams: integer("max_weight_grams"),
+    minSubtotalMinor: integer("min_subtotal_minor"),
+    maxSubtotalMinor: integer("max_subtotal_minor"),
+    enabled: boolean("enabled").notNull().default(true),
+    position: integer("position").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("shipping_rates_zone_idx").on(t.zoneId)],
+);
+
+/**
+ * Per-store tax configuration (§18.6).
+ *
+ * **Per store rather than per org**, even though tax registration is a property
+ * of a legal entity: `pricesIncludeTax` is a storefront presentation choice a
+ * merchant makes differently for a UK shop and a US one, and launch is one
+ * currency per store anyway (G2). The org's country is the default.
+ *
+ * **Markii never gives tax advice** (`docs/DECISIONS.md` G2) — this stores what
+ * the merchant told us and applies it. It does not decide what they owe.
+ */
+export const taxSettings = pgTable(
+  "tax_settings",
+  {
+    siteId: integer("site_id")
+      .primaryKey()
+      .references(() => sites.id, { onDelete: "cascade" }),
+    /**
+     * `none` — no tax line is added, prices stand as listed.
+     * `manual` — the merchant's own rates, below. Fine for a single jurisdiction.
+     * `stripe` — Stripe Tax (the decided provider, `docs/DECISIONS.md` G3).
+     */
+    provider: text("provider", { enum: ["none", "manual", "stripe"] })
+      .notNull()
+      .default("none"),
+    /**
+     * When true the listed price already contains tax, so no separate line is
+     * added and the tax figure is shown as *included*. This is the assumption
+     * §18.4 has been running on by default (D33); here it becomes explicit.
+     */
+    pricesIncludeTax: boolean("prices_include_tax").notNull().default(true),
+    /** Manual rates by destination: `{ country, province?, rateBps, name }`. */
+    manualRates: jsonb("manual_rates").$type<ManualTaxRate[]>().notNull().default([]),
+    /** Applied to products with no `taxCode` of their own. Stripe Tax only. */
+    defaultTaxCode: text("default_tax_code"),
+    /** Where the merchant says they are registered. Displayed, never enforced. */
+    registrations: jsonb("registrations").$type<string[]>().notNull().default([]),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+);
+
+/** One manual tax rate. `rateBps` is basis points — 875 is 8.75%. */
+export type ManualTaxRate = {
+  country: string;
+  province?: string | null;
+  /** Basis points, so a rate is an integer and never a float (D31 reasoning). */
+  rateBps: number;
+  name: string;
+};
+
 /** A postal address on a cart or checkout. Shape mirrors `customer_addresses`. */
 export type CartAddress = {
   name?: string | null;
@@ -928,3 +1049,6 @@ export type CartLine = typeof cartLines.$inferSelect;
 export type CheckoutSession = typeof checkoutSessions.$inferSelect;
 export type InventoryReservation = typeof inventoryReservations.$inferSelect;
 export type UsageRecord = typeof usageRecords.$inferSelect;
+export type ShippingZone = typeof shippingZones.$inferSelect;
+export type ShippingRate = typeof shippingRates.$inferSelect;
+export type TaxSettings = typeof taxSettings.$inferSelect;

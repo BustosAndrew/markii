@@ -34,9 +34,11 @@ app/api/         sites · products · categories · import · analytics · finan
 human path and the x402 agent path now share one order pipeline and one metering event.
 
 **What is still missing inside checkout** is the card rail (`lib/payments/` reports
-`configuration_required`; no `STRIPE_SECRET_KEY` exists yet), discounts (§18.5), and tax and
-shipping rates (§18.6). A cart containing anything that requires shipping is refused at checkout
-rather than quoted a zero shipping cost the merchant would silently absorb.
+`configuration_required`; no `STRIPE_SECRET_KEY` exists yet), discounts (§18.5), and Stripe Tax.
+Shipping zones and rates plus manual tax landed in §18.6
+(`lib/commerce/{shipping,tax}.ts`), so a physical-goods store can now check out — but only once its
+merchant has configured a zone and a rate. An unconfigured store is refused rather than quoted a
+zero shipping cost it would silently absorb.
 
 ---
 
@@ -203,8 +205,8 @@ Contract `docs/API.md` §18. The largest phase. Order within it:
 2. ~~**Inventory as an append-only ledger**~~ — done
 3. ~~**Collections** (manual + rule-based), **customers**~~ — done
 4. ~~**Cart and checkout**~~ — done for the x402 rail; card rail waits on Stripe credentials
-5. **Discounts**, tax (Stripe Tax), shipping rates ← **next.** Shipping is the blocking one: a cart
-   containing anything that requires shipping currently cannot check out at all
+5. Tax and shipping rates — **done**: zones, four rate types, and manual tax. Stripe Tax still
+   waits on credentials. **Discounts (§18.5) are what remains here** ← next
 6. **Orders**: refunds, cancellations, manual fulfillment status, timeline
 7. **Digital delivery** — signed expiring URLs, download limits, licence keys, membership gating
 

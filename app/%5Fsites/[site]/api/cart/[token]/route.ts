@@ -80,10 +80,19 @@ export const PATCH = handler(async (req, { params }) => {
     input.shippingAddress !== undefined ||
     input.shippingRateId !== undefined
   ) {
+    /**
+     * Only forward the keys the client actually sent. Passing
+     * `input.shippingAddress ?? null` here would coerce *absent* to *cleared*,
+     * so picking a shipping rate silently wiped the address the rate was quoted
+     * against — and the cart then failed to price the shipping it had just been
+     * told about. Absent and null are different instructions.
+     */
     cart = await setCartContact(cart, {
-      email: input.email,
-      shippingAddress: input.shippingAddress ?? null,
-      shippingRateId: input.shippingRateId,
+      ...(input.email !== undefined ? { email: input.email } : {}),
+      ...(input.shippingAddress !== undefined
+        ? { shippingAddress: input.shippingAddress ?? null }
+        : {}),
+      ...(input.shippingRateId !== undefined ? { shippingRateId: input.shippingRateId } : {}),
     });
   }
 

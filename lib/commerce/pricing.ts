@@ -9,6 +9,8 @@ import {
   type Product,
   type Variant,
 } from "../db";
+import { selectedRate, type QuotedRate, type ShippingQuote } from "./shipping";
+import { calculateTax } from "./tax";
 
 /**
  * Server-side cart pricing (§18.4).
@@ -63,6 +65,9 @@ export type PricedCart = {
   discount: MoneyComponent;
   tax: MoneyComponent;
   shipping: MoneyComponent;
+  /** Rates the shopper may pick from, so the cart and the rate list never disagree. */
+  shippingRates: QuotedRate[];
+  shippingState: ShippingQuote["state"];
   totalMinor: number;
   /**
    * `final` only when every component is `calculated` or `none`. A provisional
@@ -235,46 +240,59 @@ export async function priceCart(cart: Cart): Promise<PricedCart> {
       : { amountMinor: 0, state: "none" };
 
   /**
-   * §18.6. No separate tax line is added, and that is a **stated assumption
-   * rather than a guess**: until a store configures tax, its listed prices are
-   * treated as tax-inclusive — which is what §18.6's "prices-include-tax flag"
-   * describes, how most storefronts outside the US work, and how this platform
-   * has already been selling since v1.
-   *
-   * The distinction that matters: adding `$0.00 tax` to a total that should
-   * carry tax would under-collect and the merchant would eat the difference.
-   * Charging the listed price and saying so does neither.
+   * §18.6. Shipping is quoted from the merchant's own zones and rates. Each
+   * unquotable case keeps its own state and reason — "no zones configured", "we
+   * do not ship there", and "nothing here needs shipping" are three different
+   * situations, and only the last one is genuinely free.
    */
-  const tax: MoneyComponent = {
-    amountMinor: 0,
-    state: "none",
-    note:
-      "No separate tax line: prices are treated as tax-inclusive until tax settings are " +
-      "configured (docs/API.md §18.6).",
-  };
+  const { rate, quote } = await selectedRate({
+    siteId: cart.siteId,
+    cartId: cart.id,
+    address: cart.shippingAddress ?? null,
+    subtotalMinor,
+    shippingRateId: cart.shippingRateId,
+  });
+
+  let shipping: MoneyComponent;
+  if (quote.state === "not_required") {
+    shipping = { amountMinor: 0, state: "none", note: "Nothing in this cart requires shipping." };
+  } else if (rate) {
+    shipping = {
+      amountMinor: rate.priceMinor,
+      state: "calculated",
+      note: `${rate.name} (${rate.zoneName})`,
+    };
+  } else if (quote.state === "quoted") {
+    // Rates exist and the shopper simply has not picked one yet. Not a
+    // misconfiguration — but not a chargeable total either.
+    shipping = {
+      amountMinor: 0,
+      state: "not_configured",
+      note: `Select a shipping rate: ${quote.rates.map((r) => r.name).join(", ")}.`,
+    };
+  } else {
+    shipping = { amountMinor: 0, state: "not_configured", note: quote.reason };
+  }
 
   /**
-   * Shipping is the component that genuinely cannot be assumed. A physical item
-   * costs something to send, and quoting zero means the merchant pays it.
+   * §18.6. Tax comes from the store's own settings. A store that has configured
+   * nothing gets `none` with its listed prices treated as tax-inclusive — the
+   * D33 default, now an explicit setting rather than a hardcoded assumption.
    *
-   * A line needs shipping only when its variant says so. A product with no
-   * variant record has no shipping attributes at all and has been sold without a
-   * shipping charge since v1 — inferring `requiresShipping` for it would block
-   * checkout on every store that predates §18.1.
+   * Shipping is included in the taxable base only when tax is actually being
+   * added; most jurisdictions tax delivery charges, and leaving it out would
+   * under-collect on every shipped order.
    */
-  const needsShipping = rows.some((line) => {
-    const variant = line.variantId != null ? byVariant.get(line.variantId) : null;
-    return variant?.requiresShipping ?? false;
+  const taxResult = await calculateTax({
+    siteId: cart.siteId,
+    address: cart.shippingAddress ?? null,
+    taxableBaseMinor: subtotalMinor - discount.amountMinor + shipping.amountMinor,
   });
-  const shipping: MoneyComponent = needsShipping
-    ? {
-        amountMinor: 0,
-        state: "not_configured",
-        note:
-          "This cart contains items that require shipping, and no shipping rates are " +
-          "configured (docs/API.md §18.6). No rate is quoted because none exists.",
-      }
-    : { amountMinor: 0, state: "none" };
+  const tax: MoneyComponent = {
+    amountMinor: taxResult.amountMinor,
+    state: taxResult.state,
+    note: taxResult.note,
+  };
 
   /**
    * `totalState` answers one question: **is this an amount someone can safely be
@@ -289,8 +307,16 @@ export async function priceCart(cart: Cart): Promise<PricedCart> {
    * An uncalculated shipping cost is different in kind. The cost is real and
    * someone pays it; charging zero means the merchant does, silently, without
    * agreeing to it. That is the case worth refusing over.
+   *
+   * Tax joins it once a store has opted in. A merchant who selected a tax
+   * provider is telling us they collect tax; completing a sale without it
+   * leaves them owing money they never charged. A store on `provider: "none"`
+   * returns `none`, not `not_configured`, and is unaffected.
    */
-  const totalState = shipping.state === "not_configured" ? "provisional" : "final";
+  const totalState =
+    shipping.state === "not_configured" || tax.state === "not_configured"
+      ? "provisional"
+      : "final";
 
   return {
     currency: cart.currency,
@@ -299,6 +325,8 @@ export async function priceCart(cart: Cart): Promise<PricedCart> {
     discount,
     tax,
     shipping,
+    shippingRates: quote.state === "quoted" ? quote.rates : [],
+    shippingState: quote.state,
     totalMinor:
       subtotalMinor - discount.amountMinor + tax.amountMinor + shipping.amountMinor,
     totalState,

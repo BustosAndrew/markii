@@ -35,7 +35,7 @@ carry an explicit status — **never call a `PLANNED` endpoint and never fake it
 | 15 | Automations, activity, notifications, team | 🟡 PLANNED | E |
 | 16 | Accounts, organizations, staff | partial — `/api/auth/*`, `/api/me`, `/api/org`, `/api/org/staff*`, and **org scoping of §1–8** are ✅ LIVE; audit, sessions, tokens, MFA, org switching PLANNED | **A** |
 | 17 | Billing, plans, metering, threshold fees | 🟡 PLANNED — **except `UsageRecord`, which is ✅ LIVE**: it is written at event time by checkout and cannot be derived later, so it shipped with §18.4 | B |
-| 18 | Commerce core (variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping) | partial — §18.1 variants/inventory, §18.2 collections, §18.3 customers, §18.4 cart + x402 checkout ✅ LIVE (writes via §22 actions); §18.4 card rail, §18.5–18.6 PLANNED | C |
+| 18 | Commerce core (variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping) | partial — §18.1 variants/inventory, §18.2 collections, §18.3 customers, §18.4 cart + x402 checkout, §18.6 shipping + manual tax ✅ LIVE (writes via §22 actions); §18.4 card rail, §18.5 discounts, §18.6 Stripe Tax PLANNED | C |
 | 19 | Site builder & content | 🟡 PLANNED | D |
 | 20 | Disputes & chargebacks | 🟡 PLANNED | F |
 | 21 | Agent Ops add-on | 🟡 PLANNED | F (last) |
@@ -1526,15 +1526,14 @@ so it protects an email and a shipping address and is never derived from the row
 **Money components.** `discount`, `tax`, and `shipping` each carry a `state`, because a bare `0`
 cannot distinguish "nothing is owed" from "we cannot calculate this" — and rendering the second as
 the first is the fabrication `CLAUDE.md` forbids, at the exact moment a shopper decides to pay.
-Today: discounts are `not_configured` when a code is present (§18.5); tax is `none` with a stated
-assumption that listed prices are **tax-inclusive** until §18.6 tax settings exist; shipping is
-`none` when nothing in the cart requires it and `not_configured` when something does.
+Discounts are `not_configured` when a code is present (§18.5, not built). Tax and shipping come from
+the store's §18.6 configuration.
 
 **`totalState` is the field a checkout button must read.** It answers only "is this safe to charge?"
 An unapplied discount code leaves it `final` — the shopper pays list price and has been told the
 code did nothing; refusing there would lock a shopper out of a valid sale over a code the store
-never offered. An uncalculated **shipping** cost makes it `provisional` and checkout returns 409,
-because that cost is real and charging zero makes the merchant pay it silently.
+never offered. An uncalculated **shipping** or **tax** cost makes it `provisional` and checkout
+returns 409, because that cost is real and charging zero means the merchant absorbs it or owes it.
 
 **Inventory is reserved at payment authorization** into `inventory_reservations`, with the movement
 appended to `inventory_ledger` as `committedDelta`. The last-unit race is solved with `SELECT … FOR
@@ -1564,14 +1563,49 @@ status }`
 `POST /api/discounts/validate`. Gift cards: `/api/gift-cards` — issue, check balance, redeem
 (count toward net sales at **redemption**, not purchase — see `docs/PRICING.md` §3.1).
 
-### 18.6 Tax & shipping rates
+### 18.6 Tax & shipping rates ✅ LIVE (shipping + manual tax) · 🟡 Stripe Tax PLANNED
 
-Rate *configuration*, not logistics. `GET`/`PUT` `/api/settings/tax` (provider config, nexus,
-product tax codes, prices-include-tax flag), `POST /api/tax/calculate`;
-`GET`/`POST` `/api/shipping/zones` and `/api/shipping/rates` (flat, weight-based, price-based,
-free-over-threshold).
+Rate *configuration*, not logistics. **Out of scope permanently:** carrier rate shopping, label
+purchase, tracking sync (`docs/PLAN.md` §3).
 
-Out of scope: carrier rate shopping, label purchase, tracking sync (`docs/PLAN.md` §3).
+| Method | Route | Notes |
+|---|---|---|
+| `GET` | `/api/shipping/zones` | Zones with their rates. A zone with **no** rates is returned with a `warning` — it silently refuses every checkout to that destination |
+| `GET` | `/api/shipping/rates` | All rates across the org, each with its zone |
+| `GET` | `/api/settings/tax` | Settings + an `operational` field saying whether the chosen provider can actually calculate |
+| `POST` | `/api/tax/calculate` | **Preview only** — writes nothing, never the source of a charged amount |
+
+Mutations are actions (§22): `shipping.createZone` · `updateZone` · `deleteZone` ·
+`createRate` · `updateRate` · `deleteRate` · `tax.updateSettings`.
+
+**Zones resolve most-specific-first** — a zone naming provinces beats one naming only the country,
+which beats a zone with no countries at all (the merchant's catch-all). Two matching rules whose
+winner depends on row order is regional pricing that silently stops applying.
+
+**Rate types:** `flat`, `weight_based` (grams, from variant weights), `price_based` (subtotal
+bounds), and `free_over_threshold`. Bounds are **inclusive at both ends** — a merchant writing
+"0–1000g £3, 1000–5000g £6" means a 1000g parcel costs £3. `free_over_threshold` treats
+`minSubtotalMinor` as an ordinary eligibility bound: it is **not offered at all** below the
+threshold and is always free above it, and the action layer forces `priceMinor` to 0 so no merchant
+sets a number that does nothing.
+
+**A selected rate is always re-quoted, never trusted from the cart.** If the cart shrinks below a
+free-shipping threshold, the selection stops applying and the total goes back to `provisional`
+rather than quietly staying free.
+
+**Tax providers:** `none` (no tax line; prices stand as listed), `manual` (the merchant's own rates
+by country/province, in **basis points** so a rate is an integer), and `stripe` (Stripe Tax — the
+decided provider, `docs/DECISIONS.md` G3, not yet implemented). Rates resolve most-specific-first
+like zones. With `pricesIncludeTax` the tax is **extracted** from the price (`p × r / (1 + r)`),
+never added — adding it would charge the shopper twice. All arithmetic is integer, half-up (D31).
+
+**A provider that cannot calculate blocks checkout.** `manual` with no rate for the destination, or
+`stripe` with no credentials, returns `not_configured` and the sale is refused — a merchant who
+selected a tax provider is telling us they collect tax, and completing without it leaves them owing
+money they never charged. A store on `provider: "none"` is unaffected.
+
+**Markii never gives tax advice** (`docs/DECISIONS.md` G2). Under Connect Standard the merchant is
+the seller of record and the taxpayer; `GET /api/settings/tax` returns that disclaimer as data.
 
 ### 18.7 Order operations
 
