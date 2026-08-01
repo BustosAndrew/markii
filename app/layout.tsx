@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -16,6 +16,14 @@ export const metadata: Metadata = {
   title: "Markii — Storefronts for AI buyers",
   description:
     "Spin up machine-readable storefronts that AI agents can crawl, understand, and buy from — settled in USDC over x402.",
+};
+
+// `viewportFit: "cover"` is what gives `env(safe-area-inset-*)` a non-zero value
+// on notched devices — without it the dashboard's safe-area padding is a no-op.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

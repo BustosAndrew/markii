@@ -193,11 +193,49 @@ input:disabled,
   animation: beacon 4.5s ease-out infinite;
 }
 
+/* Mobile navigation drawer */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 180ms ease-out;
+}
+
+@keyframes slide-in-left {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.animate-slide-in-left {
+  animation: slide-in-left 220ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* Horizontally scrollable strips (tabs, subnavs) on narrow viewports. */
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-drift,
   .animate-drift-slow,
   .animate-logo-float,
   .animate-beacon,
+  .animate-fade-in,
+  .animate-slide-in-left,
   .logo-eye {
     animation: none;
   }

@@ -71,7 +71,9 @@ export function TabsList({
       role="tablist"
       aria-label={ariaLabel}
       className={cn(
-        "inline-flex rounded-[var(--radius-control)] border border-border bg-surface-elevated p-1",
+        // `max-w-full` + scroll keeps a long tab strip from forcing the page
+        // wider than the viewport on narrow screens.
+        "inline-flex max-w-full overflow-x-auto rounded-[var(--radius-control)] border border-border bg-surface-elevated p-1 scrollbar-none",
         className,
       )}
     >
@@ -102,7 +104,7 @@ export function TabsTrigger({
       tabIndex={selected ? 0 : -1}
       onClick={() => setValue(value)}
       className={cn(
-        "cursor-pointer rounded-[calc(var(--radius-control)-4px)] px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand/10",
+        "shrink-0 cursor-pointer whitespace-nowrap rounded-[calc(var(--radius-control)-4px)] px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand/10",
         selected
           ? "bg-surface text-foreground shadow-[var(--shadow-sm)]"
           : "text-muted hover:bg-hover-soft hover:text-foreground",
