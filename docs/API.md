@@ -34,8 +34,8 @@ carry an explicit status — **never call a `PLANNED` endpoint and never fake it
 | 14 | Analytics v2 (funnel, channels, failures) | 🟡 PLANNED | E |
 | 15 | Automations, activity, notifications, team | 🟡 PLANNED | E |
 | 16 | Accounts, organizations, staff | partial — `/api/auth/*`, `/api/me`, `/api/org`, `/api/org/staff*`, and **org scoping of §1–8** are ✅ LIVE; audit, sessions, tokens, MFA, org switching PLANNED | **A** |
-| 17 | Billing, plans, metering, threshold fees | 🟡 PLANNED | B |
-| 18 | Commerce core (variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping) | partial — §18.1 variants/inventory, §18.2 collections, §18.3 customers ✅ LIVE (writes via §22 actions); §18.4–18.6 PLANNED | C |
+| 17 | Billing, plans, metering, threshold fees | 🟡 PLANNED — **except `UsageRecord`, which is ✅ LIVE**: it is written at event time by checkout and cannot be derived later, so it shipped with §18.4 | B |
+| 18 | Commerce core (variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping) | partial — §18.1 variants/inventory, §18.2 collections, §18.3 customers, §18.4 cart + x402 checkout ✅ LIVE (writes via §22 actions); §18.4 card rail, §18.5–18.6 PLANNED | C |
 | 19 | Site builder & content | 🟡 PLANNED | D |
 | 20 | Disputes & chargebacks | 🟡 PLANNED | F |
 | 21 | Agent Ops add-on | 🟡 PLANNED | F (last) |
@@ -1468,39 +1468,90 @@ acceptsMarketing, marketingConsentAt, tags[], note, ordersCount, totalSpentMinor
 PII rules: never log or prompt-inject customer records; support export and deletion requests;
 marketing consent is explicit, timestamped, and never defaulted on.
 
-### 18.4 Cart & checkout
-
-**The single biggest gap** — today only agent-driven x402 checkout exists.
+### 18.4 Cart & checkout ✅ LIVE (x402 rail) · 🟡 card rail PLANNED
 
 ```ts
 interface Cart {
-  id: string; storeId: number; token: string;
-  lines: { variantId: number; quantity: number; unitPriceMinor: number;
-           addOnIds?: number[] }[];
+  token: string; storeId: number;
+  lines: { id: number; productId: number; variantId: number | null; title: string;
+           quantity: number; unitPriceMinor: number; lineTotalMinor: number;
+           addOns: { productId: number; name: string; unitPriceMinor: number;
+                     mandatory: boolean }[];
+           issues: LineIssue[] }[];
   customerId: number | null; email: string | null;
   discountCodes: string[];
-  subtotalMinor: number; discountMinor: number; taxMinor: number;
-  shippingMinor: number; totalMinor: number; currency: string;
+  subtotalMinor: number;
+  // Each component carries WHY it is what it is — see "Money components" below.
+  discount: MoneyComponent; tax: MoneyComponent; shipping: MoneyComponent;
+  totalMinor: number;
+  totalState: "final" | "provisional";
+  currency: string;
   shippingAddress: Address | null; shippingRateId: string | null;
   status: "open" | "abandoned" | "converted";
+  issues: LineIssue[];          // blocking; a cart with any of these cannot check out
   expiresAt: string;
 }
+
+type MoneyComponent = {
+  amountMinor: number;
+  state: "calculated" | "none" | "not_configured";
+  note?: string;
+};
+
+type LineIssue =
+  | { code: "price_changed"; wasMinor: number; nowMinor: number }
+  | { code: "unavailable"; reason: string }
+  | { code: "insufficient_stock"; available: number; requested: number };
 ```
 
-| Method | Route | Notes |
-|---|---|---|
-| `POST` | `/api/storefront/cart` | Create cart |
-| `GET`/`PATCH` | `/api/storefront/cart/:token` | Read, add/update/remove lines |
-| `POST` | `/api/storefront/cart/:token/discount` | Apply/remove code |
-| `POST` | `/api/storefront/cart/:token/shipping-rates` | Quote rates for an address |
-| `POST` | `/api/storefront/checkout` | Start checkout → Stripe PaymentIntent/Checkout Session |
-| `POST` | `/api/storefront/checkout/:id/complete` | Confirm → reserve inventory → create Order → **write UsageRecord (§17)** |
+**Routes are under the site tree, not `/api/storefront/*`.** On a storefront host `proxy.ts`
+rewrites every path to `/_sites/{slug}/…`, so a platform-shaped path is unreachable from the store
+the shopper is actually standing in. The slug therefore comes from the Host header, which also means
+a cart can never be created against a different store than the one being browsed.
 
-Prices, discounts, tax, and totals are **always recomputed server-side** at checkout — never trust
-client-supplied amounts. Inventory is reserved at payment authorization and released on
-expiry/failure. Card data goes to Stripe-hosted elements only (PCI SAQ-A). The x402 agent checkout
-in `app/%5Fsites/[site]/api/checkout/` remains a peer path into the same order pipeline and must
-write the same usage records.
+| Method | Route (storefront host) | Notes |
+|---|---|---|
+| `POST` | `/api/cart` | Create cart; optional first line |
+| `GET`/`PATCH` | `/api/cart/:token` | Read; add / set-quantity (0 removes) / set email + address |
+| `POST` | `/api/cart/:token/discount` | Store a code. **Never applied** until §18.5 — returns `applied: false` with a reason |
+| `POST` | `/api/cart/:token/shipping-rates` | Returns `[]` + `not_configured` until §18.6. Explicitly *not* a free-shipping offer |
+| `POST` | `/api/checkout/session` | Freeze the quote → reserve inventory → start payment on a rail |
+| `POST` | `/api/checkout/session/:id/complete` | Verify payment → Order → **UsageRecord (§17)** |
+| `GET`/`POST` | `/api/checkout` | The x402 one-shot (402 challenge → pay → present hash) |
+
+Money is **always recomputed server-side**; no request body has a price, total, or discount field to
+supply one in. Cart tokens are 256-bit CSPRNG values — the token is the shopper's only credential,
+so it protects an email and a shipping address and is never derived from the row id.
+
+**Money components.** `discount`, `tax`, and `shipping` each carry a `state`, because a bare `0`
+cannot distinguish "nothing is owed" from "we cannot calculate this" — and rendering the second as
+the first is the fabrication `CLAUDE.md` forbids, at the exact moment a shopper decides to pay.
+Today: discounts are `not_configured` when a code is present (§18.5); tax is `none` with a stated
+assumption that listed prices are **tax-inclusive** until §18.6 tax settings exist; shipping is
+`none` when nothing in the cart requires it and `not_configured` when something does.
+
+**`totalState` is the field a checkout button must read.** It answers only "is this safe to charge?"
+An unapplied discount code leaves it `final` — the shopper pays list price and has been told the
+code did nothing; refusing there would lock a shopper out of a valid sale over a code the store
+never offered. An uncalculated **shipping** cost makes it `provisional` and checkout returns 409,
+because that cost is real and charging zero makes the merchant pay it silently.
+
+**Inventory is reserved at payment authorization** into `inventory_reservations`, with the movement
+appended to `inventory_ledger` as `committedDelta`. The last-unit race is solved with `SELECT … FOR
+UPDATE` on the variant row *inside* the transaction, never an application-level read-then-write;
+reservations are taken in ascending variant id so two carts cannot deadlock. Holds expire after 15
+minutes and are swept before each new reservation. `products.stock` remains the source for products
+that predate §18.1 variants — reading the wrong one of the two oversells.
+
+Card data will go to Stripe-hosted elements only (PCI SAQ-A). **The card rail is not implemented**:
+`lib/payments/` returns an explicit `configuration_required`, and `/complete` refuses a `stripe`
+session rather than accepting the caller's word that payment succeeded.
+
+The x402 agent checkout in `app/%5Fsites/[site]/api/checkout/` is a peer path into **the same order
+pipeline** (`lib/commerce/orders.ts`) and writes the same usage records. It still quotes
+`price × quantity` with no tax or shipping, because that is what its 402 challenge advertised and the
+agent has already settled on-chain by the time the second request arrives — refusing after
+settlement would strand their money. When §18.6 lands, the fix belongs in the challenge.
 
 ### 18.5 Discounts & gift cards
 
@@ -1738,7 +1789,8 @@ preview tabs):
 | `/agent.md` | agent protocol + purchase instructions | ✅ LIVE |
 | `/sitemap.xml` | sitemap | ✅ LIVE |
 | `/api/checkout` | x402 payment endpoint (402 challenge → settle) | ✅ LIVE |
-| `/cart` · `/checkout` | human cart + Stripe-hosted checkout | 🟡 PLANNED (§18.4) |
+| `/api/cart*` · `/api/checkout/session*` | cart + checkout API | ✅ LIVE (§18.4) — x402 rail; card rail PLANNED |
+| `/cart` · `/checkout` | human cart + checkout **pages** | 🟡 PLANNED (§18.4) — the API exists; the storefront islands do not |
 | `/collections/{handle}` | merchandising collection page | 🟡 PLANNED (§18.2) |
 | `/blog` · `/pages/{handle}` | builder-authored content | 🟡 PLANNED (§19) |
 | `/account` | customer account area | 🟡 PLANNED (§18.3) |

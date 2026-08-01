@@ -28,8 +28,15 @@ app/api/         sites · products · categories · import · analytics · finan
                  orders · integrations · uploads · preview · template · overview
 ```
 
-**Two structural gaps:** no auth or tenancy (every route is open and single-tenant), and no human
-checkout (only agent-driven x402).
+**Both structural gaps are now closed.** Auth and tenancy landed in Phase A (`lib/auth/`,
+`lib/tenancy.ts`, the action registry in `lib/actions/`). The cart and checkout layer landed in
+§18.4 — `lib/commerce/{cart,pricing,reservations,orders}.ts` plus the storefront routes — so the
+human path and the x402 agent path now share one order pipeline and one metering event.
+
+**What is still missing inside checkout** is the card rail (`lib/payments/` reports
+`configuration_required`; no `STRIPE_SECRET_KEY` exists yet), discounts (§18.5), and tax and
+shipping rates (§18.6). A cart containing anything that requires shipping is refused at checkout
+rather than quoted a zero shipping cost the merchant would silently absorb.
 
 ---
 
@@ -192,12 +199,12 @@ events for connected accounts as well as the platform — route them separately.
 
 Contract `docs/API.md` §18. The largest phase. Order within it:
 
-1. **Variants and options** — the matrix regeneration is fiddly; do it first
-2. **Inventory as an append-only ledger**, not a mutable integer. Reconciliation, audit, and agent
-   undo all depend on it
-3. **Collections** (manual + rule-based), **customers**
-4. **Cart and checkout** — the biggest gap in the product today
-5. **Discounts**, tax (Stripe Tax), shipping rates
+1. ~~**Variants and options**~~ — done
+2. ~~**Inventory as an append-only ledger**~~ — done
+3. ~~**Collections** (manual + rule-based), **customers**~~ — done
+4. ~~**Cart and checkout**~~ — done for the x402 rail; card rail waits on Stripe credentials
+5. **Discounts**, tax (Stripe Tax), shipping rates ← **next.** Shipping is the blocking one: a cart
+   containing anything that requires shipping currently cannot check out at all
 6. **Orders**: refunds, cancellations, manual fulfillment status, timeline
 7. **Digital delivery** — signed expiring URLs, download limits, licence keys, membership gating
 

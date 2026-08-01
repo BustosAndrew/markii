@@ -4,6 +4,7 @@ import {
   index,
   integer,
   jsonb,
+  numeric,
   pgTable,
   primaryKey,
   serial,
@@ -644,6 +645,258 @@ export const actionInvocations = pgTable(
   ],
 );
 
+// ---------------------------------------------------------------------------
+// Cart & checkout (§18.4)
+// ---------------------------------------------------------------------------
+
+/**
+ * A shopper's cart.
+ *
+ * **No totals are stored here.** `docs/API.md` §18.4 returns `subtotalMinor`,
+ * `taxMinor`, `totalMinor` and friends on the cart, but they are computed on
+ * every read from the current catalog — see `lib/commerce/pricing.ts`. A stored
+ * total is a number someone will eventually trust: it goes stale the moment a
+ * merchant edits a price, and the whole non-negotiable rule of this section is
+ * that money is recomputed server-side and never taken on faith.
+ *
+ * The `token` is the shopper's only credential for this cart, so it is a random
+ * 256-bit value rather than the row id. A guessable cart id is someone else's
+ * address and email.
+ */
+export const carts = pgTable(
+  "carts",
+  {
+    id: serial("id").primaryKey(),
+    /** Unguessable bearer token — this *is* the shopper's authentication. */
+    token: text("token").notNull(),
+    siteId: integer("site_id")
+      .notNull()
+      .references(() => sites.id, { onDelete: "cascade" }),
+    /** Set once the shopper identifies themselves; guests stay null (§18.3). */
+    customerId: integer("customer_id").references(() => customers.id, { onDelete: "set null" }),
+    email: text("email"),
+    /**
+     * Codes as typed by the shopper. Whether they are *valid* is decided at
+     * pricing time, not here — discounts are §18.5 and do not exist yet, so an
+     * accepted code would be a promise the checkout cannot keep.
+     */
+    discountCodes: jsonb("discount_codes").$type<string[]>().notNull().default([]),
+    shippingAddress: jsonb("shipping_address").$type<CartAddress | null>(),
+    shippingRateId: text("shipping_rate_id"),
+    /**
+     * Fixed by the first line added. Mixing currencies in one cart is refused
+     * rather than silently converted — an invented FX rate is a fabricated
+     * price.
+     */
+    currency: text("currency").notNull().default("USD"),
+    status: text("status", { enum: ["open", "abandoned", "converted"] })
+      .notNull()
+      .default("open"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("carts_token_uq").on(t.token),
+    index("carts_site_idx").on(t.siteId),
+    index("carts_customer_idx").on(t.customerId),
+    index("carts_status_expires_idx").on(t.status, t.expiresAt),
+  ],
+);
+
+/**
+ * A line in a cart.
+ *
+ * `variantId` is nullable and `productId` is not, which is the honest shape of a
+ * catalog mid-migration: variants arrived in §18.1, but every product predating
+ * them still sells at the product's own price and stock. Requiring a variant
+ * would break every existing product and the live x402 path. Price resolution
+ * prefers the variant and falls back to the product — in one place,
+ * `lib/commerce/pricing.ts`, so the fallback cannot drift.
+ */
+export const cartLines = pgTable(
+  "cart_lines",
+  {
+    id: serial("id").primaryKey(),
+    cartId: integer("cart_id")
+      .notNull()
+      .references(() => carts.id, { onDelete: "cascade" }),
+    productId: integer("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    variantId: integer("variant_id").references(() => variants.id, { onDelete: "cascade" }),
+    quantity: integer("quantity").notNull().default(1),
+    /** Product ids of chosen add-ons, matching `products.addOns[].productId`. */
+    addOnIds: jsonb("add_on_ids").$type<number[]>().notNull().default([]),
+    /**
+     * What the item cost when it went in the cart. **Never used to charge** —
+     * it exists so the shopper can be *told* the price changed under them.
+     * Recomputation is authoritative; this is the disclosure.
+     */
+    unitPriceMinorAtAdd: integer("unit_price_minor_at_add").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("cart_lines_cart_idx").on(t.cartId),
+    // One line per product/variant pair — adding the same item twice raises the
+    // quantity instead of growing a second line the shopper has to notice.
+    uniqueIndex("cart_lines_cart_item_uq").on(t.cartId, t.productId, t.variantId),
+  ],
+);
+
+/**
+ * A checkout attempt: the point where a cart's prices stop moving.
+ *
+ * The amounts here are a **frozen quote** — the numbers the shopper was shown
+ * and agreed to pay. They are computed server-side from the catalog at the
+ * moment the session opens and are never accepted from a request body. If the
+ * catalog changes afterwards, the session is what gets honoured or invalidated;
+ * the cart is not silently repriced under an authorized payment.
+ */
+export const checkoutSessions = pgTable(
+  "checkout_sessions",
+  {
+    id: text("id").primaryKey(),
+    cartId: integer("cart_id")
+      .notNull()
+      .references(() => carts.id, { onDelete: "cascade" }),
+    siteId: integer("site_id")
+      .notNull()
+      .references(() => sites.id, { onDelete: "cascade" }),
+    customerId: integer("customer_id").references(() => customers.id, { onDelete: "set null" }),
+    email: text("email"),
+    /**
+     * Peer payment rails, not a hierarchy. x402 is the one that works
+     * end-to-end today; that makes it the default demo path, not the identity.
+     */
+    provider: text("provider", { enum: ["stripe", "x402"] }).notNull(),
+    status: text("status", {
+      enum: ["requires_payment", "processing", "completed", "failed", "expired"],
+    })
+      .notNull()
+      .default("requires_payment"),
+    subtotalMinor: integer("subtotal_minor").notNull(),
+    discountMinor: integer("discount_minor").notNull().default(0),
+    taxMinor: integer("tax_minor").notNull().default(0),
+    shippingMinor: integer("shipping_minor").notNull().default(0),
+    totalMinor: integer("total_minor").notNull(),
+    currency: text("currency").notNull(),
+    shippingAddress: jsonb("shipping_address").$type<CartAddress | null>(),
+    /** Stripe PaymentIntent id, or the x402 transaction hash. */
+    paymentReference: text("payment_reference"),
+    /** Set on completion. The session is the only thing that may create it. */
+    orderId: integer("order_id").references(() => orders.id, { onDelete: "set null" }),
+    failureReason: text("failure_reason"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("checkout_sessions_cart_idx").on(t.cartId),
+    index("checkout_sessions_site_idx").on(t.siteId),
+    index("checkout_sessions_status_expires_idx").on(t.status, t.expiresAt),
+    // A payment reference settles exactly one checkout. This is the database
+    // half of replay protection: two concurrent completions of the same Stripe
+    // intent or the same on-chain transaction cannot both create an order.
+    uniqueIndex("checkout_sessions_payment_ref_uq").on(t.paymentReference),
+  ],
+);
+
+/**
+ * Stock held for an in-flight checkout (§18.4: "reserved at payment
+ * authorization, released on expiry or failure").
+ *
+ * The `inventory_ledger` still records every movement — this table records
+ * *state*, which an append-only ledger cannot express without scanning it: what
+ * is currently held, by which session, and when it goes stale. Release is then
+ * an indexed lookup rather than a replay of history, and the expiry sweeper has
+ * something to sweep.
+ */
+export const inventoryReservations = pgTable(
+  "inventory_reservations",
+  {
+    id: serial("id").primaryKey(),
+    checkoutSessionId: text("checkout_session_id")
+      .notNull()
+      .references(() => checkoutSessions.id, { onDelete: "cascade" }),
+    variantId: integer("variant_id")
+      .notNull()
+      .references(() => variants.id, { onDelete: "cascade" }),
+    locationId: integer("location_id")
+      .notNull()
+      .references(() => locations.id, { onDelete: "cascade" }),
+    quantity: integer("quantity").notNull(),
+    /** `consumed` means the sale happened and the stock actually left. */
+    status: text("status", { enum: ["held", "released", "consumed"] })
+      .notNull()
+      .default("held"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("inventory_reservations_session_idx").on(t.checkoutSessionId),
+    index("inventory_reservations_variant_idx").on(t.variantId),
+    index("inventory_reservations_sweep_idx").on(t.status, t.expiresAt),
+  ],
+);
+
+/**
+ * Immutable metering events for the threshold fee engine (§17).
+ *
+ * Written **at event time and never derived later**, which is why the table
+ * lands with checkout rather than with billing: a sale that completes before
+ * this row exists is a sale the threshold meter can never learn about. Rows are
+ * never updated — a refund is its own row with a negative amount.
+ */
+export const usageRecords = pgTable(
+  "usage_records",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    siteId: integer("site_id").references(() => sites.id, { onDelete: "set null" }),
+    orderId: integer("order_id").references(() => orders.id, { onDelete: "set null" }),
+    type: text("type", { enum: ["sale", "refund", "chargeback_lost"] }).notNull(),
+    /** As transacted. Negative for refunds and lost chargebacks. */
+    amountMinor: integer("amount_minor").notNull(),
+    currency: text("currency").notNull(),
+    /**
+     * The same money in the org's billing currency. **Null when the rate is not
+     * known** — no FX provider is wired, and inventing a rate would corrupt the
+     * threshold meter, which is a billing decision about real money. A null here
+     * is a visible gap the meter must report, not a zero it can quietly sum.
+     */
+    convertedMinor: integer("converted_minor"),
+    fxRate: numeric("fx_rate", { precision: 18, scale: 8 }),
+    /** Test never counts toward the threshold (§17, and the no-fabrication rule). */
+    environment: text("environment", { enum: ["test", "production"] }).notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("usage_records_org_occurred_idx").on(t.orgId, t.occurredAt),
+    index("usage_records_order_idx").on(t.orderId),
+    // One metering event per order per type: the completion path is retried by
+    // Stripe webhooks and by agents, and double-counting a sale overcharges a
+    // merchant at the threshold.
+    uniqueIndex("usage_records_order_type_uq").on(t.orderId, t.type),
+  ],
+);
+
+/** A postal address on a cart or checkout. Shape mirrors `customer_addresses`. */
+export type CartAddress = {
+  name?: string | null;
+  line1: string;
+  line2?: string | null;
+  city: string;
+  province?: string | null;
+  postalCode?: string | null;
+  country: string;
+  phone?: string | null;
+};
+
 /** One field-level change an invocation made, as `docs/API.md` §22 shapes it. */
 export type DiffEntry = {
   entity: string;
@@ -670,3 +923,8 @@ export type InventoryEntry = typeof inventoryLedger.$inferSelect;
 export type Collection = typeof collections.$inferSelect;
 export type Customer = typeof customers.$inferSelect;
 export type CustomerAddress = typeof customerAddresses.$inferSelect;
+export type Cart = typeof carts.$inferSelect;
+export type CartLine = typeof cartLines.$inferSelect;
+export type CheckoutSession = typeof checkoutSessions.$inferSelect;
+export type InventoryReservation = typeof inventoryReservations.$inferSelect;
+export type UsageRecord = typeof usageRecords.$inferSelect;

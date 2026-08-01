@@ -507,6 +507,66 @@ driving the auth bill and rate limits in a way that makes separate metering wort
 
 ---
 
+## Checkout totals — D33 (decided while building §18.4, 2026-07-31)
+
+**Decision: a money component carries a `state`, and only *shipping* can block a sale.**
+
+**The problem.** `docs/BACKEND.md` §4 says recompute everything server-side; `CLAUDE.md` says never
+imply something happened when it didn't. Discounts (§18.5) and tax and shipping (§18.6) are not
+built. Returning `taxMinor: 0` satisfies the first rule and breaks the second — a shopper reading
+"$0.00 tax" has been told a fact nobody established. So every component returns
+`{ amountMinor, state: "calculated" | "none" | "not_configured", note }`, and the storefront must
+render the state, not just the number.
+
+**The harder question was what to do about it**, and the first implementation got it wrong. Gating
+checkout on "every component calculated" made *every* checkout unreachable — a verification harness
+caught it when an unsupported discount code blocked an otherwise valid sale. The corrected rule
+splits the three cases by **who pays for the gap**:
+
+| Component | Today | Blocks checkout? | Why |
+|---|---|---|---|
+| Discount | `not_configured` when a code is present | **No** | The shopper pays list price — the correct price for the goods — and is told plainly the code did nothing. Refusing would lock a shopper out of a valid sale over a code the store never offered |
+| Tax | `none`, stated as tax-inclusive | **No** | Not a guess: §18.6's own "prices-include-tax flag" describes this, it is how most storefronts outside the US work, and it is how this platform has sold since v1. Adding a `$0.00` tax *line* to a total that should carry tax would under-collect — saying prices already include it does not |
+| Shipping | `none` if nothing needs it, else `not_configured` | **Yes — 409** | The cost is real and someone pays it. Quoting zero means the merchant does, silently, without agreeing to it |
+
+`totalState: "final" | "provisional"` answers exactly one question — *is this safe to charge?* — and
+is the only field a checkout button should read.
+
+**Consequence to know:** a store selling anything with `requiresShipping` cannot check out until
+§18.6 lands. That is deliberate and is the strongest argument for doing §18.6 next. Digital goods
+and every product predating §18.1 variants check out today, which is also the D5 beachhead.
+
+---
+
+## Overselling — D34 (decided while building §18.4, 2026-07-31)
+
+**Decision: `SELECT … FOR UPDATE` on the variant row inside the reservation transaction.**
+
+`docs/BACKEND.md` §4 required "a database transaction or constraint, not an application-level
+read-then-write" and did not say which. The lock was chosen over a check constraint because the
+inventory level is a **sum over the append-only ledger**, not a column — there is no single value to
+constrain. Locking the variant row serialises every checkout touching it, so the level read
+immediately after cannot be stale by the time the hold is written.
+
+Two supporting choices:
+
+- **Reservations are taken in ascending variant id.** Two carts holding the same two variants in
+  opposite orders would deadlock; ordering makes that impossible rather than unlikely.
+- **`inventory_reservations` exists alongside the ledger, and is not redundant.** The ledger records
+  *movement* and answers "why is this number 3?". The reservations table records *state* — what is
+  held, by which session, expiring when — which an append-only ledger cannot express without a
+  scan. Release becomes an indexed lookup and the expiry sweeper has something to sweep.
+
+**Verified**, not assumed: 8 concurrent checkouts against 3 units, 6 rounds, exactly 3 winners every
+round and never 4.
+
+**Known gap:** products predating §18.1 have no variant and therefore no ledger, so they still
+decrement `products.stock` and are **not** protected by this lock. Reading the wrong one of the two
+stock sources oversells, which is why `lib/commerce/pricing.ts` picks the source in exactly one
+place. The gap closes by migrating products to variants, not by inventing a ledger they never had.
+
+---
+
 ## Email — G1 in full
 
 **Provider: Resend** (owner direction, 2026-07-29). Good fit — first-class Next.js/Vercel DX, React
