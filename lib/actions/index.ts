@@ -21,6 +21,7 @@ import "./definitions/catalog";
 import "./definitions/inventory";
 import "./definitions/collections";
 import "./definitions/customers";
+import "./definitions/discounts";
 import "./definitions/shipping";
 
 export { defineAction, getAction, allActions, describeAction } from "./registry";

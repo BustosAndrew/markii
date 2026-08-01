@@ -204,6 +204,8 @@ export function serializeCart(cart: Cart, priced: PricedCart) {
     shipping: priced.shipping,
     shippingRates: priced.shippingRates,
     shippingState: priced.shippingState,
+    discounts: priced.discounts,
+    rejectedCodes: priced.rejectedCodes,
     totalMinor: priced.totalMinor,
     totalState: priced.totalState,
     issues: priced.issues,

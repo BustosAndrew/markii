@@ -34,8 +34,8 @@ carry an explicit status — **never call a `PLANNED` endpoint and never fake it
 | 14 | Analytics v2 (funnel, channels, failures) | 🟡 PLANNED | E |
 | 15 | Automations, activity, notifications, team | 🟡 PLANNED | E |
 | 16 | Accounts, organizations, staff | partial — `/api/auth/*`, `/api/me`, `/api/org`, `/api/org/staff*`, and **org scoping of §1–8** are ✅ LIVE; audit, sessions, tokens, MFA, org switching PLANNED | **A** |
-| 17 | Billing, plans, metering, threshold fees | 🟡 PLANNED — **except `UsageRecord`, which is ✅ LIVE**: it is written at event time by checkout and cannot be derived later, so it shipped with §18.4 | B |
-| 18 | Commerce core (variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping) | partial — §18.1 variants/inventory, §18.2 collections, §18.3 customers, §18.4 cart + x402 checkout, §18.6 shipping + manual tax ✅ LIVE (writes via §22 actions); §18.4 card rail, §18.5 discounts, §18.6 Stripe Tax PLANNED | C |
+| 17 | Billing, plans, metering, threshold fees | 🟡 PLANNED — **except `UsageRecord`, which is ✅ LIVE**: written at event time by checkout and underivable later, so it shipped with §18.4. It meters **net sales** (`subtotal − discounts`), *not* the order total — see `docs/PRICING.md` §4.1 | B |
+| 18 | Commerce core (variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping) | partial — §18.1–18.6 ✅ LIVE **except** the §18.4 card rail, §18.5 gift cards, and §18.6 Stripe Tax (writes via §22 actions). §18.7 order operations PLANNED | C |
 | 19 | Site builder & content | 🟡 PLANNED | D |
 | 20 | Disputes & chargebacks | 🟡 PLANNED | F |
 | 21 | Agent Ops add-on | 🟡 PLANNED | F (last) |
@@ -1513,10 +1513,10 @@ a cart can never be created against a different store than the one being browsed
 |---|---|---|
 | `POST` | `/api/cart` | Create cart; optional first line |
 | `GET`/`PATCH` | `/api/cart/:token` | Read; add / set-quantity (0 removes) / set email + address |
-| `POST` | `/api/cart/:token/discount` | Store a code. **Never applied** until §18.5 — returns `applied: false` with a reason |
-| `POST` | `/api/cart/:token/shipping-rates` | Returns `[]` + `not_configured` until §18.6. Explicitly *not* a free-shipping offer |
+| `POST` | `/api/cart/:token/discount` | Apply or remove a code (§18.5). A rejection says **why** |
+| `POST` | `/api/cart/:token/shipping-rates` | Quote the merchant's rates for an address (§18.6) |
 | `POST` | `/api/checkout/session` | Freeze the quote → reserve inventory → start payment on a rail |
-| `POST` | `/api/checkout/session/:id/complete` | Verify payment → Order → **UsageRecord (§17)** |
+| `POST` | `/api/checkout/session/:id/complete` | Verify payment → Order → redemptions → **UsageRecord (§17)** |
 | `GET`/`POST` | `/api/checkout` | The x402 one-shot (402 challenge → pay → present hash) |
 
 Money is **always recomputed server-side**; no request body has a price, total, or discount field to
@@ -1526,8 +1526,7 @@ so it protects an email and a shipping address and is never derived from the row
 **Money components.** `discount`, `tax`, and `shipping` each carry a `state`, because a bare `0`
 cannot distinguish "nothing is owed" from "we cannot calculate this" — and rendering the second as
 the first is the fabrication `CLAUDE.md` forbids, at the exact moment a shopper decides to pay.
-Discounts are `not_configured` when a code is present (§18.5, not built). Tax and shipping come from
-the store's §18.6 configuration.
+All three come from real configuration: discounts from §18.5, tax and shipping from §18.6.
 
 **`totalState` is the field a checkout button must read.** It answers only "is this safe to charge?"
 An unapplied discount code leaves it `final` — the shopper pays list price and has been told the
@@ -1552,16 +1551,68 @@ pipeline** (`lib/commerce/orders.ts`) and writes the same usage records. It stil
 agent has already settled on-chain by the time the second request arrives — refusing after
 settlement would strand their money. When §18.6 lands, the fix belongs in the challenge.
 
-### 18.5 Discounts & gift cards
+### 18.5 Discounts ✅ LIVE · gift cards 🟡 PLANNED
 
-`Discount { id, code | automatic, type: "percentage"|"fixed"|"free_shipping"|"bogo", valueMinor |
-percentage, appliesTo: {scope, ids[]}, minimumSubtotalMinor, customerEligibility, usageLimit,
-usageLimitPerCustomer, usedCount, combinesWith: {product, order, shipping}, startsAt, endsAt,
-status }`
+```ts
+interface Discount {
+  id: number; siteId: number;
+  code: string | null;              // null = automatic, applied with nothing typed
+  title: string;
+  type: "percentage" | "fixed" | "free_shipping";
+  percentageBps: number | null;     // 1500 = 15%. Integer, never a float (D31)
+  valueMinor: number | null;
+  appliesToScope: "order" | "products" | "collections"; appliesToIds: number[];
+  minimumSubtotalMinor: number | null;
+  customerEligibility: "all" | "specific"; eligibleCustomerIds: number[];
+  usageLimit: number | null; usageLimitPerCustomer: number | null;
+  combinesWithProduct: boolean; combinesWithOrder: boolean; combinesWithShipping: boolean;
+  startsAt: string | null; endsAt: string | null;
+  enabled: boolean;
+  status: "active" | "scheduled" | "expired" | "disabled";  // derived
+  usedCount: number;                                        // derived
+  exhausted: boolean;
+}
+```
 
-`GET`/`POST` `/api/discounts`, `GET`/`PATCH`/`DELETE` `/api/discounts/:id`,
-`POST /api/discounts/validate`. Gift cards: `/api/gift-cards` — issue, check balance, redeem
-(count toward net sales at **redemption**, not purchase — see `docs/PRICING.md` §3.1).
+| Method | Route | Notes |
+|---|---|---|
+| `GET` | `/api/discounts` | Filter by `siteId`, `q`, `automatic`, `status` |
+| `GET` | `/api/discounts/:id` | Plus redemption history and `totalDiscountedMinor` |
+| `POST` | `/api/discounts/validate` | **Preview** — writes nothing, consumes no usage allowance |
+| `POST` | `/api/cart/:token/discount` | Storefront: apply or remove a code |
+
+Mutations are actions (§22): `discounts.create` · `update` · `delete`.
+
+**`status` and `usedCount` are derived, never stored** — status from `enabled` plus the date window,
+usage from `discount_redemptions`. A stored counter drifts the first time a redemption is reversed,
+and a usage limit enforced against a drifted counter either blocks valid customers or lets a
+single-use code run forever. Same reasoning as inventory levels and customer totals.
+
+**A rejected code says why.** `not_found`, `disabled`, `not_started`, `expired`, `below_minimum`
+(with the minimum *and* the current subtotal), `usage_limit_reached`, `customer_limit_reached`,
+`not_eligible`, `no_matching_items`, `does_not_combine`. "Invalid code" for all ten would leave a
+shopper who is £2 short of a threshold with no idea they are £2 short.
+
+**Rejected codes are not stored on the cart** — except `below_minimum`, which is the one rejection
+the shopper can fix by adding to their cart, so that code stays and starts working when they do.
+
+**Stacking is opt-in on both sides.** A second discount joins the first only if *each* one's
+`combinesWith*` flag permits the other's kind. All three flags default to `false`: defaulting to
+combinable is how a store wakes up having sold everything at 70% off.
+
+A `fixed` discount never exceeds what it applies to, and the total discount never exceeds the
+subtotal — an order can reach zero but never goes negative. `free_shipping` zeroes the chosen
+shipping rate rather than removing it, so the merchant's record still shows which service was used.
+
+**Redemptions are recorded at order completion**, from the discounts frozen on the checkout session
+— not re-evaluated, since a code that hit its limit in between would silently raise a price the
+shopper already agreed to. The unique key on `(discountId, orderId)` makes a retried completion
+unable to burn a code twice. **Known limit:** two *different* checkouts racing for a
+last-remaining use can both complete, exceeding `usageLimit` by one; refusing after payment is worse
+on the x402 rail, where the shopper has already settled on-chain.
+
+**Gift cards are not built.** `/api/gift-cards` — issue, check balance, redeem — remains planned.
+They count toward net sales at **redemption**, not purchase (`docs/PRICING.md` §4.1).
 
 ### 18.6 Tax & shipping rates ✅ LIVE (shipping + manual tax) · 🟡 Stripe Tax PLANNED
 

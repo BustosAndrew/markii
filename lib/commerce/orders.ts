@@ -12,6 +12,7 @@ import {
   usageRecords,
   type CheckoutSession,
 } from "../db";
+import { recordRedemptions } from "./discounts";
 import { consumeForSession, releaseForSession } from "./reservations";
 
 /**
@@ -190,12 +191,45 @@ export async function completeCheckout(input: CompletionInput): Promise<Completi
         .where(eq(products.id, line.productId));
     }
 
+    /**
+     * **Net sales, not the order total** (`docs/PRICING.md` §4.1):
+     *
+     *     net_sales = line item totals − discounts − refunds − chargebacks lost
+     *     excludes: taxes, shipping charges, gift-card purchases, tips
+     *
+     * The order is charged `totalMinor`; the *meter* sees subtotal minus
+     * discounts. Metering the total would bill a merchant against tax they
+     * merely collected on a government's behalf and postage they passed
+     * through — inflating their threshold with money that was never revenue,
+     * and doing it worst to whoever ships the most.
+     */
+    const netSalesMinor = current.subtotalMinor - current.discountMinor;
+
+    /**
+     * Burn the discounts this quote was built on (§18.5). Recorded here rather
+     * than at session creation because a checkout that is never paid must not
+     * consume someone's single-use code.
+     *
+     * **Known limit, stated rather than papered over:** two checkouts of a
+     * last-remaining use can both complete, exceeding `usageLimit` by one. The
+     * unique key stops one order counting twice, not two orders racing. Refusing
+     * at completion is worse — on the x402 rail the shopper has already settled
+     * on-chain, so it would take their money and give nothing. Closing it
+     * properly needs a reservation like inventory's, which is the right fix if
+     * this ever matters more than the money it would strand.
+     */
+    await recordRedemptions(tx, {
+      orderId: order.id,
+      customerId: current.customerId,
+      applied: current.appliedDiscounts,
+    });
+
     await recordUsage(tx, {
       orgId: site.orgId,
       siteId: site.id,
       orderId: order.id,
       type: "sale",
-      amountMinor: current.totalMinor,
+      amountMinor: netSalesMinor,
       currency: current.currency,
       environment: environmentFor({ siteStatus: site.status, paymentVerified: true }),
     });

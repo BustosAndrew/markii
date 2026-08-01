@@ -33,12 +33,20 @@ app/api/         sites · products · categories · import · analytics · finan
 §18.4 — `lib/commerce/{cart,pricing,reservations,orders}.ts` plus the storefront routes — so the
 human path and the x402 agent path now share one order pipeline and one metering event.
 
-**What is still missing inside checkout** is the card rail (`lib/payments/` reports
-`configuration_required`; no `STRIPE_SECRET_KEY` exists yet), discounts (§18.5), and Stripe Tax.
-Shipping zones and rates plus manual tax landed in §18.6
-(`lib/commerce/{shipping,tax}.ts`), so a physical-goods store can now check out — but only once its
-merchant has configured a zone and a rate. An unconfigured store is refused rather than quoted a
-zero shipping cost it would silently absorb.
+Commerce core is now complete end to end: `lib/commerce/{cart,pricing,discounts,shipping,tax,
+reservations,orders}.ts`. A physical-goods store checks out once its merchant has configured a
+shipping zone and rate; an unconfigured one is refused rather than quoted a zero shipping cost it
+would silently absorb.
+
+**What is still missing** is the card rail (`lib/payments/` reports `configuration_required`; no
+`STRIPE_SECRET_KEY` exists yet), Stripe Tax, gift cards, and §18.7 order operations — refunds,
+cancellations, and fulfillment.
+
+**One metering rule to keep in mind while building refunds:** the `UsageRecord` meters **net sales**
+(`subtotal − discounts`), never the order total, because `docs/PRICING.md` §4.1 excludes tax and
+shipping. Metering the total would bill a merchant against tax they collected for a government and
+postage they passed through — worst for whoever ships the most. A refund is its own record with a
+negative amount, computed the same way.
 
 ---
 
@@ -205,9 +213,8 @@ Contract `docs/API.md` §18. The largest phase. Order within it:
 2. ~~**Inventory as an append-only ledger**~~ — done
 3. ~~**Collections** (manual + rule-based), **customers**~~ — done
 4. ~~**Cart and checkout**~~ — done for the x402 rail; card rail waits on Stripe credentials
-5. Tax and shipping rates — **done**: zones, four rate types, and manual tax. Stripe Tax still
-   waits on credentials. **Discounts (§18.5) are what remains here** ← next
-6. **Orders**: refunds, cancellations, manual fulfillment status, timeline
+5. ~~**Discounts**, tax, shipping rates~~ — done. Stripe Tax and gift cards still open
+6. **Orders**: refunds, cancellations, manual fulfillment status, timeline ← **next**
 7. **Digital delivery** — signed expiring URLs, download limits, licence keys, membership gating
 
 **Checkout rules that are not negotiable:**

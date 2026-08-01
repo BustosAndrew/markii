@@ -598,6 +598,56 @@ staying free, which is the same "recompute, never trust" rule as D33 applied to 
 
 ---
 
+## Metering base — D36 (bug found and fixed 2026-07-31)
+
+**The `UsageRecord` meters net sales — `subtotal − discounts` — never the order total.**
+
+`docs/PRICING.md` §4.1 already defined this ("excludes: taxes, shipping charges…"), but the §18.4
+implementation wrote `session.totalMinor`, which *includes* both. The threshold meter would have
+billed merchants against tax they merely collected on a government's behalf and postage they passed
+straight through — **and worst for whoever ships the most**, which is the opposite of what a
+size-based threshold is meant to measure.
+
+Caught while reading §4.1 to build discounts, not by a test, which is the useful part: the number
+was internally consistent and every §18.4 check passed. Only the written definition disagreed with
+it. **The lesson is that a figure feeding a pricing decision needs checking against its spec, not
+just against itself** — a self-consistent wrong number is invisible.
+
+Now covered by a check asserting the metered amount differs from the charged amount on any order
+carrying shipping.
+
+---
+
+## Discount stacking — D37 (decided while building §18.5, 2026-07-31)
+
+**Decision: stacking is opt-in on both sides, and all three `combinesWith` flags default to false.**
+
+A second discount joins the first only if *each one's* flag permits the other's kind
+(product / order / shipping). One-sided permission is not enough.
+
+**Why the strict default.** Combinable-by-default is how a store wakes up having sold its catalogue
+at 70% off — the failure is silent, fast, and unrecoverable, since the orders are real. The opposite
+error, a merchant having to tick a box to run a stacked promotion, costs one support question.
+Asymmetric consequences justify the asymmetric default.
+
+**Related rules that fall out of the same reasoning:**
+
+- A `fixed` discount never exceeds the base it applies to, and total discount never exceeds the
+  subtotal. An order can reach zero; it can never go negative.
+- A discount matching nothing in the cart is **rejected with a reason**, not applied as zero.
+- Rejections are specific — ten distinct reasons, including the shopper's current subtotal when they
+  are below a minimum. "Invalid code" for all ten leaves someone £2 short with no idea they are £2
+  short, and that is a sale lost to a message rather than a price.
+
+**Known race, stated rather than papered over:** two checkouts of a last-remaining use can both
+complete, exceeding `usageLimit` by one. The unique key on `(discountId, orderId)` stops one order
+counting twice, not two orders racing. Refusing at completion is worse — on the x402 rail the
+shopper has already settled on-chain, so it would take their money and give nothing. Closing it
+properly needs a reservation like inventory's (D34), which is the right fix if over-redemption ever
+costs more than the payments it would strand.
+
+---
+
 ## Email — G1 in full
 
 **Provider: Resend** (owner direction, 2026-07-29). Good fit — first-class Next.js/Vercel DX, React

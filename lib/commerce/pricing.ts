@@ -9,6 +9,7 @@ import {
   type Product,
   type Variant,
 } from "../db";
+import { evaluateDiscounts, type DiscountEvaluation } from "./discounts";
 import { selectedRate, type QuotedRate, type ShippingQuote } from "./shipping";
 import { calculateTax } from "./tax";
 
@@ -68,6 +69,9 @@ export type PricedCart = {
   /** Rates the shopper may pick from, so the cart and the rate list never disagree. */
   shippingRates: QuotedRate[];
   shippingState: ShippingQuote["state"];
+  /** What applied and, crucially, what did not and why (§18.5). */
+  discounts: DiscountEvaluation["applied"];
+  rejectedCodes: DiscountEvaluation["rejected"];
   totalMinor: number;
   /**
    * `final` only when every component is `calculated` or `none`. A provisional
@@ -225,17 +229,25 @@ export async function priceCart(cart: Cart): Promise<PricedCart> {
   const subtotalMinor = priced.reduce((s, l) => s + l.lineTotalMinor, 0);
 
   /**
-   * §18.5. Codes are stored but never applied, because there is nothing to
-   * apply them against. Reporting `calculated: 0` here would tell the shopper
-   * their code was worth nothing, which is a different and false statement from
-   * "discounts are not available yet".
+   * §18.5. Codes on the cart plus any automatic discounts, evaluated against the
+   * catalog. A rejected code carries **why** — an expired code, a below-minimum
+   * cart, and a typo are three different problems and only one is the shopper's
+   * fault.
    */
+  const evaluation = await evaluateDiscounts({
+    siteId: cart.siteId,
+    codes: cart.discountCodes,
+    lines: priced.map((l) => ({ productId: l.productId, lineTotalMinor: l.lineTotalMinor })),
+    subtotalMinor,
+    customerId: cart.customerId,
+  });
+
   const discount: MoneyComponent =
-    cart.discountCodes.length > 0
+    evaluation.applied.length > 0
       ? {
-          amountMinor: 0,
-          state: "not_configured",
-          note: "Discount codes are not yet supported on this store (docs/API.md §18.5).",
+          amountMinor: evaluation.totalDiscountMinor,
+          state: "calculated",
+          note: evaluation.applied.map((a) => a.code ?? a.title).join(", "),
         }
       : { amountMinor: 0, state: "none" };
 
@@ -257,11 +269,22 @@ export async function priceCart(cart: Cart): Promise<PricedCart> {
   if (quote.state === "not_required") {
     shipping = { amountMinor: 0, state: "none", note: "Nothing in this cart requires shipping." };
   } else if (rate) {
-    shipping = {
-      amountMinor: rate.priceMinor,
-      state: "calculated",
-      note: `${rate.name} (${rate.zoneName})`,
-    };
+    /**
+     * A `free_shipping` discount zeroes the rate rather than removing it: the
+     * shopper still picks a service, and the merchant's records still show which
+     * one was used and what it would have cost.
+     */
+    shipping = evaluation.freeShipping
+      ? {
+          amountMinor: 0,
+          state: "calculated",
+          note: `${rate.name} (${rate.zoneName}) — free shipping applied`,
+        }
+      : {
+          amountMinor: rate.priceMinor,
+          state: "calculated",
+          note: `${rate.name} (${rate.zoneName})`,
+        };
   } else if (quote.state === "quoted") {
     // Rates exist and the shopper simply has not picked one yet. Not a
     // misconfiguration — but not a chargeable total either.
@@ -327,6 +350,8 @@ export async function priceCart(cart: Cart): Promise<PricedCart> {
     shipping,
     shippingRates: quote.state === "quoted" ? quote.rates : [],
     shippingState: quote.state,
+    discounts: evaluation.applied,
+    rejectedCodes: evaluation.rejected,
     totalMinor:
       subtotalMinor - discount.amountMinor + tax.amountMinor + shipping.amountMinor,
     totalState,

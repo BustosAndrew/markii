@@ -118,6 +118,11 @@ export const POST = handler(async (req, { params }) => {
       totalMinor: priced.totalMinor,
       currency: priced.currency,
       shippingAddress: cart.shippingAddress ?? null,
+      appliedDiscounts: priced.discounts.map((d) => ({
+        discountId: d.discountId,
+        code: d.code,
+        amountMinor: d.amountMinor,
+      })),
       expiresAt,
     });
     await reserveForSession(tx, sessionId, requests, expiresAt);

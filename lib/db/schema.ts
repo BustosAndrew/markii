@@ -783,6 +783,17 @@ export const checkoutSessions = pgTable(
     totalMinor: integer("total_minor").notNull(),
     currency: text("currency").notNull(),
     shippingAddress: jsonb("shipping_address").$type<CartAddress | null>(),
+    /**
+     * Which discounts made up `discountMinor`, frozen with the quote (§18.5).
+     *
+     * Re-evaluating at completion would be wrong twice over: a code that hit its
+     * limit in between would silently raise the price the shopper already
+     * agreed to, and the redemption records would not match the money.
+     */
+    appliedDiscounts: jsonb("applied_discounts")
+      .$type<{ discountId: number; code: string | null; amountMinor: number }[]>()
+      .notNull()
+      .default([]),
     /** Stripe PaymentIntent id, or the x402 transaction hash. */
     paymentReference: text("payment_reference"),
     /** Set on completion. The session is the only thing that may create it. */
@@ -882,6 +893,100 @@ export const usageRecords = pgTable(
     // Stripe webhooks and by agents, and double-counting a sale overcharges a
     // merchant at the threshold.
     uniqueIndex("usage_records_order_type_uq").on(t.orderId, t.type),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Discounts (§18.5)
+// ---------------------------------------------------------------------------
+
+/**
+ * A discount — either code-entered or automatic.
+ *
+ * `usedCount` is **derived** from `discount_redemptions`, never stored, for the
+ * same reason inventory levels and customer totals are: a counter you increment
+ * drifts the first time a redemption is reversed, and a usage limit enforced
+ * against a drifted counter either blocks valid customers or lets a
+ * single-use code run forever.
+ */
+export const discounts = pgTable(
+  "discounts",
+  {
+    id: serial("id").primaryKey(),
+    siteId: integer("site_id")
+      .notNull()
+      .references(() => sites.id, { onDelete: "cascade" }),
+    /** Null means automatic — applied without the shopper typing anything. */
+    code: text("code"),
+    title: text("title").notNull(),
+    type: text("type", {
+      enum: ["percentage", "fixed", "free_shipping"],
+    }).notNull(),
+    /** Basis points for `percentage`: 1500 is 15%. Integer, never a float (D31). */
+    percentageBps: integer("percentage_bps"),
+    /** Minor units for `fixed`. */
+    valueMinor: integer("value_minor"),
+    /** `order` discounts everything; `products`/`collections` narrow it by id. */
+    appliesToScope: text("applies_to_scope", { enum: ["order", "products", "collections"] })
+      .notNull()
+      .default("order"),
+    appliesToIds: jsonb("applies_to_ids").$type<number[]>().notNull().default([]),
+    minimumSubtotalMinor: integer("minimum_subtotal_minor"),
+    /** `specific` restricts to `eligibleCustomerIds`. */
+    customerEligibility: text("customer_eligibility", { enum: ["all", "specific"] })
+      .notNull()
+      .default("all"),
+    eligibleCustomerIds: jsonb("eligible_customer_ids").$type<number[]>().notNull().default([]),
+    /** Null means unlimited. */
+    usageLimit: integer("usage_limit"),
+    usageLimitPerCustomer: integer("usage_limit_per_customer"),
+    /**
+     * Whether this may stack with another discount of each kind. Defaults are
+     * all false: stacking is how a store accidentally gives away 70% off, so it
+     * is opted into deliberately rather than inherited.
+     */
+    combinesWithProduct: boolean("combines_with_product").notNull().default(false),
+    combinesWithOrder: boolean("combines_with_order").notNull().default(false),
+    combinesWithShipping: boolean("combines_with_shipping").notNull().default(false),
+    startsAt: timestamp("starts_at", { withTimezone: true }),
+    endsAt: timestamp("ends_at", { withTimezone: true }),
+    /** Merchant's on/off switch. `status` is derived from this plus the dates. */
+    enabled: boolean("enabled").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("discounts_site_idx").on(t.siteId),
+    // Codes are matched case-insensitively by upper-casing on write, so this
+    // unique index is what actually prevents two codes differing only in case.
+    uniqueIndex("discounts_site_code_uq").on(t.siteId, t.code),
+  ],
+);
+
+/**
+ * One use of a discount on one order. Append-only.
+ *
+ * This table *is* the usage count, and the unique key on `(discountId, orderId)`
+ * is what makes a retried checkout completion unable to burn a single-use code
+ * twice.
+ */
+export const discountRedemptions = pgTable(
+  "discount_redemptions",
+  {
+    id: serial("id").primaryKey(),
+    discountId: integer("discount_id")
+      .notNull()
+      .references(() => discounts.id, { onDelete: "cascade" }),
+    orderId: integer("order_id").references(() => orders.id, { onDelete: "set null" }),
+    customerId: integer("customer_id").references(() => customers.id, { onDelete: "set null" }),
+    /** What it actually took off, for the merchant's records and for net sales. */
+    amountMinor: integer("amount_minor").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("discount_redemptions_discount_idx").on(t.discountId),
+    index("discount_redemptions_customer_idx").on(t.customerId),
+    uniqueIndex("discount_redemptions_discount_order_uq").on(t.discountId, t.orderId),
   ],
 );
 
@@ -1049,6 +1154,8 @@ export type CartLine = typeof cartLines.$inferSelect;
 export type CheckoutSession = typeof checkoutSessions.$inferSelect;
 export type InventoryReservation = typeof inventoryReservations.$inferSelect;
 export type UsageRecord = typeof usageRecords.$inferSelect;
+export type Discount = typeof discounts.$inferSelect;
+export type DiscountRedemption = typeof discountRedemptions.$inferSelect;
 export type ShippingZone = typeof shippingZones.$inferSelect;
 export type ShippingRate = typeof shippingRates.$inferSelect;
 export type TaxSettings = typeof taxSettings.$inferSelect;

@@ -6,17 +6,17 @@ import { cartResponse, loadCart, loadStore } from "@/lib/commerce/cart";
 import { carts, db } from "@/lib/db";
 
 /**
- * `POST /api/cart/:token/discount` (§18.4) — apply or remove a code.
+ * `POST /api/cart/:token/discount` (§18.5) — apply or remove a code.
  *
- * The code is **stored, not honoured**. Discounts are §18.5 and are not built,
- * so this route deliberately does not answer "is this code valid?" — it has no
- * table to check. Accepting a code and showing a reduced total would be the
- * exact failure `CLAUDE.md` forbids: implying something happened when it did
- * not, at the one moment a shopper is deciding whether to pay.
+ * The code is validated against the store's real discounts, and a rejection
+ * says **why**: expired, below the minimum, already fully redeemed, not
+ * combinable, or simply unrecognised. "Invalid code" for all five would leave a
+ * shopper who is £2 short of a threshold with no idea they are £2 short.
  *
- * So the response echoes the code with `applied: false` and a reason, and
- * `discount.state` on the cart stays `not_configured`. When §18.5 lands, this
- * route validates against real discounts and nothing else here changes.
+ * A rejected code is **not stored**. Keeping it on the cart would show a code
+ * that never applies on every subsequent read — except for `below_minimum`,
+ * which is the one rejection the shopper can fix by adding to their cart, so
+ * that code stays and starts working when they do.
  */
 const schema = z.object({
   code: z.string().min(1).max(60),
@@ -31,28 +31,59 @@ export const POST = handler(async (req, { params }) => {
   const { code, action } = schema.parse(JSON.parse((await req.text()) || "{}"));
   const normalized = code.trim().toUpperCase();
 
-  const next =
-    action === "remove"
-      ? cart.discountCodes.filter((c) => c !== normalized)
-      : [...new Set([...cart.discountCodes, normalized])];
+  if (action === "remove") {
+    const [updated] = await db
+      .update(carts)
+      .set({
+        discountCodes: cart.discountCodes.filter((c) => c !== normalized),
+        updatedAt: new Date(),
+      })
+      .where(eq(carts.id, cart.id))
+      .returning();
+    return NextResponse.json({
+      ...(await cartResponse(updated)),
+      codeResult: { code: normalized, removed: true },
+    });
+  }
 
-  const [updated] = await db
+  // Add it, price the cart, and let the engine decide — evaluating here as well
+  // would be a second implementation of the rules that could disagree with the
+  // one checkout uses.
+  const [withCode] = await db
     .update(carts)
-    .set({ discountCodes: next, updatedAt: new Date() })
+    .set({
+      discountCodes: [...new Set([...cart.discountCodes, normalized])],
+      updatedAt: new Date(),
+    })
     .where(eq(carts.id, cart.id))
     .returning();
 
+  const response = await cartResponse(withCode);
+  const rejection = response.rejectedCodes.find((r) => r.code === normalized);
+  const applied = response.discounts.find((d) => d.code === normalized);
+
+  if (rejection && rejection.reason.code !== "below_minimum") {
+    const [reverted] = await db
+      .update(carts)
+      .set({ discountCodes: cart.discountCodes, updatedAt: new Date() })
+      .where(eq(carts.id, cart.id))
+      .returning();
+    return NextResponse.json(
+      {
+        ...(await cartResponse(reverted)),
+        // `reason` stays nested: it has its own `code` field naming the *kind*
+        // of rejection, which flattening would silently overwrite with the
+        // discount code the shopper typed.
+        codeResult: { code: normalized, applied: false, reason: rejection.reason },
+      },
+      { status: 422 },
+    );
+  }
+
   return NextResponse.json({
-    ...(await cartResponse(updated)),
-    codeResult:
-      action === "remove"
-        ? { code: normalized, removed: true }
-        : {
-            code: normalized,
-            applied: false,
-            reason:
-              "Discount codes are not yet supported on this store. The code has been saved to " +
-              "the cart and will be evaluated once discounts are available (docs/API.md §18.5).",
-          },
+    ...response,
+    codeResult: applied
+      ? { code: normalized, applied: true, amountMinor: applied.amountMinor, title: applied.title }
+      : { code: normalized, applied: false, reason: rejection!.reason },
   });
 });
