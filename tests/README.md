@@ -43,11 +43,17 @@ stack the same 61 tests take **12s**, a ~37× difference that is worth the one
 -time Docker setup if you run these more than occasionally:
 
 ```bash
-supabase start                              # Postgres + GoTrue in Docker
+# storage-api is required: the digital-delivery suite (§18.8) uploads real files
+# and redeems real signed URLs. Stubbing storage would test the stub.
+supabase start -x studio,imgproxy,edge-runtime,logflare,vector,realtime,mailpit,postgres-meta,supavisor
 pnpm db:migrate
+pnpm storage:init                           # buckets are not in the migration chain
 DEMO_SKIP_PAYMENT_VERIFICATION=1 pnpm dev
 pnpm test:integration
 ```
+
+Adding a service to an already-running stack needs `supabase stop` first — `start`
+sees the containers as up and will not reconcile the set.
 
 No `db:seed` in that list, and that is the point: the suite runs against a
 **freshly migrated, completely empty** database. If it ever stops doing so, a

@@ -44,6 +44,29 @@ export class Client {
     return { status: res.status, json };
   }
 
+  /**
+   * Multipart upload, carrying the same session cookie.
+   *
+   * Separate from {@link call} because `FormData` must set its own
+   * `content-type` with the boundary — forcing `application/json` there
+   * produces a body the server cannot parse.
+   */
+  async postForm<T = any>(path: string, form: FormData): Promise<ApiResult<T>> {
+    const res = await fetch(`${BASE_URL}${path}`, {
+      method: "POST",
+      headers: this.cookie ? { cookie: this.cookie } : {},
+      body: form,
+    });
+    const text = await res.text();
+    let json: any;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      json = { raw: text.slice(0, 500) };
+    }
+    return { status: res.status, json };
+  }
+
   get = <T = any>(p: string) => this.call<T>("GET", p);
   post = <T = any>(p: string, b?: unknown) => this.call<T>("POST", p, b);
   patch = <T = any>(p: string, b?: unknown) => this.call<T>("PATCH", p, b);

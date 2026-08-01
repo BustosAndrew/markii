@@ -35,7 +35,7 @@ carry an explicit status — **never call a `PLANNED` endpoint and never fake it
 | 15 | Automations, activity, notifications, team | 🟡 PLANNED | E |
 | 16 | Accounts, organizations, staff | partial — `/api/auth/*`, `/api/me`, `/api/org`, `/api/org/staff*`, and **org scoping of §1–8** are ✅ LIVE; audit, sessions, tokens, MFA, org switching PLANNED | **A** |
 | 17 | Billing, plans, metering, threshold fees | 🟡 PLANNED — **except `UsageRecord`, which is ✅ LIVE**: written at event time by checkout and underivable later, so it shipped with §18.4. It meters **net sales** (`subtotal − discounts`), *not* the order total — see `docs/PRICING.md` §4.1 | B |
-| 18 | Commerce core (variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping) | partial — §18.1–18.6 ✅ LIVE **except** the §18.4 card rail, §18.5 gift cards, and §18.6 Stripe Tax (writes via §22 actions). §18.7 order operations ✅ LIVE, **except** processor-executed refunds — Markii records a refund and meters it, the merchant moves the money | C |
+| 18 | Commerce core (variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping) | partial — §18.1–18.6 ✅ LIVE **except** the §18.4 card rail, §18.5 gift cards, and §18.6 Stripe Tax (writes via §22 actions). §18.7 order operations and §18.8 digital delivery ✅ LIVE, **except** processor-executed refunds (Markii records a refund and meters it; the merchant moves the money) and membership gating | C |
 | 19 | Site builder & content | 🟡 PLANNED | D |
 | 20 | Disputes & chargebacks | 🟡 PLANNED | F |
 | 21 | Agent Ops add-on | 🟡 PLANNED | F (last) |
@@ -443,9 +443,14 @@ stock copied. → `201` **Product**.
 ### `POST /api/uploads`
 Image upload for the product form. `multipart/form-data` with field `file` (png/jpg/webp,
 max 5 MB). → `201` `{ "url": "https://…" }` — put that URL into `images`.
-Stored in **Supabase Storage** in production (local `public/uploads` in dev) — either way, treat
-the returned `url` as **opaque**. That rule is why the storage backend can change without any
-frontend edit. (External image URLs can also be used directly without uploading.)
+Stored in **Supabase Storage**, `public-media` bucket, in every environment — the local-filesystem
+fallback is gone. It wrote `public/uploads` whenever `BLOB_READ_WRITE_TOKEN` was unset, which looked
+like success and 404'd as soon as a Vercel instance recycled; an unconfigured deployment now returns
+`503 CONFIGURATION_REQUIRED` instead of a URL that will not resolve. Treat the returned `url` as
+**opaque** — that rule is why this swap needed no frontend edit. Images are public by design: they
+appear in storefront HTML and JSON-LD, so a signed URL would expire out of a cached page. Files a
+merchant *sells* go to a private bucket instead (§18.8). (External image URLs can also be used
+directly without uploading.)
 Superseded by `/api/media` (§19) once the media library lands.
 
 ---
@@ -1721,6 +1726,63 @@ the shopper's money with the merchant and no record of what is owed.
 action returns `customerNotified: false` / `queued: true`, and the outcome lands on the timeline as
 `email_sent` or `email_failed`. SES is not wired yet, so `email_failed` is currently the normal
 result and is reported as such.
+
+### 18.8 Digital delivery ✅ LIVE
+
+The **D5 beachhead**. Everything here exists because a merchant selling files never needs the
+fulfillment logistics `docs/PLAN.md` §3 permanently excludes — the platform's most conspicuous gap
+is irrelevant for this segment.
+
+| Method | Route | Notes |
+|---|---|---|
+| `GET` | `/api/digital-assets` | The org's files, plus measured `usage` against the G5 quotas |
+| `POST` | `/api/digital-assets` | Multipart upload to the **private** bucket. Max 2 GB |
+| `GET` | `/api/orders/:id` | `downloads` and `licenceKeys` for that order (§18.7) |
+| `GET` | `/_sites/:site/download/:token` | **Storefront.** Redeem a grant → 302 to a signed URL |
+
+| Action | Risk | Notes |
+|---|---|---|
+| `delivery.attachAsset` · `detachAsset` | low | Which files a product delivers. Omit `variantId` for all variants |
+| `delivery.deleteAsset` | high | Removes the object. **Past buyers lose access** — reports how many grants it breaks |
+| `delivery.setDownloadPolicy` | low | Per-product download cap and expiry. Null means unlimited |
+| `delivery.reissueDownload` | medium | Reset the counter, extend expiry, un-revoke |
+| `delivery.revokeDownload` | medium | Withdraw access — fraud, chargebacks |
+| `delivery.addLicenceKeys` | medium | Load keys into a product's pool. Input is **redacted** from the audit log |
+
+**Upload is a route, not an action.** Actions take JSON and write their input to an audit table;
+base64-ing a 2 GB course file through that is not a thing to do. The bytes land on the route;
+everything a merchant then *does* with the asset goes through the registry (§22 rule 1).
+
+**The grant is the entitlement; the URL is not.** A `download_grants` row carries the cap, the
+expiry, and the revocation. A signed Supabase URL is minted per redemption and lives five minutes.
+That separation is what makes a download limit enforceable at all — a URL, once handed out, cannot
+be counted or withdrawn. The link in a receipt therefore points at `/download/:token`, never at
+storage, or it would be dead before the email was opened.
+
+**Bytes never pass through a route handler** (G5). `/download/:token` authorises, meters, and 302s
+with `cache-control: no-store`. Proxying would pay egress twice — Supabase's *and* Vercel's — and
+time out a function on a large file; G5 measured a single 2 GB video downloaded 100 times at **$18
+of bandwidth against $0.25 of storage**, which is why egress is metered at all.
+
+**Metering is honest about what it counts.** `download_events.bytes` records bytes **authorised**,
+not delivered — the transfer happens between shopper and Supabase and is never observable from here.
+An abandoned download books a full file. The over-count falls on Markii's own cost accounting, never
+on a merchant's bill. G5's quotas are reported as `usage` with `advisoryOnly: true` and **nothing is
+blocked on them**, because those numbers are still unsigned-off and cutting off a paying merchant's
+customers over an unagreed figure is worse than not gating yet.
+
+**Markii never generates licence keys.** A key it invented would not validate against the merchant's
+software. Merchants load their own pool; each sale claims one with `for update skip locked`, so two
+concurrent orders cannot be handed the same key. An **exhausted pool does not fail the order** — the
+shopper has already paid, irreversibly on the x402 rail — so the shortfall goes on the order timeline
+for the merchant to resolve. A refund returns unused keys to the pool rather than burning them.
+
+**A refund revokes the downloads it paid for**, scoped to the refunded lines. Buy, download, refund,
+keep the file is the whole digital-goods fraud pattern, and it is closed by default.
+
+**Not built:** membership and content gating, and subscription-style recurring access. Both are named
+in D5's scope consequence; the first needs the Phase D content model to gate and the second needs
+Phase B recurring billing, so neither is startable yet.
 
 ---
 

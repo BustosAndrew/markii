@@ -108,6 +108,17 @@ export const products = pgTable(
     enabled: boolean("enabled").notNull().default(true),
     suggestedProductIds: jsonb("suggested_product_ids").$type<number[]>().notNull().default([]),
     addOns: jsonb("add_ons").$type<AddOn[]>().notNull().default([]),
+    /**
+     * Digital delivery policy (§18.8). Both null by default, which means
+     * unlimited downloads that never expire.
+     *
+     * **Whether a product is digital is derived, not stored** — it is digital if
+     * it has assets or licence keys attached. A separate `isDigital` flag would
+     * be a second source of truth that can disagree with the attachments, and
+     * the disagreement would surface as a paid order delivering nothing.
+     */
+    downloadLimit: integer("download_limit"),
+    downloadExpiryDays: integer("download_expiry_days"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -1430,6 +1441,212 @@ export const orderEvents = pgTable(
   (t) => [index("order_events_order_created_idx").on(t.orderId, t.createdAt)],
 );
 
+// ---------------------------------------------------------------------------
+// Digital delivery (§18.8) — the D5 beachhead
+// ---------------------------------------------------------------------------
+
+/**
+ * A file a merchant sells.
+ *
+ * Stored in the **private** `digital-assets` bucket and reachable only through a
+ * signed URL minted per download. `storagePath` is the object key, never a URL:
+ * a durable address stored in a row is one leak away from being the product.
+ *
+ * `sizeBytes` is recorded at upload because it is what the G5 storage quota
+ * meters, and Storage cannot be asked cheaply for a per-org total afterwards.
+ */
+export const digitalAssets = pgTable(
+  "digital_assets",
+  {
+    id: serial("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    siteId: integer("site_id").references(() => sites.id, { onDelete: "set null" }),
+    /** Object key in the private bucket. Not a URL, and never rendered as one. */
+    storagePath: text("storage_path").notNull(),
+    /** What the shopper's browser saves it as. */
+    fileName: text("file_name").notNull(),
+    contentType: text("content_type").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    /** Merchant-facing label, when the filename is not descriptive enough. */
+    label: text("label"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("digital_assets_org_idx").on(t.orgId),
+    index("digital_assets_site_idx").on(t.siteId),
+    uniqueIndex("digital_assets_path_uq").on(t.storagePath),
+  ],
+);
+
+/**
+ * Which assets a product (or one of its variants) delivers.
+ *
+ * A nullable `variantId` means "every variant of this product". That is the
+ * common case — a single ebook — and requiring a row per variant would make the
+ * simple setup the fiddly one.
+ */
+export const productDigitalAssets = pgTable(
+  "product_digital_assets",
+  {
+    id: serial("id").primaryKey(),
+    productId: integer("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    /** Null: delivered for any variant. Set: only that one. */
+    variantId: integer("variant_id").references(() => variants.id, { onDelete: "cascade" }),
+    assetId: integer("asset_id")
+      .notNull()
+      .references(() => digitalAssets.id, { onDelete: "cascade" }),
+    position: integer("position").notNull().default(0),
+  },
+  (t) => [
+    index("product_digital_assets_product_idx").on(t.productId),
+    index("product_digital_assets_asset_idx").on(t.assetId),
+    uniqueIndex("product_digital_assets_uq").on(t.productId, t.variantId, t.assetId),
+  ],
+);
+
+/**
+ * A shopper's right to download something they paid for.
+ *
+ * **The grant is the entitlement, not the link.** A signed URL is minted from a
+ * grant on each redemption and lives minutes; the grant lives as long as the
+ * merchant's policy says. That separation is what makes a download limit
+ * enforceable at all — a URL, once issued, cannot be counted or revoked.
+ *
+ * `token` is the shopper's only credential, so it is a random 256-bit value
+ * rather than the row id. Guests have no account; the emailed link *is* their
+ * access, and a guessable one is someone else's purchase.
+ */
+export const downloadGrants = pgTable(
+  "download_grants",
+  {
+    id: serial("id").primaryKey(),
+    /** Unguessable bearer token — this *is* the shopper's authentication. */
+    token: text("token").notNull(),
+    orderId: integer("order_id")
+      .notNull()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    orderLineId: integer("order_line_id").references(() => orderLines.id, {
+      onDelete: "set null",
+    }),
+    assetId: integer("asset_id")
+      .notNull()
+      .references(() => digitalAssets.id, { onDelete: "cascade" }),
+    customerId: integer("customer_id").references(() => customers.id, { onDelete: "set null" }),
+    email: text("email"),
+    /**
+     * Null means unlimited. A limit is a merchant's anti-sharing choice, not a
+     * default — silently capping a legitimate buyer at some invented number is
+     * worse than not capping at all.
+     */
+    downloadLimit: integer("download_limit"),
+    downloadCount: integer("download_count").notNull().default(0),
+    /** Null means the grant does not expire. */
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    /**
+     * Set when a merchant withdraws access — after a refund, or a chargeback.
+     * Soft, so the record of what was bought and downloaded survives.
+     */
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    revokedReason: text("revoked_reason"),
+    lastDownloadedAt: timestamp("last_downloaded_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("download_grants_token_uq").on(t.token),
+    index("download_grants_order_idx").on(t.orderId),
+    index("download_grants_asset_idx").on(t.assetId),
+    index("download_grants_customer_idx").on(t.customerId),
+  ],
+);
+
+/**
+ * One redemption of a grant. Append-only.
+ *
+ * This table is both the audit trail and the **egress meter** (G5): bytes
+ * delivered is what costs money, and it cannot be recovered later because the
+ * transfer happens between the shopper and Supabase without touching us.
+ *
+ * `bytes` is the asset's recorded size, and the honest caveat is that this
+ * counts bytes we **authorised**, not bytes that arrived — a cancelled download
+ * still books a full file. Measuring the truth would mean proxying the transfer,
+ * which G5 forbids for the much larger cost it would add. The over-count is
+ * stated rather than hidden, and it errs against Markii, never the merchant.
+ */
+export const downloadEvents = pgTable(
+  "download_events",
+  {
+    id: serial("id").primaryKey(),
+    grantId: integer("grant_id")
+      .notNull()
+      .references(() => downloadGrants.id, { onDelete: "cascade" }),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** Authorised, not confirmed delivered. See the note above. */
+    bytes: integer("bytes").notNull(),
+    ip: text("ip"),
+    userAgent: text("user_agent"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("download_events_grant_idx").on(t.grantId),
+    // The shape the G5 egress rollup reads: one org, one month.
+    index("download_events_org_created_idx").on(t.orgId, t.createdAt),
+  ],
+);
+
+/**
+ * A licence key issued for a purchase.
+ *
+ * Keys are **pre-loaded by the merchant**, never generated by Markii. A
+ * generated key is meaningless unless the merchant's own software can validate
+ * it, and inventing a format would either collide with their scheme or hand a
+ * buyer a string that unlocks nothing. So a product has a pool, and a sale
+ * claims from it.
+ *
+ * That makes exhaustion a real state the merchant must see coming: `assignedAt`
+ * null is unclaimed, and a product whose pool is empty cannot fulfil its next
+ * order.
+ */
+export const licenceKeys = pgTable(
+  "licence_keys",
+  {
+    id: serial("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    productId: integer("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    variantId: integer("variant_id").references(() => variants.id, { onDelete: "cascade" }),
+    /** The key itself, exactly as the merchant supplied it. */
+    key: text("key").notNull(),
+    /** Null until a sale claims it. */
+    orderId: integer("order_id").references(() => orders.id, { onDelete: "set null" }),
+    orderLineId: integer("order_line_id").references(() => orderLines.id, {
+      onDelete: "set null",
+    }),
+    customerId: integer("customer_id").references(() => customers.id, { onDelete: "set null" }),
+    assignedAt: timestamp("assigned_at", { withTimezone: true }),
+    /** Returned to the pool after a refund, so the merchant does not lose stock. */
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("licence_keys_product_idx").on(t.productId),
+    index("licence_keys_order_idx").on(t.orderId),
+    // Claiming is "the first unassigned key for this product", so that lookup
+    // must be an index seek rather than a scan of an exhausted pool.
+    index("licence_keys_pool_idx").on(t.productId, t.assignedAt),
+    uniqueIndex("licence_keys_org_key_uq").on(t.orgId, t.key),
+  ],
+);
+
 /** One manual tax rate. `rateBps` is basis points — 875 is 8.75%. */
 export type ManualTaxRate = {
   country: string;
@@ -1502,6 +1719,11 @@ export type InventoryReservation = typeof inventoryReservations.$inferSelect;
 export type UsageRecord = typeof usageRecords.$inferSelect;
 export type Discount = typeof discounts.$inferSelect;
 export type DiscountRedemption = typeof discountRedemptions.$inferSelect;
+export type DigitalAsset = typeof digitalAssets.$inferSelect;
+export type ProductDigitalAsset = typeof productDigitalAssets.$inferSelect;
+export type DownloadGrant = typeof downloadGrants.$inferSelect;
+export type DownloadEvent = typeof downloadEvents.$inferSelect;
+export type LicenceKey = typeof licenceKeys.$inferSelect;
 export type OrderLine = typeof orderLines.$inferSelect;
 export type Refund = typeof refunds.$inferSelect;
 export type RefundLine = typeof refundLines.$inferSelect;

@@ -22,6 +22,7 @@ import {
   restockRefundLines,
   type ComputedRefundLine,
 } from "../../commerce/refunds";
+import { revokeDeliveryForOrder } from "../../commerce/delivery";
 import { recordUsage } from "../../commerce/orders";
 import { sendMerchantMail } from "../../email";
 import { siteScope } from "../../tenancy";
@@ -302,6 +303,21 @@ export const refundOrder = defineAction({
       });
     }
 
+    /**
+     * A refund withdraws digital access (§18.8). Not doing this is the whole
+     * digital-goods fraud pattern: buy, download, refund, keep the file.
+     *
+     * Scoped to the refunded lines when the refund named any, so refunding one
+     * ebook out of three does not revoke the other two. A shipping-only refund
+     * names no lines and correctly revokes nothing.
+     */
+    const revocation =
+      computed.lines.length > 0
+        ? await revokeDeliveryForOrder(ctx.db, order.id, `refunded (refund ${refund.id})`, {
+            orderLineIds: computed.lines.map((l) => l.orderLineId),
+          })
+        : { grantsRevoked: 0, keysReturned: 0 };
+
     await logEvent(ctx, {
       orderId: order.id,
       type: "refunded",
@@ -317,6 +333,8 @@ export const refundOrder = defineAction({
         shippingMinor: computed.shippingMinor,
         restockedLineIds: restocked,
         unrestockableLineIds: unrestockable,
+        downloadsRevoked: revocation.grantsRevoked,
+        licenceKeysReturned: revocation.keysReturned,
         method: "manual",
         rail,
       },
@@ -353,6 +371,9 @@ export const refundOrder = defineAction({
       restockedLineIds: restocked,
       /** Lines whose product no longer exists — nothing to return stock to. */
       unrestockableLineIds: unrestockable,
+      /** Digital access withdrawn, so a refunded buyer does not keep the file. */
+      downloadsRevoked: revocation.grantsRevoked,
+      licenceKeysReturned: revocation.keysReturned,
       /** Stated plainly: Markii wrote this down, it did not move the money. */
       moneyMoved: false,
       method: "manual" as const,

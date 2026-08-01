@@ -90,7 +90,11 @@ jobs:
       # Drop the `-x` flag if `supabase status` ever comes back short.
       - name: Start Supabase
         run: |
-          supabase start -x studio,imgproxy,edge-runtime,logflare,vector,realtime,storage-api,mailpit,postgres-meta,supavisor
+          # `storage-api` is NOT excluded: digital delivery (§18.8) uploads real
+          # files and redeems real signed URLs, and stubbing storage would test
+          # the stub rather than the thing that breaks. Everything still excluded
+          # is genuinely unused by the suite.
+          supabase start -x studio,imgproxy,edge-runtime,logflare,vector,realtime,mailpit,postgres-meta,supavisor
 
       - name: Build environment file
         run: |
@@ -125,6 +129,12 @@ jobs:
 
       - name: Run migrations
         run: pnpm db:migrate
+
+      # Buckets are created through Supabase's Storage API, not DDL, so they are
+      # not in the migration chain and a fresh stack has none. Runs after the env
+      # file exists, since it reads the same credentials the app does.
+      - name: Create storage buckets
+        run: pnpm storage:init
 
       # The RLS deny-by-default check needs a live database, so it runs here
       # rather than in the fast job.

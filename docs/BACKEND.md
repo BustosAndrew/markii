@@ -44,10 +44,25 @@ session's `lineSnapshot`), and `orders.refund` / `cancel` / `fulfill` / `addNote
 stock left from, and meter **net sales** — see below. Fulfillment is manual and explicitly
 unverified; Markii does no fulfillment logistics.
 
+**§18.8 digital delivery landed** — the D5 beachhead, and with it Supabase Storage
+(`lib/storage/`, §0 task 8). A paid order issues `download_grants` inside the completion
+transaction; `/_sites/:site/download/:token` authorises, meters, and **302s to a five-minute signed
+URL** rather than serving bytes, because G5 forbids proxying. Licence keys come from a
+merchant-supplied pool — Markii never generates one — and a refund revokes the downloads and
+returns the keys. Storage and egress are metered against G5's quotas and reported as
+`advisoryOnly`, since those numbers are not signed off and blocking a merchant's customers on an
+unagreed figure is worse than not gating yet.
+
 **What is still missing** is the card rail (`lib/payments/` reports `configuration_required`; no
-`STRIPE_SECRET_KEY` exists yet), Stripe Tax, gift cards, and **processor-executed refunds** —
+`STRIPE_SECRET_KEY` exists yet), Stripe Tax, gift cards, **processor-executed refunds** —
 `orders.refund` records a refund the merchant issued and refuses `method: "processor"` with the
-reason, since Stripe is unwired and x402 settlement is irreversible.
+reason, since Stripe is unwired and x402 settlement is irreversible — and **membership gating**,
+which has no content model to gate until Phase D.
+
+**Storage buckets are not in the migration chain.** Supabase creates them through its Storage API,
+not DDL, so a fresh environment has none and uploads fail until `pnpm storage:init` runs. It is
+idempotent, and it fails loudly if `digital-assets` is ever public — which would make every download
+limit in §18.8 decoration.
 
 **The metering rule refunds are built on:** the `UsageRecord` meters **net sales**
 (`subtotal − discounts`), never the order total, because `docs/PRICING.md` §4.1 excludes tax and
@@ -93,9 +108,14 @@ this is a driver and services swap. Full task list in `docs/DECISIONS.md` §"Dat
 > on site create/update/delete — no more database query per storefront request.
 > ✅ Seed script closes its connection; `.env.example` rewritten to match what the code reads.
 >
-> ⏳ **Blocked on a provisioned Supabase project** (needs credentials, not code): running
-> `pnpm db:migrate`, uploads → Supabase Storage (task 8, still Vercel Blob), SMTP config,
-> regenerating seed data, dropping the Neon project.
+> ✅ **Task 8 done — uploads are on Supabase Storage** (`lib/storage/`). Two buckets: `public-media`
+> for product images, private `digital-assets` for files merchants sell. The Vercel Blob and
+> local-filesystem paths are gone; the filesystem fallback silently broke every deployment, since
+> Vercel's filesystem is ephemeral. Buckets are provisioned by `pnpm storage:init`, **not** by the
+> migration chain — Supabase creates them through its Storage API, not DDL.
+>
+> ⏳ **Still needing credentials, not code:** SMTP config, regenerating seed data against the hosted
+> project, and dropping the Neon project.
 >
 > ⚠️ **Edge Config was not used.** `lib/domains.ts` caches in-process with a 5-minute TTL, which
 > removes the per-request query but means an invalidation only clears the instance that served the
@@ -224,8 +244,9 @@ Contract `docs/API.md` §18. The largest phase. Order within it:
 5. ~~**Discounts**, tax, shipping rates~~ — done. Stripe Tax and gift cards still open
 6. ~~**Orders**: refunds, cancellations, manual fulfillment status, timeline~~ — done. Executing a
    refund on a rail (rather than recording one) waits on Stripe credentials
-7. **Digital delivery** — signed expiring URLs, download limits, licence keys, membership gating
-   ← **next**
+7. ~~**Digital delivery** — signed expiring URLs, download limits, licence keys~~ — done.
+   **Membership and content gating are not started**: the content model they gate is Phase D and
+   recurring access needs Phase B billing, so neither is startable yet
 
 **Checkout rules that are not negotiable:**
 

@@ -17,7 +17,8 @@
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
-    "db:seed": "node --env-file-if-exists=.env.local --import=tsx scripts/seed.ts"
+    "db:seed": "node --env-file-if-exists=.env.local --import=tsx scripts/seed.ts",
+    "storage:init": "node --env-file-if-exists=.env.local --import=tsx scripts/ensure-buckets.ts"
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.23",

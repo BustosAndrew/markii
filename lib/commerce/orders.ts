@@ -17,6 +17,7 @@ import {
   type DbHandle,
 } from "../db";
 import { allocate } from "./allocation";
+import { deliverableItems, issueDelivery } from "./delivery";
 import { recordRedemptions } from "./discounts";
 import { consumeForSession, releaseForSession } from "./reservations";
 
@@ -333,6 +334,57 @@ export async function completeCheckout(input: CompletionInput): Promise<Completi
       visibility: "customer",
       actorType: "system",
     });
+
+    /**
+     * Digital delivery (§18.8), inside the same transaction as the order.
+     *
+     * A paid order must never exist without the access it was sold. Issuing
+     * afterwards means a crash in between leaves a buyer charged for a file
+     * they cannot reach, with nothing in the system aware it is missing.
+     */
+    const delivery = await issueDelivery(tx, {
+      orderId: order.id,
+      orgId: site.orgId,
+      customerId: current.customerId,
+      email: current.email,
+      items: await deliverableItems(tx, order.id),
+    });
+
+    if (delivery.grants.length > 0 || delivery.licenceKeys.length > 0) {
+      await tx.insert(orderEvents).values({
+        orderId: order.id,
+        type: "placed",
+        message:
+          `Issued ${delivery.grants.length} download(s) and ` +
+          `${delivery.licenceKeys.length} licence key(s).`,
+        data: {
+          downloads: delivery.grants.length,
+          licenceKeys: delivery.licenceKeys.length,
+        },
+        visibility: "internal",
+        actorType: "system",
+      });
+    }
+
+    /**
+     * An empty key pool is the merchant's problem to fix, not the shopper's to
+     * absorb — and never a reason to fail a settled payment. It is recorded
+     * loudly rather than swallowed, because the buyer is owed something the
+     * store currently cannot hand over.
+     */
+    if (delivery.exhaustedProductIds.length > 0) {
+      await tx.insert(orderEvents).values({
+        orderId: order.id,
+        type: "note",
+        message:
+          "Licence keys ran out — this order is owed keys that could not be issued. " +
+          `Add more keys for product(s) ${delivery.exhaustedProductIds.join(", ")}, ` +
+          "then re-issue from the order.",
+        data: { exhaustedProductIds: delivery.exhaustedProductIds },
+        visibility: "internal",
+        actorType: "system",
+      });
+    }
 
     await tx
       .update(checkoutSessions)

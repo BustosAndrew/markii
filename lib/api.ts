@@ -126,13 +126,24 @@ export function appUrl(): string {
 /**
  * Public base URL for a tenant storefront.
  *
- * Vercel's certificate is a single-level wildcard (`*.vercel.app`), so it does not
- * cover `{slug}.{project}.vercel.app` — those hosts fail the TLS handshake outright
- * (ERR_CONNECTION_CLOSED). When ROOT_DOMAIN is a vercel.app host we therefore fall
- * back to the path form rather than hand out a URL that cannot load.
+ * Two hosts get the path form instead of a subdomain, both because the
+ * subdomain URL would not load:
+ *
+ * - **`*.vercel.app`** — Vercel's certificate is a single-level wildcard, so it
+ *   does not cover `{slug}.{project}.vercel.app`; those hosts fail the TLS
+ *   handshake outright (ERR_CONNECTION_CLOSED).
+ * - **`localhost`** — nothing serves TLS on port 443 in development, so
+ *   `https://{slug}.localhost` is refused. This is not only a developer
+ *   annoyance: §18.8 puts this URL in a *download link handed to a buyer*, and
+ *   an unreachable one means the goods never arrive.
+ *
+ * This returns an absolute URL in every case, which is what callers embedding it
+ * in a receipt or an email need.
  */
 export function tenantBaseUrl(slug: string): string {
   const root = process.env.ROOT_DOMAIN?.replace(/^\.|\/$/g, "");
-  if (root && !root.endsWith(".vercel.app")) return `https://${slug}.${root}`;
+  const subdomainWorks =
+    root && !root.endsWith(".vercel.app") && root !== "localhost" && !root.startsWith("localhost:");
+  if (subdomainWorks) return `https://${slug}.${root}`;
   return `${appUrl()}/_sites/${slug}`;
 }

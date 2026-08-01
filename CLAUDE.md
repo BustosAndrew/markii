@@ -20,7 +20,9 @@ pnpm lint             # eslint + the RLS deny-by-default check
 pnpm test             # unit tests — pure money/rule functions, ~1s, no deps
 pnpm test:integration # real HTTP + real DB; needs a dev server (see tests/README.md)
 pnpm db:push          # push Drizzle schema (dev only — see docs/DECISIONS.md D6)
+pnpm db:migrate       # apply generated migrations (needs session-mode DIRECT_URL)
 pnpm db:seed          # seed demo data (3 sites, ~30 products, orders, traffic)
+pnpm storage:init     # create the two Storage buckets — NOT in the migration chain
 ```
 
 **Run `pnpm test` freely — it is a second and touches nothing.** `pnpm
@@ -143,8 +145,13 @@ campaigns. Rationale in `docs/DECISIONS.md` §G10.
 - **Merchant-side AI writes go through propose → approve → execute**, with an audit entry and an
   undo path. Retrieved catalog/customer content is untrusted data, never instruction
   (`docs/AGENT-OPS.md` §3).
-- Dashboard FE treats upload `url` values as opaque (`public/uploads` in dev; **Supabase Storage**
-  in prod once D6's migration lands — the opacity rule is why that swap needs no frontend change).
+- Dashboard FE treats upload `url` values as opaque. Storage is now **Supabase Storage** in every
+  environment (D6 task 8 done) — the opacity rule is why that swap needed no frontend change.
+- **Two storage buckets, and the split is a security boundary.** `public-media` holds product
+  images and is public because storefront HTML and JSON-LD reference them directly. `digital-assets`
+  is **private** and holds what merchants sell; access is a signed URL minted per paid download, and
+  making it public would turn every download limit into decoration. **Never proxy a download through
+  a route handler** — it pays egress twice and times out on large files (G5).
 
 ## Infrastructure (decided — `docs/DECISIONS.md`)
 

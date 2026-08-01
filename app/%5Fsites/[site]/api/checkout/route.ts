@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { logTraffic, parseAgentName } from "@/lib/agents";
 import { badRequest, handler, notFound } from "@/lib/api";
 import { createCart } from "@/lib/commerce/cart";
+import { deliveryForOrder } from "@/lib/commerce/delivery";
 import { completeCheckout } from "@/lib/commerce/orders";
 import { availableToSell } from "@/lib/commerce/pricing";
 import {
@@ -247,6 +248,14 @@ async function checkout(req: Request, siteSlug: string, input: unknown) {
   // The cart existed only to carry this order's lines through the pipeline.
   await db.update(carts).set({ status: "converted" }).where(eq(carts.id, cart.id));
 
+  /**
+   * Digital goods are handed over in the same exchange that pays for them
+   * (§18.8). This is the D5 story finishing on the rail that can actually
+   * finish it: an agent discovers, buys, and *receives* — no address, no
+   * shipping step, nothing left pending.
+   */
+  const delivery = await deliveryForOrder(db, order.id, baseUrl);
+
   return NextResponse.json(
     {
       success: true,
@@ -259,8 +268,12 @@ async function checkout(req: Request, siteSlug: string, input: unknown) {
         txHash: order.txHash,
         status: order.status,
       },
+      delivery,
       fulfillment: {
-        message: `Order confirmed — ${quantity}× ${product.name}. Thank you for shopping at ${site.name}.`,
+        message:
+          delivery.downloads.length > 0 || delivery.licenceKeys.length > 0
+            ? `Order confirmed — ${quantity}× ${product.name}. Your download is ready below.`
+            : `Order confirmed — ${quantity}× ${product.name}. Thank you for shopping at ${site.name}.`,
         support: `${baseUrl}/agent.md`,
       },
     },

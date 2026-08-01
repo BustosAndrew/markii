@@ -1,9 +1,10 @@
 import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { conflict, handler, notFound } from "@/lib/api";
+import { conflict, handler, notFound, tenantBaseUrl } from "@/lib/api";
 import { parseAgentName } from "@/lib/agents";
 import { loadStore } from "@/lib/commerce/cart";
+import { deliveryForOrder } from "@/lib/commerce/delivery";
 import { completeCheckout, failCheckout } from "@/lib/commerce/orders";
 import { checkoutSessions, db, orders } from "@/lib/db";
 import { defaultWallet } from "@/lib/integrations";
@@ -39,7 +40,14 @@ export const POST = handler(async (req, { params }) => {
 
   // Idempotent: a webhook and a browser redirect both land here.
   if (session.status === "completed" && session.orderId != null) {
-    return NextResponse.json({ ok: true, orderId: session.orderId, alreadyCompleted: true });
+    return NextResponse.json({
+      ok: true,
+      orderId: session.orderId,
+      alreadyCompleted: true,
+      // Re-returned on a retry, so a client that lost the first response can
+      // recover its download links without contacting the merchant.
+      delivery: await deliveryForOrder(db, session.orderId, tenantBaseUrl(slug)),
+    });
   }
   if (session.status === "expired") throw conflict("This checkout expired and its stock was released");
   if (session.status === "failed") throw conflict("This checkout already failed");
@@ -103,6 +111,13 @@ export const POST = handler(async (req, { params }) => {
     agentName: parseAgentName(userAgent),
   });
 
+  /**
+   * Digital goods are handed over in the same exchange that pays for them
+   * (§18.8, D5). Links point at the grant, not at storage — a storage URL
+   * expires in minutes and would be dead by the time a receipt is opened.
+   */
+  const delivery = await deliveryForOrder(db, result.orderId, tenantBaseUrl(slug));
+
   return NextResponse.json({
     ok: true,
     orderId: result.orderId,
@@ -110,5 +125,6 @@ export const POST = handler(async (req, { params }) => {
     rail: "x402",
     amountMinor: session.totalMinor,
     currency: session.currency,
+    delivery,
   });
 });

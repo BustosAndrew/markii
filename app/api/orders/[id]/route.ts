@@ -5,8 +5,11 @@ import { orgHandler } from "@/lib/auth/handler";
 import { siteScope } from "@/lib/tenancy";
 import {
   db,
+  digitalAssets,
+  downloadGrants,
   fulfillmentLines,
   fulfillments,
+  licenceKeys,
   orderEvents,
   orderLines,
   orders,
@@ -84,6 +87,20 @@ export const GET = orgHandler(
       .orderBy(desc(orderEvents.createdAt), desc(orderEvents.id))
       .limit(200);
 
+    /** §18.8. What was delivered digitally, and whether it still can be. */
+    const grants = await db
+      .select({ grant: downloadGrants, asset: digitalAssets })
+      .from(downloadGrants)
+      .innerJoin(digitalAssets, eq(digitalAssets.id, downloadGrants.assetId))
+      .where(eq(downloadGrants.orderId, order.id))
+      .orderBy(asc(downloadGrants.id));
+
+    const keys = await db
+      .select()
+      .from(licenceKeys)
+      .where(eq(licenceKeys.orderId, order.id))
+      .orderBy(asc(licenceKeys.id));
+
     return NextResponse.json({
       ...serialized,
       lines: lines.map((l) => ({
@@ -121,6 +138,32 @@ export const GET = orgHandler(
         updatedAt: f.updatedAt.toISOString(),
       })),
       timeline: timeline.map((e) => ({ ...e, createdAt: e.createdAt.toISOString() })),
+      downloads: grants.map(({ grant, asset }) => ({
+        id: grant.id,
+        fileName: asset.fileName,
+        sizeBytes: asset.sizeBytes,
+        downloadsUsed: grant.downloadCount,
+        downloadLimit: grant.downloadLimit,
+        expiresAt: grant.expiresAt?.toISOString() ?? null,
+        revokedAt: grant.revokedAt?.toISOString() ?? null,
+        revokedReason: grant.revokedReason,
+        lastDownloadedAt: grant.lastDownloadedAt?.toISOString() ?? null,
+        /**
+         * The token is **not** returned. It is the buyer's credential, and a
+         * merchant screen does not need it to reissue or revoke — those take a
+         * grant id. Putting it here would leak the file to anyone who ever saw
+         * the dashboard or a support screenshot.
+         */
+        redeemable: grant.revokedAt == null,
+        createdAt: grant.createdAt.toISOString(),
+      })),
+      licenceKeys: keys.map((k) => ({
+        id: k.id,
+        key: k.key,
+        productId: k.productId,
+        assignedAt: k.assignedAt?.toISOString() ?? null,
+        revokedAt: k.revokedAt?.toISOString() ?? null,
+      })),
       totals: {
         subtotalMinor: order.subtotalMinor,
         discountMinor: order.discountMinor,
