@@ -235,6 +235,21 @@ export async function serializeOrders(list: Order[]) {
       currency: o.currency,
       provider: o.provider,
       txHash: o.txHash,
+      /**
+       * §18.7. Added beside the v1 fields rather than replacing them — `status`
+       * keeps its original meaning (the payment outcome) and existing screens
+       * that branch on it are untouched. Money and fulfillment are separate axes.
+       */
+      financialStatus: o.financialStatus,
+      fulfillmentStatus: o.fulfillmentStatus,
+      subtotalMinor: o.subtotalMinor,
+      discountMinor: o.discountMinor,
+      taxMinor: o.taxMinor,
+      shippingMinor: o.shippingMinor,
+      refundedMinor: o.refundedMinor,
+      email: o.email,
+      cancelledAt: o.cancelledAt,
+      cancelReason: o.cancelReason,
       agent: {
         userAgent: o.agentUserAgent,
         name: o.agentName,

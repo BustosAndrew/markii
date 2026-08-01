@@ -59,6 +59,7 @@ export async function invokeAction<TResult = unknown>(
       const ctx: ActionContext = {
         actor,
         db: tx,
+        invocationId,
         dryRun,
         can: (permission) => authorize(actor, permission),
         recordDiff: (entry) => void diff.push(entry),

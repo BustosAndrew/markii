@@ -45,8 +45,14 @@ yarn-error.log*
 # user-uploaded product images (local dev storage)
 /public/uploads
 
-# drizzle-kit migration snapshots
-/drizzle
+# NOTE: /drizzle is deliberately NOT ignored.
+#
+# It was, from the `db:push` era when the directory only held throwaway
+# snapshots. Migrations are now the schema's record (`docs/BACKEND.md` §0), and
+# ignoring them had two consequences worth stating: the migration chain was not
+# version controlled at all, and `pnpm check:rls` — whose static pass scans
+# `drizzle/*.sql` — found zero files in CI and therefore passed vacuously,
+# checking nothing.
 
 # vercel
 .vercel

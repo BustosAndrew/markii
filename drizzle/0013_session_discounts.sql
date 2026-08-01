@@ -1,0 +1,1 @@
+ALTER TABLE "checkout_sessions" ADD COLUMN "applied_discounts" jsonb DEFAULT '[]'::jsonb NOT NULL;

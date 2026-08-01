@@ -173,15 +173,29 @@ export class Cleanup {
  * exception — they reference a site with `on delete set null`, so they are
  * removed explicitly first (see {@link Cleanup.run}) or they survive as orphans.
  */
-export async function createTestStore(cleanup: Cleanup, label: string) {
+export async function createTestStore(
+  cleanup: Cleanup,
+  label: string,
+  /**
+   * Attach the store to an org that already exists — the one a signed-up
+   * merchant owns. Without it the store belongs to a synthetic org with no
+   * staff, which is fine for storefront tests but means no session can invoke
+   * an action against it.
+   */
+  opts: { orgId?: string } = {},
+) {
   const stamp = `${Date.now()}${Math.floor(Math.random() * 10_000)}`;
-  const orgId = `org_test_${stamp}`;
+  const orgId = opts.orgId ?? `org_test_${stamp}`;
   const slug = `test-${label}-${stamp}`;
 
-  await sql`insert into organizations (id, name, slug, owner_id, billing_email, currency, country)
-    values (${orgId}, ${`Test Org ${label}`}, ${`test-org-${stamp}`},
-            ${`test-owner-${stamp}`}, ${`test-${stamp}@markii.shop`}, 'USD', 'US')`;
-  cleanup.orgIds.push(orgId);
+  if (!opts.orgId) {
+    await sql`insert into organizations (id, name, slug, owner_id, billing_email, currency, country)
+      values (${orgId}, ${`Test Org ${label}`}, ${`test-org-${stamp}`},
+              ${`test-owner-${stamp}`}, ${`test-${stamp}@markii.shop`}, 'USD', 'US')`;
+    // Only orgs this helper created are its to delete; a merchant's own org is
+    // removed with the merchant.
+    cleanup.orgIds.push(orgId);
+  }
 
   const [site] = await sql`insert into sites
     (org_id, name, slug, status, purchases_enabled, wallet_address, payment_providers)

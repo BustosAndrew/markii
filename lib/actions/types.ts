@@ -1,5 +1,5 @@
 import type { z } from "zod";
-import type { db as rootDb, DiffEntry } from "../db";
+import type { DbHandle, DiffEntry } from "../db";
 
 export type { DiffEntry };
 
@@ -31,11 +31,17 @@ export type Actor =
  * action inside a transaction and rolling it back, which only holds if every
  * write goes through the handle it was given.
  */
-export type ActionDb = typeof rootDb | Parameters<Parameters<typeof rootDb.transaction>[0]>[0];
+export type ActionDb = DbHandle;
 
 export type ActionContext = {
   actor: Actor;
   db: ActionDb;
+  /**
+   * This invocation's id, known before `run` starts so rows it writes can point
+   * back at it. Several tables already reserve an `invocation_id` "so undo can
+   * find it" — without this they could only ever store null.
+   */
+  invocationId: string;
   /** True when the caller asked what *would* happen. Nothing may escape the process. */
   dryRun: boolean;
   /** Server-checked, identical for humans, agents, and tokens (§22 rule 4). */

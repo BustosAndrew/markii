@@ -142,9 +142,57 @@ export const orders = pgTable(
     agentUserAgent: text("agent_user_agent").notNull().default(""),
     agentName: text("agent_name").notNull().default("Other"),
     agentWalletAddress: text("agent_wallet_address"),
+    /**
+     * The money broken out, frozen from the checkout session (§18.7).
+     *
+     * `amountCents` stays the total and stays named as it is — the v1 `Cents`
+     * fields do not get renamed (`CLAUDE.md`). But a refund cannot be metered
+     * correctly from a total alone: net sales exclude tax and shipping
+     * (`docs/PRICING.md` §4.1), so refunding $50 that contained $4 tax and $5
+     * postage must meter −$41, and there is no way to know that after the fact
+     * unless the split was written down when the order was created.
+     */
+    subtotalMinor: integer("subtotal_minor").notNull().default(0),
+    discountMinor: integer("discount_minor").notNull().default(0),
+    taxMinor: integer("tax_minor").notNull().default(0),
+    shippingMinor: integer("shipping_minor").notNull().default(0),
+    /** Gross refunded so far, across every refund on this order. */
+    refundedMinor: integer("refunded_minor").notNull().default(0),
+    /**
+     * Where the money stands, kept beside `status` rather than folded into it.
+     *
+     * `status` is v1's payment outcome and existing code branches on `success`;
+     * widening that enum would silently change what every one of those branches
+     * means. Refund state is a second axis and gets its own column.
+     */
+    financialStatus: text("financial_status", {
+      enum: ["pending", "paid", "partially_refunded", "refunded", "voided"],
+    })
+      .notNull()
+      .default("pending"),
+    /** Manual fulfillment only — Markii does not do fulfillment logistics (`docs/PLAN.md` §3). */
+    fulfillmentStatus: text("fulfillment_status", {
+      enum: ["unfulfilled", "partially_fulfilled", "fulfilled", "not_required"],
+    })
+      .notNull()
+      .default("unfulfilled"),
+    /**
+     * Where confirmations and refund notices go. Copied from the checkout
+     * session rather than read through `customerId`, because guests have no
+     * customer record and a deleted customer must not silently orphan the
+     * merchant's ability to contact a buyer about their own order.
+     */
+    email: text("email"),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    cancelReason: text("cancel_reason"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("orders_site_idx").on(t.siteId), index("orders_created_idx").on(t.createdAt)],
+  (t) => [
+    index("orders_site_idx").on(t.siteId),
+    index("orders_created_idx").on(t.createdAt),
+    index("orders_financial_status_idx").on(t.financialStatus),
+    index("orders_fulfillment_status_idx").on(t.fulfillmentStatus),
+  ],
 );
 
 export const agentTraffic = pgTable(
@@ -794,6 +842,21 @@ export const checkoutSessions = pgTable(
       .$type<{ discountId: number; code: string | null; amountMinor: number }[]>()
       .notNull()
       .default([]),
+    /**
+     * The priced lines, frozen with the quote — what becomes `order_lines` on
+     * completion (§18.7).
+     *
+     * Rebuilding lines from the catalog at completion instead would let a price
+     * edit made during the 15-minute reservation window produce line totals
+     * that do not sum to `subtotalMinor`. The order would then charge one
+     * amount and itemise another, and a refund computed from the lines would
+     * return the wrong money. The session is where prices stop moving; the line
+     * detail has to stop with them.
+     */
+    lineSnapshot: jsonb("line_snapshot")
+      .$type<CheckoutLineSnapshot[]>()
+      .notNull()
+      .default([]),
     /** Stripe PaymentIntent id, or the x402 transaction hash. */
     paymentReference: text("payment_reference"),
     /** Set on completion. The session is the only thing that may create it. */
@@ -884,15 +947,27 @@ export const usageRecords = pgTable(
     fxRate: numeric("fx_rate", { precision: 18, scale: 8 }),
     /** Test never counts toward the threshold (§17, and the no-fabrication rule). */
     environment: text("environment", { enum: ["test", "production"] }).notNull(),
+    /**
+     * The idempotency key for this metering event — `sale:{orderId}`,
+     * `refund:{refundId}`, `chargeback_lost:{disputeId}`.
+     *
+     * This replaced a unique key on `(orderId, type)`, which was right while a
+     * sale was the only event and wrong the moment §18.7 allowed **partial**
+     * refunds: two refunds against one order are two genuine events, and that
+     * key would have silently swallowed the second one, permanently
+     * over-metering the merchant by the amount it dropped. Keying on the thing
+     * that caused the event keeps retries idempotent without conflating
+     * distinct ones.
+     */
+    dedupeKey: text("dedupe_key").notNull(),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index("usage_records_org_occurred_idx").on(t.orgId, t.occurredAt),
     index("usage_records_order_idx").on(t.orderId),
-    // One metering event per order per type: the completion path is retried by
-    // Stripe webhooks and by agents, and double-counting a sale overcharges a
-    // merchant at the threshold.
-    uniqueIndex("usage_records_order_type_uq").on(t.orderId, t.type),
+    // The completion path is retried by Stripe webhooks and by agents, and
+    // double-counting a sale overcharges a merchant at the threshold.
+    uniqueIndex("usage_records_dedupe_uq").on(t.dedupeKey),
   ],
 );
 
@@ -1102,6 +1177,259 @@ export const taxSettings = pgTable(
   },
 );
 
+// ---------------------------------------------------------------------------
+// Order operations (§18.7)
+// ---------------------------------------------------------------------------
+
+/**
+ * What was actually sold, frozen at completion.
+ *
+ * Until now an order pointed at one `productId` and carried a total — a v1
+ * shape from when a sale was one agent buying one thing. Refunds are what make
+ * that unworkable: "refund two of the three mugs and restock them" needs to
+ * know which line, at what price, from which location, and how much of the
+ * order's discount and tax belonged to it.
+ *
+ * Everything here is a **snapshot**, not a join. The product may later be
+ * renamed, repriced, or deleted; what the shopper bought and paid does not
+ * change with it, and a merchant reading a two-year-old order should see the
+ * order, not today's catalog.
+ */
+export const orderLines = pgTable(
+  "order_lines",
+  {
+    id: serial("id").primaryKey(),
+    orderId: integer("order_id")
+      .notNull()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    /** `set null`: deleting a product must not destroy the financial record. */
+    productId: integer("product_id").references(() => products.id, { onDelete: "set null" }),
+    variantId: integer("variant_id").references(() => variants.id, { onDelete: "set null" }),
+    /** Snapshots — the catalog is free to change underneath. */
+    title: text("title").notNull(),
+    variantTitle: text("variant_title"),
+    sku: text("sku"),
+    quantity: integer("quantity").notNull(),
+    /** One unit, excluding add-ons. Add-ons are in `subtotalMinor` and listed below. */
+    unitPriceMinor: integer("unit_price_minor").notNull(),
+    /** `(unit + add-ons) × quantity`, matching `PricedLine.lineTotalMinor`. */
+    subtotalMinor: integer("subtotal_minor").notNull(),
+    /**
+     * This line's share of the order's discount and tax.
+     *
+     * Both are **allocations**, not independently calculated figures: discounts
+     * apply to an order or a set of products, and tax to a base, so neither has
+     * a natural per-line value. They are split in proportion to line subtotal
+     * with the rounding remainder given to the largest line, so the parts sum
+     * exactly to the order's own totals — an allocation that does not add up is
+     * a refund that returns the wrong money.
+     */
+    discountMinor: integer("discount_minor").notNull().default(0),
+    taxMinor: integer("tax_minor").notNull().default(0),
+    /** `subtotal − discount + tax`. Shipping is order-level and never allocated. */
+    totalMinor: integer("total_minor").notNull(),
+    addOns: jsonb("add_ons")
+      .$type<{ productId: number; name: string; unitPriceMinor: number }[]>()
+      .notNull()
+      .default([]),
+    /** Units refunded so far. Derived state, but the cap a refund is checked against. */
+    quantityRefunded: integer("quantity_refunded").notNull().default(0),
+    quantityFulfilled: integer("quantity_fulfilled").notNull().default(0),
+    /**
+     * Where the stock left from, so a restock puts it back in the same place.
+     * Null for variant-less products, which have no ledger to return it to.
+     */
+    locationId: integer("location_id").references(() => locations.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("order_lines_order_idx").on(t.orderId),
+    index("order_lines_product_idx").on(t.productId),
+  ],
+);
+
+/**
+ * A refund against an order (§18.7).
+ *
+ * **Recording a refund and moving the money are separate facts**, and this
+ * table keeps them separate on purpose. Markii never holds merchant funds
+ * (`docs/PRICING.md`), the card rail is not wired, and x402/USDC settlement is
+ * irreversible with no chargeback path (§20) — so for most refunds today the
+ * merchant is the one who actually sends the money back. Writing `succeeded`
+ * because a row was inserted would be a success toast for an unwired action.
+ *
+ * `method` says who moved it: `manual` is the merchant reporting a refund they
+ * issued themselves; `processor` is Markii asking a rail, which currently
+ * refuses rather than pretending.
+ */
+export const refunds = pgTable(
+  "refunds",
+  {
+    id: serial("id").primaryKey(),
+    orderId: integer("order_id")
+      .notNull()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    /** The money, split the same way the order is, so metering can exclude tax and shipping. */
+    subtotalMinor: integer("subtotal_minor").notNull().default(0),
+    discountMinor: integer("discount_minor").notNull().default(0),
+    taxMinor: integer("tax_minor").notNull().default(0),
+    shippingMinor: integer("shipping_minor").notNull().default(0),
+    /** What the shopper gets back: `subtotal − discount + tax + shipping`. */
+    amountMinor: integer("amount_minor").notNull(),
+    /**
+     * The negative that reaches the meter: `subtotal − discount` (D36). Stored
+     * rather than recomputed so the usage record and the refund can never
+     * disagree about what was metered.
+     */
+    netSalesMinor: integer("net_sales_minor").notNull(),
+    currency: text("currency").notNull(),
+    reason: text("reason", {
+      enum: ["requested_by_customer", "duplicate", "fraudulent", "item_unavailable", "other"],
+    })
+      .notNull()
+      .default("requested_by_customer"),
+    note: text("note"),
+    restock: boolean("restock").notNull().default(true),
+    /** `manual` — the merchant sent the money. `processor` — a rail did. */
+    method: text("method", { enum: ["manual", "processor"] })
+      .notNull()
+      .default("manual"),
+    /** Named explicitly wherever a payment appears (`CLAUDE.md`, rails are peers). */
+    rail: text("rail", { enum: ["stripe", "x402", "manual", "external"] }).notNull(),
+    /** Stripe refund id, or the on-chain hash of the merchant's return transfer. */
+    processorReference: text("processor_reference"),
+    actorType: text("actor_type", { enum: ["user", "agent", "token", "system"] }).notNull(),
+    actorId: text("actor_id"),
+    /** Ties the refund to the invocation that made it (§22). */
+    invocationId: text("invocation_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("refunds_order_idx").on(t.orderId)],
+);
+
+/** Which units of which line a refund covered. Absent for a shipping-only refund. */
+export const refundLines = pgTable(
+  "refund_lines",
+  {
+    id: serial("id").primaryKey(),
+    refundId: integer("refund_id")
+      .notNull()
+      .references(() => refunds.id, { onDelete: "cascade" }),
+    orderLineId: integer("order_line_id")
+      .notNull()
+      .references(() => orderLines.id, { onDelete: "cascade" }),
+    quantity: integer("quantity").notNull(),
+    /** This line's share of the refund, split exactly as the order line was. */
+    subtotalMinor: integer("subtotal_minor").notNull(),
+    discountMinor: integer("discount_minor").notNull().default(0),
+    taxMinor: integer("tax_minor").notNull().default(0),
+    restocked: boolean("restocked").notNull().default(false),
+  },
+  (t) => [
+    index("refund_lines_refund_idx").on(t.refundId),
+    index("refund_lines_order_line_idx").on(t.orderLineId),
+  ],
+);
+
+/**
+ * A shipment the merchant recorded by hand (§18.7 — **manual only**).
+ *
+ * Carrier rate shopping, label purchase, and tracking sync are permanently out
+ * of scope (`docs/PLAN.md` §3). `carrier` is therefore free text the merchant
+ * typed, and `trackingUrl` is whatever they pasted — Markii does not verify
+ * either, and the UI must not present them as confirmed by a carrier.
+ */
+export const fulfillments = pgTable(
+  "fulfillments",
+  {
+    id: serial("id").primaryKey(),
+    orderId: integer("order_id")
+      .notNull()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    status: text("status", { enum: ["pending", "shipped", "delivered", "cancelled"] })
+      .notNull()
+      .default("shipped"),
+    trackingNumber: text("tracking_number"),
+    carrier: text("carrier"),
+    trackingUrl: text("tracking_url"),
+    /** Whether the shopper was emailed. False is a real state, not a failure. */
+    notifiedCustomer: boolean("notified_customer").notNull().default(false),
+    note: text("note"),
+    actorType: text("actor_type", { enum: ["user", "agent", "token", "system"] }).notNull(),
+    actorId: text("actor_id"),
+    invocationId: text("invocation_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("fulfillments_order_idx").on(t.orderId)],
+);
+
+/** Which units of which line went in a shipment. */
+export const fulfillmentLines = pgTable(
+  "fulfillment_lines",
+  {
+    id: serial("id").primaryKey(),
+    fulfillmentId: integer("fulfillment_id")
+      .notNull()
+      .references(() => fulfillments.id, { onDelete: "cascade" }),
+    orderLineId: integer("order_line_id")
+      .notNull()
+      .references(() => orderLines.id, { onDelete: "cascade" }),
+    quantity: integer("quantity").notNull(),
+  },
+  (t) => [
+    index("fulfillment_lines_fulfillment_idx").on(t.fulfillmentId),
+    index("fulfillment_lines_order_line_idx").on(t.orderLineId),
+  ],
+);
+
+/**
+ * The order timeline: everything that happened, append-only.
+ *
+ * Merchant notes live here too rather than in a `notes` column, because a note
+ * is an event with an author and a time — a single overwritable text field
+ * loses who said what and when, which is exactly what anyone opening a disputed
+ * order needs.
+ *
+ * `visibility` marks whether an entry was shown to the shopper. An internal
+ * note leaking into a customer-facing timeline is a support incident.
+ */
+export const orderEvents = pgTable(
+  "order_events",
+  {
+    id: serial("id").primaryKey(),
+    orderId: integer("order_id")
+      .notNull()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    type: text("type", {
+      enum: [
+        "placed",
+        "note",
+        "refunded",
+        "cancelled",
+        "fulfilled",
+        "fulfillment_updated",
+        "email_sent",
+        "email_failed",
+      ],
+    }).notNull(),
+    /** One line, written to be read by a merchant. */
+    message: text("message").notNull(),
+    /** Structured detail for the UI — amounts, ids, tracking numbers. */
+    data: jsonb("data").$type<Record<string, unknown>>().notNull().default({}),
+    visibility: text("visibility", { enum: ["internal", "customer"] })
+      .notNull()
+      .default("internal"),
+    actorType: text("actor_type", { enum: ["user", "agent", "token", "system"] }).notNull(),
+    actorId: text("actor_id"),
+    /** Display name captured at write time — staff leave, the timeline stays readable. */
+    actorLabel: text("actor_label"),
+    invocationId: text("invocation_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("order_events_order_created_idx").on(t.orderId, t.createdAt)],
+);
+
 /** One manual tax rate. `rateBps` is basis points — 875 is 8.75%. */
 export type ManualTaxRate = {
   country: string;
@@ -1109,6 +1437,24 @@ export type ManualTaxRate = {
   /** Basis points, so a rate is an integer and never a float (D31 reasoning). */
   rateBps: number;
   name: string;
+};
+
+/**
+ * One priced line frozen onto a checkout session, and the direct source of an
+ * `order_lines` row. Amounts are per-line **before** discount and tax, which are
+ * order-level and allocated at completion (`lib/commerce/allocation.ts`).
+ */
+export type CheckoutLineSnapshot = {
+  productId: number;
+  variantId: number | null;
+  title: string;
+  variantTitle: string | null;
+  sku: string | null;
+  quantity: number;
+  unitPriceMinor: number;
+  /** `(unit + add-ons) × quantity`. */
+  subtotalMinor: number;
+  addOns: { productId: number; name: string; unitPriceMinor: number }[];
 };
 
 /** A postal address on a cart or checkout. Shape mirrors `customer_addresses`. */
@@ -1156,6 +1502,12 @@ export type InventoryReservation = typeof inventoryReservations.$inferSelect;
 export type UsageRecord = typeof usageRecords.$inferSelect;
 export type Discount = typeof discounts.$inferSelect;
 export type DiscountRedemption = typeof discountRedemptions.$inferSelect;
+export type OrderLine = typeof orderLines.$inferSelect;
+export type Refund = typeof refunds.$inferSelect;
+export type RefundLine = typeof refundLines.$inferSelect;
+export type Fulfillment = typeof fulfillments.$inferSelect;
+export type FulfillmentLine = typeof fulfillmentLines.$inferSelect;
+export type OrderEvent = typeof orderEvents.$inferSelect;
 export type ShippingZone = typeof shippingZones.$inferSelect;
 export type ShippingRate = typeof shippingRates.$inferSelect;
 export type TaxSettings = typeof taxSettings.$inferSelect;

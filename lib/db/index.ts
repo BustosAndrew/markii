@@ -53,6 +53,16 @@ if (process.env.NODE_ENV !== "production") globalForDb.markiiSql = sql;
 
 export const db = drizzle(sql, { schema });
 
+/**
+ * The root client or a transaction — whichever a caller was handed.
+ *
+ * Helpers that write take this rather than `typeof db`, so the same function
+ * works standalone and inside an action's transaction. It matters more than it
+ * looks: an action's dry run is the real action rolled back, which only holds
+ * if every write goes through the handle it was given.
+ */
+export type DbHandle = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 /** False when `DATABASE_URL` is unset — routes surface *configuration required*, never fake data. */
 export function isDatabaseConfigured() {
   return connectionString !== null;

@@ -1,17 +1,138 @@
-import { and, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { badRequest, notFound } from "@/lib/api";
 import { orgHandler } from "@/lib/auth/handler";
 import { siteScope } from "@/lib/tenancy";
-import { db, orders } from "@/lib/db";
+import {
+  db,
+  fulfillmentLines,
+  fulfillments,
+  orderEvents,
+  orderLines,
+  orders,
+  refundLines,
+  refunds,
+} from "@/lib/db";
 import { serializeOrders } from "@/lib/queries";
 
-export const GET = orgHandler(async (_req, { params, orgId }) => {
-  const { id } = await params;
-  const orderId = parseInt(id, 10);
-  if (!Number.isFinite(orderId)) throw badRequest("order id must be a number");
-  const [order] = await db.select().from(orders).where(and(eq(orders.id, orderId), siteScope(orgId, orders.siteId))).limit(1);
-  if (!order) throw notFound("Order");
-  const [serialized] = await serializeOrders([order]);
-  return NextResponse.json(serialized);
-});
+/**
+ * `GET /api/orders/:id` (§13, extended by §18.7) — the whole order.
+ *
+ * Everything a merchant needs to act on an order arrives in one response:
+ * itemisation, refunds, shipments, and the timeline. Splitting them across four
+ * calls would let a screen show a total that disagrees with the refunds beside
+ * it, because each half arrived at a different moment.
+ *
+ * **Writes are not here.** `orders.refund`, `orders.cancel`, `orders.fulfill`,
+ * `orders.addNote`, and `orders.resendConfirmation` are invoked through
+ * `POST /api/actions/:id` — no route handler mutates state outside the registry
+ * (§22 rule 1).
+ */
+export const GET = orgHandler(
+  async (_req, { params, orgId }) => {
+    const { id } = await params;
+    const orderId = parseInt(id, 10);
+    if (!Number.isFinite(orderId)) throw badRequest("order id must be a number");
+
+    const [order] = await db
+      .select()
+      .from(orders)
+      .where(and(eq(orders.id, orderId), siteScope(orgId, orders.siteId)))
+      .limit(1);
+    if (!order) throw notFound("Order");
+
+    const [serialized] = await serializeOrders([order]);
+
+    const lines = await db
+      .select()
+      .from(orderLines)
+      .where(eq(orderLines.orderId, order.id))
+      .orderBy(asc(orderLines.id));
+
+    const refundRows = await db
+      .select()
+      .from(refunds)
+      .where(eq(refunds.orderId, order.id))
+      .orderBy(desc(refunds.createdAt));
+
+    const refundLineRows = refundRows.length
+      ? await db
+          .select({ line: refundLines })
+          .from(refundLines)
+          .innerJoin(refunds, eq(refunds.id, refundLines.refundId))
+          .where(eq(refunds.orderId, order.id))
+      : [];
+
+    const fulfillmentRows = await db
+      .select()
+      .from(fulfillments)
+      .where(eq(fulfillments.orderId, order.id))
+      .orderBy(desc(fulfillments.createdAt));
+
+    const fulfillmentLineRows = fulfillmentRows.length
+      ? await db
+          .select({ line: fulfillmentLines })
+          .from(fulfillmentLines)
+          .innerJoin(fulfillments, eq(fulfillments.id, fulfillmentLines.fulfillmentId))
+          .where(eq(fulfillments.orderId, order.id))
+      : [];
+
+    const timeline = await db
+      .select()
+      .from(orderEvents)
+      .where(eq(orderEvents.orderId, order.id))
+      .orderBy(desc(orderEvents.createdAt), desc(orderEvents.id))
+      .limit(200);
+
+    return NextResponse.json({
+      ...serialized,
+      lines: lines.map((l) => ({
+        ...l,
+        /** What is still refundable and still to ship, so the UI need not derive it. */
+        quantityRefundable: l.quantity - l.quantityRefunded,
+        quantityUnfulfilled: Math.max(l.quantity - l.quantityFulfilled - l.quantityRefunded, 0),
+        createdAt: l.createdAt.toISOString(),
+      })),
+      /**
+       * Empty for orders placed before §18.7 and for the direct x402 rail's
+       * earliest orders — they were never itemised, and inventing lines from
+       * today's catalog would show a merchant prices nobody paid.
+       */
+      itemised: lines.length > 0,
+      refunds: refundRows.map((r) => ({
+        ...r,
+        lines: refundLineRows.filter((x) => x.line.refundId === r.id).map((x) => x.line),
+        /**
+         * Stated on every refund: Markii recorded this, it did not move the
+         * money. Card refunds need a connected Stripe account and x402
+         * settlements cannot be reversed at all (§18.7, §20).
+         */
+        moneyMovedByMarkii: false,
+        createdAt: r.createdAt.toISOString(),
+      })),
+      fulfillments: fulfillmentRows.map((f) => ({
+        ...f,
+        lines: fulfillmentLineRows
+          .filter((x) => x.line.fulfillmentId === f.id)
+          .map((x) => x.line),
+        /** Merchant-entered. Markii does no carrier integration (`docs/PLAN.md` §3). */
+        trackingVerified: false,
+        createdAt: f.createdAt.toISOString(),
+        updatedAt: f.updatedAt.toISOString(),
+      })),
+      timeline: timeline.map((e) => ({ ...e, createdAt: e.createdAt.toISOString() })),
+      totals: {
+        subtotalMinor: order.subtotalMinor,
+        discountMinor: order.discountMinor,
+        taxMinor: order.taxMinor,
+        shippingMinor: order.shippingMinor,
+        totalMinor: order.amountCents,
+        refundedMinor: order.refundedMinor,
+        /** What is left to refund. Never negative — the database checks it too. */
+        refundableMinor: Math.max(order.amountCents - order.refundedMinor, 0),
+        currency: order.currency,
+      },
+    });
+  },
+  { permission: "commerce.read" },
+);

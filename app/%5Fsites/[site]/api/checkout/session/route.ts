@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { badRequest, conflict, handler } from "@/lib/api";
 import { assertPurchasable, loadCart, loadStore, setCartContact } from "@/lib/commerce/cart";
-import { priceCart } from "@/lib/commerce/pricing";
+import { priceCart, snapshotLines } from "@/lib/commerce/pricing";
 import {
   RESERVATION_TTL_MS,
   reservationsForCart,
@@ -123,6 +123,10 @@ export const POST = handler(async (req, { params }) => {
         code: d.code,
         amountMinor: d.amountMinor,
       })),
+      // Frozen with the quote, for the same reason the amounts are: these
+      // become the order's lines, and lines that do not sum to the subtotal
+      // charged are a refund that returns the wrong money (§18.7).
+      lineSnapshot: snapshotLines(priced),
       expiresAt,
     });
     await reserveForSession(tx, sessionId, requests, expiresAt);

@@ -198,6 +198,24 @@ async function checkout(req: Request, siteSlug: string, input: unknown) {
       subtotalMinor: amountCents,
       totalMinor: amountCents,
       currency: product.currency,
+      /**
+       * One line, built here rather than from `priceCart`: this rail charges
+       * exactly what the 402 challenge advertised, and re-pricing at this point
+       * could itemise an amount other than the one already settled on-chain.
+       */
+      lineSnapshot: [
+        {
+          productId: product.id,
+          variantId: defaultVariant?.id ?? null,
+          title: product.name,
+          variantTitle: null,
+          sku: product.sku,
+          quantity,
+          unitPriceMinor: product.priceCents,
+          subtotalMinor: amountCents,
+          addOns: [],
+        },
+      ],
       expiresAt,
     });
     if (defaultVariant) {

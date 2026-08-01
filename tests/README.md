@@ -38,7 +38,7 @@ makes the tests safe to run against a database someone else is using, and safe t
 run twice at once — see *Fixtures* below.
 
 Against the hosted Supabase, expect **several minutes** — measured at **457s**
-for the 61 tests, because every request is a real round trip. Against a local
+for 61 tests, because every request is a real round trip. Against a local
 stack the same 61 tests take **12s**, a ~37× difference that is worth the one
 -time Docker setup if you run these more than occasionally:
 

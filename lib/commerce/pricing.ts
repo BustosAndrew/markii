@@ -6,6 +6,7 @@ import {
   products,
   variants,
   type Cart,
+  type CheckoutLineSnapshot,
   type Product,
   type Variant,
 } from "../db";
@@ -50,6 +51,9 @@ export type PricedLine = {
   productId: number;
   variantId: number | null;
   title: string;
+  /** Kept apart from `title` so the order snapshot can show them separately (§18.7). */
+  variantTitle: string | null;
+  sku: string | null;
   quantity: number;
   unitPriceMinor: number;
   addOns: { productId: number; name: string; unitPriceMinor: number; mandatory: boolean }[];
@@ -152,6 +156,8 @@ export async function priceCart(cart: Cart): Promise<PricedCart> {
         productId: line.productId,
         variantId: line.variantId,
         title: product?.name ?? "Unavailable item",
+        variantTitle: null,
+        sku: product?.sku ?? null,
         quantity: line.quantity,
         unitPriceMinor: 0,
         addOns: [],
@@ -167,6 +173,8 @@ export async function priceCart(cart: Cart): Promise<PricedCart> {
         productId: line.productId,
         variantId: line.variantId,
         title: product.name,
+        variantTitle: null,
+        sku: product.sku,
         quantity: line.quantity,
         unitPriceMinor: 0,
         addOns: [],
@@ -217,6 +225,8 @@ export async function priceCart(cart: Cart): Promise<PricedCart> {
       productId: line.productId,
       variantId: line.variantId,
       title: variant ? `${product.name} — ${variant.title}` : product.name,
+      variantTitle: variant?.title ?? null,
+      sku: variant?.sku ?? product.sku,
       quantity: line.quantity,
       unitPriceMinor,
       addOns,
@@ -357,6 +367,32 @@ export async function priceCart(cart: Cart): Promise<PricedCart> {
     totalState,
     issues: priced.flatMap((l) => l.issues.filter((i) => i.code !== "price_changed")),
   };
+}
+
+/**
+ * Freezes a priced cart's lines onto a checkout session (§18.7).
+ *
+ * Only the fields an order needs, and only the ones that must not move: the
+ * catalog is free to change after this, and what the shopper bought is not.
+ * `subtotalMinor` here sums to the session's own `subtotalMinor` by
+ * construction — both come from the same `PricedCart`.
+ */
+export function snapshotLines(priced: PricedCart): CheckoutLineSnapshot[] {
+  return priced.lines.map((l) => ({
+    productId: l.productId,
+    variantId: l.variantId,
+    title: l.title,
+    variantTitle: l.variantTitle,
+    sku: l.sku,
+    quantity: l.quantity,
+    unitPriceMinor: l.unitPriceMinor,
+    subtotalMinor: l.lineTotalMinor,
+    addOns: l.addOns.map((a) => ({
+      productId: a.productId,
+      name: a.name,
+      unitPriceMinor: a.unitPriceMinor,
+    })),
+  }));
 }
 
 /**

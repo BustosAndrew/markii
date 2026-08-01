@@ -182,6 +182,20 @@ async function main() {
       amountCents: product.priceCents * quantity,
       currency: "USDC",
       provider: "x402" as const,
+      /**
+       * §18.7's split, set here so a seeded order is coherent rather than a
+       * paid order that claims a zero subtotal and a `pending` balance. The
+       * direct x402 rail quotes no tax or shipping, so the total *is* the
+       * subtotal — these are not stand-in numbers.
+       */
+      subtotalMinor: product.priceCents * quantity,
+      financialStatus:
+        status === "success"
+          ? ("paid" as const)
+          : status === "cancel"
+            ? ("voided" as const)
+            : ("pending" as const),
+      /** No `order_lines`: these orders were never itemised, and inventing lines would show prices nobody paid. */
       txHash:
         status === "success"
           ? `0x${Array.from({ length: 64 }, () => "0123456789abcdef"[Math.floor(rand() * 16)]).join("")}`

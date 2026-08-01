@@ -5,13 +5,18 @@ import {
   carts,
   checkoutSessions,
   db,
+  inventoryReservations,
+  orderEvents,
+  orderLines,
   orders,
   organizations,
   products,
   sites,
   usageRecords,
   type CheckoutSession,
+  type DbHandle,
 } from "../db";
+import { allocate } from "./allocation";
 import { recordRedemptions } from "./discounts";
 import { consumeForSession, releaseForSession } from "./reservations";
 
@@ -70,7 +75,7 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  * decides what a merchant is charged.
  */
 export async function recordUsage(
-  tx: Tx,
+  tx: DbHandle,
   input: {
     orgId: string;
     siteId: number | null;
@@ -79,6 +84,13 @@ export async function recordUsage(
     amountMinor: number;
     currency: string;
     environment: "test" | "production";
+    /**
+     * What caused this event — `sale:{orderId}`, `refund:{refundId}`. Retrying
+     * the same cause is a no-op; a second, genuinely different refund on the
+     * same order is a second record, which is the distinction the old
+     * `(orderId, type)` key could not make.
+     */
+    dedupeKey: string;
     occurredAt?: Date;
   },
 ): Promise<void> {
@@ -103,11 +115,68 @@ export async function recordUsage(
       convertedMinor: sameCurrency ? input.amountMinor : null,
       fxRate: sameCurrency ? "1" : null,
       environment: input.environment,
+      dedupeKey: input.dedupeKey,
       occurredAt: input.occurredAt ?? new Date(),
     })
     // The completion path is retried by Stripe webhooks and by agents.
     // Double-counting a sale overcharges a merchant at the threshold.
-    .onConflictDoNothing({ target: [usageRecords.orderId, usageRecords.type] });
+    .onConflictDoNothing({ target: usageRecords.dedupeKey });
+}
+
+/**
+ * Writes the order's itemisation from the session's frozen line snapshot (§18.7).
+ *
+ * The snapshot is the source rather than the cart or the live catalog, because
+ * these lines must sum to the amount that was charged. `priceCart` at this
+ * moment could return different numbers — a price edited during the fifteen
+ * minutes stock was held — and an order that charges one total while itemising
+ * another is a refund waiting to return the wrong money.
+ *
+ * Discount and tax are **allocated**, not calculated: neither has a per-line
+ * value of its own. `lib/commerce/allocation.ts` splits them so the parts sum
+ * back exactly to the order's own totals.
+ */
+async function writeOrderLines(tx: Tx, orderId: number, session: CheckoutSession): Promise<void> {
+  const snapshot = session.lineSnapshot;
+  if (snapshot.length === 0) return;
+
+  const weights = snapshot.map((l) => l.subtotalMinor);
+  const discounts = allocate(session.discountMinor, weights);
+  const taxes = allocate(session.taxMinor, weights);
+
+  /**
+   * Where each variant's stock actually left from, so a restock returns it to
+   * the same place rather than to whichever location happens to be default
+   * today. Variant-less products have no ledger and no location — their stock
+   * is the legacy `products.stock` counter, and a restock adjusts that instead.
+   */
+  const held = await tx
+    .select({
+      variantId: inventoryReservations.variantId,
+      locationId: inventoryReservations.locationId,
+    })
+    .from(inventoryReservations)
+    .where(eq(inventoryReservations.checkoutSessionId, session.id));
+  const locationByVariant = new Map(held.map((h) => [h.variantId, h.locationId]));
+
+  await tx.insert(orderLines).values(
+    snapshot.map((line, i) => ({
+      orderId,
+      productId: line.productId,
+      variantId: line.variantId,
+      title: line.title,
+      variantTitle: line.variantTitle,
+      sku: line.sku,
+      quantity: line.quantity,
+      unitPriceMinor: line.unitPriceMinor,
+      subtotalMinor: line.subtotalMinor,
+      discountMinor: discounts[i],
+      taxMinor: taxes[i],
+      totalMinor: line.subtotalMinor - discounts[i] + taxes[i],
+      addOns: line.addOns,
+      locationId: line.variantId != null ? (locationByVariant.get(line.variantId) ?? null) : null,
+    })),
+  );
 }
 
 export type CompletionResult = {
@@ -153,11 +222,11 @@ export async function completeCheckout(input: CompletionInput): Promise<Completi
     const lines = await tx.select().from(cartLines).where(eq(cartLines.cartId, current.cartId));
 
     /**
-     * `orders` is still one row per product from v1 (§1–8) and the multi-line
-     * order table is §18.7 work. Until then the order references the first
-     * line's product and carries the session's authoritative total, so the
-     * money is right even while the line detail lives on the cart. The
-     * checkout session id is what ties an order back to its full contents.
+     * `orders` keeps its v1 shape — `productId`, `quantity`, `amountCents` — so
+     * every §1–8 route and serializer that reads it goes on working. What §18.7
+     * added beside it is the itemisation (`order_lines`) and the money split,
+     * because a total alone cannot answer "refund two of the three mugs", and
+     * net sales cannot be recomputed from it after the fact (D36).
      */
     const [order] = await tx
       .insert(orders)
@@ -174,8 +243,22 @@ export async function completeCheckout(input: CompletionInput): Promise<Completi
         agentUserAgent: input.userAgent ?? "",
         agentName: input.agentName ?? "Other",
         agentWalletAddress: input.payerReference ?? null,
+        subtotalMinor: current.subtotalMinor,
+        discountMinor: current.discountMinor,
+        taxMinor: current.taxMinor,
+        shippingMinor: current.shippingMinor,
+        email: current.email,
+        financialStatus: "paid" as const,
+        /**
+         * Digital goods and delivery are §18.7's last item and do not exist
+         * yet, so every order starts shippable. Claiming `not_required` here
+         * would tell a merchant a physical order needs no action.
+         */
+        fulfillmentStatus: "unfulfilled" as const,
       })
       .returning();
+
+    await writeOrderLines(tx, order.id, current);
 
     // Variant-backed stock leaves here; variant-less products still decrement
     // their own counter until the catalog finishes migrating to variants.
@@ -232,6 +315,23 @@ export async function completeCheckout(input: CompletionInput): Promise<Completi
       amountMinor: netSalesMinor,
       currency: current.currency,
       environment: environmentFor({ siteStatus: site.status, paymentVerified: true }),
+      dedupeKey: `sale:${order.id}`,
+    });
+
+    // The timeline starts here, so nothing that happens to this order later
+    // sits above an unexplained beginning (§18.7).
+    await tx.insert(orderEvents).values({
+      orderId: order.id,
+      type: "placed",
+      message: `Order placed and paid via ${current.provider}.`,
+      data: {
+        rail: current.provider,
+        totalMinor: current.totalMinor,
+        currency: current.currency,
+        paymentReference: input.paymentReference,
+      },
+      visibility: "customer",
+      actorType: "system",
     });
 
     await tx

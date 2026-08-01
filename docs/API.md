@@ -30,16 +30,16 @@ carry an explicit status — **never call a `PLANNED` endpoint and never fake it
 | 10 | Channels | 🟡 PLANNED | E |
 | 11 | Product agent-data extension | 🟡 PLANNED | E |
 | 12 | Agent Test Lab | 🟡 PLANNED | E |
-| 13 | Orders (promoted) | partial — `GET /api/orders/:id` is LIVE, the rest PLANNED | C |
+| 13 | Orders (promoted) | partial — `GET /api/orders/:id` (now with lines, refunds, fulfillments, timeline) and the §18.7 order actions are ✅ LIVE; list/filter/export PLANNED | C |
 | 14 | Analytics v2 (funnel, channels, failures) | 🟡 PLANNED | E |
 | 15 | Automations, activity, notifications, team | 🟡 PLANNED | E |
 | 16 | Accounts, organizations, staff | partial — `/api/auth/*`, `/api/me`, `/api/org`, `/api/org/staff*`, and **org scoping of §1–8** are ✅ LIVE; audit, sessions, tokens, MFA, org switching PLANNED | **A** |
 | 17 | Billing, plans, metering, threshold fees | 🟡 PLANNED — **except `UsageRecord`, which is ✅ LIVE**: written at event time by checkout and underivable later, so it shipped with §18.4. It meters **net sales** (`subtotal − discounts`), *not* the order total — see `docs/PRICING.md` §4.1 | B |
-| 18 | Commerce core (variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping) | partial — §18.1–18.6 ✅ LIVE **except** the §18.4 card rail, §18.5 gift cards, and §18.6 Stripe Tax (writes via §22 actions). §18.7 order operations PLANNED | C |
+| 18 | Commerce core (variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping) | partial — §18.1–18.6 ✅ LIVE **except** the §18.4 card rail, §18.5 gift cards, and §18.6 Stripe Tax (writes via §22 actions). §18.7 order operations ✅ LIVE, **except** processor-executed refunds — Markii records a refund and meters it, the merchant moves the money | C |
 | 19 | Site builder & content | 🟡 PLANNED | D |
 | 20 | Disputes & chargebacks | 🟡 PLANNED | F |
 | 21 | Agent Ops add-on | 🟡 PLANNED | F (last) |
-| 22 | **Action registry & MCP** — agent-native architecture | ✅ LIVE (registry, invoke, dry-run, audit; 4 actions). Undo + MCP server PLANNED | **Registry: C · MCP: D** |
+| 22 | **Action registry & MCP** — agent-native architecture | ✅ LIVE (registry, invoke, dry-run, audit). Undo + MCP server PLANNED | **Registry: C · MCP: D** |
 
 **v3 note.** Markii is now a full commerce platform (`docs/PLAN.md` v3). §16 was a **breaking change
 to everything above it**, and as of 2026-07-31 that change has landed: **every `/api/*` route
@@ -1658,12 +1658,69 @@ money they never charged. A store on `provider: "none"` is unaffected.
 **Markii never gives tax advice** (`docs/DECISIONS.md` G2). Under Connect Standard the merchant is
 the seller of record and the taxpayer; `GET /api/settings/tax` returns that disclaimer as data.
 
-### 18.7 Order operations
+### 18.7 Order operations ✅ LIVE · 🟡 processor-executed refunds PLANNED
 
-Extends §13. `POST /api/orders/:id/refund` (partial/full, restock flag → inventory ledger +
-`UsageRecord{type:"refund"}`), `POST /api/orders/:id/cancel`,
-`POST /api/orders/:id/fulfillment` (**manual only**: status, tracking number, carrier name, notify
-customer), `POST /api/orders/:id/notes`, `POST /api/orders/:id/resend-confirmation`.
+Extends §13. Reads are REST; **every mutation is an action** (§22 rule 1), so the `POST
+/api/orders/:id/…` routes this section originally sketched are invoked as
+`POST /api/actions/orders.refund` and friends.
+
+| Method | Route | Notes |
+|---|---|---|
+| `GET` | `/api/orders/:id` | The whole order: `lines`, `refunds`, `fulfillments`, `timeline`, `totals` |
+
+| Action | Risk | Notes |
+|---|---|---|
+| `orders.refund` | high | Partial or full, by line (+ optional shipping) or by amount on un-itemised orders |
+| `orders.cancel` | high | Unpaid orders only; releases stock |
+| `orders.fulfill` | medium | **Manual only**: status, tracking number, carrier, notify |
+| `orders.addNote` | low | Append-only timeline entry, `internal` or `customer` |
+| `orders.resendConfirmation` | low | Reports whether a provider accepted the message |
+
+**Orders are now itemised.** `order_lines` snapshots what was sold — title, sku, unit price,
+quantity, and the line's **allocated** share of the order's discount and tax — frozen from the
+checkout session's `lineSnapshot`, not rebuilt from the catalog. Rebuilding would let a price edit
+made during the reservation window produce lines that do not sum to the amount charged. Orders
+placed before this return `itemised: false` and an empty `lines` array; nothing is invented for them.
+
+Allocation uses largest-remainder apportionment (`lib/commerce/allocation.ts`) and **sums exactly**
+to the order's own totals. A partial refund of a line takes a cumulative slice of its allocation, so
+refunding a line in pieces returns precisely its total rather than stranding a rounding remainder.
+
+**The refund meters net sales, not the amount returned** (`docs/PRICING.md` §4.1, D36). A £59
+refund containing £4 VAT and £5 postage returns £59 and writes `UsageRecord{type:"refund",
+amountMinor:-5000}`. Metering the full £59 would credit the merchant for tax owed to a government
+and postage owed to a carrier. The record's environment is **read from the sale**, never
+re-derived — a store that went live between the two would otherwise have its reversal metered in an
+environment its sale was never counted in. Idempotency is keyed `refund:{refundId}`, which is why
+`usage_records` moved off its old `(orderId, type)` unique key: two partial refunds on one order are
+two real events, and that key silently dropped the second.
+
+**Markii records refunds; it does not move the money.** `method: "manual"` — the default and
+currently the only accepted value — means the merchant issued the refund themselves and is telling
+Markii about it; `processorReference` holds the Stripe refund id or the hash of their return
+transfer. `method: "processor"` is **refused with the reason**: card refunds need a connected
+Stripe account (`lib/payments` reports `configuration_required`), and x402/USDC settlements are
+irreversible with no path back from Markii at all (§20). Every refund in the API response carries
+`moneyMovedByMarkii: false` so no surface can imply otherwise.
+
+**Restocking** returns units to the **location the stock left from**, recorded on the order line at
+completion — not to whichever location is default today. Variant-less products still move the legacy
+`products.stock` counter. A line whose product was deleted comes back in `unrestockableLineIds`
+rather than being silently skipped.
+
+**Fulfillment is manual and unverified.** Markii does no fulfillment logistics (`docs/PLAN.md` §3),
+so `carrier`, `trackingNumber`, and `trackingUrl` are merchant-entered text. Responses carry
+`trackingVerified: false`; no surface may present them as confirmed by a carrier.
+`fulfillmentStatus` is recomputed from the lines and treats refunded units as no longer outstanding.
+
+**Cancellation is for unpaid orders only.** A paid order is refunded — cancelling one would leave
+the shopper's money with the merchant and no record of what is owed.
+
+**Notify is never assumed.** `notifyCustomer` queues merchant mail (SES, the merchant's own domain
+— `sendMerchantMail`) as a post-commit effect, so a rolled-back or dry-run action sends nothing. The
+action returns `customerNotified: false` / `queued: true`, and the outcome lands on the timeline as
+`email_sent` or `email_failed`. SES is not wired yet, so `email_failed` is currently the normal
+result and is reported as such.
 
 ---
 

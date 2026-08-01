@@ -34,19 +34,27 @@ app/api/         sites · products · categories · import · analytics · finan
 human path and the x402 agent path now share one order pipeline and one metering event.
 
 Commerce core is now complete end to end: `lib/commerce/{cart,pricing,discounts,shipping,tax,
-reservations,orders}.ts`. A physical-goods store checks out once its merchant has configured a
-shipping zone and rate; an unconfigured one is refused rather than quoted a zero shipping cost it
-would silently absorb.
+reservations,allocation,refunds,orders}.ts`. A physical-goods store checks out once its merchant has
+configured a shipping zone and rate; an unconfigured one is refused rather than quoted a zero
+shipping cost it would silently absorb.
+
+**§18.7 order operations landed.** Orders are itemised (`order_lines`, frozen from the checkout
+session's `lineSnapshot`), and `orders.refund` / `cancel` / `fulfill` / `addNote` /
+`resendConfirmation` are registry actions. Refunds are partial or full, restock to the location the
+stock left from, and meter **net sales** — see below. Fulfillment is manual and explicitly
+unverified; Markii does no fulfillment logistics.
 
 **What is still missing** is the card rail (`lib/payments/` reports `configuration_required`; no
-`STRIPE_SECRET_KEY` exists yet), Stripe Tax, gift cards, and §18.7 order operations — refunds,
-cancellations, and fulfillment.
+`STRIPE_SECRET_KEY` exists yet), Stripe Tax, gift cards, and **processor-executed refunds** —
+`orders.refund` records a refund the merchant issued and refuses `method: "processor"` with the
+reason, since Stripe is unwired and x402 settlement is irreversible.
 
-**One metering rule to keep in mind while building refunds:** the `UsageRecord` meters **net sales**
+**The metering rule refunds are built on:** the `UsageRecord` meters **net sales**
 (`subtotal − discounts`), never the order total, because `docs/PRICING.md` §4.1 excludes tax and
 shipping. Metering the total would bill a merchant against tax they collected for a government and
 postage they passed through — worst for whoever ships the most. A refund is its own record with a
-negative amount, computed the same way.
+negative amount, computed the same way, keyed `refund:{refundId}` and stamped with the environment
+**read from the sale** rather than re-derived.
 
 ---
 
@@ -214,8 +222,10 @@ Contract `docs/API.md` §18. The largest phase. Order within it:
 3. ~~**Collections** (manual + rule-based), **customers**~~ — done
 4. ~~**Cart and checkout**~~ — done for the x402 rail; card rail waits on Stripe credentials
 5. ~~**Discounts**, tax, shipping rates~~ — done. Stripe Tax and gift cards still open
-6. **Orders**: refunds, cancellations, manual fulfillment status, timeline ← **next**
+6. ~~**Orders**: refunds, cancellations, manual fulfillment status, timeline~~ — done. Executing a
+   refund on a rail (rather than recording one) waits on Stripe credentials
 7. **Digital delivery** — signed expiring URLs, download limits, licence keys, membership gating
+   ← **next**
 
 **Checkout rules that are not negotiable:**
 
