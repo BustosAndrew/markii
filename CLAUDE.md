@@ -14,12 +14,19 @@ Started as a 4-hour hackathon (v1, shipped). Now a platform build — read `docs
 ## Commands
 
 ```bash
-pnpm dev        # dev server (Turbopack)
-pnpm build      # production build — run before considering work done
-pnpm lint       # eslint
-pnpm db:push    # push Drizzle schema (dev only — see docs/DECISIONS.md D6)
-pnpm db:seed    # seed demo data (3 sites, ~30 products, orders, traffic)
+pnpm dev              # dev server (Turbopack)
+pnpm build            # production build — run before considering work done
+pnpm lint             # eslint + the RLS deny-by-default check
+pnpm test             # unit tests — pure money/rule functions, ~1s, no deps
+pnpm test:integration # real HTTP + real DB; needs a dev server (see tests/README.md)
+pnpm db:push          # push Drizzle schema (dev only — see docs/DECISIONS.md D6)
+pnpm db:seed          # seed demo data (3 sites, ~30 products, orders, traffic)
 ```
+
+**Run `pnpm test` freely — it is a second and touches nothing.** `pnpm
+test:integration` **writes to the real database** and is opt-in behind a guard;
+it takes several minutes. `tests/README.md` explains why the slow suite earns
+its keep: every bug found so far lived in the wiring, not the arithmetic.
 
 Package manager is **pnpm** (v11; build-script approvals live in `pnpm-workspace.yaml`).
 

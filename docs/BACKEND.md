@@ -284,10 +284,16 @@ goes live — that badge is the frontend's only signal that something is callabl
 - Org-scoped via the required-`orgId` query helpers — no unscoped query exists
 - Idempotent where it can be retried; transactional where it touches money or stock
 - Money in integer minor units with explicit currency
-- Usage record written for anything that affects billable volume
+- Usage record written for anything that affects billable volume, on the **net
+  sales** base (`subtotal − discounts`), never the order total (D36)
 - Errors follow the `{ error: { code, message } }` envelope in `docs/API.md`
 - `docs/API.md` updated: shape accurate, status badge moved to ✅ LIVE
-- `pnpm build` and `pnpm lint` pass
+- **Tested**: pure money and rule logic gets a unit test in `lib/**/*.test.ts`;
+  anything that spans a route, the database, and a response gets an integration
+  test in `tests/integration/`. Every bug found in Phase C lived in that span,
+  not in the arithmetic — see `tests/README.md`
+- `pnpm build`, `pnpm lint`, and `pnpm test` pass; `pnpm test:integration` passes
+  before calling a commerce change done
 
 ---
 

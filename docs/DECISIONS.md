@@ -648,6 +648,48 @@ costs more than the payments it would strand.
 
 ---
 
+## Testing — D38 (decided 2026-07-31, after Phase C)
+
+**Decision: Vitest, two suites split by what they need — `unit` (pure, ~1s, no
+dependencies) and `integration` (real HTTP, real database, ~10 min, opt-in).**
+
+**Why a slow suite exists at all.** Every bug found while building §18.4–18.6
+lived in the wiring, not the arithmetic, and none was reachable from a unit test:
+
+| Bug | Where it lived |
+|---|---|
+| Picking a shipping rate wiped the cart's shipping address | `?? null` in request parsing, turning *absent* into *cleared* |
+| "Free over $50" withheld below the threshold **and** charged above it | Two functions each correct alone, disagreeing about one field's meaning |
+| The metering base included tax and shipping (D36) | Self-consistent; only `docs/PRICING.md` §4.1 disagreed |
+| A rejection's `reason.code` overwrote the shopper's discount code | An object spread in a response body |
+
+The concurrency requirement settles it: `docs/BACKEND.md` §4 demands the
+last-unit race be solved with a database transaction, and the only way to
+demonstrate that is many simultaneous checkouts through the real server against
+real Postgres.
+
+**Tests assert against the database, not through the API that wrote the value.**
+Reading a write back through the same code proves only that the code agrees with
+itself. The tenancy tests are the clearest case — a refusal is not enough, the
+row must be unchanged afterwards.
+
+**Safety, because there is one Supabase project.** "Test database" and "database"
+are the same thing today, so the integration suite is gated on an explicit
+`MARKII_ALLOW_INTEGRATION_TESTS=1` (set only by `pnpm test:integration`), refuses
+a `DATABASE_URL` containing `prod`, and checks the dev server up front. Cleanup
+order is fixed once in a `Cleanup` helper rather than at each call site.
+
+**Known cost:** ~10 minutes, because every request is a real round trip to a
+remote Supabase through the dev server. Worth revisiting with a local Postgres if
+it becomes a reason not to run them — the guard and the helpers would not change.
+
+**Not done, deliberately:** no CI wiring yet (the integration suite needs a
+database and a server, which is a separate decision), and no component or
+end-to-end browser tests — the frontend has not been built against these
+contracts yet.
+
+---
+
 ## Email — G1 in full
 
 **Provider: Resend** (owner direction, 2026-07-29). Good fit — first-class Next.js/Vercel DX, React

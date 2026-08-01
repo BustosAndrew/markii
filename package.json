@@ -7,6 +7,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint && pnpm check:rls",
+    "test": "vitest run --project unit",
+    "test:watch": "vitest --project unit",
+    "test:integration": "cross-env MARKII_ALLOW_INTEGRATION_TESTS=1 vitest run --project integration",
+    "test:all": "pnpm test && pnpm test:integration",
     "check:rls": "node --env-file-if-exists=.env.local --import=tsx scripts/check-rls.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
@@ -44,11 +48,14 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^6.0.5",
+    "cross-env": "^10.1.0",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.2.11",
     "tailwindcss": "^4",
     "tsx": "^4.23.1",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.10"
   }
 }
