@@ -19,6 +19,8 @@
 import "./authorization";
 import "./definitions/catalog";
 import "./definitions/inventory";
+import "./definitions/collections";
+import "./definitions/customers";
 
 export { defineAction, getAction, allActions, describeAction } from "./registry";
 export {

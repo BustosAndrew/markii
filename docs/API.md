@@ -35,7 +35,7 @@ carry an explicit status — **never call a `PLANNED` endpoint and never fake it
 | 15 | Automations, activity, notifications, team | 🟡 PLANNED | E |
 | 16 | Accounts, organizations, staff | partial — `/api/auth/*`, `/api/me`, `/api/org`, `/api/org/staff*`, and **org scoping of §1–8** are ✅ LIVE; audit, sessions, tokens, MFA, org switching PLANNED | **A** |
 | 17 | Billing, plans, metering, threshold fees | 🟡 PLANNED | B |
-| 18 | Commerce core (variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping) | partial — §18.1 variants & inventory ✅ LIVE (writes via §22 actions); §18.2–18.6 PLANNED | C |
+| 18 | Commerce core (variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping) | partial — §18.1 variants/inventory, §18.2 collections, §18.3 customers ✅ LIVE (writes via §22 actions); §18.4–18.6 PLANNED | C |
 | 19 | Site builder & content | 🟡 PLANNED | D |
 | 20 | Disputes & chargebacks | 🟡 PLANNED | F |
 | 21 | Agent Ops add-on | 🟡 PLANNED | F (last) |
@@ -1385,6 +1385,30 @@ interface Variant {
 Inventory is an **append-only ledger**, not a mutable integer — reconciliation and audit depend on
 it, and so does the Agent Ops undo path.
 
+### 18.2 Collections — ✅ LIVE
+
+> **Live (2026-07-31).** Reads: `GET /api/collections`, `GET /api/collections/:idOrHandle`.
+> Writes via §22 actions: `catalog.createCollection`, `catalog.updateCollection`,
+> `catalog.setCollectionProducts`, `catalog.deleteCollection`.
+>
+> **Rule fields are narrower than the type below.** Products carry no `tag`, `vendor`, or `type`
+> column, so rules on those fields are **rejected with an explanatory error** rather than accepted
+> and silently matching nothing. Supported today: `title`, `price`, `stock`, `sku`. Numeric fields
+> take `eq`/`gt`/`lt`; text fields take `eq`/`contains`/`starts_with` — a mismatched pair is also
+> refused. The other three become available when the product model grows those fields.
+>
+> **Automated membership resolves at read time, never materialised.** A cached membership goes stale
+> the moment a price or stock level changes, and an "Under £20" collection listing a £30 product is
+> a worse failure than a slower query. Verified: repricing a product removes it from the collection
+> on the next read.
+>
+> A rule set with no usable rules yields an **empty** collection, never the whole catalog — widening
+> is the dangerous direction to fail in. `setCollectionProducts` is refused on automated collections,
+> and deleting a collection leaves its products untouched.
+>
+> `best_selling` sort currently falls back to newest-first: there is no order-line data to rank by
+> until checkout ships (§18.4). It does not invent a ranking.
+
 ### 18.2 Collections
 
 ```ts
@@ -1404,6 +1428,34 @@ interface Collection {
 `POST /api/collections/:id/products` (manual membership + reorder).
 Collections coexist with the existing §3 categories: **categories are catalog taxonomy, collections
 are merchandising.** Do not merge them; do document the distinction in the UI.
+
+### 18.3 Customers — ✅ LIVE (records; shopper *login* is separate)
+
+> **Live (2026-07-31).** Reads: `GET /api/customers`, `GET /api/customers/:id`,
+> `GET /api/customers/:id/orders`. Writes via §22 actions: `customers.create`,
+> `customers.update`, `customers.addAddress`, `customers.delete`.
+>
+> **A customer record is not a login.** Guest checkout creates a customer with no `authUserId`; an
+> account links one later. `customers.authUserId` points at `auth.users` (D32 — one project) with no
+> foreign key, since that schema belongs to `supabase_auth_admin`. Shopper *authentication* arrives
+> with checkout (§18.4).
+>
+> **D32's `user_kind` is enforced from here on.** It lives in **`app_metadata`**, not
+> `user_metadata` — the latter is user-writable, so a shopper could otherwise promote themselves by
+> calling `updateUser`. Verified: a `customer`-kind user **with a valid owner staff row** still gets
+> `401` from `/api/me` and every data route.
+>
+> **PII (§18.3).** Marketing consent defaults off, is timestamped on grant, and its timestamp is
+> **cleared on withdrawal** — a stale one would misrepresent the record if produced as evidence.
+> Customer actions carry `redactInput`, so emails, names, and phone numbers never reach the
+> long-lived audit table; diffs record which field changed, not to what.
+>
+> **Erasure keeps the financial record.** `customers.delete` is `high` risk (irreversible,
+> privacy-affecting). It removes the customer and their addresses; orders survive with
+> `customerId` nulled, because erasing a person must not destroy the merchant's tax records.
+>
+> `ordersCount` / `totalSpentMinor` are derived from **successful** orders only, never stored — a
+> denormalised total drifts after the first refund.
 
 ### 18.3 Customers
 

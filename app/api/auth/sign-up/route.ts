@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { ApiError, appUrl, badRequest, handler } from "@/lib/api";
+import { setUserKind } from "@/lib/auth/admin";
 import { ensureFirstOrg } from "@/lib/auth/provisioning";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { credentialsSchema } from "@/lib/validation";
@@ -21,7 +22,17 @@ export const POST = handler(async (req) => {
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
-    options: { emailRedirectTo: `${appUrl()}/api/auth/callback?next=/dashboard` },
+    options: {
+      emailRedirectTo: `${appUrl()}/api/auth/callback?next=/dashboard`,
+      /**
+       * Marks the identity as staff (D32). Note this goes through `data`, which
+       * lands in **`user_metadata`** — user-writable, so it is a label rather
+       * than a boundary. `stampStaffKind` below rewrites it into `app_metadata`,
+       * which only the service role can set, and that is the copy
+       * `isStaffUser()` reads.
+       */
+      data: { signup_kind: "staff" },
+    },
   });
 
   if (error) {
@@ -30,6 +41,11 @@ export const POST = handler(async (req) => {
     throw badRequest(error.message);
   }
   if (!data.user) throw badRequest("Sign-up did not return a user");
+
+  // The authoritative marker: `app_metadata`, service-role only (D32). The
+  // `data` field above lands in user-writable `user_metadata` and is a label,
+  // not a boundary.
+  await setUserKind(data.user.id, "staff");
 
   // Idempotent: Supabase intentionally returns a plausible user for an existing
   // address so sign-up cannot enumerate accounts, so this must not mint a

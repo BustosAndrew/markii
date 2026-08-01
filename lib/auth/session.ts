@@ -15,6 +15,7 @@ import {
 } from "../db";
 import { getSupabaseServerClient } from "../supabase/server";
 import { bearerFrom, hashesMatch, hashToken } from "./tokens";
+import { isStaffUser } from "./user-kind";
 
 /**
  * Which org a multi-org user is currently acting in. A user may belong to
@@ -54,6 +55,14 @@ export async function getAuthUser(): Promise<{
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return null;
+
+  /**
+   * D32 mitigation 3. Staff and shoppers share one Supabase project, so a
+   * shopper's session is a structurally valid Supabase session for this origin.
+   * This is the explicit refusal — checked from `app_metadata`, which only the
+   * service role can write.
+   */
+  if (!isStaffUser(user)) return null;
 
   return {
     id: user.id,

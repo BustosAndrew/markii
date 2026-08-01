@@ -5,6 +5,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   serial,
   text,
   timestamp,
@@ -122,6 +123,13 @@ export const orders = pgTable(
     id: serial("id").primaryKey(),
     siteId: integer("site_id").references(() => sites.id, { onDelete: "set null" }),
     productId: integer("product_id").references(() => products.id, { onDelete: "set null" }),
+    /**
+     * Set for orders placed by a known shopper (§18.3). Null for the existing
+     * agent-driven x402 orders, which carry no customer identity — and `set null`
+     * on delete so a customer's erasure request does not destroy the merchant's
+     * financial record.
+     */
+    customerId: integer("customer_id").references(() => customers.id, { onDelete: "set null" }),
     quantity: integer("quantity").notNull().default(1),
     status: text("status", { enum: ["pending", "success", "cancel", "failed"] })
       .notNull()
@@ -350,6 +358,150 @@ export const variants = pgTable(
   ],
 );
 
+// ---------------------------------------------------------------------------
+// Customers (§18.3)
+// ---------------------------------------------------------------------------
+
+/**
+ * A shopper record, per store.
+ *
+ * **Not the same thing as a login.** Guest checkout creates a customer with no
+ * `authUserId`; an account links one later. Keeping them separate is what lets a
+ * merchant have customers before shopper accounts exist at all.
+ *
+ * **PII rules (§18.3):** never log or prompt-inject these records, support
+ * export and deletion, and marketing consent is explicit, timestamped, and never
+ * defaulted on.
+ *
+ * `ordersCount` and `totalSpentMinor` are **derived**, never stored — a
+ * denormalised total drifts after the first refund and then the customer list
+ * disagrees with the orders list. Same reasoning as inventory levels and plan
+ * entitlements.
+ */
+export const customers = pgTable(
+  "customers",
+  {
+    id: serial("id").primaryKey(),
+    siteId: integer("site_id")
+      .notNull()
+      .references(() => sites.id, { onDelete: "cascade" }),
+    /**
+     * `auth.users.id` when this shopper has an account (D32 — staff and shoppers
+     * share one Supabase project). Null for guests. No foreign key: the `auth`
+     * schema is owned by `supabase_auth_admin`.
+     */
+    authUserId: text("auth_user_id"),
+    email: text("email").notNull(),
+    firstName: text("first_name"),
+    lastName: text("last_name"),
+    phone: text("phone"),
+    /** Never defaults to true. Consent is given, not assumed. */
+    acceptsMarketing: boolean("accepts_marketing").notNull().default(false),
+    /** When consent was given. Null whenever `acceptsMarketing` is false. */
+    marketingConsentAt: timestamp("marketing_consent_at", { withTimezone: true }),
+    tags: jsonb("tags").$type<string[]>().notNull().default([]),
+    note: text("note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // One customer record per email per store. The same person shopping at two
+    // merchants is two records — they are the merchants' customers, not Markii's.
+    uniqueIndex("customers_site_email_uq").on(t.siteId, t.email),
+    index("customers_site_idx").on(t.siteId),
+    index("customers_auth_user_idx").on(t.authUserId),
+  ],
+);
+
+export const customerAddresses = pgTable(
+  "customer_addresses",
+  {
+    id: serial("id").primaryKey(),
+    customerId: integer("customer_id")
+      .notNull()
+      .references(() => customers.id, { onDelete: "cascade" }),
+    name: text("name"),
+    line1: text("line1").notNull(),
+    line2: text("line2"),
+    city: text("city").notNull(),
+    province: text("province"),
+    postalCode: text("postal_code"),
+    /** ISO 3166-1 alpha-2. */
+    country: text("country").notNull(),
+    phone: text("phone"),
+    isDefault: boolean("is_default").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("customer_addresses_customer_idx").on(t.customerId)],
+);
+
+/**
+ * Merchandising collections (§18.2).
+ *
+ * **Collections are not categories.** Categories (§3) are catalog taxonomy — where
+ * a product lives. Collections are merchandising — how products are grouped for
+ * sale ("Summer Sale", "Under £20"). A product has one category and many
+ * collections. `docs/API.md` §18.2 is explicit that these must not be merged.
+ */
+export type CollectionRule = {
+  field: "title" | "price" | "stock" | "sku";
+  op: "eq" | "contains" | "gt" | "lt" | "starts_with";
+  value: string;
+};
+
+export const collections = pgTable(
+  "collections",
+  {
+    id: serial("id").primaryKey(),
+    siteId: integer("site_id")
+      .notNull()
+      .references(() => sites.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    handle: text("handle").notNull(),
+    description: text("description"),
+    imageUrl: text("image_url"),
+    /** `manual` = an explicit product list; `automated` = whatever matches `rules`. */
+    type: text("type", { enum: ["manual", "automated"] })
+      .notNull()
+      .default("manual"),
+    rules: jsonb("rules").$type<CollectionRule[]>().notNull().default([]),
+    rulesMatch: text("rules_match", { enum: ["all", "any"] })
+      .notNull()
+      .default("all"),
+    sortOrder: text("sort_order", {
+      enum: ["manual", "best_selling", "price_asc", "price_desc", "created_desc"],
+    })
+      .notNull()
+      .default("manual"),
+    /** Null until published — an unpublished collection is invisible to storefronts. */
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("collections_site_handle_uq").on(t.siteId, t.handle),
+    index("collections_site_idx").on(t.siteId),
+  ],
+);
+
+/** Manual membership and ordering. Unused by automated collections. */
+export const collectionProducts = pgTable(
+  "collection_products",
+  {
+    collectionId: integer("collection_id")
+      .notNull()
+      .references(() => collections.id, { onDelete: "cascade" }),
+    productId: integer("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    position: integer("position").notNull().default(0),
+  },
+  (t) => [
+    primaryKey({ columns: [t.collectionId, t.productId] }),
+    index("collection_products_product_idx").on(t.productId),
+  ],
+);
+
 /** Stock-holding locations. One default per store until multi-location matters. */
 export const locations = pgTable(
   "locations",
@@ -515,3 +667,6 @@ export type ProductOption = typeof productOptions.$inferSelect;
 export type Variant = typeof variants.$inferSelect;
 export type Location = typeof locations.$inferSelect;
 export type InventoryEntry = typeof inventoryLedger.$inferSelect;
+export type Collection = typeof collections.$inferSelect;
+export type Customer = typeof customers.$inferSelect;
+export type CustomerAddress = typeof customerAddresses.$inferSelect;
