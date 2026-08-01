@@ -25,16 +25,38 @@ enforce (`docs/DECISIONS.md` D31).
 `tests/integration/**/*.test.ts` drives real HTTP against a running dev server
 and asserts against a real database.
 
-**Prerequisites:**
+**Prerequisites:** a dev server, and nothing else.
 
 ```bash
 DEMO_SKIP_PAYMENT_VERIFICATION=1 pnpm dev   # in another terminal
-pnpm db:seed                                # if the demo store is missing
+pnpm test:integration
 ```
 
-Then `pnpm test:integration`. Expect **several minutes** — every request is a
-real round trip to a remote Supabase through the dev server, at roughly three
-seconds each. That is the price of testing the wiring rather than a mock of it.
+**The suite no longer needs `pnpm db:seed`.** Each file creates its own
+organization, store, and products, and deletes them afterwards. That is what
+makes the tests safe to run against a database someone else is using, and safe to
+run twice at once — see *Fixtures* below.
+
+Against the hosted Supabase, expect **several minutes** — measured at **457s**
+for the 61 tests, because every request is a real round trip. Against a local
+stack the same 61 tests take **12s**, a ~37× difference that is worth the one
+-time Docker setup if you run these more than occasionally:
+
+```bash
+supabase start                              # Postgres + GoTrue in Docker
+pnpm db:migrate
+DEMO_SKIP_PAYMENT_VERIFICATION=1 pnpm dev
+pnpm test:integration
+```
+
+No `db:seed` in that list, and that is the point: the suite runs against a
+**freshly migrated, completely empty** database. If it ever stops doing so, a
+fixture has started depending on data it did not create.
+
+`supabase/config.toml` pins `db.major_version` to **17**, matching the hosted
+project. A local Postgres on a different major version would let a migration
+pass here and fail in production, which is the one difference that would make
+local runs actively misleading.
 
 ### Why these exist rather than more unit tests
 
@@ -69,6 +91,37 @@ Every test also cleans up what it creates, via the `Cleanup` helper — which
 fixes the deletion order once (usage records before orders before sites) rather
 than at each call site, where getting it wrong leaves foreign-key debris.
 
+### Fixtures — tests own their data
+
+`createTestStore(cleanup, label)` builds a private organization, store, and three
+products for each test file, and `Cleanup` drops the org afterwards, cascading
+everything beneath it.
+
+The earlier version borrowed the seeded `aurora-supply` store and mutated it —
+disabling a product, changing a price, rewriting tax settings — restoring each
+in a `finally`. That works exactly once at a time. Two concurrent runs see each
+other's mutations, and the failures do not reproduce; a crashed run leaves the
+demo store altered. Owning the fixtures removes the shared state rather than
+sequencing access to it.
+
+One subtlety worth keeping: `orders` and `usage_records` reference a site with
+`on delete set null`, so dropping the org would leave them behind pointing at
+nothing. `Cleanup` sweeps them by site id first. That is a safety net for rows a
+test forgot to track — which is a mistake that actually happened while writing
+these, and cost a confusing ten-minute rerun to find.
+
+## CI
+
+`.github/workflows/ci.yml` runs two jobs:
+
+- **check** — typecheck, unit tests, eslint. No database, no server, ~1 minute.
+- **integration** — `supabase start` brings up a disposable Postgres *and*
+  GoTrue, then migrations, the RLS check, a production build, and the suite.
+
+Auth is not optional in CI: `tenancy.test.ts` signs up real users to prove one
+org cannot write to another's data, which is the check most worth having. A bare
+Postgres service container would not provide it.
+
 **Tests assert against the database directly, not through the API that wrote the
 value.** Checking a write by reading it back through the same code only proves
 the code agrees with itself. The tenancy tests are the sharpest example: it is
@@ -76,10 +129,10 @@ not enough that org B gets a refusal — the row must be unchanged afterwards.
 
 ### Adding a test
 
-Use `Client` for HTTP (it carries cookies), `signUpMerchant` for a real
-authenticated merchant, and `Cleanup` for teardown in `afterAll`. Storefront
-tests run against the seeded demo store via `demoStore()`; merchant tests create
-their own org so they cannot collide.
+Use `Client` for HTTP (it carries cookies), `createTestStore(cleanup, label)` for
+a private org/store/products, `signUpMerchant` for a real authenticated merchant,
+and `Cleanup` for teardown in `afterAll`. **Never reach for a store you did not
+create** — that is the shared state this suite deliberately removed.
 
 `refused(r)` is the way to assert a registry action was rejected — refusals
 arrive either as an HTTP 4xx or as an `ok: false` outcome depending on where the

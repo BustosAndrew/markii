@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { Cleanup, Client, demoStore, sql, trackCart } from "./helpers";
+import { Cleanup, Client, createTestStore, sql, trackCart } from "./helpers";
 
 /**
  * Cart behaviour (§18.4) against the seeded demo store.
@@ -14,20 +14,21 @@ describe("storefront cart", () => {
   let slug: string;
   let p1: any;
   let p2: any;
+  /** A second store, so cross-store isolation is tested against a real neighbour. */
+  let otherSlug: string;
   let otherProductId: number;
   let token: string;
 
   const cart = (p = "") => `/_sites/${slug}/api/cart${p}`;
 
   beforeAll(async () => {
-    const store = await demoStore();
+    const store = await createTestStore(cleanup, "cart");
     slug = store.slug;
     [p1, p2] = store.products;
 
-    const [other] = await sql`select p.id from products p
-      join sites s on s.id = p.site_id
-      where s.id <> ${store.site.id} limit 1`;
-    otherProductId = other.id;
+    const neighbour = await createTestStore(cleanup, "cart-neighbour");
+    otherSlug = neighbour.slug;
+    otherProductId = neighbour.products[0].id;
 
     const created = await client.post(cart(), {});
     token = created.json.token;
@@ -78,8 +79,7 @@ describe("storefront cart", () => {
   });
 
   it("does not resolve a cart token on a different store", async () => {
-    const [other] = await sql`select slug from sites where slug <> ${slug} limit 1`;
-    const r = await client.get(`/_sites/${other.slug}/api/cart/${token}`);
+    const r = await client.get(`/_sites/${otherSlug}/api/cart/${token}`);
     expect(r.status).toBe(404);
   });
 

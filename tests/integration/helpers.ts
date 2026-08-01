@@ -117,10 +117,10 @@ export class Cleanup {
   shippingZoneIds: number[] = [];
   variantIds: number[] = [];
   locationIds: number[] = [];
-  siteIdsForTaxSettings: number[] = [];
   merchantEmails: string[] = [];
-  /** Restores `products.stock`, which the legacy non-variant path decrements. */
-  productStock: { id: number; stock: number }[] = [];
+  /** Test-owned stores. Deleting the org cascades everything beneath it. */
+  orgIds: string[] = [];
+  siteIds: number[] = [];
 
   async run() {
     for (const id of this.usageRecordIds) await sql`delete from usage_records where id = ${id}`;
@@ -131,33 +131,83 @@ export class Cleanup {
     for (const id of this.cartIds) await sql`delete from carts where id = ${id}`;
     for (const id of this.discountIds) await sql`delete from discounts where id = ${id}`;
     for (const id of this.shippingZoneIds) await sql`delete from shipping_zones where id = ${id}`;
-    for (const id of this.siteIdsForTaxSettings) {
-      await sql`delete from tax_settings where site_id = ${id}`;
-    }
     for (const id of this.variantIds) {
       await sql`delete from inventory_ledger where variant_id = ${id}`;
       await sql`delete from variants where id = ${id}`;
     }
     for (const id of this.locationIds) await sql`delete from locations where id = ${id}`;
-    for (const p of this.productStock) {
-      await sql`update products set stock = ${p.stock} where id = ${p.id}`;
+
+    /**
+     * The safety net, and the reason it is not just belt-and-braces: orders and
+     * usage records reference a site with `on delete set null`, so dropping the
+     * org would leave them behind pointing at nothing. Sweeping by site catches
+     * anything an individual test forgot to track, which is the failure mode
+     * that actually happened while writing these.
+     */
+    for (const id of this.siteIds) {
+      await sql`delete from usage_records where site_id = ${id}`;
+      await sql`delete from orders where site_id = ${id}`;
     }
+
+    // Cascades to sites, products, carts, discounts, zones, tax settings.
+    for (const id of this.orgIds) await sql`delete from organizations where id = ${id}`;
+
     for (const email of this.merchantEmails) await removeMerchant(email);
   }
 }
 
-/** The seeded demo store the storefront tests run against. */
-export async function demoStore(slug = "aurora-supply") {
-  const [site] = await sql`select * from sites where slug = ${slug}`;
-  if (!site) {
-    throw new Error(`Seed store "${slug}" is missing. Run: pnpm db:seed`);
+/**
+ * Creates a private store for one test file: its own org, site, and products.
+ *
+ * **Tests own their fixtures rather than borrowing the seeded demo store.** The
+ * earlier version used `aurora-supply` and mutated it — disabling a product,
+ * changing a price, rewriting tax settings — restoring each afterwards. That
+ * works exactly once at a time: two concurrent runs (two CI jobs, or a re-run
+ * overlapping the first) see each other's mutations, and the failures do not
+ * reproduce. It also meant a crashed test left the demo store altered.
+ *
+ * A disposable store removes the shared state entirely, so the suite can run
+ * anywhere, in parallel, against a database someone else is also using.
+ *
+ * Deleting the org cascades to the site and everything under it. Orders are the
+ * exception — they reference a site with `on delete set null`, so they are
+ * removed explicitly first (see {@link Cleanup.run}) or they survive as orphans.
+ */
+export async function createTestStore(cleanup: Cleanup, label: string) {
+  const stamp = `${Date.now()}${Math.floor(Math.random() * 10_000)}`;
+  const orgId = `org_test_${stamp}`;
+  const slug = `test-${label}-${stamp}`;
+
+  await sql`insert into organizations (id, name, slug, owner_id, billing_email, currency, country)
+    values (${orgId}, ${`Test Org ${label}`}, ${`test-org-${stamp}`},
+            ${`test-owner-${stamp}`}, ${`test-${stamp}@markii.shop`}, 'USD', 'US')`;
+  cleanup.orgIds.push(orgId);
+
+  const [site] = await sql`insert into sites
+    (org_id, name, slug, status, purchases_enabled, wallet_address, payment_providers)
+    values (${orgId}, ${`Test Store ${label}`}, ${slug}, 'live', true,
+            '0xtestwallet000000000000000000000000000001',
+            ${sql.json({ x402: true, stripe: false })})
+    returning *`;
+  cleanup.siteIds.push(site.id);
+
+  // Three products at distinct prices, so a test can tell which one a
+  // product-scoped discount or a per-line assertion actually hit.
+  const specs = [
+    { name: "Test Product One", slug: "test-product-one", priceCents: 1400, stock: 60 },
+    { name: "Test Product Two", slug: "test-product-two", priceCents: 1900, stock: 55 },
+    { name: "Test Product Three", slug: "test-product-three", priceCents: 3800, stock: 90 },
+  ];
+  const products = [];
+  for (const s of specs) {
+    const [p] = await sql`insert into products
+      (site_id, name, slug, price_cents, currency, stock, enabled)
+      values (${site.id}, ${s.name}, ${s.slug}, ${s.priceCents}, 'USD', ${s.stock}, true)
+      returning *`;
+    products.push(p);
   }
-  const products = await sql`select * from products
-    where site_id = ${site.id} and enabled order by id limit 5`;
-  if (products.length < 3) {
-    throw new Error(`Seed store "${slug}" has too few products. Run: pnpm db:seed`);
-  }
-  return { site, products, slug };
+
+  return { site, products, slug, orgId };
 }
 
 /** Records a cart by token so cleanup can find it. */

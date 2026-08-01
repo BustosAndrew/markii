@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { Cleanup, Client, demoStore, sql, trackCart, trackOrderCascade } from "./helpers";
+import { Cleanup, Client, createTestStore, sql, trackCart, trackOrderCascade } from "./helpers";
 
 /**
  * Discounts, shipping, tax, and the metering base (§18.5, §18.6, §17).
@@ -28,12 +28,10 @@ describe("pricing", () => {
   };
 
   beforeAll(async () => {
-    const store = await demoStore();
+    const store = await createTestStore(cleanup, "pricing");
     slug = store.slug;
     site = store.site;
     [p1, p2] = store.products;
-    cleanup.productStock.push({ id: p1.id, stock: p1.stock });
-    cleanup.siteIdsForTaxSettings.push(site.id);
 
     const [loc] = await sql`insert into locations (site_id, name, is_default)
       values (${site.id}, 'Pricing Location', true) returning *`;

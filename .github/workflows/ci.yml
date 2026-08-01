@@ -1,0 +1,159 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A newer push supersedes an in-flight run on the same ref. The integration job
+# takes minutes; queueing every intermediate commit wastes them.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Node 24 matches the Vercel deploy target. pnpm is not pinned here —
+  # `pnpm/action-setup` reads the `packageManager` field in package.json, so
+  # there is one version to keep current rather than two that can disagree.
+  NODE_VERSION: 24
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Fast feedback: everything that needs no database and no server.
+  # ---------------------------------------------------------------------------
+  check:
+    name: lint · types · unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm exec tsc --noEmit
+
+      - name: Unit tests
+        run: pnpm test
+
+      # `pnpm lint` also runs the RLS deny-by-default check, which needs a
+      # database. Split here so the eslint half still gates every push.
+      - name: Lint
+        run: pnpm exec eslint
+
+  # ---------------------------------------------------------------------------
+  # The real thing: a disposable Supabase stack, migrations, a built app, and
+  # the integration suite driving it over HTTP.
+  # ---------------------------------------------------------------------------
+  integration:
+    name: integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      # Postgres **and** GoTrue, disposable and private to this run. Auth is not
+      # optional here: the tenancy tests sign up real users to prove one org
+      # cannot write to another's data, which is the check most worth having.
+      #
+      # Everything else is excluded. `kong` stays because it fronts the auth API
+      # the app talks to, and `postgrest` because it answers on the same
+      # gateway; the rest — Studio, Realtime, Storage, image proxy, mail catcher,
+      # log pipeline, edge runtime — is a container per feature this suite never
+      # exercises. Verified locally: `docker ps` shows exactly db, auth, kong,
+      # rest, and `supabase status` lists the other ten as stopped.
+      #
+      # Note `-x` skips *running* a service, not *pulling* its image — the CLI
+      # downloads all of them regardless. So this saves memory and boot time,
+      # not network time. Cache the images if pull time becomes the bottleneck.
+      # Drop the `-x` flag if `supabase status` ever comes back short.
+      - name: Start Supabase
+        run: |
+          supabase start -x studio,imgproxy,edge-runtime,logflare,vector,realtime,storage-api,mailpit,postgres-meta,supavisor
+
+      - name: Build environment file
+        run: |
+          # Keys are generated per run, so they are read from the CLI rather
+          # than hardcoded. `-o env` emits shell assignments with quoted values;
+          # `eval` is what makes them usable, and is why this is one step rather
+          # than a write into $GITHUB_ENV (which would keep the quotes literal).
+          eval "$(supabase status -o env)"
+
+          cat > .env.local <<EOF
+          # Local Postgres, no pooler in front of it — the app's transaction-mode
+          # settings are harmless here.
+          DATABASE_URL=${DB_URL}
+          DIRECT_URL=${DB_URL}
+          NEXT_PUBLIC_SUPABASE_URL=${API_URL}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY=${ANON_KEY}
+          SUPABASE_SERVICE_ROLE_KEY=${SERVICE_ROLE_KEY}
+          NEXT_PUBLIC_APP_URL=http://localhost:3000
+          ROOT_DOMAIN=localhost
+          # x402 settles on-chain. CI has no wallet and must not touch a real
+          # network, so completions are accepted without verification — every
+          # sale here is test data on a database thrown away at the end.
+          DEMO_SKIP_PAYMENT_VERIFICATION=1
+          EOF
+
+          # Confirm the substitutions landed without printing the keys.
+          grep -c '=$' .env.local | grep -qx 0 || {
+            echo "empty value in .env.local — supabase status did not provide everything"
+            sed 's/=.*/=<redacted>/' .env.local
+            exit 1
+          }
+
+      - name: Run migrations
+        run: pnpm db:migrate
+
+      # The RLS deny-by-default check needs a live database, so it runs here
+      # rather than in the fast job.
+      - name: RLS check
+        run: pnpm check:rls
+
+      - name: Build
+        run: pnpm build
+
+      - name: Start the app
+        run: |
+          # `nohup` so the server outlives this step's shell.
+          nohup pnpm start > /tmp/app.log 2>&1 &
+          # Poll rather than sleep: any HTTP status means it is up and routing.
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/api/me || true)
+            if [ "$code" != "000" ]; then
+              echo "app responding with $code after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "app did not start in 60s"
+          cat /tmp/app.log
+          exit 1
+
+      - name: Integration tests
+        run: pnpm test:integration
+
+      - name: App log on failure
+        if: failure()
+        run: tail -200 /tmp/app.log || true

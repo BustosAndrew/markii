@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { Cleanup, Client, demoStore, sql, trackCart, trackOrderCascade } from "./helpers";
+import { Cleanup, Client, createTestStore, sql, trackCart, trackOrderCascade } from "./helpers";
 
 /**
  * Checkout, inventory reservation, and metering (§18.4, §17).
@@ -14,17 +14,18 @@ describe("checkout", () => {
   let slug: string;
   let site: any;
   let p1: any;
+  /** A second product on the same store, for the variant-less one-shot path. */
+  let p2: any;
   let locationId: number;
 
   const cart = (p = "") => `/_sites/${slug}/api/cart${p}`;
   const checkout = (p = "") => `/_sites/${slug}/api/checkout${p}`;
 
   beforeAll(async () => {
-    const store = await demoStore();
+    const store = await createTestStore(cleanup, "checkout");
     slug = store.slug;
     site = store.site;
-    [p1] = store.products;
-    cleanup.productStock.push({ id: p1.id, stock: p1.stock });
+    [p1, p2] = store.products;
 
     const [loc] = await sql`insert into locations (site_id, name, is_default)
       values (${site.id}, 'Test Location', true) returning *`;
@@ -87,7 +88,8 @@ describe("checkout", () => {
     const usage = await sql`select * from usage_records where order_id = ${done.json.orderId}`;
     expect(usage).toHaveLength(1);
     expect(usage[0].type).toBe("sale");
-    expect(usage[0].environment).toBe(site.status === "live" ? "production" : "test");
+    // The test store is live and the payment verified, so this is a real sale.
+    expect(usage[0].environment).toBe("production");
 
     const [cartRow] = await sql`select status from carts where token = ${c.json.token}`;
     expect(cartRow.status).toBe("converted");
@@ -209,9 +211,9 @@ describe("checkout", () => {
   });
 
   it("routes the x402 one-shot through the same pipeline and meters it", async () => {
-    const store = await demoStore();
-    const target = store.products[1];
-    cleanup.productStock.push({ id: target.id, stock: target.stock });
+    // The store's second product, which no other test has attached variants to
+    // — this path exercises the variant-less `products.stock` branch.
+    const target = p2;
 
     const challenge = await client.get(
       `/_sites/${slug}/api/checkout?productId=${target.id}&quantity=1`,
