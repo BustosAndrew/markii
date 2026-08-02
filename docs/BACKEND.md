@@ -263,11 +263,28 @@ expiring URLs directly from Supabase Storage, never proxied through a route hand
 bandwidth twice and risks function timeouts on large files. Signed URLs also give download-limit
 enforcement for free. Meter storage and egress per org against the G5 quotas.
 
-### 5. Readiness computation
+### 5. ~~Readiness computation~~ — done
 
 Rule-based and deterministic — **no model inference**. `docs/PRICING.md` §"Margin check" makes this
 a cost constraint, not just a preference: per-product inference on every plan would exceed every
 other infrastructure line combined. Scores derive from real catalog data; contract `docs/API.md` §9.
+
+> **Built.** `lib/readiness/` — `rules.ts` (pure findings), `score.ts` (pure arithmetic),
+> `compute.ts` (loads facts, merges decisions, snapshots). Routes: overview, issues, issues/:id,
+> export, history, products matrix. Triage is the `readiness.updateIssues` action.
+>
+> Three decisions worth not re-arguing:
+>
+> - **Issues are recomputed per request, never stored.** A stored issue goes stale the moment
+>   someone edits a product. Only merchant *decisions* persist, keyed by an issue id derived
+>   deterministically from the rule and its subject — that determinism is what makes a dismissal
+>   survive the next recomputation.
+> - **Scoring is per subject, then averaged.** Each product and store loses points for its own
+>   issues; a component is the mean. A flat per-component penalty floors at zero and stops moving,
+>   so a merchant with fifty broken products would see no change after fixing forty-five.
+> - **A rule may only check a field the platform offers.** The §11 agent-data extension is Phase E
+>   and does not exist, so nothing scores a merchant on it — that would be a fabricated criticism.
+>   Those groups are reported in `notMeasured` with the reason.
 
 ### 6. Email plumbing
 

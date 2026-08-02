@@ -10,6 +10,7 @@ import {
   serial,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
@@ -1647,6 +1648,89 @@ export const licenceKeys = pgTable(
   ],
 );
 
+// ---------------------------------------------------------------------------
+// Agent readiness (§9)
+// ---------------------------------------------------------------------------
+
+/**
+ * A merchant's decision about one readiness issue.
+ *
+ * **Issues themselves are not stored.** They are recomputed from the catalog on
+ * every request, because a stored issue is a claim that goes stale the moment
+ * someone edits a product — a merchant who fixes a description should not have
+ * to wait for a job to notice. What genuinely cannot be recomputed is what the
+ * *merchant decided*: dismissed, resolved by hand, assigned to someone. Only
+ * that lives here.
+ *
+ * The key is `(orgId, issueId)`, where `issueId` is derived deterministically
+ * from the rule and its subject (`lib/readiness/rules.ts`). That is what makes a
+ * dismissal survive tomorrow's recomputation.
+ */
+export const readinessIssueStates = pgTable(
+  "readiness_issue_states",
+  {
+    id: serial("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** Deterministic — see `issueId()`. Not a foreign key; there is no issue table. */
+    issueId: text("issue_id").notNull(),
+    status: text("status", { enum: ["open", "resolved", "dismissed", "assigned"] })
+      .notNull()
+      .default("open"),
+    assignedTo: text("assigned_to"),
+    /** Why it was dismissed, so the decision is reviewable later. */
+    note: text("note"),
+    actorId: text("actor_id"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("readiness_issue_states_uq").on(t.orgId, t.issueId)],
+);
+
+/**
+ * A score on a day, for the trend line.
+ *
+ * History is the one part of readiness that **must** be stored: a score is a
+ * function of the catalog as it was, and yesterday's catalog is gone. Written
+ * at most once per scope per day — a merchant editing products all afternoon
+ * wants a trend, not a sawtooth.
+ */
+export const readinessSnapshots = pgTable(
+  "readiness_snapshots",
+  {
+    id: serial("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    scope: text("scope", { enum: ["organization", "site", "product"] }).notNull(),
+    /** Null for organization scope. */
+    scopeId: integer("scope_id"),
+    /** UTC calendar day, so one row per scope per day. */
+    day: text("day").notNull(),
+    score: integer("score").notNull(),
+    components: jsonb("components").$type<Record<string, number>>().notNull().default({}),
+    counts: jsonb("counts")
+      .$type<{ critical: number; warning: number; opportunity: number }>()
+      .notNull()
+      .default({ critical: 0, warning: 0, opportunity: 0 }),
+    computedAt: timestamp("computed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    /**
+     * **`nullsNotDistinct` is load-bearing, not a detail.** `scopeId` is NULL for
+     * organization scope, and Postgres treats NULLs as *distinct* in a unique
+     * index by default — so the plain version never conflicted with itself and
+     * every single overview request appended another row. The upsert silently
+     * became an insert, and a merchant refreshing a dashboard would grow the
+     * trend table without bound while the chart drew one point per page view.
+     */
+    unique("readiness_snapshots_uq")
+      .on(t.orgId, t.scope, t.scopeId, t.day)
+      .nullsNotDistinct(),
+    index("readiness_snapshots_org_day_idx").on(t.orgId, t.day),
+  ],
+);
+
 /** One manual tax rate. `rateBps` is basis points — 875 is 8.75%. */
 export type ManualTaxRate = {
   country: string;
@@ -1719,6 +1803,8 @@ export type InventoryReservation = typeof inventoryReservations.$inferSelect;
 export type UsageRecord = typeof usageRecords.$inferSelect;
 export type Discount = typeof discounts.$inferSelect;
 export type DiscountRedemption = typeof discountRedemptions.$inferSelect;
+export type ReadinessIssueState = typeof readinessIssueStates.$inferSelect;
+export type ReadinessSnapshot = typeof readinessSnapshots.$inferSelect;
 export type DigitalAsset = typeof digitalAssets.$inferSelect;
 export type ProductDigitalAsset = typeof productDigitalAssets.$inferSelect;
 export type DownloadGrant = typeof downloadGrants.$inferSelect;

@@ -40,16 +40,18 @@ x402 checkout, importer, seed script — plus the v1 dashboard (overview, invent
 products, websites, analytics, finances, integrations) and the landing page. Requires
 `DATABASE_URL` in `.env.local` (see `.env.example`); until then DB-backed endpoints return 500.
 
-**Everything else is planned, not built.** The v2 AI layer (readiness, channels, test lab) and the
-whole v3 platform scope (auth, billing, commerce core, site builder, disputes, agent ops) are
-contracted in `docs/API.md` §9–21 as 🟡 PLANNED. None of it exists yet.
+**Phases A, C, and the readiness score are built.** Auth, orgs, and tenancy (§16); the action
+registry (§22); commerce core (§18.1–18.8) — variants, inventory, collections, customers, cart and
+checkout, discounts, tax, shipping, order operations, digital delivery; and rule-based readiness
+(§9). Supabase Storage backs both uploads and the files merchants sell.
 
-Always check the **status legend at the top of `docs/API.md`** before calling an endpoint. Call
-`/api/*` only — never `lib/db` / Drizzle from frontend screens.
+**Still planned:** the **card rail** (no `STRIPE_SECRET_KEY`; `lib/payments/` reports
+*configuration required*), Stripe Tax, gift cards, processor-executed refunds, membership gating,
+and all of **Phase B billing** (§17) except the `UsageRecord` meter, which shipped with checkout
+because it cannot be derived later. Everything in §10–15 and §19–21 is untouched.
 
-**Two gaps worth knowing before you plan anything:** there is **no auth or tenancy** (every route is
-open and single-tenant — Phase A fixes this and re-scopes every existing endpoint), and there is
-**no human checkout** (only agent-driven x402 — Phase C fixes this).
+Always check the **status legend at the top of `docs/API.md`** before calling an endpoint — it is
+per-section and kept current. Call `/api/*` only — never `lib/db` / Drizzle from frontend screens.
 
 ## Launch scope
 

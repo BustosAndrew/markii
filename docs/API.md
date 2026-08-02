@@ -26,7 +26,7 @@ carry an explicit status — **never call a `PLANNED` endpoint and never fake it
 | § | Area | Status | Phase |
 |---|---|---|---|
 | 1–8 | Overview, sites, categories, products, import, analytics, finances, integrations | ✅ LIVE | — |
-| 9 | Readiness & catalog health | 🟡 PLANNED | E |
+| 9 | Readiness & catalog health | ✅ LIVE — rule-based, deterministic, no model inference. Issues recomputed per request; only merchant decisions and daily score snapshots persist | **C** |
 | 10 | Channels | 🟡 PLANNED | E |
 | 11 | Product agent-data extension | 🟡 PLANNED | E |
 | 12 | Agent Test Lab | 🟡 PLANNED | E |
@@ -638,10 +638,33 @@ Disconnect. → `{ "status": "not_connected" }`
 
 ---
 
-## 9. Readiness & catalog health 🟡 PLANNED
+## 9. Readiness & catalog health ✅ LIVE
 
-Service: `ReadinessService` — `getOverview`, `getIssues`, `getHistory`, `resolveIssue`,
-`dismissIssue`. Powers the Overview score card and `/dashboard/health`.
+Powers the Overview score card and `/dashboard/health`.
+
+**Rule-based and deterministic — no model inference, ever.** Every point comes from a named rule in
+`lib/readiness/rules.ts` over the merchant's real catalog, so a score can be explained issue by
+issue. `docs/PRICING.md` §"Margin check" also makes it a cost constraint: per-product inference on
+every plan would exceed every other infrastructure line combined.
+
+**Issues are recomputed on every request, never stored.** A stored issue is a claim that goes stale
+the moment someone edits a product — a merchant who has just written a description should see the
+issue vanish, not wait for a job. Only what the *merchant decided* persists
+(`readiness_issue_states`), keyed by an issue id derived deterministically from the rule and its
+subject. That determinism is what makes a dismissal survive tomorrow's recomputation.
+
+**A rule may only check a field this platform actually offers.** The §11 agent-data extension
+(`useCases`, `faqs`, `machineSummary`, GTIN, dimensions, compatibility) is Phase E and does not
+exist, so nothing scores a merchant on it — marking someone down for a field they have no way to
+fill would be a fabricated criticism. Those groups appear in `notMeasured`, with the reason.
+
+**Scoring is per subject, then averaged.** Each product and each store starts at 100 and loses
+points for its *own* open issues (critical 20, warning 5, opportunity 1); a component is the mean
+across the subjects it covers, and the overall score is the weighted mean of components, rounded
+once at the end. The obvious alternative — one running penalty per component — floors at zero and
+then stops moving, so a merchant with fifty products missing descriptions would see the same score
+after fixing forty-five of them. `checkout`, `policies`, and `protocol_coverage` are scored over
+stores, not products, so healthy products cannot drown out a store that cannot take payment.
 
 ### Entities
 
@@ -693,14 +716,28 @@ Query: `severity`, `status`, `siteId`, `productId`, `categoryId`, `channelId`, `
 ### `GET /api/readiness/issues/:id`
 → single **ReadinessIssue** (drawer payload: evidence, affected fields, recommendation, impact).
 
-### `POST /api/readiness/issues/bulk`
-Bulk actions from the health table.
+A 404 here means the issue **is not currently present**, which usually means it was fixed — the
+response says so rather than implying a missing row.
+
+### `readiness.updateIssues` — bulk triage (action, §22)
+The health table's bulk actions. Invoked as `POST /api/actions/readiness.updateIssues`, not a
+route of its own: no route handler mutates state outside the registry (§22 rule 1).
 
 ```json
-{ "ids": ["iss_1", "iss_2"], "action": "resolve" | "dismiss" | "assign", "assignee": "user_1" }
+{ "ids": ["iss_1", "iss_2"], "action": "resolve" | "dismiss" | "assign" | "reopen",
+  "assignee": "user_1", "note": "why" }
 ```
 
-→ `200` `{ "updated": 2, "issues": [ ReadinessIssue, ... ], "failed": [] }`
+→ `{ "updated": 2, "status": "dismissed", "issueIds": [...], "catalogChanged": false }`
+
+`catalogChanged` is always `false` and is stated so no surface can imply a fix happened. **Resolving
+is not fixing** — it records "handled outside the rule's view" and stops the issue counting;
+`reopen` reverses it and clears the assignee. Fixing the product makes the issue disappear on its
+own, with no action needed. `assign` requires a staff member of the *same* org, so an issue cannot
+be assigned to a user id from another tenant.
+
+Ids are **not** validated against the current issue set: a merchant may dismiss something about to
+reappear, and a row whose issue no longer exists is inert until it comes back.
 
 ### `GET /api/readiness/issues/export`
 Same filters as the list. → `text/csv`.
@@ -732,11 +769,23 @@ Query: `siteId`, `categoryId`, `q`, `page`, `limit`, `sort`.
 }
 ```
 
-`state`: `"complete" | "partial" | "empty" | "conflict"`.
 
-**Scope note:** the first version may compute scores client-side from real `/api/products` data.
-That is honest (it is derived from the merchant's actual catalog). Persisted resolve/dismiss and
-score history require these endpoints.
+`state`: `"complete" | "partial" | "empty"`. The contract previously also listed `"conflict"`;
+nothing can currently produce it, so it is not emitted rather than declared and never used.
+
+`columns` carries only groups with real fields behind them. Everything else is in `notMeasured`:
+
+```json
+{ "notMeasured": [ { "group": "agent_data", "label": "Agent data",
+    "fields": ["useCases", "faqs", "machineSummary"],
+    "reason": "The product agent-data extension (§11) is not built, so there is nowhere to enter these." } ] }
+```
+
+**History is never backfilled.** A score is a function of the catalog as it was, and yesterday's
+catalog is gone — so a store scored for three days returns three points, not a flat line invented
+back to its creation date. Snapshots are written when the overview is computed, at most once per
+scope per day, and an empty series comes back with a `note` saying why rather than zeros a chart
+would draw as a crash to nothing.
 
 ---
 
