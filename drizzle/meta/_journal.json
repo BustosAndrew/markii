@@ -120,6 +120,13 @@
       "when": 1785641650763,
       "tag": "0016_readiness",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1785642854434,
+      "tag": "0017_fee_assessments",
+      "breakpoints": true
     }
   ]
 }

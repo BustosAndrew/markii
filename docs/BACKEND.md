@@ -212,7 +212,28 @@ requires**: every auth mutation runs server-side in `/api/auth/*` (`docs/API.md`
 Delete `lib/supabase/client.ts` as part of this. A browser client in the tree is how this decision
 gets quietly reversed later.
 
-### 3. Phase B — billing and metering
+### 3. Phase B — billing and metering — partly done
+
+> **Built, and it is everything that does not need Stripe.** `lib/billing/` —
+> `fees.ts` (the marginal engine, pure), `meter.ts` (T12 and period net sales over the ledger),
+> `close.ts` (period close into immutable `fee_assessments`, plus a reconciliation check).
+> Routes: `/api/billing/usage`, `plans`, `subscription`, `invoices`, `payment-method`.
+>
+> **The Stripe-dependent half refuses with `503 CONFIGURATION_REQUIRED` rather than stubbing.** A
+> plan change that moved `organizations.planId` with no subscription behind it would grant a higher
+> threshold and extra storefronts for free; a fake SetupIntent secret fails inside Stripe's own card
+> element after the merchant has typed their card number. Every billing response carries
+> `charging: false` with the reason.
+>
+> Two things worth knowing before extending it:
+>
+> - **The §4.5 nightly `t12_net_sales` rollup is deliberately absent.** Nothing schedules jobs here
+>   yet, and a cache nobody refreshes is worse than the query it replaces. Add it when volume
+>   demands it, not before there is a scheduler.
+> - **Records with no FX conversion are excluded *and counted*** (`unconvertedRecordCount`). No FX
+>   provider is wired, so cross-currency sales store `convertedMinor: null`; summing them as zero
+>   would understate a merchant's threshold, and inventing a rate would corrupt what they are
+>   charged.
 
 Contract `docs/API.md` §17; the fee engine is specified in `docs/PRICING.md` §4. Stripe Billing for
 subscriptions, **Connect Standard** for merchant payments (D4).

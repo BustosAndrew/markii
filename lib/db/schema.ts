@@ -1649,6 +1649,61 @@ export const licenceKeys = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// Billing — threshold fee assessments (§17, `docs/PRICING.md` §4)
+// ---------------------------------------------------------------------------
+
+/**
+ * What a merchant was assessed for one closed billing period. Immutable.
+ *
+ * The meter recomputes freely from the usage ledger, but **what was actually
+ * charged must never move afterwards**. Once a period closes, the numbers on it
+ * are what the merchant was told and what an invoice cites; a late-arriving
+ * usage record adjusts the *next* period as a credit (§4.4), it does not
+ * silently rewrite a settled one.
+ *
+ * `workings` stores the inputs to the marginal formula, so "why this number"
+ * has an exact answer from the row itself rather than a recomputation that may
+ * no longer agree.
+ */
+export const feeAssessments = pgTable(
+  "fee_assessments",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** UTC period bounds. Calendar months until Stripe defines real ones. */
+    periodStart: timestamp("period_start", { withTimezone: true }).notNull(),
+    periodEnd: timestamp("period_end", { withTimezone: true }).notNull(),
+    /** The plan in force at close — thresholds change, assessments must not. */
+    planId: text("plan_id", { enum: PLAN_IDS }).notNull(),
+    thresholdMinor: integer("threshold_minor").notNull(),
+    overageRateBps: integer("overage_rate_bps").notNull(),
+    t12NetSalesMinor: integer("t12_net_sales_minor").notNull(),
+    periodNetSalesMinor: integer("period_net_sales_minor").notNull(),
+    billableMinor: integer("billable_minor").notNull(),
+    feeMinor: integer("fee_minor").notNull(),
+    currency: text("currency").notNull(),
+    /** The formula's inputs, for an invoice line that shows its own arithmetic. */
+    workings: jsonb("workings").$type<Record<string, unknown>>().notNull().default({}),
+    /**
+     * Whether this was actually billed. False while Stripe is unwired — the
+     * assessment is a measurement, and calling it an invoice would be a claim
+     * that money changed hands.
+     */
+    invoiced: boolean("invoiced").notNull().default(false),
+    /** How many usage records fed it, for reconciliation against a later recount. */
+    recordCount: integer("record_count").notNull().default(0),
+    closedAt: timestamp("closed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // One assessment per org per period. Closing twice must not double-bill.
+    uniqueIndex("fee_assessments_period_uq").on(t.orgId, t.periodStart),
+    index("fee_assessments_org_idx").on(t.orgId, t.periodStart),
+  ],
+);
+
+// ---------------------------------------------------------------------------
 // Agent readiness (§9)
 // ---------------------------------------------------------------------------
 
@@ -1803,6 +1858,7 @@ export type InventoryReservation = typeof inventoryReservations.$inferSelect;
 export type UsageRecord = typeof usageRecords.$inferSelect;
 export type Discount = typeof discounts.$inferSelect;
 export type DiscountRedemption = typeof discountRedemptions.$inferSelect;
+export type FeeAssessment = typeof feeAssessments.$inferSelect;
 export type ReadinessIssueState = typeof readinessIssueStates.$inferSelect;
 export type ReadinessSnapshot = typeof readinessSnapshots.$inferSelect;
 export type DigitalAsset = typeof digitalAssets.$inferSelect;

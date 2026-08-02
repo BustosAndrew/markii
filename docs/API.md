@@ -34,7 +34,7 @@ carry an explicit status — **never call a `PLANNED` endpoint and never fake it
 | 14 | Analytics v2 (funnel, channels, failures) | 🟡 PLANNED | E |
 | 15 | Automations, activity, notifications, team | 🟡 PLANNED | E |
 | 16 | Accounts, organizations, staff | partial — `/api/auth/*`, `/api/me`, `/api/org`, `/api/org/staff*`, and **org scoping of §1–8** are ✅ LIVE; audit, sessions, tokens, MFA, org switching PLANNED | **A** |
-| 17 | Billing, plans, metering, threshold fees | 🟡 PLANNED — **except `UsageRecord`, which is ✅ LIVE**: written at event time by checkout and underivable later, so it shipped with §18.4. It meters **net sales** (`subtotal − discounts`), *not* the order total — see `docs/PRICING.md` §4.1 | B |
+| 17 | Billing, plans, metering, threshold fees | partial — ✅ LIVE: usage ledger, threshold fee engine, meter, plan catalog, entitlements, period-close assessments. 🟡 Stripe-dependent routes (subscription changes, payment method, invoices, webhook) refuse with 503 CONFIGURATION_REQUIRED; **nothing is charged** | B |
 | 18 | Commerce core (variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping) | partial — §18.1–18.6 ✅ LIVE **except** the §18.4 card rail, §18.5 gift cards, and §18.6 Stripe Tax (writes via §22 actions). §18.7 order operations and §18.8 digital delivery ✅ LIVE, **except** processor-executed refunds (Markii records a refund and meters it; the merchant moves the money) and membership gating | C |
 | 19 | Site builder & content | 🟡 PLANNED | D |
 | 20 | Disputes & chargebacks | 🟡 PLANNED | F |
@@ -1307,10 +1307,26 @@ Never return an invitation as "delivered" unless a mail provider actually accept
 
 ---
 
-## 17. Billing, plans, metering, threshold fees 🟡 PLANNED — Phase B
+## 17. Billing, plans, metering, threshold fees — partial ✅/🟡 Phase B
 
 Full model in **`docs/PRICING.md`**. Processor: Stripe Billing (subscriptions) + Stripe Connect
 (merchant payouts). Markii never holds merchant funds.
+
+**✅ LIVE — everything that does not need Stripe.** The `UsageRecord` ledger (shipped with checkout,
+because it cannot be derived later), the **threshold fee engine** (`lib/billing/fees.ts`), the
+**meter** (`GET /api/billing/usage`), the plan catalog, entitlements, and **period close** into an
+immutable `fee_assessments` ledger with a reconciliation check.
+
+**🟡 Blocked on `STRIPE_SECRET_KEY`.** Subscriptions, plan changes, proration, payment methods,
+invoices, dunning, and the webhook. These **refuse with `503 CONFIGURATION_REQUIRED`** rather than
+returning stubs: a plan change that moved `organizations.planId` without a subscription behind it
+would grant a higher threshold and more storefronts for free with nothing sold, and a fake
+SetupIntent secret fails inside Stripe's own card element *after* the merchant types their card
+number.
+
+**Nothing is being charged, and every billing response says so.** `billingStatus.charging` is
+`false` and carries the reason; `fee_assessments.invoiced` is `false`. The figures are a
+measurement, not an invoice — the same framing §4.4 requires for trial orgs, for the same reason.
 
 ```ts
 interface Entitlements {           // gate features on THIS, never on plan name
@@ -1374,11 +1390,46 @@ interface UsageRecord {            // immutable; written at event time, never de
 }
 ```
 
-**Contract rules.** `billableThisPeriodMinor` uses the marginal formula in `docs/PRICING.md` §3.3 —
+**Contract rules.** `billableThisPeriodMinor` uses the marginal formula in `docs/PRICING.md` §4.3 —
 only the slice above the threshold, never the whole period. Projections are always labeled as
 projections and never presented as owed. Before a first sale exists, values are `null` and the UI
 shows *not yet measured*, never `0`. Trial orgs see accrual with "would have been charged" framing.
 `upgradeSuggestion` is surfaced even when it lowers Markii's revenue.
+
+**Two fields beyond the shape above**, both about being honest when the number is incomplete:
+
+- `billingStatus: { charging, reason }` — false while Stripe is unwired, with the reason. The meter
+  shows figures that look like a bill; it has to say they are not one.
+- `unconvertedRecordCount` — usage records whose currency could not be converted to the org's
+  billing currency. No FX provider is wired, so those store `convertedMinor: null` rather than an
+  invented rate (§4.1: "never retro-recompute"). Summing them as zero would understate a merchant's
+  threshold, so they are excluded **and counted**, making the gap visible rather than silent.
+
+**The engine is exact and tested against the published example.** `lib/billing/fees.test.ts`
+reproduces §4.3's worked case verbatim — Growth, $750k threshold, enters at $730k T12, sells $60k →
+$40k billable, **$160**. If that test ever fails, either the code or the published pricing is wrong.
+Rounding is **half-even**: half-up would bias every fee upward by half a minor unit on average,
+systematically in Markii's favour across every merchant and month.
+
+`billable` is capped at the period's own sales and floored at zero. A refund-heavy period does not
+produce a negative fee silently netted off — §4.4 makes that a credit on the *next* invoice at the
+rate originally charged.
+
+### Period close — `fee_assessments`
+
+The meter recomputes from the ledger on every request, which is right for a live number. **What a
+merchant was assessed must stop moving**, so closing a period freezes it with the inputs that
+produced it (`workings`), the plan terms in force at close, and the record count. Closing is
+idempotent on `(orgId, periodStart)` — a retried scheduler must not double-bill.
+
+`reconcileAssessment()` recomputes a closed period and **reports drift without correcting it**. A
+settled number that silently changes is worse than a wrong one somebody can see; drift means either
+a late record (a §4.4 credit) or a bug, and both need a human.
+
+**The nightly `t12_net_sales` rollup in §4.5 is deliberately not built.** Nothing schedules jobs in
+this deployment yet, and a cache nobody refreshes is worse than the query it replaces. The direct
+sum is exact and uses `usage_records_org_occurred_idx` — the index a rollup would have been built
+on anyway. Add the rollup when volume demands it, not before there is a scheduler to keep it fresh.
 
 ---
 

@@ -45,10 +45,18 @@ registry (§22); commerce core (§18.1–18.8) — variants, inventory, collecti
 checkout, discounts, tax, shipping, order operations, digital delivery; and rule-based readiness
 (§9). Supabase Storage backs both uploads and the files merchants sell.
 
+**Phase B billing is half built.** The threshold fee engine, the meter, plan catalog, entitlements,
+and period-close assessments are live (`lib/billing/`). Everything needing Stripe — subscriptions,
+plan changes, payment methods, invoices, the webhook — refuses with `503 CONFIGURATION_REQUIRED`.
+**Nothing is charged**, and every billing response says so.
+
 **Still planned:** the **card rail** (no `STRIPE_SECRET_KEY`; `lib/payments/` reports
 *configuration required*), Stripe Tax, gift cards, processor-executed refunds, membership gating,
-and all of **Phase B billing** (§17) except the `UsageRecord` meter, which shipped with checkout
-because it cannot be derived later. Everything in §10–15 and §19–21 is untouched.
+and SES email plumbing. Everything in §10–15 and §19–21 is untouched.
+
+**One env var unlocks most of the gaps:** `STRIPE_SECRET_KEY` turns on the card rail, subscriptions,
+invoices, and processor refunds. Until it exists, those paths refuse rather than stub — see the
+`configuration_required` pattern in `lib/payments/` and `app/api/billing/`.
 
 Always check the **status legend at the top of `docs/API.md`** before calling an endpoint — it is
 per-section and kept current. Call `/api/*` only — never `lib/db` / Drizzle from frontend screens.
