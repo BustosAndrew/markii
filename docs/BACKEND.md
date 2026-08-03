@@ -319,6 +319,13 @@ other infrastructure line combined. Scores derive from real catalog data; contra
 > **Nothing sends from this deployment** — SES has no credentials — and that is visible rather
 > than silent: every attempt writes an `email_deliveries` row with `status: "not_configured"`,
 > the order timeline gets `email_failed`, and `/api/settings/email` says so.
+>
+> ⚠️ **Migration `0018` shipped with the code but was not applied to the hosted database** — that
+> gap was found on 2026-08-02 and closed with `pnpm db:migrate` (19/19 applied). Until then all
+> three email tables were absent, and the integration suite failed **22 tests** with
+> `relation "email_identities" does not exist`. Generating a migration is not applying it: the
+> hosted project needs `db:migrate` in the same change that ships the schema, or the next person
+> to run the suite debugs a phantom code bug.
 
 `lib/email/` exposes `sendPlatformMail()` (→ Resend, `markii.shop`) and `sendMerchantMail()`
 (→ SES, the merchant's verified domain). Callers pick the **stream**, never the provider.
