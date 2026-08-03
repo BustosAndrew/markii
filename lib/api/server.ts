@@ -16,6 +16,8 @@ import { GET as customerGET } from "@/app/api/customers/[id]/route";
 import { GET as customerOrdersGET } from "@/app/api/customers/[id]/orders/route";
 import { GET as customerMembershipsGET } from "@/app/api/customers/[id]/memberships/route";
 import { GET as meGET } from "@/app/api/me/route";
+import { GET as staffGET } from "@/app/api/org/staff/route";
+import { GET as tokensGET } from "@/app/api/org/tokens/route";
 import { GET as membershipTiersGET } from "@/app/api/memberships/tiers/route";
 import { GET as productsGET } from "@/app/api/products/route";
 import { GET as productGET } from "@/app/api/products/[idOrSlug]/route";
@@ -28,7 +30,7 @@ import type { UsageResponse } from "./billing";
 import type { EmailSettings } from "./email";
 import type { CustomerMembership, MembershipTier } from "./memberships";
 import type { Collection, Customer, Discount } from "./commerce";
-import type { MeResponse } from "./org";
+import type { MeResponse, ScopedToken, StaffMember } from "./org";
 import type { ReadinessReport } from "./readiness";
 import type { AnalyticsOverview, AnalyticsQuery, AnalyticsSiteDetail } from "./analytics";
 import type { FinancesOverview, FinancesQuery, FinancesSiteDetail } from "./finances";
@@ -189,6 +191,10 @@ export const listMembershipTiers = (query?: { siteId?: number }) =>
 
 /** The caller's identity and org. `org.currency` is what money formatters need (D31). */
 export const getMe = () => call<MeResponse>(meGET, "/api/me");
+
+export const listStaff = () => call<{ items: StaffMember[] }>(staffGET, "/api/org/staff");
+
+export const listTokens = () => call<{ items: ScopedToken[] }>(tokensGET, "/api/org/tokens");
 
 export const listCollections = (query?: {
   siteId?: number;
