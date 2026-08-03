@@ -269,8 +269,9 @@ Contract `docs/API.md` §18. The largest phase. Order within it:
 7. ~~**Digital delivery** — signed expiring URLs, download limits, licence keys~~ — done
 8. ~~**Membership gating** (§18.9) and the **shopper login** it required (§18.3)~~ — done 2026-08-03
    (D34). The blocker was neither of the two the docs named: there was **no shopper identity**, so
-   gating would have enforced nothing. **Content** gating is still Phase D (no content model), and
-   memberships do **not** auto-renew (Phase B recurring billing)
+   gating would have enforced nothing. A refund revokes conferred memberships, scoped to the
+   refunded lines. **Content** gating is still Phase D (no content model), and memberships do
+   **not** auto-renew (Phase B recurring billing)
 
 > **Two things this uncovered, both worth knowing.**
 >

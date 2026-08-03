@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { conflict } from "../api";
 import {
   customerMemberships,
@@ -335,6 +335,72 @@ export async function membershipGateFor(
   const tiers = customerId === null ? new Set<number>() : await activeTierIds(customerId);
 
   return { tierName: tier.name, tierHandle: tier.handle, unlocked: tiers.has(tier.id) };
+}
+
+/**
+ * Withdraw memberships a refunded order conferred (§18.9).
+ *
+ * The mirror of `revokeDeliveryForOrder`, and for the same reason: buy, use,
+ * refund, keep the access is the whole digital-goods fraud pattern, and leaving
+ * it open for memberships while closing it for downloads would just move the
+ * hole.
+ *
+ * **Scoped two ways, so a partial refund does not over-revoke.** Only tiers
+ * granted by the *refunded lines'* products are considered, and only memberships
+ * whose `orderId` is this order — refunding a t-shirt from an order that also
+ * contained a membership revokes nothing, and refunding an old order whose
+ * membership has since been extended by a newer purchase leaves the newer one
+ * alone, because `orderId` then points at that later order.
+ *
+ * **Known limit, stated rather than papered over:** refunding a purchase that
+ * *extended* a membership revokes the whole thing, including time paid for by an
+ * earlier order. Rolling back precisely would need the pre-extension expiry
+ * stored, which no column holds. Revoking is the merchant-favourable direction
+ * and `memberships.grant` puts it back in one call, so this errs the way the
+ * digital-delivery precedent already does.
+ */
+export async function revokeMembershipsForOrder(
+  handle: DbHandle,
+  input: { orderId: number; siteId: number; productIds: number[] },
+  now: Date = new Date(),
+): Promise<{ membershipsRevoked: number; tierNames: string[] }> {
+  const ids = [...new Set(input.productIds.filter((id): id is number => id != null))];
+  if (ids.length === 0) return { membershipsRevoked: 0, tierNames: [] };
+
+  const tiers = await handle
+    .select({ tierId: products.grantsTierId, tierName: membershipTiers.name })
+    .from(products)
+    .innerJoin(membershipTiers, eq(membershipTiers.id, products.grantsTierId))
+    .where(
+      and(
+        inArray(products.id, ids),
+        eq(products.siteId, input.siteId),
+        isNotNull(products.grantsTierId),
+      ),
+    );
+
+  if (tiers.length === 0) return { membershipsRevoked: 0, tierNames: [] };
+
+  const revoked = await handle
+    .update(customerMemberships)
+    .set({ revokedAt: now, updatedAt: now })
+    .where(
+      and(
+        eq(customerMemberships.orderId, input.orderId),
+        inArray(
+          customerMemberships.tierId,
+          tiers.map((t) => t.tierId as number),
+        ),
+        isNull(customerMemberships.revokedAt),
+      ),
+    )
+    .returning({ tierId: customerMemberships.tierId });
+
+  const names = revoked
+    .map((r) => tiers.find((t) => t.tierId === r.tierId)?.tierName)
+    .filter((n): n is string => Boolean(n));
+
+  return { membershipsRevoked: revoked.length, tierNames: names };
 }
 
 /** Tiers belonging to a store, for pickers and storefront copy. */

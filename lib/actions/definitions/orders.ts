@@ -23,6 +23,7 @@ import {
   type ComputedRefundLine,
 } from "../../commerce/refunds";
 import { revokeDeliveryForOrder } from "../../commerce/delivery";
+import { revokeMembershipsForOrder } from "../../commerce/memberships";
 import { recordUsage } from "../../commerce/orders";
 import { sendMerchantMail } from "../../email";
 import { orderMailContext, storeIdentity } from "../../email/context";
@@ -327,6 +328,30 @@ export const refundOrder = defineAction({
           })
         : { grantsRevoked: 0, keysReturned: 0 };
 
+    /**
+     * The same withdrawal for memberships (§18.9). Closing the fraud pattern for
+     * downloads while leaving it open for memberships would only move the hole —
+     * a refunded membership that keeps working is the identical trade.
+     *
+     * Scoped to the refunded lines' products, so refunding a t-shirt from an
+     * order that also contained a membership revokes nothing.
+     */
+    const membershipRevocation =
+      /*
+       * `order.siteId` is nullable — orders outlive the store they were placed
+       * in. There is nothing to revoke in that case: tiers cascade from the
+       * site, so they are already gone.
+       */
+      computed.lines.length > 0 && order.siteId != null
+        ? await revokeMembershipsForOrder(ctx.db, {
+            orderId: order.id,
+            siteId: order.siteId,
+            productIds: computed.lines
+              .map((l) => l.productId)
+              .filter((id): id is number => id != null),
+          })
+        : { membershipsRevoked: 0, tierNames: [] };
+
     await logEvent(ctx, {
       orderId: order.id,
       type: "refunded",
@@ -344,6 +369,8 @@ export const refundOrder = defineAction({
         unrestockableLineIds: unrestockable,
         downloadsRevoked: revocation.grantsRevoked,
         licenceKeysReturned: revocation.keysReturned,
+        membershipsRevoked: membershipRevocation.membershipsRevoked,
+        membershipTiersRevoked: membershipRevocation.tierNames,
         method: "manual",
         rail,
       },

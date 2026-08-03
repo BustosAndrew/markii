@@ -412,4 +412,105 @@ describe("membership purchase", () => {
     expect(allowed.status).toBe(201);
     await trackCart(cleanup, allowed.json.token);
   }, 120_000);
+
+  it("takes the membership back when the order is refunded", async () => {
+    const shopper = shopperClient();
+    const { email } = await signUpShopper(shopper, "refunded");
+    const [customer] = await sql`select id from customers
+      where site_id = ${siteId} and email = ${email}`;
+
+    const cart = await shopper.post(`/_sites/${slug}/api/cart`, {
+      productId: grantingProductId,
+      quantity: 1,
+    });
+    await trackCart(cleanup, cart.json.token);
+
+    const session = await shopper.post(`/_sites/${slug}/api/checkout/session`, {
+      cartToken: cart.json.token,
+      rail: "x402",
+      email,
+    });
+    const done = await shopper.post(
+      `/_sites/${slug}/api/checkout/session/${session.json.id}/complete`,
+      { paymentReference: `test-refund-membership-${Date.now()}` },
+    );
+    expect(done.status).toBeLessThan(400);
+    const orderId = done.json.orderId;
+    cleanup.orderIds.push(orderId);
+
+    // An itemised order is refunded by line — `computeRefund` refuses a request
+    // that names neither lines nor an amount.
+    const lines = await sql`select id, product_id from order_lines
+      where order_id = ${orderId}`;
+    const membershipLine = lines.find((l: any) => l.product_id === grantingProductId);
+    expect(membershipLine, "the order should carry the membership line").toBeTruthy();
+
+    // Buy, use, refund, keep the access is the digital-goods fraud pattern.
+    // Closed for downloads already; this proves it is closed here too.
+    const refund = await merchant.invoke("orders.refund", {
+      orderId,
+      reason: "requested_by_customer",
+      restock: false,
+      lines: [{ orderLineId: membershipLine!.id, quantity: 1 }],
+    });
+    expect(refused(refund), JSON.stringify(refund.json)).toBe(false);
+
+    const [membership] = await sql`select revoked_at from customer_memberships
+      where customer_id = ${customer.id} and tier_id = ${tierId}`;
+    expect(membership.revoked_at, "a refunded membership must not keep working").not.toBeNull();
+
+    const denied = await shopper.post(`/_sites/${slug}/api/cart`, {
+      productId: gatedProductId,
+      quantity: 1,
+    });
+    expect(refused(denied)).toBe(true);
+  }, 120_000);
+
+  it("does not revoke a membership when an unrelated line is refunded", async () => {
+    const shopper = shopperClient();
+    const { email } = await signUpShopper(shopper, "partialrefund");
+    const [customer] = await sql`select id from customers
+      where site_id = ${siteId} and email = ${email}`;
+
+    // One membership line and one ordinary line in the same order.
+    const cart = await shopper.post(`/_sites/${slug}/api/cart`, {
+      productId: grantingProductId,
+      quantity: 1,
+    });
+    await trackCart(cleanup, cart.json.token);
+    const added = await shopper.patch(`/_sites/${slug}/api/cart/${cart.json.token}`, {
+      add: { productId: openProductId, quantity: 1 },
+    });
+    expect(added.status).toBeLessThan(400);
+
+    const session = await shopper.post(`/_sites/${slug}/api/checkout/session`, {
+      cartToken: cart.json.token,
+      rail: "x402",
+      email,
+    });
+    const done = await shopper.post(
+      `/_sites/${slug}/api/checkout/session/${session.json.id}/complete`,
+      { paymentReference: `test-partial-${Date.now()}` },
+    );
+    expect(done.status).toBeLessThan(400);
+    cleanup.orderIds.push(done.json.orderId);
+
+    const lines = await sql`select id, product_id from order_lines
+      where order_id = ${done.json.orderId}`;
+    const openLine = lines.find((l: any) => l.product_id === openProductId);
+    expect(openLine, "the order should carry the non-membership line").toBeTruthy();
+
+    // Refunding the t-shirt must not cancel the membership.
+    const refund = await merchant.invoke("orders.refund", {
+      orderId: done.json.orderId,
+      reason: "requested_by_customer",
+      restock: false,
+      lines: [{ orderLineId: openLine!.id, quantity: 1 }],
+    });
+    expect(refused(refund)).toBe(false);
+
+    const [membership] = await sql`select revoked_at from customer_memberships
+      where customer_id = ${customer.id} and tier_id = ${tierId}`;
+    expect(membership.revoked_at, "a partial refund must not over-revoke").toBeNull();
+  }, 120_000);
 });

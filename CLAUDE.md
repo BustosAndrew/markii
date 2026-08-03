@@ -59,7 +59,9 @@ credentials, and merchant mail is never rerouted through Resend to hide that (G1
 **Membership gating and storefront shopper login are built** (§18.9, D34). Tiers gate products;
 buying a granting product confers one inside the order transaction. **Membership status is derived
 per request, never stored** — nothing here schedules jobs, so a stored status would keep granting
-access after it expired. Memberships do **not** auto-renew (that needs Phase B recurring billing).
+access after it expired. A refund revokes them, mirroring digital delivery — closing *buy, use,
+refund, keep it* for files but not for memberships would only move the hole. Memberships do **not**
+auto-renew (that needs Phase B recurring billing).
 
 **Still planned:** the **card rail** (no `STRIPE_SECRET_KEY`; `lib/payments/` reports
 *configuration required*), Stripe Tax, processor-executed refunds, recurring membership billing,

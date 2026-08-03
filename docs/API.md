@@ -1949,6 +1949,7 @@ finite one by a later purchase.
 | `POST /_sites/:site/api/checkout/session` | Re-checked **before payment starts**, since a membership can lapse between filling a cart and paying |
 | Product page | Renders "Members only" and **omits the buy instructions**, rather than advertising a purchase that will be refused |
 | Order completion | Grants conferred tiers **inside the order transaction** |
+| `orders.refund` | **Revokes** them, mirroring §18.8's download revocation — closing the fraud pattern for files while leaving it open for memberships would only move the hole |
 
 Checkout completion deliberately does **not** re-check. On the x402 rail settlement is irreversible,
 so refusing there would take a shopper's money and decline the goods — the same reasoning that
@@ -1975,11 +1976,23 @@ merchant to grant by hand.
 | `memberships.grant` | `commerce.write` | medium | Grants or extends. Refuses a tier from a different store than the customer |
 | `memberships.revoke` | `commerce.write` | medium | Access stops immediately; the record survives so history still shows they held it |
 
+### Refunds
+
+A refund revokes the memberships that order conferred, scoped **two ways** so a partial refund does
+not over-revoke: only tiers granted by the *refunded lines'* products, and only memberships whose
+`orderId` is that order. Refunding a t-shirt from an order that also contained a membership therefore
+revokes nothing, and refunding an old order whose membership has since been extended by a newer
+purchase leaves the newer one alone.
+
+**Known limit, stated rather than papered over:** refunding a purchase that *extended* a membership
+revokes the whole thing, including time paid for by an earlier order. Rolling back precisely would
+need the pre-extension expiry stored, which no column holds. Revoking is the merchant-favourable
+direction and `memberships.grant` restores it in one call, so this errs the way §18.8 already does.
+
 ### Not built
 
-Recurring billing (a membership does not auto-renew), gating anything other than products — there is
-still no CMS content model, that remains Phase D — and refund-triggered revocation: a refund does not
-currently take a membership back, unlike digital downloads.
+Recurring billing — a membership does not auto-renew — and gating anything other than products:
+there is still no CMS content model, which remains Phase D.
 
 ---
 
