@@ -3,7 +3,15 @@ import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { badRequest, conflict, handler } from "@/lib/api";
-import { assertPurchasable, loadCart, loadStore, setCartContact } from "@/lib/commerce/cart";
+import { currentCustomerId } from "@/lib/auth/shopper";
+import {
+  assertPurchasable,
+  attachShopper,
+  loadCart,
+  loadStore,
+  setCartContact,
+} from "@/lib/commerce/cart";
+import { assertCartAccess } from "@/lib/commerce/memberships";
 import { priceCart, snapshotLines } from "@/lib/commerce/pricing";
 import {
   RESERVATION_TTL_MS,
@@ -46,8 +54,26 @@ export const POST = handler(async (req, { params }) => {
   let cart = await loadCart(site, input.cartToken);
   if (input.email) cart = await setCartContact(cart, { email: input.email });
 
+  /**
+   * Claim the cart for the signed-in shopper before the session freezes its
+   * `customerId`. Done here rather than at cart creation because signing in
+   * *after* filling a basket is the ordinary order of events.
+   */
+  cart = await attachShopper(site, cart);
+
   const priced = await priceCart(cart);
   if (priced.lines.length === 0) throw badRequest("Cart is empty");
+
+  /**
+   * Re-check the membership gate (§18.9) **before** payment starts, not after.
+   *
+   * `addLine` already refused anything the shopper could not access, but a
+   * membership can lapse between filling a cart and paying for it. Checking here
+   * is the last point where a refusal costs nobody anything; the same check at
+   * completion would take money on the x402 rail — which settles irreversibly —
+   * and then decline to hand over the goods.
+   */
+  await assertCartAccess(site.id, priced.lines, await currentCustomerId(site.id));
   if (priced.issues.length > 0) {
     throw conflict(
       "This cart cannot be checked out yet — some items are unavailable or out of stock.",

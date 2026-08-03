@@ -88,6 +88,32 @@ export const categories = pgTable(
   ],
 );
 
+/**
+ * A membership tier a store sells access with (§18.9).
+ *
+ * Tiers belong to a **store**, not an org: a customer is a customer of one
+ * merchant's store (`customers` is keyed by `siteId`), so an entitlement that
+ * spanned stores would cross a tenancy boundary the rest of the model does not.
+ */
+export const membershipTiers = pgTable(
+  "membership_tiers",
+  {
+    id: serial("id").primaryKey(),
+    siteId: integer("site_id")
+      .notNull()
+      .references(() => sites.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    handle: text("handle").notNull(),
+    description: text("description"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("membership_tiers_site_handle_uq").on(t.siteId, t.handle),
+    index("membership_tiers_site_idx").on(t.siteId),
+  ],
+);
+
 export const products = pgTable(
   "products",
   {
@@ -120,6 +146,24 @@ export const products = pgTable(
      */
     downloadLimit: integer("download_limit"),
     downloadExpiryDays: integer("download_expiry_days"),
+    /**
+     * Membership gating (§18.9). Two independent relationships, deliberately not
+     * one field:
+     *
+     * - `requiresTierId` — only members of that tier may view or buy this.
+     * - `grantsTierId` — buying this *confers* that tier, for
+     *   `grantsDurationDays` (null = no expiry).
+     *
+     * A product may do both: a "renewal" is a product that requires the tier it
+     * grants. Collapsing them into one column would make that inexpressible.
+     */
+    requiresTierId: integer("requires_tier_id").references(() => membershipTiers.id, {
+      onDelete: "set null",
+    }),
+    grantsTierId: integer("grants_tier_id").references(() => membershipTiers.id, {
+      onDelete: "set null",
+    }),
+    grantsDurationDays: integer("grants_duration_days"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -127,6 +171,8 @@ export const products = pgTable(
     uniqueIndex("products_site_slug_uq").on(t.siteId, t.slug),
     index("products_site_idx").on(t.siteId),
     index("products_category_idx").on(t.categoryId),
+    index("products_requires_tier_idx").on(t.requiresTierId),
+    index("products_grants_tier_idx").on(t.grantsTierId),
   ],
 );
 
@@ -471,6 +517,53 @@ export const customers = pgTable(
     uniqueIndex("customers_site_email_uq").on(t.siteId, t.email),
     index("customers_site_idx").on(t.siteId),
     index("customers_auth_user_idx").on(t.authUserId),
+  ],
+);
+
+/**
+ * A customer's membership in one tier (§18.9).
+ *
+ * **There is no `status` column, and that is deliberate.** Nothing in this
+ * deployment schedules jobs — the same constraint that keeps readiness issues
+ * unstored and the §4.5 t12 rollup unbuilt — so a stored `"active"` would go on
+ * claiming access the moment `endsAt` passed, with no job to correct it. Status
+ * is *derived* from these columns at read time by `membershipStatus()`, which
+ * cannot go stale.
+ *
+ * `revokedAt` is separate from `endsAt` for the same reason a refund is its own
+ * record: "the merchant took this away" and "this ran out" are different facts,
+ * and a merchant investigating a complaint needs to tell them apart.
+ */
+export const customerMemberships = pgTable(
+  "customer_memberships",
+  {
+    id: serial("id").primaryKey(),
+    customerId: integer("customer_id")
+      .notNull()
+      .references(() => customers.id, { onDelete: "cascade" }),
+    tierId: integer("tier_id")
+      .notNull()
+      .references(() => membershipTiers.id, { onDelete: "cascade" }),
+    startsAt: timestamp("starts_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Null means no expiry — a lifetime membership, not an unset field. */
+    endsAt: timestamp("ends_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    source: text("source", { enum: ["purchase", "manual"] }).notNull(),
+    /** The order that conferred it, when it came from a purchase. */
+    orderId: integer("order_id").references(() => orders.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    /**
+     * One row per customer per tier. Renewing **extends `endsAt`** on the
+     * existing row rather than inserting a second — two overlapping rows for the
+     * same tier would make "is this person a member?" a question with two
+     * answers, and the gate would have to pick one.
+     */
+    uniqueIndex("customer_memberships_customer_tier_uq").on(t.customerId, t.tierId),
+    index("customer_memberships_customer_idx").on(t.customerId),
+    index("customer_memberships_tier_idx").on(t.tierId),
   ],
 );
 

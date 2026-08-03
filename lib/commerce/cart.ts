@@ -1,7 +1,9 @@
 import { randomBytes } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { badRequest, conflict, notFound } from "../api";
+import { currentCustomerId } from "../auth/shopper";
 import { cartLines, carts, db, sites, type Cart, type Site } from "../db";
+import { assertAccess } from "./memberships";
 import { priceCart, productOnSite, unitPriceOf, type PricedCart } from "./pricing";
 import { variants } from "../db";
 
@@ -90,6 +92,13 @@ export async function addLine(
   if (!product) throw notFound("Product");
   if (!product.enabled) throw conflict(`"${product.name}" is not for sale`);
 
+  /**
+   * Membership gate (§18.9), enforced here rather than only on the product page.
+   * The page is a view; this is the write, and a shopper who knows a product id
+   * can post straight to the cart without ever loading it.
+   */
+  await assertAccess(product, await currentCustomerId(site.id));
+
   let variant = null;
   if (input.variantId != null) {
     const [v] = await db
@@ -176,6 +185,36 @@ export async function setCartContact(
 
   const [row] = await db.update(carts).set(patch).where(eq(carts.id, cart.id)).returning();
   return row;
+}
+
+/**
+ * Attach the signed-in shopper's customer record to a cart.
+ *
+ * **Nothing populated `carts.customerId` before shopper accounts existed**, so
+ * every order was recorded as a guest's — which quietly emptied a customer's
+ * order history, left digital-delivery grants unattributed, and made
+ * per-customer discount limits uncountable. There was no signed-in shopper to
+ * attribute to, so the gap was invisible rather than wrong.
+ *
+ * Called at checkout rather than only at cart creation, because a shopper may
+ * fill a cart and *then* sign in — which is the ordinary way round.
+ *
+ * An existing `customerId` is never overwritten: the cart was already claimed,
+ * and reassigning it on a shared device would move someone else's order.
+ */
+export async function attachShopper(site: Site, cart: Cart): Promise<Cart> {
+  if (cart.customerId !== null) return cart;
+
+  const customerId = await currentCustomerId(site.id);
+  if (customerId === null) return cart;
+
+  const [row] = await db
+    .update(carts)
+    .set({ customerId, updatedAt: new Date() })
+    .where(eq(carts.id, cart.id))
+    .returning();
+
+  return row ?? cart;
 }
 
 /**

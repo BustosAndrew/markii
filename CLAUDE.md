@@ -56,10 +56,20 @@ SNS bounce webhook, and the five transactional templates — wired into `orders.
 completion (§24). **Every send is recorded as `not_configured`** because this deployment has no AWS
 credentials, and merchant mail is never rerouted through Resend to hide that (G1).
 
+**Membership gating and storefront shopper login are built** (§18.9, D34). Tiers gate products;
+buying a granting product confers one inside the order transaction. **Membership status is derived
+per request, never stored** — nothing here schedules jobs, so a stored status would keep granting
+access after it expired. Memberships do **not** auto-renew (that needs Phase B recurring billing).
+
 **Still planned:** the **card rail** (no `STRIPE_SECRET_KEY`; `lib/payments/` reports
-*configuration required*), Stripe Tax, gift cards, processor-executed refunds, membership gating,
+*configuration required*), Stripe Tax, processor-executed refunds, recurring membership billing,
 shopper auth mail via Supabase's Send Email Hook, and abandoned-cart mail. Everything in §10–15 and
 §19–21 is untouched.
+
+**Deferred until further notice — do not build, and do not let schema anticipate it:** **gift
+cards** (D33, 2026-08-03). The metering exclusion in `docs/PRICING.md` §4.1 is asserted but
+unimplemented, so a naive implementation mis-bills merchants in one direction or the other —
+`lib/commerce/orders.ts` carries the detail.
 
 **Two credentials gate almost everything that remains, and neither is a switch.**
 `STRIPE_SECRET_KEY` is a *prerequisite* for the card rail, subscriptions, invoices, and processor

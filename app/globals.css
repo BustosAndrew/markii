@@ -342,6 +342,42 @@ input:disabled,
   color: var(--sf-muted);
   margin: 0 0 1rem;
 }
+/* Membership gate notice (§18.9). Uses the theme's own tokens so it inherits
+   whichever storefront theme is active rather than importing dashboard colour. */
+.sf-gate {
+  margin: 1rem 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--sf-border);
+  border-radius: 0.5rem;
+  font-size: 0.9375rem;
+}
+.sf-gate-locked {
+  border-style: dashed;
+}
+.sf-form {
+  display: grid;
+  gap: 0.75rem;
+  max-width: 22rem;
+  margin: 1rem 0 2rem;
+}
+.sf-form input {
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--sf-border);
+  border-radius: 0.375rem;
+  font: inherit;
+  background: var(--sf-bg);
+  color: var(--sf-fg);
+}
+.sf-form button {
+  padding: 0.625rem 1rem;
+  border: 0;
+  border-radius: 0.375rem;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  background: var(--sf-fg);
+  color: var(--sf-bg);
+}
 .sf-crumb a {
   color: inherit;
 }

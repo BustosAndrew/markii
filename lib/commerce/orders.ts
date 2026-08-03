@@ -19,6 +19,7 @@ import {
 import { allocate } from "./allocation";
 import { deliverableItems, issueDelivery } from "./delivery";
 import { recordRedemptions } from "./discounts";
+import { grantMembershipsForOrder } from "./memberships";
 import { consumeForSession, releaseForSession } from "./reservations";
 
 /**
@@ -286,6 +287,15 @@ export async function completeCheckout(input: CompletionInput): Promise<Completi
      * merely collected on a government's behalf and postage they passed
      * through — inflating their threshold with money that was never revenue,
      * and doing it worst to whoever ships the most.
+     *
+     * **Gift cards are deferred (D33), and this line is why it matters.** The
+     * exclusion above is asserted, not implemented — there is no gift-card term
+     * here, and both obvious implementations are wrong in opposite directions:
+     * sold as a product line the price lands in `subtotalMinor` and is metered
+     * at purchase *and* again at redemption (the merchant is billed twice on one
+     * pound); redeemed as a discount it reduces `discountMinor` and is metered
+     * at neither. A gift card is a **tender**, not a line and not a discount, so
+     * it needs its own term here rather than reusing either.
      */
     const netSalesMinor = current.subtotalMinor - current.discountMinor;
 
@@ -349,6 +359,49 @@ export async function completeCheckout(input: CompletionInput): Promise<Completi
       email: current.email,
       items: await deliverableItems(tx, order.id),
     });
+
+    /**
+     * Memberships conferred by this order (§18.9), in the same transaction and
+     * for the same reason as digital delivery: a paid order must never exist
+     * without the access it was sold. Granting afterwards means a crash in
+     * between leaves a buyer charged for a membership they do not hold.
+     *
+     * **Silently skipped for a guest checkout**, which is a real gap rather than
+     * an oversight — a membership is held by a `customers` row, and a shopper
+     * who never created an account has none to attach it to. The order timeline
+     * records that, so the merchant can grant it by hand.
+     */
+    const memberships = await grantMembershipsForOrder(tx, {
+      orderId: order.id,
+      siteId: site.id,
+      customerId: current.customerId,
+      lines,
+    });
+
+    if (memberships.granted.length > 0) {
+      await tx.insert(orderEvents).values({
+        orderId: order.id,
+        type: "placed",
+        message: `Granted membership: ${memberships.granted.map((g) => g.tierName).join(", ")}.`,
+        data: { tiers: memberships.granted },
+        visibility: "customer",
+        actorType: "system",
+      });
+    }
+
+    if (memberships.unclaimed.length > 0) {
+      await tx.insert(orderEvents).values({
+        orderId: order.id,
+        type: "placed",
+        message:
+          `This order includes ${memberships.unclaimed.length} membership(s) that could not be ` +
+          "granted because the buyer checked out as a guest. Grant them manually once they " +
+          "create an account.",
+        data: { tiers: memberships.unclaimed },
+        visibility: "internal",
+        actorType: "system",
+      });
+    }
 
     if (delivery.grants.length > 0 || delivery.licenceKeys.length > 0) {
       await tx.insert(orderEvents).values({

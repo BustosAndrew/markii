@@ -35,7 +35,7 @@ carry an explicit status — **never call a `PLANNED` endpoint and never fake it
 | 15 | Automations, activity, notifications, team | 🟡 PLANNED | E |
 | 16 | Accounts, organizations, staff | partial — `/api/auth/*`, `/api/me`, `/api/org`, `/api/org/staff*`, and **org scoping of §1–8** are ✅ LIVE; audit, sessions, tokens, MFA, org switching PLANNED | **A** |
 | 17 | Billing, plans, metering, threshold fees | partial — ✅ LIVE: usage ledger, threshold fee engine, meter, plan catalog, entitlements, period-close assessments. 🟡 Stripe-dependent routes (subscription changes, payment method, invoices, webhook) refuse with 503 CONFIGURATION_REQUIRED; **nothing is charged** | B |
-| 18 | Commerce core (variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping) | partial — §18.1–18.6 ✅ LIVE **except** the §18.4 card rail, §18.5 gift cards, and §18.6 Stripe Tax (writes via §22 actions). §18.7 order operations and §18.8 digital delivery ✅ LIVE, **except** processor-executed refunds (Markii records a refund and meters it; the merchant moves the money) and membership gating | C |
+| 18 | Commerce core (variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping, **memberships**) | partial — §18.1–18.6 ✅ LIVE **except** the §18.4 card rail and §18.6 Stripe Tax; §18.5 gift cards are ⛔ **deferred** (D33). §18.7 order operations, §18.8 digital delivery, and §18.9 membership gating + shopper login ✅ LIVE, **except** processor-executed refunds (Markii records a refund and meters it; the merchant moves the money) and recurring/auto-renewing membership billing | C |
 | 19 | Site builder & content | 🟡 PLANNED | D |
 | 20 | Disputes & chargebacks | 🟡 PLANNED | F |
 | 21 | Agent Ops add-on | 🟡 PLANNED | F (last) |
@@ -1543,8 +1543,14 @@ are merchandising.** Do not merge them; do document the distinction in the UI.
 >
 > **A customer record is not a login.** Guest checkout creates a customer with no `authUserId`; an
 > account links one later. `customers.authUserId` points at `auth.users` (D32 — one project) with no
-> foreign key, since that schema belongs to `supabase_auth_admin`. Shopper *authentication* arrives
-> with checkout (§18.4).
+> foreign key, since that schema belongs to `supabase_auth_admin`.
+>
+> **Shopper login is ✅ LIVE as of 2026-08-03** (D34) — it landed with membership gating, which
+> could not be enforced without it. Routes and the identity rules are in **§18.9**.
+>
+> **Linking a guest record requires a confirmed address.** Guest rows carry order history, so
+> attaching one to whoever signs up with that email would let anybody claim a stranger's orders. An
+> unconfirmed shopper gets a session but no linkage, and `accountLinked: false` says so.
 >
 > **D32's `user_kind` is enforced from here on.** It lives in **`app_metadata`**, not
 > `user_metadata` — the latter is user-writable, so a shopper could otherwise promote themselves by
@@ -1657,7 +1663,7 @@ pipeline** (`lib/commerce/orders.ts`) and writes the same usage records. It stil
 agent has already settled on-chain by the time the second request arrives — refusing after
 settlement would strand their money. When §18.6 lands, the fix belongs in the challenge.
 
-### 18.5 Discounts ✅ LIVE · gift cards 🟡 PLANNED
+### 18.5 Discounts ✅ LIVE · gift cards ⛔ DEFERRED (D33)
 
 ```ts
 interface Discount {
@@ -1717,8 +1723,13 @@ unable to burn a code twice. **Known limit:** two *different* checkouts racing f
 last-remaining use can both complete, exceeding `usageLimit` by one; refusing after payment is worse
 on the x402 rail, where the shopper has already settled on-chain.
 
-**Gift cards are not built.** `/api/gift-cards` — issue, check balance, redeem — remains planned.
-They count toward net sales at **redemption**, not purchase (`docs/PRICING.md` §4.1).
+**Gift cards are deferred until further notice (D33, 2026-08-03)** — not "planned next". Nothing in
+`/api/gift-cards` is to be built, and **no schema should anticipate them**. They count toward net
+sales at **redemption**, not purchase (`docs/PRICING.md` §4.1) — but note that exclusion is
+currently *asserted and unimplemented*: `lib/commerce/orders.ts` computes
+`subtotalMinor − discountMinor` with no gift-card term, so adding them as a product line would
+double-bill merchants and adding them as a discount would under-bill. See D33 for the three
+prerequisites (split tender, stored-value ledger, metering term).
 
 ### 18.6 Tax & shipping rates ✅ LIVE (shipping + manual tax) · 🟡 Stripe Tax PLANNED
 
@@ -1881,9 +1892,94 @@ for the merchant to resolve. A refund returns unused keys to the pool rather tha
 **A refund revokes the downloads it paid for**, scoped to the refunded lines. Buy, download, refund,
 keep the file is the whole digital-goods fraud pattern, and it is closed by default.
 
-**Not built:** membership and content gating, and subscription-style recurring access. Both are named
-in D5's scope consequence; the first needs the Phase D content model to gate and the second needs
-Phase B recurring billing, so neither is startable yet.
+**Membership gating is now built — see §18.9.** Subscription-style **recurring** access still is
+not: it needs Phase B recurring billing, so a membership is bought for a fixed term and does not
+auto-renew.
+
+---
+
+## 18.9 Memberships & gating — ✅ LIVE
+
+A **tier** is an entitlement a store sells. A product may **require** one (only members may view or
+buy it) and/or **grant** one (buying it confers the tier). A product that requires the tier it grants
+is a renewal, which is why those are two columns rather than one.
+
+### What had to be built first, and was not recorded anywhere
+
+The docs named two blockers for gating — no Phase D content model, no Phase B recurring billing.
+**Neither was the real one.** Gating needs to know *who is asking*, and there was no storefront
+shopper identity at all: no auth routes under `/_sites/`, nothing ever creating a `customer`-kind
+user, and `customers.authUserId` declared and indexed but never read or written. Built on that,
+gating would have been a dashboard toggle enforcing nothing.
+
+So §18.3's shopper *login* landed with this section (D34):
+`POST /_sites/:site/api/auth/sign-up` · `sign-in` · `sign-out`, and a server-rendered `/account`
+page. Three properties are load-bearing:
+
+- **Sign-up stamps `user_kind: "customer"` into `app_metadata`**, which only the service role can
+  write. `user_metadata` is user-writable, so a shopper could otherwise promote themselves.
+- **A staff account cannot sign in at a storefront**, and the route signs the session back out
+  before refusing — otherwise a staff cookie is left on the origin where merchant custom code runs.
+- **Authorization resolves through the per-store `customers` row, never `auth.getUser()`** (D32
+  mitigation 1). One shopper signed in across two stores is one auth user with two customer records;
+  gating on the session alone would hand store A's members access to store B's catalog.
+
+The routes accept a form-encoded body and answer `303`, so the account page needs **no client
+JavaScript** — `CLAUDE.md` sanctions only three storefront islands and an account page is not one.
+
+### Status is derived, never stored
+
+There is no `status` column on `customer_memberships`. Nothing in this deployment schedules jobs, so
+a stored `"active"` would keep granting access the moment `endsAt` passed, with no sweeper to correct
+it — the same constraint that keeps readiness issues unstored and the §4.5 rollup unbuilt. Status is
+computed from `startsAt` / `endsAt` / `revokedAt` per request: `active` · `scheduled` · `expired` ·
+`revoked`. **`revoked` and `expired` stay distinct** — "the merchant took it away" and "it ran out"
+are different answers to a customer complaint.
+
+Renewal **extends the existing row** rather than inserting a second, from whichever is later: now, or
+the current expiry. Renewing early therefore never forfeits unused time, and renewing after a lapse
+never back-dates into the gap. A lifetime membership (`endsAt: null`) is never shortened into a
+finite one by a later purchase.
+
+### Where the gate is enforced
+
+| Point | Behaviour |
+|---|---|
+| `POST /_sites/:site/api/cart` | Refused, naming the tier — a refusal with no next step is unactionable |
+| `POST /_sites/:site/api/checkout/session` | Re-checked **before payment starts**, since a membership can lapse between filling a cart and paying |
+| Product page | Renders "Members only" and **omits the buy instructions**, rather than advertising a purchase that will be refused |
+| Order completion | Grants conferred tiers **inside the order transaction** |
+
+Checkout completion deliberately does **not** re-check. On the x402 rail settlement is irreversible,
+so refusing there would take a shopper's money and decline the goods — the same reasoning that
+leaves the §18.5 discount race documented rather than closed by a post-payment refusal.
+
+**Guest checkout cannot receive a membership**, and this is stated rather than silently dropped: a
+membership is held by a `customers` row and a guest has none. The order timeline records it for the
+merchant to grant by hand.
+
+### Routes
+
+| Method | Route | Notes |
+|---|---|---|
+| `GET` | `/api/memberships/tiers` | `commerce.read`. Member counts are computed per request, and `gatedProductCount` / `grantingProductCount` say how much a tier unlocks and how it is sold |
+| `GET` | `/api/customers/:id/memberships` | `commerce.read`. Each row carries a derived `status` |
+
+### Actions (§22)
+
+| Action | Permission | Risk | Notes |
+|---|---|---|---|
+| `memberships.createTier` | `commerce.write` | low | `handle` is slugified and **not editable afterwards** — it may already be in storefront copy |
+| `memberships.updateTier` | `commerce.write` | low | Name and description only |
+| `memberships.deleteTier` | `commerce.write` | **high** | `products.requires_tier_id` is `on delete set null`, so this **ungates every product behind it** — paid-for content silently becomes public. The result reports `productsUngated` so a confirmation can say it beforehand |
+| `memberships.grant` | `commerce.write` | medium | Grants or extends. Refuses a tier from a different store than the customer |
+| `memberships.revoke` | `commerce.write` | medium | Access stops immediately; the record survives so history still shows they held it |
+
+### Not built
+
+Recurring billing (a membership does not auto-renew), gating anything other than products — there is
+still no CMS content model, that remains Phase D — and refund-triggered revocation: a refund does not
+currently take a membership back, unlike digital downloads.
 
 ---
 

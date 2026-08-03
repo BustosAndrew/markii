@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { SiteHeader } from "@/components/storefront/site-header";
 import { ThemeRoot } from "@/components/storefront/theme-root";
 import { logTraffic } from "@/lib/agents";
+import { membershipGateFor } from "@/lib/commerce/memberships";
 import { formatPrice, productJsonLd } from "@/lib/generators";
 import { loadSite } from "@/lib/storefront";
 
@@ -56,6 +57,21 @@ export default async function ProductPage({ params }: Props) {
   const themeId = site.themeId ?? "studio";
   const description = stripHtml(product.description);
 
+  /**
+   * Membership gate (§18.9), for display only — the refusal that matters lives
+   * in `addLine` and checkout, because a shopper can post a product id without
+   * ever loading this page.
+   *
+   * **The session lookup is skipped entirely unless this product is gated.**
+   * Resolving a shopper costs a round trip to Supabase, and storefront latency
+   * is the one budget this codebase guards hardest; a store selling no
+   * memberships must not pay for a feature it does not use.
+   */
+  const gate = dbProduct.requiresTierId
+    ? await membershipGateFor(site.id, dbProduct.requiresTierId)
+    : null;
+  const locked = gate !== null && !gate.unlocked;
+
   return (
     <ThemeRoot themeId={themeId}>
       <script
@@ -100,13 +116,40 @@ export default async function ProductPage({ params }: Props) {
           </span>
         </p>
         {description ? <p>{description}</p> : null}
-        <h2>Buy via agent</h2>
-        <pre className="sf-buy">{`POST ${baseUrl}/api/checkout
+
+        {/*
+          Stated before the buy instructions rather than after: a shopper or an
+          agent that reads to the end and tries to check out would be refused,
+          and finding out at that point is the worst place to learn it.
+        */}
+        {gate ? (
+          <p className={locked ? "sf-gate sf-gate-locked" : "sf-gate"}>
+            {locked ? (
+              <>
+                <strong>Members only.</strong> This product is available to{" "}
+                {gate.tierName} members.{" "}
+                <a href={`${baseUrl}/account`}>Sign in or create an account</a> to check whether
+                your membership covers it.
+              </>
+            ) : (
+              <>
+                <strong>Included with your {gate.tierName} membership.</strong>
+              </>
+            )}
+          </p>
+        ) : null}
+
+        {locked ? null : (
+          <>
+            <h2>Buy via agent</h2>
+            <pre className="sf-buy">{`POST ${baseUrl}/api/checkout
 {"productSlug": "${product.slug}", "quantity": 1}`}</pre>
-        <p className="sf-muted">
-          Payment protocol: <a href={`${baseUrl}/agent.md`}>agent.md</a> (x402,
-          USDC on Base Sepolia)
-        </p>
+            <p className="sf-muted">
+              Payment protocol: <a href={`${baseUrl}/agent.md`}>agent.md</a> (x402,
+              USDC on Base Sepolia)
+            </p>
+          </>
+        )}
         {suggested.length > 0 ? (
           <>
             <h2>You might also like</h2>

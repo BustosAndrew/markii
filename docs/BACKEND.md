@@ -54,7 +54,7 @@ returns the keys. Storage and egress are metered against G5's quotas and reporte
 unagreed figure is worse than not gating yet.
 
 **What is still missing** is the card rail (`lib/payments/` reports `configuration_required`; no
-`STRIPE_SECRET_KEY` exists yet), Stripe Tax, gift cards, **processor-executed refunds** —
+`STRIPE_SECRET_KEY` exists yet), Stripe Tax, **processor-executed refunds** —
 `orders.refund` records a refund the merchant issued and refuses `method: "processor"` with the
 reason, since Stripe is unwired and x402 settlement is irreversible — and **membership gating**,
 which has no content model to gate until Phase D.
@@ -262,12 +262,27 @@ Contract `docs/API.md` §18. The largest phase. Order within it:
 2. ~~**Inventory as an append-only ledger**~~ — done
 3. ~~**Collections** (manual + rule-based), **customers**~~ — done
 4. ~~**Cart and checkout**~~ — done for the x402 rail; card rail waits on Stripe credentials
-5. ~~**Discounts**, tax, shipping rates~~ — done. Stripe Tax and gift cards still open
+5. ~~**Discounts**, tax, shipping rates~~ — done. Stripe Tax still open; **gift cards are deferred
+   until further notice (D33)** — do not build, and do not let schema anticipate them
 6. ~~**Orders**: refunds, cancellations, manual fulfillment status, timeline~~ — done. Executing a
    refund on a rail (rather than recording one) waits on Stripe credentials
-7. ~~**Digital delivery** — signed expiring URLs, download limits, licence keys~~ — done.
-   **Membership and content gating are not started**: the content model they gate is Phase D and
-   recurring access needs Phase B billing, so neither is startable yet
+7. ~~**Digital delivery** — signed expiring URLs, download limits, licence keys~~ — done
+8. ~~**Membership gating** (§18.9) and the **shopper login** it required (§18.3)~~ — done 2026-08-03
+   (D34). The blocker was neither of the two the docs named: there was **no shopper identity**, so
+   gating would have enforced nothing. **Content** gating is still Phase D (no content model), and
+   memberships do **not** auto-renew (Phase B recurring billing)
+
+> **Two things this uncovered, both worth knowing.**
+>
+> `carts.customerId` was **never populated by anything** — so every order was recorded as a guest's,
+> which silently emptied customer order history, left digital-delivery grants unattributed, and made
+> per-customer discount limits uncountable. Invisible rather than wrong, because until shopper login
+> existed there was no one to attribute to. `attachShopper()` claims the cart at checkout, which is
+> also where a shopper who signs in *after* filling a basket gets picked up.
+>
+> A `source = 'purchase' ⇒ order_id IS NOT NULL` check in `0019` contradicted that column's
+> `on delete set null` and made any order that had granted a membership **undeletable**. Dropped in
+> `0020`; the integration suite's own cleanup is what found it.
 
 **Checkout rules that are not negotiable:**
 
