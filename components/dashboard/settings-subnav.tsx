@@ -9,6 +9,7 @@ const settingsLinks = [
   { href: "/dashboard/settings/billing", label: "Billing" },
   { href: "/dashboard/settings/tax", label: "Tax" },
   { href: "/dashboard/settings/shipping", label: "Shipping" },
+  { href: "/dashboard/settings/email", label: "Email" },
   { href: "/dashboard/settings/domains", label: "Domains" },
 ] as const;
 

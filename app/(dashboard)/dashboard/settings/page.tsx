@@ -23,6 +23,12 @@ const sections = [
     description: "Shipping zones and rates for human checkout after Phase C.",
   },
   {
+    href: "/dashboard/settings/email",
+    title: "Email",
+    description:
+      "Sending domains, deliverability, and suppressed addresses for customer email.",
+  },
+  {
     href: "/dashboard/settings/domains",
     title: "Domains",
     description: "Custom domain setup lives here once org-scoped settings are expanded.",
@@ -33,7 +39,7 @@ export default function SettingsIndexPage() {
   return (
     <SettingsShell
       title="Settings"
-      description="Launch settings structure for team, billing, tax, shipping, and domains."
+      description="Launch settings structure for team, billing, tax, shipping, email, and domains."
     >
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {sections.map((section) => (

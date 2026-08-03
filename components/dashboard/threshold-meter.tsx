@@ -70,6 +70,12 @@ export function ThresholdMeter({
             Trailing-12-month net sales against your plan threshold, with projections labeled separately.
           </p>
         </div>
+        {/*
+          `state` is null before a first production sale. That is the absence of
+          a measurement, not a measurement of zero — rendering it as a green
+          "Below threshold" would tell a merchant their sales are under the
+          threshold when nothing has been measured at all.
+        */}
         <span
           className={cn(
             "rounded-full px-2.5 py-1 text-xs font-medium",
@@ -77,14 +83,18 @@ export function ThresholdMeter({
               ? "bg-error-bg text-error-text"
               : usage.state === "approaching"
                 ? "bg-warning-bg text-warning-text"
-                : "bg-success-bg text-success-text",
+                : usage.state === "below"
+                  ? "bg-success-bg text-success-text"
+                  : "bg-surface-elevated text-muted",
           )}
         >
           {usage.state === "above"
             ? "Above threshold"
             : usage.state === "approaching"
               ? "Approaching threshold"
-              : "Below threshold"}
+              : usage.state === "below"
+                ? "Below threshold"
+                : "Not yet measured"}
         </span>
       </div>
 
@@ -147,6 +157,35 @@ export function ThresholdMeter({
           </p>
           {usage.processorFeesNote ? (
             <p className="mt-4 text-sm leading-6 text-muted">{usage.processorFeesNote}</p>
+          ) : null}
+
+          {/*
+            Every figure above looks like a bill. Whether anything is actually
+            being charged is stated on the same card, never inferred from the
+            numbers being present.
+          */}
+          <p
+            className={cn(
+              "mt-4 rounded-[var(--radius-control)] px-3 py-2 text-sm leading-6",
+              usage.billingStatus.charging
+                ? "bg-surface text-muted"
+                : "bg-warning-bg text-warning-text",
+            )}
+          >
+            {usage.billingStatus.reason}
+          </p>
+
+          {/*
+            No FX provider is wired, so cross-currency sales are excluded rather
+            than converted at an invented rate. Saying how many are missing is
+            what stops the total reading as complete.
+          */}
+          {usage.unconvertedRecordCount > 0 ? (
+            <p className="mt-3 text-sm leading-6 text-muted">
+              {usage.unconvertedRecordCount} sale
+              {usage.unconvertedRecordCount === 1 ? " is" : "s are"} in another currency and could
+              not be converted, so they are not counted above.
+            </p>
           ) : null}
           {usage.upgradeSuggestion ? (
             <div className="mt-4 rounded-[var(--radius-control)] border border-brand/20 bg-error-bg/30 p-4">

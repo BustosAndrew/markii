@@ -1434,7 +1434,7 @@ on anyway. Add the rollup when volume demands it, not before there is a schedule
 
 ---
 
-## 18. Commerce core 🟡 PLANNED — Phase C
+## 18. Commerce core — partial ✅/🟡 Phase C
 
 The gap between "catalog" and "store". Everything here is prerequisite to a real shopper checking
 out. Extends §4's Product.
@@ -1973,7 +1973,7 @@ Three contract rules that belong here rather than only in the spec:
 
 ---
 
-## 22. Action registry & MCP 🟡 PLANNED — Phase D (architecture, not a feature)
+## 22. Action registry & MCP — ✅ LIVE (registry) / 🟡 PLANNED (undo, MCP)
 
 Markii is **agent-native**: humans and agents operate the product through the same actions,
 permissions, and audit trail. Architecture in `docs/BUILDER.md` §2–3. This section is the contract.
@@ -1989,9 +1989,13 @@ adds builder actions and the MCP server on top; Phase F adds the chat product. S
 
 **As of 2026-07-31 the registry is wired end to end.** `GET /api/actions` (filtered to what the
 caller may invoke), `POST /api/actions/:id` (with `?dryRun=1`), and `GET /api/actions/invocations`
-are live. Four actions are defined — `catalog.setProductOptions`, `catalog.updateVariant`,
-`inventory.adjust`, `inventory.createLocation` — and they are the **only** way those mutations
-happen.
+are live. **39 actions are defined** across `lib/actions/definitions/` — `catalog.*`,
+`collections`, `customers.*`, `delivery.*`, `discounts.*`, `email.*`, `inventory.*`, `orders.*`,
+`readiness.updateIssues`, `shipping.*`, and `tax.updateSettings` — and they are the **only** way
+those mutations happen.
+
+**Note the invoke response is `dryRun`, not `auditId`** (`lib/actions/types.ts`): the JSON example
+below predates the implementation on that field. The frontend client is `lib/api/actions.ts`.
 
 Verified behaviour: a dry run returns the full diff and writes nothing (not even an audit row);
 failures are audited while dry runs are not; an `analyst` token is refused a write action **and**
@@ -2049,7 +2053,7 @@ defineAction({
 |---|---|---|
 | `GET` | `/api/actions` | Registry: id, description, JSON schema, permission, risk tier. Filtered to what the caller may invoke |
 | `POST` | `/api/actions/:id` | Invoke. Same validation, permissions, and audit for every caller |
-| `POST` | `/api/actions/:id/dry-run` | Return the diff an invocation *would* produce, without writing |
+| `POST` | `/api/actions/:id?dryRun=1` | Return the diff an invocation *would* produce, without writing. A **query flag on the invoke route**, not a `/dry-run` sub-path — one handler, so the preview cannot drift from the execution |
 | `POST` | `/api/actions/:id/undo` | Invert a prior invocation by `invocationId`, when `undoable` |
 | `GET` | `/api/actions/invocations` | Audit trail: actor (`user` \| `agent` \| `token`), input, result, `occurredAt` |
 | `ALL` | `/api/mcp` | MCP server: registry as tools, store/page context as resources |
@@ -2204,6 +2208,12 @@ customers, and the damage would look exactly like a deliverability problem. So:
    (`SES_CONFIGURATION_SET`). Without it SES still sends, nothing is ever suppressed, and the
    account drifts toward a bounce-rate suspension unseen.
 4. Per-merchant domain verification — a product feature, and the merchant's own task.
+
+**Frontend:** `lib/api/email.ts` and `/dashboard/settings/email` (added 2026-08-02). The screen is
+what `lib/email/`'s own copy — "Verify a sending domain in Settings → Email" — points at; before it
+existed that instruction led nowhere. It renders the two streams separately, and **hides the
+add-domain form entirely when `providerConfigured` is false** rather than offering one that AWS
+would reject after the merchant filled it in.
 
 **Not built:** shopper auth mail via Supabase's Send Email Hook, Secure Email Change's two-message
 flow, abandoned-cart mail, and broadcast/campaign sending.

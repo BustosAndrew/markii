@@ -1,5 +1,7 @@
-import { getBillingUsage, type UsageResponse } from "@/lib/api/billing";
+import type { UsageResponse } from "@/lib/api/billing";
 import { isPlannedError } from "@/lib/api/planned";
+// In-process, so the session cookie is inherited rather than dropped — see lib/api/server.ts.
+import { getBillingUsage } from "@/lib/api/server";
 import { ThresholdMeter } from "@/components/dashboard/threshold-meter";
 import { ComingSoon } from "@/components/ui/coming-soon";
 import { SettingsShell } from "@/components/dashboard/settings-shell";

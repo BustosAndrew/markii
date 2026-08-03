@@ -61,15 +61,50 @@ real state. These are the open items, recorded so they are not rediscovered late
 | ~~Sign-in runs in the browser~~ ✅ **fixed 2026-07-30** | `components/auth/auth-form.tsx` | Now posts to `/api/auth/*` through `lib/api/auth.ts`, gated on `AUTH_API_LIVE`; `lib/supabase/client.ts` is deleted, so no `createBrowserClient` exists in the tree (**D30**). The form stays disabled behind an API §16 notice until the backend ships the routes |
 | ~~Threshold meter hardcodes `/100`~~ ✅ **fixed 2026-07-30** | `components/dashboard/threshold-meter.tsx` | Uses `formatMinor(amountMinor, currency)` from `lib/api/money.ts`, which derives the exponent from the currency (**D31**). `formatCents` stays USD-shaped for the legacy §1–8 `Cents` fields |
 | **No cart, variant picker, or checkout** | `components/storefront/` has card, header, theme root, paused | Phase C. The variant picker's shell needs no backend and can start early |
-| **Screens still stubbed** | Collections tab, customers, discounts, team, invoices, orders list, org switcher | Correct today — each is built when its API section flips to ✅ LIVE, not before |
+| ~~Every live endpoint gated off~~ ✅ **fixed 2026-08-02** | `lib/api/{readiness,billing,commerce}.ts` | Constants flipped per endpoint group against the routes that actually exist, and the drifted response types corrected. See the two-sided-flip note below |
+| ~~§24 email had no client or screen~~ ✅ **fixed 2026-08-02** | `lib/api/email.ts`, `/dashboard/settings/email` | The route and its five actions shipped 2026-08-02 with nothing calling them, while `lib/email/` told merchants to go to a page that did not exist |
+| **Screens still stubbed** | Collections tab, customers, discounts, team, invoices, orders list, org switcher | Their services are live now, so these are buildable — no longer blocked on the backend |
 | **Session refresh is unwired** | `lib/supabase/middleware.ts` is imported nowhere | Backend owns this — it belongs in `proxy.ts`. Nothing guards `/dashboard` until it lands |
 
 **Going LIVE is a two-sided flip.** Each planned service gates on a local constant —
 `AUTH_API_LIVE`, `ORG_API_LIVE`, `BILLING_API_LIVE`, `READINESS_API_LIVE`, and the commerce
-equivalent — so a screen throws `PlannedError` and renders its placeholder instead of calling a
+equivalents — so a screen throws `PlannedError` and renders its placeholder instead of calling a
 route that does not exist.
 When the backend moves a status badge in `docs/API.md`, **the matching constant flips in the same
 change**, or the endpoint ships to nobody.
+
+> **This drifted, and it is worth knowing how it failed** (fixed 2026-08-02). Phases B and C,
+> readiness, the action registry, and email all shipped and moved their badges, but no constant
+> flipped — so every one of those endpoints was live and unreachable from any screen. Two lessons
+> are baked into the fix:
+>
+> - **A section-wide boolean is the wrong granularity for a partial section.** `COMMERCE_API_LIVE`
+>   could not be right in either position: `false` hid collections, customers, discounts, and
+>   variants, which all work, while `true` would have pointed screens at `/api/variants/:id` and
+>   `/api/storefront/cart`, which **have never existed**. Flags are now per endpoint group, as
+>   `org.ts` already did.
+> - **Flipping a flag is not enough on its own — the types have to be re-read off the route.** Every
+>   service that had sat at `false` had drifted: list endpoints return `{ items, total, page, limit }`
+>   but were typed `{ items }`; `/api/billing/invoices` returns `assessments`, not `invoices`;
+>   the variants route returns `{ productId, options, variants }`, not an array. Flipping without
+>   checking would have traded "ships to nobody" for "ships broken".
+>
+> **`configuration_required` is a third state, not an error.** `isConfigurationRequired()` in
+> `lib/api/planned.ts` distinguishes a route that exists but has no credential (Stripe, SES) from
+> one that is not built. Those refusing routes are *not* gated to `false` — the contract is agreed
+> and the route answers truthfully, so a "coming soon" would be the less accurate of the two.
+
+**Server components must call `lib/api/server.ts`, never the fetch client.** This is now an auth
+requirement, not just an optimisation. `requireAuthContext` resolves the caller from `cookies()` —
+the **ambient request context**, not the `Request` it is handed. An in-process handler call inherits
+that context; a server component that `fetch`es its own API opens a *new* request with no cookie
+header, authenticates as nobody, and gets a `401`.
+
+The failure is nasty because it is invisible until the flag flips: while a service is gated `false`
+it throws `PlannedError` and the screen shows a placeholder, so nothing ever reaches the fetch. Flip
+it to `true` and the same screen starts reporting "could not be loaded" on a perfectly healthy
+deployment. Add the endpoint to `lib/api/server.ts` in the same change as the flip. **Client**
+components are unaffected — the browser attaches the cookie itself.
 
 `GET /api/me`'s response shape is now pinned in §16 to what `lib/api/org.ts` already assumes, so
 that one is settled rather than assumed.

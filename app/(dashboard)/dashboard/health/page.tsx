@@ -1,5 +1,7 @@
-import { getReadinessOverview, type ReadinessReport } from "@/lib/api/readiness";
+import type { ReadinessReport } from "@/lib/api/readiness";
 import { isPlannedError } from "@/lib/api/planned";
+// In-process, so the session cookie is inherited rather than dropped — see lib/api/server.ts.
+import { getReadinessOverview } from "@/lib/api/server";
 import { HealthPagePreview } from "@/components/dashboard/health-page-preview";
 import { PageHeader } from "@/components/ui/page-header";
 

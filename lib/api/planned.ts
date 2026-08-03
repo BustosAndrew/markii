@@ -18,6 +18,21 @@ export function isEndpointMissing(error: unknown) {
   return error instanceof ApiClientError && (error.status === 404 || error.status === 501);
 }
 
+/**
+ * A route that exists and is reachable, but cannot do its job because a
+ * credential is missing on this deployment — `503 CONFIGURATION_REQUIRED`
+ * (`lib/payments/`, `/api/billing/*`, `lib/email/`).
+ *
+ * Distinct from {@link PlannedError} on purpose. "Not built yet" and "built,
+ * waiting on a key" look identical in a generic error toast and are different
+ * facts: only one of them has an owner who can act. Merging them is how a
+ * surface ends up claiming something is coming when it is actually sitting
+ * behind an unset environment variable.
+ */
+export function isConfigurationRequired(error: unknown): error is ApiClientError {
+  return error instanceof ApiClientError && error.code === "CONFIGURATION_REQUIRED";
+}
+
 export function toPlannedError(error: unknown, section: string): never {
   if (isPlannedError(error)) {
     throw error;
