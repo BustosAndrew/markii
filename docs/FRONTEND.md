@@ -63,7 +63,8 @@ real state. These are the open items, recorded so they are not rediscovered late
 | **No cart, variant picker, or checkout** | `components/storefront/` has card, header, theme root, paused | Phase C. The variant picker's shell needs no backend and can start early |
 | ~~Every live endpoint gated off~~ ✅ **fixed 2026-08-02** | `lib/api/{readiness,billing,commerce}.ts` | Constants flipped per endpoint group against the routes that actually exist, and the drifted response types corrected. See the two-sided-flip note below |
 | ~~§24 email had no client or screen~~ ✅ **fixed 2026-08-02** | `lib/api/email.ts`, `/dashboard/settings/email` | The route and its five actions shipped 2026-08-02 with nothing calling them, while `lib/email/` told merchants to go to a page that did not exist |
-| **Screens still stubbed** | Collections tab, customers, discounts, team, invoices, orders list, org switcher | Their services are live now, so these are buildable — no longer blocked on the backend |
+| **Screens still stubbed** | Collections tab, **customers**, discounts, team, invoices, orders list, org switcher | Their services are live now, so these are buildable — no longer blocked on the backend. `customers` is the most conspicuous: `/api/customers` is LIVE and `CUSTOMERS_API_LIVE` is `true`, but the page is still a `ComingSoon` |
+| ~~No memberships screen~~ ✅ **added 2026-08-03** | `/dashboard/memberships` | Tiers with live member counts, create/delete, and manual grant/revoke by customer search (§18.9). Deleting a tier warns that it **ungates** its products, because `requires_tier_id` is `on delete set null` and nothing errors when paid content becomes public |
 | **Session refresh is unwired** | `lib/supabase/middleware.ts` is imported nowhere | Backend owns this — it belongs in `proxy.ts`. Nothing guards `/dashboard` until it lands |
 
 **Going LIVE is a two-sided flip.** Each planned service gates on a local constant —

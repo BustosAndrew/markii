@@ -1966,6 +1966,11 @@ merchant to grant by hand.
 | `GET` | `/api/memberships/tiers` | `commerce.read`. Member counts are computed per request, and `gatedProductCount` / `grantingProductCount` say how much a tier unlocks and how it is sold |
 | `GET` | `/api/customers/:id/memberships` | `commerce.read`. Each row carries a derived `status` |
 
+**Frontend:** `lib/api/memberships.ts` and `/dashboard/memberships` — tiers with live counts, create
+and delete, and manual grant/revoke by customer search. A tier nothing sells is badged **Manual
+only**, since that usually means a product is missing its `grantsTierId` rather than that it was
+intended.
+
 ### Actions (§22)
 
 | Action | Permission | Risk | Notes |

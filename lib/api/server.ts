@@ -9,6 +9,7 @@ import { GET as financesOverviewGET } from "@/app/api/finances/overview/route";
 import { GET as financesSiteGET } from "@/app/api/finances/sites/[idOrSlug]/route";
 import { GET as integrationsGET } from "@/app/api/integrations/route";
 import { GET as overviewGET } from "@/app/api/overview/route";
+import { GET as membershipTiersGET } from "@/app/api/memberships/tiers/route";
 import { GET as productsGET } from "@/app/api/products/route";
 import { GET as productGET } from "@/app/api/products/[idOrSlug]/route";
 import { GET as readinessOverviewGET } from "@/app/api/readiness/overview/route";
@@ -18,6 +19,7 @@ import { GET as siteSummaryGET } from "@/app/api/sites/[idOrSlug]/summary/route"
 import { buildQuery, type QueryValue } from "./client";
 import type { UsageResponse } from "./billing";
 import type { EmailSettings } from "./email";
+import type { MembershipTier } from "./memberships";
 import type { ReadinessReport } from "./readiness";
 import type { AnalyticsOverview, AnalyticsQuery, AnalyticsSiteDetail } from "./analytics";
 import type { FinancesOverview, FinancesQuery, FinancesSiteDetail } from "./finances";
@@ -167,3 +169,10 @@ export const getBillingUsage = () => call<UsageResponse>(billingUsageGET, "/api/
 
 export const getEmailSettings = () =>
   call<EmailSettings>(emailSettingsGET, "/api/settings/email");
+
+export const listMembershipTiers = (query?: { siteId?: number }) =>
+  call<{ items: MembershipTier[] }>(
+    membershipTiersGET,
+    "/api/memberships/tiers",
+    query as Record<string, QueryValue>,
+  );

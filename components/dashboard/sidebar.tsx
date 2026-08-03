@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import {
   BarChart3,
   Globe,
+  KeyRound,
   LayoutList,
   LayoutGrid,
   Percent,
@@ -23,6 +24,7 @@ export const nav = [
   { href: "/dashboard/orders", label: "Orders", icon: LayoutList },
   { href: "/dashboard/customers", label: "Customers", icon: Users },
   { href: "/dashboard/discounts", label: "Discounts", icon: Percent },
+  { href: "/dashboard/memberships", label: "Memberships", icon: KeyRound },
   { href: "/dashboard/websites", label: "Websites", icon: Globe },
   { href: "/dashboard/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/dashboard/settings", label: "Settings", icon: Settings },
