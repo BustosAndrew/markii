@@ -1538,8 +1538,11 @@ are merchandising.** Do not merge them; do document the distinction in the UI.
 ### 18.3 Customers — ✅ LIVE (records; shopper *login* is separate)
 
 > **Live (2026-07-31).** Reads: `GET /api/customers`, `GET /api/customers/:id`,
-> `GET /api/customers/:id/orders`. Writes via §22 actions: `customers.create`,
-> `customers.update`, `customers.addAddress`, `customers.delete`.
+> `GET /api/customers/:id/orders`, `GET /api/customers/:id/memberships` (§18.9). Writes via §22
+> actions: `customers.create`, `customers.update`, `customers.addAddress`, `customers.delete`.
+>
+> **Frontend:** `/dashboard/customers` and `/dashboard/customers/:id` (2026-08-03) — list with
+> search and store filter, detail with memberships, orders, and addresses.
 >
 > **A customer record is not a login.** Guest checkout creates a customer with no `authUserId`; an
 > account links one later. `customers.authUserId` points at `auth.users` (D32 — one project) with no

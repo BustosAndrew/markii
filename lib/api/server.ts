@@ -9,6 +9,11 @@ import { GET as financesOverviewGET } from "@/app/api/finances/overview/route";
 import { GET as financesSiteGET } from "@/app/api/finances/sites/[idOrSlug]/route";
 import { GET as integrationsGET } from "@/app/api/integrations/route";
 import { GET as overviewGET } from "@/app/api/overview/route";
+import { GET as customersGET } from "@/app/api/customers/route";
+import { GET as customerGET } from "@/app/api/customers/[id]/route";
+import { GET as customerOrdersGET } from "@/app/api/customers/[id]/orders/route";
+import { GET as customerMembershipsGET } from "@/app/api/customers/[id]/memberships/route";
+import { GET as meGET } from "@/app/api/me/route";
 import { GET as membershipTiersGET } from "@/app/api/memberships/tiers/route";
 import { GET as productsGET } from "@/app/api/products/route";
 import { GET as productGET } from "@/app/api/products/[idOrSlug]/route";
@@ -19,7 +24,9 @@ import { GET as siteSummaryGET } from "@/app/api/sites/[idOrSlug]/summary/route"
 import { buildQuery, type QueryValue } from "./client";
 import type { UsageResponse } from "./billing";
 import type { EmailSettings } from "./email";
-import type { MembershipTier } from "./memberships";
+import type { CustomerMembership, MembershipTier } from "./memberships";
+import type { Customer } from "./commerce";
+import type { MeResponse } from "./org";
 import type { ReadinessReport } from "./readiness";
 import type { AnalyticsOverview, AnalyticsQuery, AnalyticsSiteDetail } from "./analytics";
 import type { FinancesOverview, FinancesQuery, FinancesSiteDetail } from "./finances";
@@ -30,6 +37,7 @@ import type { SiteSummary, SitesQuery } from "./sites";
 import {
   ApiClientError,
   type Category,
+  type Order,
   type OverviewResponse,
   type Paginated,
   type Product,
@@ -176,3 +184,51 @@ export const listMembershipTiers = (query?: { siteId?: number }) =>
     "/api/memberships/tiers",
     query as Record<string, QueryValue>,
   );
+
+/** The caller's identity and org. `org.currency` is what money formatters need (D31). */
+export const getMe = () => call<MeResponse>(meGET, "/api/me");
+
+export const listCustomers = (query?: {
+  q?: string;
+  siteId?: number;
+  page?: number;
+  limit?: number;
+}) =>
+  call<Paginated<Customer>>(customersGET, "/api/customers", query as Record<string, QueryValue>);
+
+/** Detail carries addresses and derived order stats alongside the record. */
+export const getCustomer = (id: number) =>
+  call<Customer & {
+    addresses: CustomerAddress[];
+    defaultAddressId: number | null;
+  }>(customerGET, `/api/customers/${id}`, undefined, { id: String(id) });
+
+export const getCustomerOrders = (id: number, query?: { page?: number; limit?: number }) =>
+  call<{ items: Order[]; page: number; limit: number }>(
+    customerOrdersGET,
+    `/api/customers/${id}/orders`,
+    query as Record<string, QueryValue>,
+    { id: String(id) },
+  );
+
+export const getCustomerMemberships = (id: number) =>
+  call<{ items: CustomerMembership[] }>(
+    customerMembershipsGET,
+    `/api/customers/${id}/memberships`,
+    undefined,
+    { id: String(id) },
+  );
+
+export type CustomerAddress = {
+  id: number;
+  customerId: number;
+  name: string | null;
+  line1: string;
+  line2: string | null;
+  city: string;
+  province: string | null;
+  postalCode: string | null;
+  country: string;
+  phone: string | null;
+  isDefault: boolean;
+};
