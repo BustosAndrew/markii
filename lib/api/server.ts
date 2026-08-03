@@ -9,7 +9,9 @@ import { GET as financesOverviewGET } from "@/app/api/finances/overview/route";
 import { GET as financesSiteGET } from "@/app/api/finances/sites/[idOrSlug]/route";
 import { GET as integrationsGET } from "@/app/api/integrations/route";
 import { GET as overviewGET } from "@/app/api/overview/route";
+import { GET as collectionsGET } from "@/app/api/collections/route";
 import { GET as customersGET } from "@/app/api/customers/route";
+import { GET as discountsGET } from "@/app/api/discounts/route";
 import { GET as customerGET } from "@/app/api/customers/[id]/route";
 import { GET as customerOrdersGET } from "@/app/api/customers/[id]/orders/route";
 import { GET as customerMembershipsGET } from "@/app/api/customers/[id]/memberships/route";
@@ -25,7 +27,7 @@ import { buildQuery, type QueryValue } from "./client";
 import type { UsageResponse } from "./billing";
 import type { EmailSettings } from "./email";
 import type { CustomerMembership, MembershipTier } from "./memberships";
-import type { Customer } from "./commerce";
+import type { Collection, Customer, Discount } from "./commerce";
 import type { MeResponse } from "./org";
 import type { ReadinessReport } from "./readiness";
 import type { AnalyticsOverview, AnalyticsQuery, AnalyticsSiteDetail } from "./analytics";
@@ -187,6 +189,26 @@ export const listMembershipTiers = (query?: { siteId?: number }) =>
 
 /** The caller's identity and org. `org.currency` is what money formatters need (D31). */
 export const getMe = () => call<MeResponse>(meGET, "/api/me");
+
+export const listCollections = (query?: {
+  siteId?: number;
+  q?: string;
+  page?: number;
+  limit?: number;
+}) =>
+  call<Paginated<Collection>>(
+    collectionsGET,
+    "/api/collections",
+    query as Record<string, QueryValue>,
+  );
+
+export const listDiscounts = (query?: {
+  siteId?: number;
+  status?: Discount["status"];
+  page?: number;
+  limit?: number;
+}) =>
+  call<Paginated<Discount>>(discountsGET, "/api/discounts", query as Record<string, QueryValue>);
 
 export const listCustomers = (query?: {
   q?: string;

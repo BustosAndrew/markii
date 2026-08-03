@@ -100,13 +100,30 @@ export type Customer = {
 
 export type Discount = {
   id: number;
+  siteId: number;
+  /** Null means **automatic** — applied without the shopper typing anything. */
   code: string | null;
-  automatic: boolean;
-  type: "percentage" | "fixed" | "free_shipping" | "bogo";
+  title: string;
+  type: "percentage" | "fixed" | "free_shipping";
+  /** Basis points: 1500 is 15%. Integer, never a float (D31). */
+  percentageBps: number | null;
+  /** Minor units, for `fixed`. */
   valueMinor: number | null;
-  percentage: number | null;
-  status: "draft" | "active" | "expired";
+  appliesToScope: "order" | "products" | "collections";
+  appliesToIds: number[];
+  minimumSubtotalMinor: number | null;
+  customerEligibility: "all" | "specific";
+  eligibleCustomerIds: number[];
   usageLimit: number | null;
+  usageLimitPerCustomer: number | null;
+  /** All default false — stacking is opted into, never inherited (§18.5). */
+  combinesWithProduct: boolean;
+  combinesWithOrder: boolean;
+  combinesWithShipping: boolean;
+  /** The merchant's on/off switch. `status` is derived from this plus the dates. */
+  enabled: boolean;
+  /** Derived per request from `enabled` and the window — never stored. */
+  status: "active" | "scheduled" | "expired" | "disabled";
   usedCount: number;
   /** A fully-redeemed code looks active until someone tries it — so it is stated. */
   exhausted: boolean;

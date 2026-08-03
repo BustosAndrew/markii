@@ -1726,6 +1726,11 @@ unable to burn a code twice. **Known limit:** two *different* checkouts racing f
 last-remaining use can both complete, exceeding `usageLimit` by one; refusing after payment is worse
 on the x402 rail, where the shopper has already settled on-chain.
 
+**Frontend:** `/dashboard/discounts` (2026-08-03) — list with status and store filters, derived
+redemption counts, and a **Fully redeemed** badge, since an exhausted code still reads as active by
+its dates and only fails when a shopper tries it. Creation still goes through §22 actions; there is
+no builder screen yet.
+
 **Gift cards are deferred until further notice (D33, 2026-08-03)** — not "planned next". Nothing in
 `/api/gift-cards` is to be built, and **no schema should anticipate them**. They count toward net
 sales at **redemption**, not purchase (`docs/PRICING.md` §4.1) — but note that exclusion is

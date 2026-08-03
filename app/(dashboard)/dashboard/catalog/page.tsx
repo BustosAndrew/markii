@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Suspense } from "react";
 import { ImageIcon } from "lucide-react";
-import { listCategories, listProducts, listSites } from "@/lib/api/server";
+import { listCategories, listCollections, listProducts, listSites } from "@/lib/api/server";
 import { firstParam, loadOrError, parseLimit, parsePage } from "@/lib/api/load";
 import { formatCents } from "@/lib/api/money";
 import type { Category } from "@/lib/api/types";
@@ -10,7 +10,6 @@ import { RouteTabs } from "@/components/dashboard/route-tabs";
 import { FetchError } from "@/components/dashboard/fetch-error";
 import { Badge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
-import { ComingSoon } from "@/components/ui/coming-soon";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ListFilters } from "@/components/ui/list-filters";
 import { PageHeader } from "@/components/ui/page-header";
@@ -94,11 +93,23 @@ export default async function CatalogPage({
         )
       : { data: null, error: null as string | null };
 
+  const collectionsResult =
+    tab === "collections"
+      ? await loadOrError(() =>
+          listCollections({
+            q,
+            siteId: Number.isFinite(siteId) ? siteId : undefined,
+            page,
+            limit,
+          }),
+        )
+      : { data: null, error: null as string | null };
+
   return (
     <div>
       <PageHeader
         title="Catalog"
-        description="Products, categories, and future collections in one launch-ready workspace."
+        description="Products, categories, and collections in one workspace."
         actions={
           tab === "products" ? (
             <InventoryActions sites={sites} />
@@ -383,11 +394,62 @@ export default async function CatalogPage({
       ) : null}
 
       {tab === "collections" ? (
-        <ComingSoon
-          title="Collections are planned"
-          description="Collections are distinct from categories: categories stay taxonomy, while collections will become merchandising once API §18 is live."
-          apiSection="API §18 · Commerce core (collections)"
-        />
+        !collectionsResult.data ? (
+          <FetchError message={collectionsResult.error ?? "Collections could not be loaded."} />
+        ) : collectionsResult.data.items.length === 0 ? (
+          <EmptyState
+            title="No collections yet"
+            description="Collections are merchandising, distinct from categories: a product sits in one category but can appear in many collections. Create them through the action registry (§22)."
+          />
+        ) : (
+          <>
+            <div className="overflow-x-auto rounded-[var(--radius-card)] border border-border bg-surface shadow-[var(--shadow-sm)]">
+              <table className="w-full min-w-[40rem] text-left text-sm">
+                <thead className="text-muted">
+                  <tr className="border-b border-border">
+                    <th className="px-4 py-3 font-medium">Collection</th>
+                    <th className="px-4 py-3 font-medium">Type</th>
+                    <th className="px-4 py-3 font-medium">Products</th>
+                    <th className="px-4 py-3 font-medium">Visibility</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {collectionsResult.data.items.map((c) => (
+                    <tr key={c.id} className="border-b border-border last:border-0">
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-foreground">{c.title}</div>
+                        <div className="text-xs text-muted">{c.handle}</div>
+                      </td>
+                      <td className="px-4 py-3">
+                        {/*
+                          An automated collection resolves its members at read
+                          time and is never materialised, so its count moves as
+                          the catalog does — worth distinguishing from a manual
+                          list someone curated.
+                        */}
+                        <Badge variant={c.type === "automated" ? "info" : "neutral"}>
+                          {c.type === "automated" ? "Rule-based" : "Manual"}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3 tabular-nums text-foreground">
+                        {c.productCount}
+                      </td>
+                      <td className="px-4 py-3 text-muted">
+                        {c.publishedAt ? "Published" : "Hidden"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <Pagination
+              page={collectionsResult.data.page}
+              limit={collectionsResult.data.limit}
+              total={collectionsResult.data.total}
+            />
+          </>
+        )
       ) : null}
     </div>
   );
