@@ -40,6 +40,7 @@ carry an explicit status — **never call a `PLANNED` endpoint and never fake it
 | 20 | Disputes & chargebacks | 🟡 PLANNED | F |
 | 21 | Agent Ops add-on | 🟡 PLANNED | F (last) |
 | 22 | **Action registry & MCP** — agent-native architecture | ✅ LIVE (registry, invoke, dry-run, audit). Undo + MCP server PLANNED | **Registry: C · MCP: D** |
+| 24 | Email — sending domains, deliverability, suppression | partial — ✅ LIVE: SES transport, templates, suppression list, bounce webhook, `/api/settings/email`, §22 actions. **Nothing sends here** (no AWS credentials); every attempt is recorded as `not_configured` and merchant mail never falls back to Markii's domain | **C** |
 
 **v3 note.** Markii is now a full commerce platform (`docs/PLAN.md` v3). §16 was a **breaking change
 to everything above it**, and as of 2026-07-31 that change has landed: **every `/api/*` route
@@ -2100,6 +2101,112 @@ preview tabs):
 | `/account` | customer account area | 🟡 PLANNED (§18.3) |
 
 In local dev, storefronts are reachable at `http://localhost:3000/_sites/{siteSlug}/…`.
+
+---
+
+## 24. Email — sending domains, deliverability, suppression — partial ✅/🟡
+
+Transport, templates, and the suppression list are ✅ LIVE. **No mail is sent from this
+deployment**, because AWS SES has no credentials here — every send is recorded as
+`not_configured` and no surface claims otherwise.
+
+**Two streams, split by whose mail it is, and the split is load-bearing** (`CLAUDE.md`, G1):
+
+| Stream | Provider | Carries | From |
+|---|---|---|---|
+| Merchant | **AWS SES** | order confirmations, shipping and refund notices, cancellations, digital delivery | the merchant's **own verified domain** |
+| Platform | **Resend** | staff auth, invoices, dunning, contact form, platform notices | `markii.shop` |
+
+**Merchant mail never falls back to Resend.** A merchant's order confirmation leaving from
+`markii.shop` would put their bounces on Markii's sending reputation, which is the entire reason
+the two streams exist. Without a verified domain, merchant mail does not send.
+
+### `GET /api/settings/email` — ✅ LIVE (`org.read`)
+
+```ts
+{
+  customerEmail: {
+    canSend: boolean;
+    code: "ready" | "configuration_required" | "domain_verification_required";
+    message: string;
+    senderAddress: string | null;
+  };
+  domains: {
+    id: number;
+    domain: string;
+    senderAddress: string;          // `${fromLocalPart}@${domain}`
+    fromName: string | null;
+    replyTo: string | null;
+    status: "pending" | "verified" | "failed" | "temporary_failure";
+    verifiedAt: string | null;
+    lastCheckedAt: string | null;
+    problem: string | null;
+    /** The CNAMEs to publish. Derived from SES's current tokens, never stored. */
+    dns: { type: "CNAME"; name: string; value: string }[];
+  }[];
+  suppressions: {
+    email: string;
+    reason: "bounce" | "complaint" | "manual";
+    detail: string | null;
+    createdAt: string;
+    /** False for complaints — the recipient's decision, not the merchant's. */
+    removable: boolean;
+  }[];
+  platformEmail: { status: "ready" | "configuration_required"; scope: string };
+  providerConfigured: boolean;      // false ⇒ nothing above can work yet
+}
+```
+
+`customerEmail.code` distinguishes **whose problem it is**: `configuration_required` is Markii's
+(no AWS credentials), `domain_verification_required` is the merchant's. `platformEmail` is reported
+separately and must never be merged into one "email: OK" — a merchant whose password reset arrived
+would otherwise conclude their order confirmations work, and they do not.
+
+### Actions (§22) — ✅ LIVE
+
+| Action | Permission | Risk | Notes |
+|---|---|---|---|
+| `email.addSendingDomain` | `org.write` | medium | Registers with SES and returns the DKIM CNAMEs. Refuses rather than writing a row with no tokens — a merchant cannot act on a verification step with no records to publish. A **dry run does not contact AWS**: creating an SES identity is a durable side effect no rollback can withdraw. |
+| `email.verifySendingDomain` | `org.write` | low | Re-reads status from SES. Pull, not push — nothing in this deployment schedules jobs. An unreachable AWS is *reported*, not thrown, and never downgrades a verified domain. |
+| `email.removeSendingDomain` | `org.write` | **high** | Silently stops every customer email. Nothing errors; customers simply stop hearing from the store. |
+| `email.suppressAddress` | `commerce.write` | low | Manual entry. Lowercased at write. |
+| `email.unsuppressAddress` | `commerce.write` | medium | **Refuses for `complaint`.** That consent was withdrawn by the recipient; re-enabling it from a dashboard button would put an AWS policy violation one click away. |
+
+### `POST /api/webhooks/ses` — ✅ LIVE (unauthenticated, signature-verified)
+
+SES bounce and complaint events over SNS. **Not an action** (§22): there is no actor and no org on
+the request, and the write it causes is a platform-safety record rather than a merchant mutation.
+
+Verification is a real security boundary, not hygiene. An unverified endpoint here is a *remote
+suppression button* — fabricated complaints would silently stop a merchant mailing their own
+customers, and the damage would look exactly like a deliverability problem. So:
+
+- The SNS signature is checked against the certificate SNS names, and **the certificate URL is
+  host-validated before it is fetched** (`^sns\.[a-z0-9-]+\.amazonaws\.com$`). A signature check
+  that downloads its own trust anchor from an attacker-supplied URL verifies nothing and doubles
+  as SSRF. Unverified messages get `403`.
+- **Only `Permanent` bounces suppress.** A `Transient` bounce is a full mailbox or a greylisting
+  server; suppressing on those would permanently cut off a paying customer for a problem that
+  fixes itself.
+- Events are attributed to an org through `email_deliveries.providerMessageId`. An event that
+  cannot be attributed is **dropped, never applied globally** — guessing wrong silences a
+  merchant's mail to a customer who never complained about them.
+- Once the signature verifies, the answer is always `200`. SNS retries a non-2xx for an hour then
+  disables the subscription, and losing every future bounce because one lookup failed is far worse
+  than dropping one event.
+
+### What still needs AWS, not code
+
+1. `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_REGION`.
+2. **Sandbox escape** — a support request with a queue in front of it. Until granted, SES accepts
+   mail only to verified addresses. **Start it early; it is refusable.**
+3. A configuration set with an SNS destination pointing at `/api/webhooks/ses`
+   (`SES_CONFIGURATION_SET`). Without it SES still sends, nothing is ever suppressed, and the
+   account drifts toward a bounce-rate suspension unseen.
+4. Per-merchant domain verification — a product feature, and the merchant's own task.
+
+**Not built:** shopper auth mail via Supabase's Send Email Hook, Secure Email Change's two-message
+flow, abandoned-cart mail, and broadcast/campaign sending.
 
 ---
 

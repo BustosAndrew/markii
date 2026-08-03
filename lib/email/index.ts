@@ -1,10 +1,13 @@
 import "server-only";
 
+import { db, emailDeliveries } from "../db";
+import { resolveSender } from "./identity";
 import { isResendConfigured, sendViaResend } from "./resend";
 import { isSesConfigured, sendViaSes } from "./ses";
-import type { MailInput, SendResult } from "./types";
+import { normalizeEmail, suppressionFor } from "./suppression";
+import type { MailInput, MerchantMailInput, SendResult } from "./types";
 
-export type { MailInput, SendResult } from "./types";
+export type { MailInput, MerchantMailInput, SendResult } from "./types";
 export { isResendConfigured } from "./resend";
 export { isSesConfigured } from "./ses";
 
@@ -24,16 +27,82 @@ export function sendPlatformMail(input: MailInput): Promise<SendResult> {
 /**
  * Mail sent **on a merchant's behalf**, from their own verified domain via SES.
  *
- * `orgId` is required even though SES is not wired yet: it is what selects the
- * merchant's sending identity, and adding it later would mean revisiting every
- * caller. Returns `{ sent: false }` until SES lands — it deliberately does not
- * fall back to Resend.
+ * Four things happen in order, and each can stop the send:
+ *
+ * 1. **Suppression.** Checked first, because mailing a known-bad address costs
+ *    the whole platform's sending reputation and nothing else here can undo it.
+ * 2. **Sender resolution.** No verified domain means no send — there is
+ *    deliberately no fallback to Resend and to `markii.shop` (G1).
+ * 3. **The send itself**, via SES.
+ * 4. **Recording the outcome** in `email_deliveries`, whatever it was. "Did the
+ *    customer get their receipt?" is a support question that arrives days later.
+ *
+ * The result is a value, never a throw: a caller that swallowed an exception
+ * here would report a confirmation that never left the building.
  */
-export function sendMerchantMail(
-  _orgId: string,
-  input: MailInput,
+export async function sendMerchantMail(
+  orgId: string,
+  input: MerchantMailInput,
 ): Promise<SendResult> {
-  return sendViaSes(input);
+  const to = Array.isArray(input.to) ? input.to : [input.to];
+  const primary = normalizeEmail(to[0] ?? "");
+
+  const record = (
+    status: (typeof emailDeliveries.$inferInsert)["status"],
+    provider: (typeof emailDeliveries.$inferInsert)["provider"],
+    extra: { messageId?: string | null; reason?: string | null },
+  ) =>
+    db
+      .insert(emailDeliveries)
+      .values({
+        orgId,
+        template: input.template,
+        toEmail: primary,
+        subject: input.subject,
+        provider,
+        status,
+        providerMessageId: extra.messageId ?? null,
+        reason: extra.reason ?? null,
+        orderId: input.orderId ?? null,
+      })
+      // Logging must never be the reason a send is reported as failed.
+      .catch((e) => {
+        console.error("[email] could not record delivery", e);
+      });
+
+  const suppressed = await suppressionFor(orgId, primary);
+  if (suppressed) {
+    const reason =
+      suppressed.reason === "complaint"
+        ? `${primary} reported earlier mail as spam and will not be contacted again.`
+        : `${primary} is suppressed (${suppressed.reason}${suppressed.detail ? `: ${suppressed.detail}` : ""}).`;
+    await record("suppressed", "none", { reason });
+    return { sent: false, provider: "none", reason };
+  }
+
+  const sender = await resolveSender(orgId);
+  if (!sender) {
+    const reason = isSesConfigured()
+      ? "No verified sending domain. Verify a domain in Settings → Email before sending " +
+        "customer mail — Markii will not send it from markii.shop on your behalf."
+      : "Merchant email is not configured on this deployment — AWS SES is not connected " +
+        "(docs/BACKEND.md §6).";
+    await record("not_configured", "none", { reason });
+    return { sent: false, provider: "none", reason };
+  }
+
+  const result = await sendViaSes(input, {
+    address: sender.address,
+    name: sender.name,
+    replyTo: sender.replyTo,
+  });
+
+  if (result.sent) {
+    await record("sent", "ses", { messageId: result.id });
+  } else {
+    await record("failed", result.provider, { reason: result.reason });
+  }
+  return result;
 }
 
 /** For status surfaces: which streams can actually deliver right now. */
@@ -43,5 +112,45 @@ export function emailStatus() {
       ? ("ready" as const)
       : ("configuration_required" as const),
     merchant: isSesConfigured() ? ("ready" as const) : ("configuration_required" as const),
+  };
+}
+
+/**
+ * Whether a specific org can send customer mail right now.
+ *
+ * Distinct from {@link emailStatus}: SES can be perfectly configured while a
+ * given merchant still has no verified domain, and those are different problems
+ * with different owners — ours and theirs.
+ */
+export async function merchantEmailStatus(orgId: string): Promise<{
+  canSend: boolean;
+  code: "ready" | "configuration_required" | "domain_verification_required";
+  message: string;
+  senderAddress: string | null;
+}> {
+  if (!isSesConfigured()) {
+    return {
+      canSend: false,
+      code: "configuration_required",
+      message: "AWS SES is not connected on this deployment, so no customer mail can be sent.",
+      senderAddress: null,
+    };
+  }
+  const sender = await resolveSender(orgId);
+  if (!sender) {
+    return {
+      canSend: false,
+      code: "domain_verification_required",
+      message:
+        "Verify a sending domain in Settings → Email. Customer mail is sent from your own " +
+        "domain, never from markii.shop.",
+      senderAddress: null,
+    };
+  }
+  return {
+    canSend: true,
+    code: "ready",
+    message: `Customer mail sends from ${sender.address}.`,
+    senderAddress: sender.address,
   };
 }

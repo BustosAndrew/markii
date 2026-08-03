@@ -1786,6 +1786,150 @@ export const readinessSnapshots = pgTable(
   ],
 );
 
+// ---------------------------------------------------------------------------
+// Email (§6) — merchant sending identities and the suppression list
+// ---------------------------------------------------------------------------
+
+/**
+ * A domain a merchant sends their own mail from (G1).
+ *
+ * This table is what makes `sendMerchantMail(orgId, …)` mean anything. The
+ * two-stream split is only real if merchant mail leaves from the *merchant's*
+ * domain — otherwise their bounces land on Markii's sending reputation, which
+ * is the exact failure the split exists to prevent. Without a verified row
+ * here, merchant mail does not send at all; it deliberately does not fall back
+ * to `markii.shop`.
+ *
+ * DKIM tokens come from SES at creation and are shown to the merchant as CNAME
+ * records. They are not secrets — they are published in DNS by design — so they
+ * live in a plain column rather than the credential store.
+ */
+export const emailIdentities = pgTable(
+  "email_identities",
+  {
+    id: serial("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** The bare domain, lowercased — `acme.com`, never `mail.acme.com.` or a URL. */
+    domain: text("domain").notNull(),
+    /**
+     * Mailbox part of the From address on this domain. The full sender is
+     * `${fromLocalPart}@${domain}`; stored split so a merchant can change the
+     * mailbox without re-verifying the domain.
+     */
+    fromLocalPart: text("from_local_part").notNull().default("orders"),
+    /** Display name in the From header. Falls back to the site name when null. */
+    fromName: text("from_name"),
+    replyTo: text("reply_to"),
+    /**
+     * `pending` until DNS propagates and SES confirms. **Only `verified` may
+     * send** — a `pending` identity that sent anyway would be an unauthenticated
+     * message from a domain the merchant may not even own.
+     */
+    status: text("status", { enum: ["pending", "verified", "failed", "temporary_failure"] })
+      .notNull()
+      .default("pending"),
+    /** The three CNAME records SES wants published, in order. */
+    dkimTokens: jsonb("dkim_tokens").$type<string[]>().notNull().default([]),
+    /** Set once SES reports success, so "verified when" is answerable. */
+    verifiedAt: timestamp("verified_at", { withTimezone: true }),
+    /** Why verification failed, verbatim from SES, for a merchant-facing hint. */
+    lastError: text("last_error"),
+    lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    /**
+     * A domain belongs to one org. Global, not per-org: two organizations
+     * claiming `acme.com` means one of them is sending as a domain they do not
+     * own, and the database is the right place to make that impossible.
+     */
+    uniqueIndex("email_identities_domain_uq").on(t.domain),
+    index("email_identities_org_idx").on(t.orgId),
+  ],
+);
+
+/**
+ * Addresses that must not be mailed again, per org.
+ *
+ * **This is not a nicety — it is what keeps an SES account alive.** AWS suspends
+ * senders above roughly 5% bounce or 0.1% complaint, and a hard bounce that
+ * keeps being retried counts every time. Suppression is checked before every
+ * merchant send, so a single bad address cannot compound into a suspension that
+ * takes down mail for every merchant on the platform.
+ *
+ * Scoped per org because a complaint is about *that merchant's* mail: an address
+ * that reported one store as spam has not consented to hear from a different
+ * store, and equally should not be denied a receipt from a store it does
+ * business with.
+ */
+export const emailSuppressions = pgTable(
+  "email_suppressions",
+  {
+    id: serial("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** Lowercased at write time — suppression is useless if case defeats it. */
+    email: text("email").notNull(),
+    /**
+     * `complaint` is permanent: the recipient marked mail as spam, and sending
+     * again is both an AWS violation and a reputation hit. `bounce` is a hard
+     * bounce — the mailbox does not exist. `manual` is the merchant's own call.
+     */
+    reason: text("reason", { enum: ["bounce", "complaint", "manual"] }).notNull(),
+    /** SES bounce subtype or complaint feedback type, for support conversations. */
+    detail: text("detail"),
+    /** The SES message id that produced the event, when there is one. */
+    sourceMessageId: text("source_message_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("email_suppressions_uq").on(t.orgId, t.email),
+    index("email_suppressions_org_idx").on(t.orgId),
+  ],
+);
+
+/**
+ * Every merchant send attempt, and what came of it.
+ *
+ * Kept because "did the customer get their receipt?" is a support question that
+ * arrives days later, when the order timeline entry is buried and the provider's
+ * own logs have rolled off. Bodies are **not** stored — a receipt contains a
+ * customer's name, address and purchase history, and keeping a second copy of
+ * that indefinitely for debugging is not a trade worth making.
+ */
+export const emailDeliveries = pgTable(
+  "email_deliveries",
+  {
+    id: serial("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** `order_confirmation`, `shipping_notice`, … — see `lib/email/templates/`. */
+    template: text("template").notNull(),
+    toEmail: text("to_email").notNull(),
+    subject: text("subject").notNull(),
+    /** Null when nothing was sent — see `status`. */
+    providerMessageId: text("provider_message_id"),
+    provider: text("provider", { enum: ["ses", "resend", "none"] }).notNull(),
+    status: text("status", {
+      enum: ["sent", "failed", "suppressed", "not_configured", "bounced", "complained"],
+    }).notNull(),
+    /** The refusal or provider error, verbatim. */
+    reason: text("reason"),
+    orderId: integer("order_id").references(() => orders.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("email_deliveries_org_idx").on(t.orgId, t.createdAt),
+    index("email_deliveries_order_idx").on(t.orderId),
+    /** Bounce notifications arrive by message id, so that lookup needs an index. */
+    index("email_deliveries_message_idx").on(t.providerMessageId),
+  ],
+);
+
 /** One manual tax rate. `rateBps` is basis points — 875 is 8.75%. */
 export type ManualTaxRate = {
   country: string;
@@ -1875,3 +2019,6 @@ export type OrderEvent = typeof orderEvents.$inferSelect;
 export type ShippingZone = typeof shippingZones.$inferSelect;
 export type ShippingRate = typeof shippingRates.$inferSelect;
 export type TaxSettings = typeof taxSettings.$inferSelect;
+export type EmailIdentity = typeof emailIdentities.$inferSelect;
+export type EmailSuppression = typeof emailSuppressions.$inferSelect;
+export type EmailDelivery = typeof emailDeliveries.$inferSelect;

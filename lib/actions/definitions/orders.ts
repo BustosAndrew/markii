@@ -25,6 +25,15 @@ import {
 import { revokeDeliveryForOrder } from "../../commerce/delivery";
 import { recordUsage } from "../../commerce/orders";
 import { sendMerchantMail } from "../../email";
+import { orderMailContext, storeIdentity } from "../../email/context";
+import {
+  cancellationNotice,
+  orderConfirmation,
+  refundNotice,
+  shippingNotice,
+  type RenderedEmail,
+  type TemplateId,
+} from "../../email/templates";
 import { siteScope } from "../../tenancy";
 import { defineAction } from "../registry";
 import type { ActionContext } from "../types";
@@ -350,14 +359,27 @@ export const refundOrder = defineAction({
     });
 
     if (input.notifyCustomer) {
+      const { storeName, supportEmail } = await storeIdentity(order.siteId, ctx.db);
       queueOrderMail(ctx, {
         orgId: order.orgId,
         orderId: order.id,
         to: order.email,
-        subject: `Refund issued for order #${order.id}`,
-        text:
-          `A refund of ${computed.amountMinor} ${order.currency} has been issued for order ` +
-          `#${order.id}.` + (input.note ? `\n\n${input.note}` : ""),
+        template: "refund_notice",
+        email: refundNotice({
+          order: orderMailContext({ order, lines, storeName, supportEmail }),
+          refundedMinor: computed.amountMinor,
+          lines: computed.lines.map((l) => ({
+            title: lines.find((ol) => ol.id === l.orderLineId)?.title ?? "Item",
+            quantity: l.quantity,
+          })),
+          /**
+           * Always false today. Every refund this action writes is `manual` —
+           * the merchant reporting money they sent themselves — so the customer
+           * is told that, not that their card was credited.
+           */
+          settled: false,
+          rail,
+        }),
       });
     }
 
@@ -469,12 +491,23 @@ export const cancelOrder = defineAction({
     });
 
     if (input.notifyCustomer) {
+      const { storeName, supportEmail } = await storeIdentity(order.siteId, ctx.db);
       queueOrderMail(ctx, {
         orgId: order.orgId,
         orderId: order.id,
         to: order.email,
-        subject: `Order #${order.id} was cancelled`,
-        text: `Order #${order.id} has been cancelled.\n\n${input.reason}`,
+        template: "cancellation_notice",
+        email: cancellationNotice({
+          order: orderMailContext({ order, lines, storeName, supportEmail }),
+          reason: input.reason,
+          /**
+           * Cancellation refuses paid orders outright, so this is normally zero
+           * and the template says "you have not been charged". It reads the
+           * stored figure rather than assuming, because an order can carry a
+           * prior partial refund.
+           */
+          refundedMinor: order.refundedMinor,
+        }),
       });
     }
 
@@ -638,16 +671,30 @@ export const fulfillOrder = defineAction({
     });
 
     if (input.notifyCustomer) {
+      const { storeName, supportEmail } = await storeIdentity(order.siteId, ctx.db);
+      const byId = new Map(after.map((l) => [l.id, l]));
       queueOrderMail(ctx, {
         orgId: order.orgId,
         orderId: order.id,
         to: order.email,
-        subject: `Your order #${order.id} has shipped`,
-        text:
-          `Order #${order.id} is on its way.` +
-          (input.carrier ? `\n\nCarrier: ${input.carrier}` : "") +
-          (input.trackingNumber ? `\nTracking: ${input.trackingNumber}` : "") +
-          (input.trackingUrl ? `\n${input.trackingUrl}` : ""),
+        template: "shipping_notice",
+        email: shippingNotice({
+          order: orderMailContext({ order, lines: after, storeName, supportEmail }),
+          carrier: input.carrier ?? null,
+          trackingNumber: input.trackingNumber ?? null,
+          trackingUrl: input.trackingUrl ?? null,
+          shipped: requested.map((r) => ({
+            title: byId.get(r.orderLineId)?.title ?? "Item",
+            quantity: r.quantity,
+          })),
+          /**
+           * Recomputed status, not "did we ship everything in this request".
+           * Telling a shopper the whole order is on its way when half of it is
+           * still on a shelf is the version of this email that generates a
+           * "where is the rest?" ticket a week later.
+           */
+          partial: fulfillmentStatus !== "fulfilled",
+        }),
         onSent: async () => {
           await ctx.db
             .update(fulfillments)
@@ -735,19 +782,14 @@ export const resendOrderConfirmation = defineAction({
     }
 
     const lines = await linesOf(ctx, order.id);
-    const body =
-      `Order #${order.id}\n\n` +
-      (lines.length > 0
-        ? lines.map((l) => `${l.quantity} × ${l.title} — ${l.totalMinor} ${order.currency}`).join("\n")
-        : `${order.quantity} item(s)`) +
-      `\n\nTotal: ${order.amountCents} ${order.currency}`;
+    const { storeName, supportEmail } = await storeIdentity(order.siteId, ctx.db);
 
     queueOrderMail(ctx, {
       orgId: order.orgId,
       orderId: order.id,
       to,
-      subject: `Your order #${order.id}`,
-      text: body,
+      template: "order_confirmation",
+      email: orderConfirmation(orderMailContext({ order, lines, storeName, supportEmail })),
     });
 
     return {
@@ -778,40 +820,46 @@ function queueOrderMail(
     orgId: string;
     orderId: number;
     to: string | null;
-    subject: string;
-    text: string;
+    template: TemplateId;
+    /** Rendered inside the transaction, sent after it commits. */
+    email: RenderedEmail;
     onSent?: () => Promise<void>;
   },
 ): void {
+  const subject = input.email.subject;
+
   if (!input.to) {
     ctx.effect("skip order mail — no address", async () => {
       await recordMailOutcome(ctx, input.orderId, {
         type: "email_failed",
-        message: `Could not send "${input.subject}" — this order has no email address.`,
+        message: `Could not send "${subject}" — this order has no email address.`,
       });
     });
     return;
   }
   const to = input.to;
 
-  ctx.effect(`order mail: ${input.subject}`, async () => {
+  ctx.effect(`order mail: ${subject}`, async () => {
     const result = await sendMerchantMail(input.orgId, {
       to,
-      subject: input.subject,
-      text: input.text,
+      subject,
+      html: input.email.html,
+      text: input.email.text,
+      template: input.template,
+      orderId: input.orderId,
     });
     if (result.sent) {
       await input.onSent?.();
       await recordMailOutcome(ctx, input.orderId, {
         type: "email_sent",
-        message: `Sent "${input.subject}" to ${to}.`,
-        data: { provider: result.provider, id: result.id, to },
+        message: `Sent "${subject}" to ${to}.`,
+        data: { provider: result.provider, id: result.id, to, template: input.template },
       });
     } else {
       await recordMailOutcome(ctx, input.orderId, {
         type: "email_failed",
-        message: `Could not send "${input.subject}" to ${to}: ${result.reason}`,
-        data: { provider: result.provider, reason: result.reason, to },
+        message: `Could not send "${subject}" to ${to}: ${result.reason}`,
+        data: { provider: result.provider, reason: result.reason, to, template: input.template },
       });
     }
   });

@@ -7,6 +7,7 @@ import { loadStore } from "@/lib/commerce/cart";
 import { deliveryForOrder } from "@/lib/commerce/delivery";
 import { completeCheckout, failCheckout } from "@/lib/commerce/orders";
 import { checkoutSessions, db, orders } from "@/lib/db";
+import { sendDeliveryMail } from "@/lib/email/deliver";
 import { defaultWallet } from "@/lib/integrations";
 import { verifyOnChain } from "@/lib/x402";
 
@@ -117,6 +118,30 @@ export const POST = handler(async (req, { params }) => {
    * expires in minutes and would be dead by the time a receipt is opened.
    */
   const delivery = await deliveryForOrder(db, result.orderId, tenantBaseUrl(slug));
+
+  /**
+   * The email copy of those links (§6).
+   *
+   * Sent only on a genuine completion, never on the idempotent retry above: a
+   * webhook and a browser redirect both land here, and mailing the shopper twice
+   * for one purchase is the kind of thing that gets a sending domain reported.
+   *
+   * Awaited rather than fired and forgotten — a serverless function that returns
+   * kills its own pending work, and this send is the delivery mechanism for a
+   * download-only order. It cannot throw (see `sendDeliveryMail`), so a mail
+   * failure never turns a settled payment into an error.
+   */
+  if (!result.alreadyCompleted) {
+    await sendDeliveryMail({
+      orgId: site.orgId,
+      orderId: result.orderId,
+      to: session.email,
+      storeName: site.name,
+      delivery,
+      totalMinor: session.totalMinor,
+      currency: session.currency,
+    });
+  }
 
   return NextResponse.json({
     ok: true,

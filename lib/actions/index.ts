@@ -26,6 +26,7 @@ import "./definitions/shipping";
 import "./definitions/orders";
 import "./definitions/delivery";
 import "./definitions/readiness";
+import "./definitions/email";
 
 export { defineAction, getAction, allActions, describeAction } from "./registry";
 export {

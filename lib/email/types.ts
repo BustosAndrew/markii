@@ -25,6 +25,21 @@ export type MailInput = {
 };
 
 /**
+ * Merchant mail carries two extra fields, and both are required rather than
+ * optional on purpose.
+ *
+ * `template` is what makes `email_deliveries` answerable months later — "which
+ * of our emails is bouncing?" cannot be reconstructed from a subject line a
+ * merchant has since reworded. `orderId` is what ties a delivery back to the
+ * order a support conversation is actually about.
+ */
+export type MerchantMailInput = MailInput & {
+  /** A `TemplateId` from `lib/email/templates/`. */
+  template: string;
+  orderId?: number | null;
+};
+
+/**
  * A discriminated union rather than a thrown error, deliberately.
  *
  * §16 requires that an invitation is never reported as delivered unless a

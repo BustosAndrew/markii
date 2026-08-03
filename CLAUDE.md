@@ -50,13 +50,24 @@ and period-close assessments are live (`lib/billing/`). Everything needing Strip
 plan changes, payment methods, invoices, the webhook — refuses with `503 CONFIGURATION_REQUIRED`.
 **Nothing is charged**, and every billing response says so.
 
+**Email plumbing is built; no mail is sent.** `lib/email/` has the SES v2 transport (hand-rolled
+SigV4 over `fetch`), per-merchant sending identities, the suppression list, a signature-verified
+SNS bounce webhook, and the five transactional templates — wired into `orders.*` and checkout
+completion (§24). **Every send is recorded as `not_configured`** because this deployment has no AWS
+credentials, and merchant mail is never rerouted through Resend to hide that (G1).
+
 **Still planned:** the **card rail** (no `STRIPE_SECRET_KEY`; `lib/payments/` reports
 *configuration required*), Stripe Tax, gift cards, processor-executed refunds, membership gating,
-and SES email plumbing. Everything in §10–15 and §19–21 is untouched.
+shopper auth mail via Supabase's Send Email Hook, and abandoned-cart mail. Everything in §10–15 and
+§19–21 is untouched.
 
-**One env var unlocks most of the gaps:** `STRIPE_SECRET_KEY` turns on the card rail, subscriptions,
-invoices, and processor refunds. Until it exists, those paths refuse rather than stub — see the
-`configuration_required` pattern in `lib/payments/` and `app/api/billing/`.
+**Two credentials gate almost everything that remains, and neither is a switch.**
+`STRIPE_SECRET_KEY` is a *prerequisite* for the card rail, subscriptions, invoices, and processor
+refunds — those routes refuse unconditionally today and still need implementing once the key
+exists. AWS SES credentials are the opposite: the code is finished, so credentials plus sandbox
+escape plus a merchant's verified domain are all that stand between here and real mail. Until then
+both refuse rather than stub — see the `configuration_required` pattern in `lib/payments/`,
+`app/api/billing/`, and `lib/email/`.
 
 Always check the **status legend at the top of `docs/API.md`** before calling an endpoint — it is
 per-section and kept current. Call `/api/*` only — never `lib/db` / Drizzle from frontend screens.

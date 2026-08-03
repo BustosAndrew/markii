@@ -307,18 +307,57 @@ other infrastructure line combined. Scores derive from real catalog data; contra
 >   and does not exist, so nothing scores a merchant on it — that would be a fabricated criticism.
 >   Those groups are reported in `notMeasured` with the reason.
 
-### 6. Email plumbing
+### 6. Email plumbing — mostly done
 
-`lib/email/` exposing `sendPlatformMail()` (→ Resend, `markii.shop`) and `sendMerchantMail()`
+> **Built 2026-08-02** — `lib/email/` (`ses.ts` + `sigv4.ts` transport, `identity.ts`,
+> `suppression.ts`, `sns.ts`, `templates/`), the `email_identities` / `email_suppressions` /
+> `email_deliveries` tables (migration `0018`), `GET /api/settings/email`,
+> `POST /api/webhooks/ses`, and five §22 actions. Order confirmation, shipping, refund,
+> cancellation and digital-delivery mail is wired into `orders.*` and checkout completion.
+> Full contract in `docs/API.md` §24.
+>
+> **Nothing sends from this deployment** — SES has no credentials — and that is visible rather
+> than silent: every attempt writes an `email_deliveries` row with `status: "not_configured"`,
+> the order timeline gets `email_failed`, and `/api/settings/email` says so.
+
+`lib/email/` exposes `sendPlatformMail()` (→ Resend, `markii.shop`) and `sendMerchantMail()`
 (→ SES, the merchant's verified domain). Callers pick the **stream**, never the provider.
 
+**The transport is hand-rolled SigV4 over `fetch`, not `@aws-sdk/client-sesv2`** — SES v2 is a JSON
+REST API and `ses.ts` is the whole client, where the SDK would put a large dependency tree on a path
+that runs inside order completion. The cost is that the signing has to be right, so `sigv4.test.ts`
+pins it to **AWS's own published vectors** rather than to "a real request worked once": a wrong
+signature yields `403 SignatureDoesNotMatch` with no hint which of the six canonical lines was
+malformed.
+
+Three things shape the design, and each is a rule rather than a preference:
+
+- **No fallback to Resend, ever.** A merchant's order confirmation leaving from `markii.shop` puts
+  their bounces on Markii's sending reputation. Without a verified domain, merchant mail does not
+  send — it is not quietly rerouted, and it is not sent from a "test mode" Markii address either.
+- **Suppression is checked before every send**, and it is what keeps the SES account alive: AWS
+  suspends above ~5% bounce or 0.1% complaint, measured **across the whole account**, so one
+  merchant mailing a dead address can cut off every merchant on the platform.
+- **The bounce webhook is signature-verified, and the certificate URL is host-checked before it is
+  fetched.** An unverified endpoint is a remote suppression button.
+
+Still outstanding, and none of it is code:
+
 - Merchant mail requires a **verified sending domain to go live** — blocking item on the publish
-  checklist. Test mode may send from Markii's domain, labeled.
-- Shopper auth mail goes through Supabase's **Send Email Hook** → your handler → SES, reading
-  `store_id` from user metadata to pick the sender. Supabase's built-in SMTP allows only one
-  from-address per project, which is why the hook is required.
-- Secure Email Change requires sending **two** emails with specific token/hash pairings.
-- SES sandbox escape needs AWS approval — **start that early**, it is not instant.
+  checklist.
+- SES **sandbox escape** needs AWS approval — **start that early**, it is not instant and it is
+  refusable.
+- An SES **configuration set** with an SNS destination pointed at `/api/webhooks/ses`
+  (`SES_CONFIGURATION_SET`). Without it SES still sends, nothing is suppressed, and the account
+  drifts toward a suspension unseen.
+
+Not built:
+
+- Shopper auth mail through Supabase's **Send Email Hook** → your handler → SES, reading `store_id`
+  from user metadata to pick the sender. Supabase's built-in SMTP allows only one from-address per
+  project, which is why the hook is required.
+- Secure Email Change, which requires sending **two** emails with specific token/hash pairings.
+- Abandoned-cart mail and any broadcast/campaign sending.
 
 ---
 
