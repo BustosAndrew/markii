@@ -259,8 +259,18 @@ historical orders is lossy and painful.
   an alert on drift between the two.
 - The marginal formula in §4.3 — only the slice above the threshold is billable. Round half-even.
 
-**Stripe webhooks:** verify signatures, handle retries idempotently, and note that Connect sends
-events for connected accounts as well as the platform — route them separately.
+**Stripe webhooks — the receiver is now built** (`/api/webhooks/stripe`,
+`lib/payments/stripe-webhook.ts`), deliberately **ahead of** the routes it will feed: an event
+dropped while a handler was missing is never redelivered, so the endpoint has to exist before the
+first capability that cares. It verifies the signature (HMAC-SHA256 over `${timestamp}.${rawBody}`,
+constant-time, 5-minute tolerance, hand-rolled like the SigV4 and SNS code), claims the event by
+Stripe's own id in `stripe_webhook_events` so a redelivery collides rather than replays, and
+records `received` / `processed` / `ignored` / `failed` with a mandatory reason on the last two.
+**Connect and platform events use separate signing secrets and the route never falls back between
+them** — an event with `account` is a merchant's, one without is Markii's own.
+
+Add handlers to the `HANDLERS` map as each capability lands. Until then every recognised type is
+recorded as `ignored` with a reason, never silently dropped, and **no billing state changes**.
 
 ### 4. Phase C — commerce core
 

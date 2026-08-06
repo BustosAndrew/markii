@@ -34,7 +34,7 @@ carry an explicit status — **never call a `PLANNED` endpoint and never fake it
 | 14 | Analytics v2 (funnel, channels, failures) | 🟡 PLANNED | E |
 | 15 | Automations, activity, notifications, team | 🟡 PLANNED | E |
 | 16 | Accounts, organizations, staff | partial — `/api/auth/*`, `/api/me`, `/api/org`, `/api/org/staff*`, `/api/org/tokens*`, `/api/org/switch`, and **org scoping of §1–8** are ✅ LIVE; **audit, sessions, and MFA** remain PLANNED. (Tokens and org switching were listed as planned here until 2026-08-03; both were already routed.) Frontend: `/dashboard/settings/team` and the sidebar org switcher | **A** |
-| 17 | Billing, plans, metering, threshold fees | partial — ✅ LIVE: usage ledger, threshold fee engine, meter, plan catalog, entitlements, period-close assessments. 🟡 Stripe-dependent routes (subscription changes, payment method, invoices, webhook) refuse with 503 CONFIGURATION_REQUIRED; **nothing is charged** | B |
+| 17 | Billing, plans, metering, threshold fees | partial — ✅ LIVE: usage ledger, threshold fee engine, meter, plan catalog, entitlements, period-close assessments, and the **Stripe webhook** (verified + idempotent, no handlers yet). 🟡 Stripe-dependent routes (subscription changes, payment method, invoices) refuse with 503 CONFIGURATION_REQUIRED; **nothing is charged** | B |
 | 18 | Commerce core (variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping, **memberships**) | partial — §18.1–18.6 ✅ LIVE **except** the §18.4 card rail and §18.6 Stripe Tax; §18.5 gift cards are ⛔ **deferred** (D33). §18.7 order operations, §18.8 digital delivery, and §18.9 membership gating + shopper login ✅ LIVE, **except** processor-executed refunds (Markii records a refund and meters it; the merchant moves the money) and recurring/auto-renewing membership billing | C |
 | 19 | Site builder & content | 🟡 PLANNED | D |
 | 20 | Disputes & chargebacks | 🟡 PLANNED | F |
@@ -1369,7 +1369,7 @@ because it cannot be derived later), the **threshold fee engine** (`lib/billing/
 immutable `fee_assessments` ledger with a reconciliation check.
 
 **🟡 Blocked on `STRIPE_SECRET_KEY`.** Subscriptions, plan changes, proration, payment methods,
-invoices, dunning, and the webhook. These **refuse with `503 CONFIGURATION_REQUIRED`** rather than
+invoices, and dunning. These **refuse with `503 CONFIGURATION_REQUIRED`** rather than
 returning stubs: a plan change that moved `organizations.planId` without a subscription behind it
 would grant a higher threshold and more storefronts for free with nothing sold, and a fake
 SetupIntent secret fails inside Stripe's own card element *after* the merchant types their card
@@ -1417,7 +1417,33 @@ interface UsageRecord {            // immutable; written at event time, never de
 | `GET` | `/api/billing/invoices` · `/:id` | History + line-itemized detail |
 | `POST` | `/api/billing/payment-method` | Stripe SetupIntent client secret; card data never touches Markii |
 | `POST` | `/api/billing/addons/:addon` · `DELETE` | Toggle add-on entitlement |
-| `POST` | `/api/webhooks/stripe` | Signature-verified, idempotent, retry-safe |
+| `POST` | `/api/webhooks/stripe` | ✅ LIVE — signature-verified, idempotent, retry-safe. **No handlers yet** (see below) |
+
+### `POST /api/webhooks/stripe` — ✅ LIVE (unauthenticated, signature-verified)
+
+Built **ahead of** the routes it will feed, because an event dropped while a handler was missing is
+never redelivered. It verifies, records, and acknowledges; it does not yet change billing state,
+because nothing downstream of it is built.
+
+- **Two endpoints point here.** Connect delivers events for *merchants'* accounts as well as
+  Markii's own. An event carrying `account` is a connected merchant's; one without it is the
+  platform's. They are configured separately in Stripe with **separate signing secrets**, and the
+  route **never falls back** from one secret to the other — sharing them would make an unverifiable
+  event look verified.
+- **The signature is the only authentication.** HMAC-SHA256 over `${timestamp}.${rawBody}`,
+  compared in constant time, with a 5-minute tolerance so a captured event cannot be replayed
+  forever. Hand-rolled over `node:crypto` (`lib/payments/stripe-webhook.ts`), matching the SigV4
+  and SNS precedents. Multiple `v1` signatures are accepted, so a secret roll does not drop events.
+- **Idempotent on Stripe's event id**, which is the primary key of `stripe_webhook_events`. A
+  redelivery collides instead of running a handler twice — `invoice.paid` processed twice is a
+  merchant charged twice.
+- **Status codes are chosen for Stripe's retry behaviour**, which is the opposite of the SES
+  webhook's: missing secret → `503`, bad signature → `400`, duplicate → `200`, recognised but
+  unhandled → `200` with the reason recorded, handler threw → **`500` so Stripe retries** over its
+  three-day window.
+- Every event is recorded with a status of `received` / `processed` / `ignored` / `failed`, and
+  `ignored` and `failed` **must** carry a reason — enforced by a database check, because a decision
+  with no reason recorded is indistinguishable from a handler that silently did nothing.
 
 ### `GET /api/billing/usage` — threshold meter
 

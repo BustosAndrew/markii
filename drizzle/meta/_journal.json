@@ -148,6 +148,13 @@
       "when": 1785745704777,
       "tag": "0020_drop_membership_purchase_check",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1786009151620,
+      "tag": "0021_stripe_webhook_events",
+      "breakpoints": true
     }
   ]
 }

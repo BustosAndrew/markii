@@ -2023,6 +2023,60 @@ export const emailDeliveries = pgTable(
   ],
 );
 
+// ---------------------------------------------------------------------------
+// Stripe webhooks (§17)
+// ---------------------------------------------------------------------------
+
+/**
+ * Every verified Stripe event, recorded before it is acted on.
+ *
+ * **This table is the idempotency key, and it is not optional.** Stripe
+ * redelivers on any non-2xx for up to three days, and delivers at least once
+ * even when everything succeeds — a duplicate `invoice.paid` processed twice is
+ * a merchant charged twice, which `docs/BACKEND.md` names as the billing dispute
+ * to avoid. The event id is the primary key, so the second delivery collides
+ * rather than replays.
+ *
+ * `processedAt` is separate from insertion on purpose: a row exists from the
+ * moment the event is claimed, so a crash mid-handler leaves visible evidence of
+ * an event that arrived and never finished, rather than either a silent gap or a
+ * loop that retries forever.
+ *
+ * **No `orgId`.** The event arrives before anything is resolved, and a webhook
+ * that could not be attributed still has to be recorded — attribution failure is
+ * exactly what someone debugging needs to see.
+ */
+export const stripeWebhookEvents = pgTable(
+  "stripe_webhook_events",
+  {
+    /** Stripe's `evt_…`. Their id, not ours — that is what makes it idempotent. */
+    id: text("id").primaryKey(),
+    type: text("type").notNull(),
+    /**
+     * The connected account, when this is a Connect event. **Null means the
+     * event is the platform's own**, and the two are routed separately: Connect
+     * sends events for merchants' accounts to the same code, and confusing a
+     * merchant's `invoice.paid` with Markii's own would bill the wrong party.
+     */
+    stripeAccount: text("stripe_account"),
+    /** Stripe's own test/live flag, kept so test events can never be mistaken for real ones. */
+    livemode: boolean("livemode").notNull(),
+    status: text("status", { enum: ["received", "processed", "ignored", "failed"] })
+      .notNull()
+      .default("received"),
+    /** Why it was ignored, or how it failed. Present whenever status is not `processed`. */
+    detail: text("detail"),
+    /** The verified payload, for replay and for answering "what did Stripe actually send?". */
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+    processedAt: timestamp("processed_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("stripe_webhook_events_type_idx").on(t.type, t.receivedAt),
+    index("stripe_webhook_events_account_idx").on(t.stripeAccount),
+  ],
+);
+
 /** One manual tax rate. `rateBps` is basis points — 875 is 8.75%. */
 export type ManualTaxRate = {
   country: string;
@@ -2115,3 +2169,4 @@ export type TaxSettings = typeof taxSettings.$inferSelect;
 export type EmailIdentity = typeof emailIdentities.$inferSelect;
 export type EmailSuppression = typeof emailSuppressions.$inferSelect;
 export type EmailDelivery = typeof emailDeliveries.$inferSelect;
+export type StripeWebhookEvent = typeof stripeWebhookEvents.$inferSelect;

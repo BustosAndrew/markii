@@ -46,9 +46,11 @@ checkout, discounts, tax, shipping, order operations, digital delivery; and rule
 (§9). Supabase Storage backs both uploads and the files merchants sell.
 
 **Phase B billing is half built.** The threshold fee engine, the meter, plan catalog, entitlements,
-and period-close assessments are live (`lib/billing/`). Everything needing Stripe — subscriptions,
-plan changes, payment methods, invoices, the webhook — refuses with `503 CONFIGURATION_REQUIRED`.
-**Nothing is charged**, and every billing response says so.
+and period-close assessments are live (`lib/billing/`), as is the **Stripe webhook receiver**
+(`/api/webhooks/stripe` — signature-verified, idempotent on Stripe's event id, separate secrets for
+platform and Connect events; **no handlers yet, so no billing state changes**). Everything else
+needing Stripe — subscriptions, plan changes, payment methods, invoices — refuses with
+`503 CONFIGURATION_REQUIRED`. **Nothing is charged**, and every billing response says so.
 
 **Email plumbing is built; no mail is sent.** `lib/email/` has the SES v2 transport (hand-rolled
 SigV4 over `fetch`), per-merchant sending identities, the suppression list, a signature-verified
