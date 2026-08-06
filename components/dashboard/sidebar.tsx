@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useState } from "react";
 import {
   BarChart3,
   Globe,
@@ -16,6 +17,8 @@ import {
   Users,
 } from "lucide-react";
 import { Logo } from "@/components/logo";
+import { switchOrg, type MeResponse } from "@/lib/api/org";
+import { ApiClientError } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
 export const nav = [
@@ -108,22 +111,83 @@ export function SidebarNav({
   );
 }
 
-export function SidebarOrgCard() {
+/**
+ * Active organization, with a switcher when the user belongs to more than one.
+ *
+ * Agencies build stores for clients, so one person legitimately belongs to
+ * several orgs. **Switching only rewrites a preference cookie** — it grants
+ * nothing by itself, because every request re-resolves membership server-side.
+ * That is also why the cookie is not `httpOnly`: it is a preference, not a
+ * credential.
+ *
+ * `router.refresh()` after a switch is not cosmetic — every screen above is
+ * scoped to the active org, so leaving them rendered would show one org's
+ * catalog under another's name.
+ */
+export function SidebarOrgCard({ me }: { me: MeResponse | null }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!me) {
+    return (
+      <div className="rounded-[var(--radius-card)] border border-dashed border-border bg-surface-elevated p-3">
+        <p className="text-xs font-medium uppercase tracking-[0.12em] text-muted">
+          Organization
+        </p>
+        <p className="mt-2 text-sm leading-6 text-muted">Not signed in.</p>
+      </div>
+    );
+  }
+
+  const others = me.organizations.filter((o) => !o.active);
+
   return (
-    <div className="rounded-[var(--radius-card)] border border-dashed border-border bg-surface-elevated p-3">
+    <div className="rounded-[var(--radius-card)] border border-border bg-surface-elevated p-3">
       <p className="text-xs font-medium uppercase tracking-[0.12em] text-muted">
         Organization
       </p>
-      <p className="mt-2 text-sm font-medium text-foreground">Single workspace</p>
-      <p className="mt-1 text-sm leading-6 text-muted">
-        Org switching is coming soon with Phase A auth.
+      <p className="mt-2 truncate text-sm font-medium text-foreground" title={me.org.name}>
+        {me.org.name}
       </p>
+      <p className="mt-0.5 text-xs capitalize text-muted">{me.role.replace(/_/g, " ")}</p>
+
+      {others.length > 0 ? (
+        <select
+          aria-label="Switch organization"
+          className="mt-2 w-full cursor-pointer rounded-[var(--radius-control)] border border-border bg-surface px-2 py-1.5 text-sm text-foreground disabled:cursor-not-allowed"
+          value={me.org.id}
+          disabled={busy}
+          onChange={async (e) => {
+            const orgId = e.target.value;
+            if (orgId === me.org.id) return;
+            setBusy(true);
+            setError(null);
+            try {
+              await switchOrg({ orgId });
+              router.refresh();
+            } catch (err) {
+              setError(err instanceof ApiClientError ? err.message : "Could not switch.");
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          {me.organizations.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.name}
+            </option>
+          ))}
+        </select>
+      ) : null}
+
+      {error ? <p className="mt-2 text-xs text-error-text">{error}</p> : null}
     </div>
   );
 }
 
 /** Desktop rail. Hidden below `lg` — the mobile shell renders `MobileNav` instead. */
-export function DashboardSidebar() {
+export function DashboardSidebar({ me }: { me: MeResponse | null }) {
   return (
     <aside className="sticky top-0 hidden h-dvh w-56 shrink-0 flex-col border-r border-border bg-surface lg:flex">
       <div className="flex h-16 items-center gap-2.5 border-b border-border-nav px-4">
@@ -131,7 +195,7 @@ export function DashboardSidebar() {
       </div>
       <SidebarNav className="flex-1 overflow-y-auto p-3" />
       <div className="border-t border-border p-3">
-        <SidebarOrgCard />
+        <SidebarOrgCard me={me} />
       </div>
     </aside>
   );

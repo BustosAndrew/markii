@@ -9,6 +9,7 @@ import {
   SidebarOrgCard,
   useCurrentSection,
 } from "@/components/dashboard/sidebar";
+import type { MeResponse } from "@/lib/api/org";
 
 const PANEL_ID = "dashboard-mobile-nav";
 
@@ -16,7 +17,7 @@ const PANEL_ID = "dashboard-mobile-nav";
  * Mobile dashboard shell: a sticky bar with a hamburger, plus a slide-in drawer
  * holding the same nav the desktop rail renders. Hidden at `lg` and up.
  */
-export function MobileNav() {
+export function MobileNav({ me }: { me: MeResponse | null }) {
   const pathname = usePathname();
   const section = useCurrentSection();
   const panelRef = useRef<HTMLDivElement>(null);
@@ -136,7 +137,7 @@ export function MobileNav() {
             />
 
             <div className="shrink-0 border-t border-border p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-              <SidebarOrgCard />
+              <SidebarOrgCard me={me} />
             </div>
           </div>
         </div>
