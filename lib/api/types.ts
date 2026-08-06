@@ -114,6 +114,22 @@ export type Order = {
   currency: string;
   provider: "x402" | "stripe";
   txHash: string | null;
+  /**
+   * §18.7. Money and fulfillment are separate axes from `status`, which keeps
+   * its v1 meaning (the payment outcome) — a refunded order is still
+   * `status: "success"`, with `financialStatus: "refunded"` beside it.
+   */
+  financialStatus: "pending" | "paid" | "partially_refunded" | "refunded" | "voided";
+  fulfillmentStatus: "unfulfilled" | "partially_fulfilled" | "fulfilled" | "not_required";
+  /** Minor units, in `currency`. Never format with a hardcoded `/100` (D31). */
+  subtotalMinor: number;
+  discountMinor: number;
+  taxMinor: number;
+  shippingMinor: number;
+  refundedMinor: number;
+  email: string | null;
+  cancelledAt: string | null;
+  cancelReason: string | null;
   agent: {
     userAgent: string;
     name: string;

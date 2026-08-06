@@ -84,6 +84,27 @@ export function intParam(sp: URLSearchParams, name: string): number | undefined 
   return Number.isFinite(n) ? n : undefined;
 }
 
+/**
+ * A filter whose value must be one of a fixed set.
+ *
+ * An unrecognised value is a **400, never a silent no-op**: dropping it would
+ * answer `?status=refunded` (a status that does not exist on that column) with
+ * the unfiltered list, and a merchant reading a screen has no way to tell an
+ * empty filter from one that matched everything.
+ */
+export function enumParam<T extends string>(
+  sp: URLSearchParams,
+  name: string,
+  allowed: readonly T[],
+): T | undefined {
+  const v = sp.get(name);
+  if (v == null || v === "") return undefined;
+  if (!(allowed as readonly string[]).includes(v)) {
+    throw badRequest(`invalid ${name}: expected one of ${allowed.join(", ")}`);
+  }
+  return v as T;
+}
+
 /** `from`/`to` filters (inclusive; date-only `to` extends to end of day). */
 export function dateRange(sp: URLSearchParams): { from?: Date; to?: Date } {
   const parse = (name: string, endOfDay: boolean): Date | undefined => {

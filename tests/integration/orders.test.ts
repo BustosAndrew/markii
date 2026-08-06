@@ -333,5 +333,92 @@ describe("order operations", () => {
     expect(
       refused(await outsider.invoke("orders.refund", { orderId, amountMinor: 100 })),
     ).toBe(true);
+
+    // …and sees an empty list, not somebody else's. A list route that leaks is
+    // worse than a detail route that does: one id versus every order.
+    const list = await outsider.get("/api/orders");
+    expect(list.status).toBe(200);
+    expect(list.json.items).toEqual([]);
+    expect(list.json.total).toBe(0);
+    expect(list.json.totals.byCurrency).toEqual([]);
+  });
+
+  it("lists orders with their itemisation and per-currency totals", async () => {
+    const v = await makeVariant("list", 5);
+    const orderId = await buy(v.id, 2);
+
+    const list = await merchant.get(`/api/orders?siteId=${site.id}&limit=100`);
+    expect(list.status).toBe(200);
+    expect(list.json.total).toBeGreaterThan(0);
+    expect(list.json.total).toBe(list.json.items.length);
+
+    const row = list.json.items.find((o: any) => o.id === orderId);
+    expect(row).toBeDefined();
+    expect(row.itemised).toBe(true);
+    expect(row.lineCount).toBe(1);
+    expect(row.unitCount).toBe(2);
+    expect(row.refundableMinor).toBe(row.amountCents - row.refundedMinor);
+    // Newest first by default.
+    expect(list.json.items[0].id).toBe(orderId);
+
+    // Totals are per currency and never summed across it, and every row's net
+    // is its own gross less its own refunds.
+    expect(list.json.totals.byCurrency.length).toBeGreaterThan(0);
+    for (const c of list.json.totals.byCurrency) {
+      expect(c.netMinor).toBe(c.grossMinor - c.refundedMinor);
+      expect(c.paidOrderCount).toBeLessThanOrEqual(c.orderCount);
+    }
+    const counted = list.json.totals.byCurrency.reduce((n: number, c: any) => n + c.orderCount, 0);
+    expect(counted).toBe(list.json.total);
+
+    // Findable by the order number a merchant would paste from a support email.
+    const byId = await merchant.get(`/api/orders?q=${orderId}`);
+    expect(byId.json.items.map((o: any) => o.id)).toContain(orderId);
+  });
+
+  it("keeps unpaid orders out of the revenue total while still listing them", async () => {
+    const before = await merchant.get(`/api/orders?siteId=${site.id}&limit=100`);
+    const grossBefore = before.json.totals.byCurrency.reduce(
+      (n: number, c: any) => n + c.grossMinor,
+      0,
+    );
+
+    const [pending] = await sql`insert into orders
+      (site_id, product_id, quantity, status, amount_cents, currency, provider)
+      values (${site.id}, ${p1.id}, 1, 'pending', 999900, 'USD', 'x402') returning *`;
+    cleanup.orderIds.push(pending.id);
+
+    const after = await merchant.get(`/api/orders?siteId=${site.id}&limit=100`);
+    // The order is listed — it exists and the merchant should see it…
+    expect(after.json.total).toBe(before.json.total + 1);
+    expect(after.json.items.map((o: any) => o.id)).toContain(pending.id);
+    // …but a payment that never arrived is not revenue.
+    const grossAfter = after.json.totals.byCurrency.reduce(
+      (n: number, c: any) => n + c.grossMinor,
+      0,
+    );
+    expect(grossAfter).toBe(grossBefore);
+
+    const onlyPending = await merchant.get(`/api/orders?siteId=${site.id}&status=pending`);
+    expect(onlyPending.json.items.every((o: any) => o.status === "pending")).toBe(true);
+    expect(onlyPending.json.total).toBeGreaterThan(0);
+    expect(onlyPending.json.totals.byCurrency.every((c: any) => c.grossMinor === 0)).toBe(true);
+  });
+
+  it("refuses a filter value it cannot honour instead of ignoring it", async () => {
+    // `refunded` is a *financial* status. Silently dropping it would answer with
+    // every order, which reads as "all of these were refunded".
+    const bad = await merchant.get("/api/orders?status=refunded");
+    expect(bad.status).toBe(400);
+
+    const ok = await merchant.get("/api/orders?financialStatus=refunded");
+    expect(ok.status).toBe(200);
+    expect(ok.json.items.every((o: any) => o.financialStatus === "refunded")).toBe(true);
+
+    // A rail with no column value, and a §13 filter with no column at all —
+    // both refused by name rather than quietly returning the whole list.
+    expect((await merchant.get("/api/orders?provider=paypal")).status).toBe(400);
+    expect((await merchant.get("/api/orders?exception=true")).status).toBe(400);
+    expect((await merchant.get("/api/orders?paymentStatus=paid")).status).toBe(400);
   });
 });

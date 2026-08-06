@@ -30,7 +30,7 @@ carry an explicit status — **never call a `PLANNED` endpoint and never fake it
 | 10 | Channels | 🟡 PLANNED | E |
 | 11 | Product agent-data extension | 🟡 PLANNED | E |
 | 12 | Agent Test Lab | 🟡 PLANNED | E |
-| 13 | Orders (promoted) | partial — `GET /api/orders/:id` (now with lines, refunds, fulfillments, timeline) and the §18.7 order actions are ✅ LIVE; list/filter/export PLANNED | C |
+| 13 | Orders (promoted) | partial — `GET /api/orders` and `GET /api/orders/:id` (lines, refunds, fulfillments, timeline) and the §18.7 order actions are ✅ LIVE; export PLANNED | C |
 | 14 | Analytics v2 (funnel, channels, failures) | 🟡 PLANNED | E |
 | 15 | Automations, activity, notifications, team | 🟡 PLANNED | E |
 | 16 | Accounts, organizations, staff | partial — `/api/auth/*`, `/api/me`, `/api/org`, `/api/org/staff*`, `/api/org/tokens*`, `/api/org/switch`, and **org scoping of §1–8** are ✅ LIVE; **audit, sessions, and MFA** remain PLANNED. (Tokens and org switching were listed as planned here until 2026-08-03; both were already routed.) Frontend: `/dashboard/settings/team` and the sidebar org switcher | **A** |
@@ -985,12 +985,20 @@ this ships, the Test Lab UI is interface-only and must say so.
 
 ## 13. Orders (promoted from Finances) — partial
 
-`GET /api/orders/:id` is ✅ LIVE (§7). The list, timeline, and the extended fields below are
-🟡 PLANNED. Service: `OrderService` — `listOrders`, `getOrder`, `getTimeline`.
+`GET /api/orders` and `GET /api/orders/:id` are ✅ LIVE; the timeline ships **inside** the detail
+response rather than as its own call (§18.7). The CSV export is 🟡 PLANNED. Client service:
+`lib/api/orders.ts` — `listOrders`.
 Settlement history moves under Orders as a tab (FR-OR-06); §7's finances endpoints stay live and
 back it.
 
-### Extended Order entity
+### Extended Order entity — 🟡 aspirational
+
+**Nothing below this line is a column yet.** `channelId`, `environment`, `paymentRail`,
+`exception`, `payment`, `fulfillment`, and `buyerAuthorization` were sketched against a schema
+that was never built. What the live routes return is the v1 **Order** plus §18.7's
+`financialStatus`, `fulfillmentStatus`, the money split (`subtotalMinor`, `discountMinor`,
+`taxMinor`, `shippingMinor`, `refundedMinor`), `email`, and `cancelledAt` / `cancelReason`. The
+rail lives in `provider` (`x402 | stripe`).
 
 ```ts
 {
@@ -1026,13 +1034,37 @@ back it.
 }
 ```
 
-### `GET /api/orders`
-Query: `q`, `siteId`, `channelId`, `paymentRail`, `paymentStatus`, `fulfillmentStatus`,
-`status`, `exception` (`true` = only orders with an exception), `environment`, `from`, `to`,
-`page`, `limit`, `sort` (`-createdAt|amountCents`).
-→ paginated **Order** + `"totals": { "amountCents": 152300, "orderCount": 87 }`.
+### `GET /api/orders` ✅ LIVE
 
-### `GET /api/orders/:id/timeline`
+Query: `q`, `siteId`, `customerId`, `productId`, `status`, `financialStatus`,
+`fulfillmentStatus`, `provider` (`x402|stripe` — the payment rail), `from`, `to`, `page`, `limit`,
+`sort` (`-createdAt|createdAt|amountCents|-amountCents`). `q` matches order id, buyer email,
+tx hash, agent name, and product name.
+
+**The filters are the columns that exist.** `channelId`, `environment`, `exception`,
+`paymentRail`, and `paymentStatus` were written against the planned schema above and have no
+column behind them; the route answers **400 naming the replacement** rather than accepting a
+filter it cannot honour — an ignored filter returns the whole list, which reads as a match.
+
+→ paginated **Order**, each row extended with `customerId`, `customer` (`{ id, email, name }` or
+`null`), `itemised`, `lineCount`, `unitCount`, and `refundableMinor`, plus:
+
+```json
+{ "totals": { "orderCount": 87, "byCurrency": [
+  { "currency": "USDC", "orderCount": 61, "paidOrderCount": 58,
+    "grossMinor": 152300, "refundedMinor": 4200, "netMinor": 148100 } ] } }
+```
+
+**Totals are grouped by currency and never summed across it** — a store selling in USDC and USD
+has two totals, and one merged number is not money in either (D31). `grossMinor` counts
+`status: "success"` only: pending and failed orders are requests, not receipts. `orderCount`
+still covers every matched row, so a status filter never looks like an empty result.
+
+### `GET /api/orders/:id/timeline` — ❌ not built, and not planned
+
+The timeline arrives as `timeline` on `GET /api/orders/:id` (§18.7), typed as `order_events`. A
+second call would let a screen show a total and a refund history that disagree, because each half
+arrived at a different moment. The shape below is the sketch, not the live one:
 
 ```json
 { "events": [
@@ -1045,11 +1077,13 @@ Query: `q`, `siteId`, `channelId`, `paymentRail`, `paymentStatus`, `fulfillmentS
     "metadata": { }, "occurredAt": "2026-07-26T18:00:00.000Z" } ] }
 ```
 
-### `GET /api/orders/export`
-Same filters as the list. → `text/csv`.
+### `GET /api/orders/export` 🟡 PLANNED
+Same filters as the list. → `text/csv`. `GET /api/finances/sites/:idOrSlug/export` is ✅ LIVE and
+covers a single site's transactions in the meantime.
 
-Operational mutations (refund, cancel, mark fulfilled) are an **open decision** — Orders is
-read-only until that is settled. Do not build mutation controls yet.
+Operational mutations are **settled, and they are not routes**: `orders.refund`, `orders.cancel`,
+`orders.fulfill`, `orders.addNote`, and `orders.resendConfirmation` are registry actions invoked
+via `POST /api/actions/:id` (§18.7, §22 rule 1). The routes in this section stay read-only.
 
 ---
 
