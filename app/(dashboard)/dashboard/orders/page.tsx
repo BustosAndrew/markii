@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { FetchError } from "@/components/dashboard/fetch-error";
 import { OrdersSubnav } from "@/components/dashboard/orders-subnav";
 import { Badge } from "@/components/ui/badge";
@@ -110,7 +111,12 @@ function OrderRow({ order }: { order: OrderListItem }) {
   return (
     <tr className="border-b border-border last:border-0">
       <td className="px-4 py-3">
-        <div className="font-medium text-foreground">#{order.id}</div>
+        <Link
+          href={`/dashboard/orders/${order.id}`}
+          className="font-medium text-foreground hover:text-brand"
+        >
+          #{order.id}
+        </Link>
         <div className="text-xs text-muted">
           {new Date(order.createdAt).toLocaleDateString()}
         </div>

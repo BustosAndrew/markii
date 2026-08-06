@@ -1841,7 +1841,7 @@ Extends §13. Reads are REST; **every mutation is an action** (§22 rule 1), so 
 
 | Method | Route | Notes |
 |---|---|---|
-| `GET` | `/api/orders/:id` | The whole order: `lines`, `refunds`, `fulfillments`, `timeline`, `totals` |
+| `GET` | `/api/orders/:id` | The whole order: `customer`, `lines`, `refunds`, `fulfillments`, `timeline`, `totals` (plus `downloads` and `licenceKeys`, §18.8) |
 
 | Action | Risk | Notes |
 |---|---|---|

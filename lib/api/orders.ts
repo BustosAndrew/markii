@@ -72,8 +72,152 @@ export type OrdersQuery = {
   sort?: "-createdAt" | "createdAt" | "amountCents" | "-amountCents";
 };
 
+/** A line as sold — a snapshot, not a join against today's catalog. */
+export type OrderLine = {
+  id: number;
+  orderId: number;
+  productId: number | null;
+  variantId: number | null;
+  title: string;
+  variantTitle: string | null;
+  sku: string | null;
+  quantity: number;
+  unitPriceMinor: number;
+  subtotalMinor: number;
+  discountMinor: number;
+  taxMinor: number;
+  totalMinor: number;
+  addOns: { productId: number; name: string; unitPriceMinor: number }[];
+  quantityRefunded: number;
+  quantityFulfilled: number;
+  /** Pre-derived by the API so a screen cannot compute them differently. */
+  quantityRefundable: number;
+  quantityUnfulfilled: number;
+  locationId: number | null;
+  createdAt: string;
+};
+
+export type OrderRefund = {
+  id: number;
+  orderId: number;
+  subtotalMinor: number;
+  discountMinor: number;
+  taxMinor: number;
+  shippingMinor: number;
+  amountMinor: number;
+  netSalesMinor: number;
+  currency: string;
+  reason: "requested_by_customer" | "duplicate" | "fraudulent" | "item_unavailable" | "other";
+  note: string | null;
+  restock: boolean;
+  /** `manual` — the merchant sent the money. `processor` — a rail did. */
+  method: "manual" | "processor";
+  rail: "stripe" | "x402" | "manual" | "external";
+  processorReference: string | null;
+  lines: { id: number; refundId: number; orderLineId: number; quantity: number }[];
+  /**
+   * Always `false` today, and shown as such. Markii never holds merchant funds,
+   * the card rail is unwired, and x402 settlement is irreversible — so recording
+   * a refund and moving the money are different facts (§18.7).
+   */
+  moneyMovedByMarkii: boolean;
+  createdAt: string;
+};
+
+export type OrderFulfillment = {
+  id: number;
+  orderId: number;
+  status: "pending" | "shipped" | "delivered" | "cancelled";
+  trackingNumber: string | null;
+  carrier: string | null;
+  trackingUrl: string | null;
+  notifiedCustomer: boolean;
+  note: string | null;
+  lines: { id: number; fulfillmentId: number; orderLineId: number; quantity: number }[];
+  /** Always `false`: Markii does no carrier integration (`docs/PLAN.md` §3). */
+  trackingVerified: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type OrderEvent = {
+  id: number;
+  orderId: number;
+  type:
+    | "placed"
+    | "note"
+    | "refunded"
+    | "cancelled"
+    | "fulfilled"
+    | "fulfillment_updated"
+    | "email_sent"
+    | "email_failed";
+  message: string;
+  data: Record<string, unknown>;
+  visibility: "internal" | "customer";
+  actorType: "user" | "agent" | "token" | "system";
+  actorLabel: string | null;
+  createdAt: string;
+};
+
+/** §18.8. The grant's token is deliberately absent — it is the buyer's credential. */
+export type OrderDownload = {
+  id: number;
+  fileName: string;
+  sizeBytes: number;
+  downloadsUsed: number;
+  downloadLimit: number | null;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  revokedReason: string | null;
+  lastDownloadedAt: string | null;
+  redeemable: boolean;
+  createdAt: string;
+};
+
+export type OrderLicenceKey = {
+  id: number;
+  key: string;
+  productId: number | null;
+  assignedAt: string | null;
+  revokedAt: string | null;
+};
+
+/** What `GET /api/orders/:id` returns: the whole order in one response. */
+export type OrderDetail = Order & {
+  customerId: number | null;
+  /** Null for guest and agent-placed orders — `email` still carries the buyer. */
+  customer: { id: number; email: string; name: string | null } | null;
+  lines: OrderLine[];
+  /**
+   * `false` for orders placed before §18.7 and the earliest x402 orders. They
+   * were never itemised, and inventing lines from today's catalog would show a
+   * merchant prices nobody paid.
+   */
+  itemised: boolean;
+  refunds: OrderRefund[];
+  fulfillments: OrderFulfillment[];
+  timeline: OrderEvent[];
+  downloads: OrderDownload[];
+  licenceKeys: OrderLicenceKey[];
+  totals: {
+    subtotalMinor: number;
+    discountMinor: number;
+    taxMinor: number;
+    shippingMinor: number;
+    totalMinor: number;
+    refundedMinor: number;
+    refundableMinor: number;
+    currency: string;
+  };
+};
+
 export function listOrders(query?: OrdersQuery, init?: RequestInit) {
   return apiGet<OrdersResponse>("/api/orders", query, init);
+}
+
+export function getOrder(id: number, init?: RequestInit) {
+  return apiGet<OrderDetail>(`/api/orders/${id}`, undefined, init);
 }
 
 /**

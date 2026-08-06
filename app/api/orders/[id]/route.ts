@@ -4,6 +4,7 @@ import { badRequest, notFound } from "@/lib/api";
 import { orgHandler } from "@/lib/auth/handler";
 import { siteScope } from "@/lib/tenancy";
 import {
+  customers,
   db,
   digitalAssets,
   downloadGrants,
@@ -45,6 +46,29 @@ export const GET = orgHandler(
     if (!order) throw notFound("Order");
 
     const [serialized] = await serializeOrders([order]);
+
+    /**
+     * Who bought it, when the order knows. Scoped again on the way out rather
+     * than trusted from the order's own `customerId` — one lookup is not a
+     * reason to leave a tenancy boundary to an invariant elsewhere in the file.
+     *
+     * Null for guest and agent-placed orders, which is a real state: `email` is
+     * the copy frozen at checkout and survives the customer's erasure (§18.3).
+     */
+    const [customer] = order.customerId
+      ? await db
+          .select({
+            id: customers.id,
+            email: customers.email,
+            firstName: customers.firstName,
+            lastName: customers.lastName,
+          })
+          .from(customers)
+          .where(
+            and(eq(customers.id, order.customerId), siteScope(orgId, customers.siteId)),
+          )
+          .limit(1)
+      : [];
 
     const lines = await db
       .select()
@@ -103,6 +127,14 @@ export const GET = orgHandler(
 
     return NextResponse.json({
       ...serialized,
+      customerId: order.customerId,
+      customer: customer
+        ? {
+            id: customer.id,
+            email: customer.email,
+            name: [customer.firstName, customer.lastName].filter(Boolean).join(" ") || null,
+          }
+        : null,
       lines: lines.map((l) => ({
         ...l,
         /** What is still refundable and still to ship, so the UI need not derive it. */

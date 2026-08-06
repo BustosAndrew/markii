@@ -106,6 +106,12 @@ describe("order operations", () => {
     expect(detail.json.itemised).toBe(true);
     expect(detail.json.lines).toHaveLength(1);
 
+    // The buyer, when the order knows one. This checkout is a guest's, and
+    // `null` is the honest answer — `email` still carries who to contact.
+    expect(detail.json).toHaveProperty("customer");
+    expect(detail.json.customer).toBeNull();
+    expect(detail.json.customerId).toBeNull();
+
     const [line] = detail.json.lines;
     expect(line.quantity).toBe(2);
     expect(line.quantityRefundable).toBe(2);

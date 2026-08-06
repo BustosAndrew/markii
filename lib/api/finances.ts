@@ -59,6 +59,4 @@ export function siteFinancesExportUrl(
   return `/api/finances/sites/${encodeURIComponent(idOrSlug)}/export${buildQuery(query)}`;
 }
 
-export function getOrder(id: number, init?: RequestInit) {
-  return apiGet<Order>(`/api/orders/${id}`, undefined, init);
-}
+/** `getOrder` lives in ./orders — the detail response is far more than an `Order`. */
