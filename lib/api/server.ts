@@ -8,6 +8,7 @@ import { GET as emailSettingsGET } from "@/app/api/settings/email/route";
 import { GET as financesOverviewGET } from "@/app/api/finances/overview/route";
 import { GET as financesSiteGET } from "@/app/api/finances/sites/[idOrSlug]/route";
 import { GET as integrationsGET } from "@/app/api/integrations/route";
+import { GET as ordersGET } from "@/app/api/orders/route";
 import { GET as overviewGET } from "@/app/api/overview/route";
 import { GET as collectionsGET } from "@/app/api/collections/route";
 import { GET as customersGET } from "@/app/api/customers/route";
@@ -31,6 +32,7 @@ import type { EmailSettings } from "./email";
 import type { CustomerMembership, MembershipTier } from "./memberships";
 import type { Collection, Customer, Discount } from "./commerce";
 import type { MeResponse, ScopedToken, StaffMember } from "./org";
+import type { OrdersQuery, OrdersResponse } from "./orders";
 import type { ReadinessReport } from "./readiness";
 import type { AnalyticsOverview, AnalyticsQuery, AnalyticsSiteDetail } from "./analytics";
 import type { FinancesOverview, FinancesQuery, FinancesSiteDetail } from "./finances";
@@ -215,6 +217,13 @@ export const listDiscounts = (query?: {
   limit?: number;
 }) =>
   call<Paginated<Discount>>(discountsGET, "/api/discounts", query as Record<string, QueryValue>);
+
+/**
+ * §13. `totals` is grouped by currency and must be rendered that way — see
+ * `OrdersResponse` in ./orders for why one merged number would not be money.
+ */
+export const listOrders = (query?: OrdersQuery) =>
+  call<OrdersResponse>(ordersGET, "/api/orders", query as Record<string, QueryValue>);
 
 export const listCustomers = (query?: {
   q?: string;

@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 export function ListFilters({
   searchPlaceholder = "Search…",
   filters,
+  dateRange = false,
   className,
 }: {
   searchPlaceholder?: string;
@@ -16,6 +17,12 @@ export function ListFilters({
     label: string;
     options: { value: string; label: string }[];
   }[];
+  /**
+   * Adds `from`/`to` inputs beside the selects. Kept here rather than in a
+   * second component so a screen that needs both does not render two search
+   * boxes writing to the same `q`.
+   */
+  dateRange?: boolean;
   className?: string;
 }) {
   const router = useRouter();
@@ -36,7 +43,7 @@ export function ListFilters({
   return (
     <div
       className={cn(
-        "mb-6 flex flex-col gap-3 sm:flex-row sm:items-center",
+        "mb-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center",
         pending && "opacity-70",
         className,
       )}
@@ -70,6 +77,24 @@ export function ListFilters({
           ))}
         </Select>
       ))}
+      {dateRange ? (
+        <>
+          <Input
+            type="date"
+            aria-label="From date"
+            className="sm:max-w-[160px]"
+            value={searchParams.get("from") ?? ""}
+            onChange={(e) => update("from", e.target.value)}
+          />
+          <Input
+            type="date"
+            aria-label="To date"
+            className="sm:max-w-[160px]"
+            value={searchParams.get("to") ?? ""}
+            onChange={(e) => update("to", e.target.value)}
+          />
+        </>
+      ) : null}
     </div>
   );
 }
