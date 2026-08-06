@@ -67,6 +67,19 @@ export class Client {
     return { status: res.status, json };
   }
 
+  /**
+   * A response whose body is not JSON and whose headers are the point — a CSV
+   * export, `llms.txt`, `sitemap.xml`. {@link call} would swallow both: it
+   * truncates an unparseable body to 500 characters and drops the headers, so a
+   * test could not tell an attachment from a rendered page.
+   */
+  async getRaw(path: string): Promise<{ status: number; headers: Headers; text: string }> {
+    const res = await fetch(`${BASE_URL}${path}`, {
+      headers: this.cookie ? { cookie: this.cookie } : {},
+    });
+    return { status: res.status, headers: res.headers, text: await res.text() };
+  }
+
   get = <T = any>(p: string) => this.call<T>("GET", p);
   post = <T = any>(p: string, b?: unknown) => this.call<T>("POST", p, b);
   patch = <T = any>(p: string, b?: unknown) => this.call<T>("PATCH", p, b);

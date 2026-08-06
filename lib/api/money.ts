@@ -65,6 +65,25 @@ export function formatMinor(
 }
 
 /**
+ * The same amount as a **plain decimal string** — for CSV cells, accounting
+ * imports, and anywhere a machine reads the number back.
+ *
+ * {@link formatMinor} is for humans and adds a symbol and grouping separators;
+ * a `1,523.00` in a comma-separated file is two columns, and `$` is not a digit.
+ *
+ * The scaling is integer and string work, never `minor / 100`: the exponent is
+ * the currency's (JPY has none, D31), and float division is exactly what the
+ * money rule forbids.
+ */
+export function decimalMinor(amountMinor: number, currency: string): string {
+  const exponent = currencyExponent(currency);
+  if (exponent === 0) return String(amountMinor);
+  const digits = String(Math.abs(amountMinor)).padStart(exponent + 1, "0");
+  const sign = amountMinor < 0 ? "-" : "";
+  return `${sign}${digits.slice(0, -exponent)}.${digits.slice(-exponent)}`;
+}
+
+/**
  * Legacy `*Cents` fields from API §1–8 only, which are USD/USDC-shaped by
  * design. Anything with a `Minor` suffix uses {@link formatMinor} (D31).
  */

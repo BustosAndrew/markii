@@ -420,5 +420,55 @@ describe("order operations", () => {
     expect((await merchant.get("/api/orders?provider=paypal")).status).toBe(400);
     expect((await merchant.get("/api/orders?exception=true")).status).toBe(400);
     expect((await merchant.get("/api/orders?paymentStatus=paid")).status).toBe(400);
+
+    // The export shares the filter builder, so it refuses identically. An export
+    // that applied a wider filter than the screen is the copy that reaches an
+    // accountant.
+    expect((await merchant.get("/api/orders/export?exception=true")).status).toBe(400);
+    expect((await merchant.get("/api/orders/export?status=refunded")).status).toBe(400);
+  });
+
+  it("exports the same orders the list shows, as a csv", async () => {
+    const list = await merchant.get(`/api/orders?siteId=${site.id}&limit=100`);
+    const csv = await merchant.getRaw(`/api/orders/export?siteId=${site.id}`);
+
+    expect(csv.status).toBe(200);
+    expect(csv.headers.get("content-type")).toContain("text/csv");
+    expect(csv.headers.get("content-disposition")).toContain("attachment");
+    // One org's ledger — never a shared cache.
+    expect(csv.headers.get("cache-control")).toContain("private");
+
+    const rows = csv.text.trim().split("\r\n");
+    expect(rows[0]).toBe(
+      "id,created_at,site,status,financial_status,fulfillment_status,payment_rail,currency," +
+        "subtotal,discount,tax,shipping,total,refunded,email,product,quantity,tx_hash,agent",
+    );
+
+    // Header plus exactly the rows the list reported — no truncation, no extras.
+    expect(rows.length - 1).toBe(list.json.total);
+    const csvIds = rows
+      .slice(1)
+      .map((r: string) => Number(r.split(",")[0]))
+      .sort((a: number, b: number) => a - b);
+    const listIds = list.json.items
+      .map((o: any) => o.id)
+      .sort((a: number, b: number) => a - b);
+    expect(csvIds).toEqual(listIds);
+
+    const cells = rows[1].split(",");
+    // The rail is named as such, not flattened into "payment method".
+    expect(cells[6]).toBe("x402");
+    // Money is a plain decimal in the row's own currency: no symbol (not a
+    // digit) and no grouping separator (a column break in a CSV).
+    for (const i of [8, 9, 10, 11, 12, 13]) {
+      expect(cells[i]).toMatch(/^-?\d+(\.\d+)?$/);
+    }
+
+    // The decimal point is placed, not the value changed — removing it recovers
+    // the exact minor-unit integer, whatever the currency's exponent.
+    const top = list.json.items.find((o: any) => o.id === Number(cells[0]));
+    expect(top).toBeDefined();
+    expect(Number(cells[12].replace(".", ""))).toBe(top.amountCents);
+    expect(Number(cells[8].replace(".", ""))).toBe(top.subtotalMinor);
   });
 });

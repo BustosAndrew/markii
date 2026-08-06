@@ -44,6 +44,14 @@ session's `lineSnapshot`), and `orders.refund` / `cancel` / `fulfill` / `addNote
 stock left from, and meter **net sales** — see below. Fulfillment is manual and explicitly
 unverified; Markii does no fulfillment logistics.
 
+**The merchant-facing reads are §13** and are now live: `GET /api/orders` (filtered, paginated,
+totals **grouped by currency and never summed across it**) and `GET /api/orders/export`. Both build
+their `where` from **`orderListFilters` in `lib/queries.ts`** — a shared builder rather than two
+copies, because an export that filtered differently from the screen it was launched from is the copy
+that reaches an accountant. It also refuses §13's speculative filters (`channelId`, `environment`,
+`exception`, `paymentRail`, `paymentStatus`) **by name**: those have no columns, and an ignored
+filter returns everything, which reads as a match.
+
 **§18.8 digital delivery landed** — the D5 beachhead, and with it Supabase Storage
 (`lib/storage/`, §0 task 8). A paid order issues `download_grants` inside the completion
 transaction; `/_sites/:site/download/:token` authorises, meters, and **302s to a five-minute signed

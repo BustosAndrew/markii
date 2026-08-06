@@ -1,5 +1,5 @@
 import { and, count, eq, gte, ilike, lte, or, sql, type SQL } from "drizzle-orm";
-import { badRequest, dateRange, notFound, tenantBaseUrl } from "@/lib/api";
+import { badRequest, dateRange, enumParam, intParam, notFound, tenantBaseUrl } from "@/lib/api";
 import {
   agentTraffic,
   categories,
@@ -12,7 +12,7 @@ import {
   type Product,
   type Site,
 } from "@/lib/db";
-import { ownSites, siteScope, type OrgId } from "@/lib/tenancy";
+import { ownSites, siteScope, siteScopeForStaff, type OrgId } from "@/lib/tenancy";
 
 // ---------- URLs ----------
 
@@ -373,6 +373,105 @@ export function transactionFilters(siteId: number, sp: URLSearchParams): SQL | u
   const q = sp.get("q");
   if (q) conds.push(or(ilike(products.name, `%${q}%`), ilike(orders.txHash, `%${q}%`))!);
   return and(...conds);
+}
+
+// ---------- order list (§13) ----------
+
+const ORDER_STATUSES = ["pending", "success", "cancel", "failed"] as const;
+const FINANCIAL_STATUSES = ["pending", "paid", "partially_refunded", "refunded", "voided"] as const;
+const FULFILLMENT_STATUSES = [
+  "unfulfilled",
+  "partially_fulfilled",
+  "fulfilled",
+  "not_required",
+] as const;
+const PROVIDERS = ["x402", "stripe"] as const;
+
+/**
+ * §13's speculative filters, refused **by name** rather than left unread.
+ *
+ * Leaving them unread is the same silent no-op as accepting them: a caller
+ * asking for `?exception=true` would be handed every order and have no way to
+ * know the filter never ran. Each one names what to use instead, or why there is
+ * nothing to use.
+ */
+const UNSUPPORTED_ORDER_FILTERS: Record<string, string> = {
+  channelId: "there is no channel model yet (§11 is planned)",
+  environment: "orders carry no test/production flag — test orders are excluded at write time",
+  exception: "orders carry no exception column; filter on status or fulfillmentStatus instead",
+  paymentRail: "use `provider` (x402 | stripe)",
+  paymentStatus: "use `financialStatus`",
+};
+
+/**
+ * Shared filter set for `GET /api/orders` and its CSV export.
+ *
+ * **Both routes call this or neither is trustworthy.** An export that quietly
+ * applied a wider filter than the list it was launched from hands a merchant a
+ * file that disagrees with the screen they were reading — and a CSV is what ends
+ * up in the accountant's inbox, so it is the copy that has to be right.
+ *
+ * Scope is built here from the session rather than passed in already-composed,
+ * so a caller cannot supply a filter set that forgot its tenancy (`lib/tenancy`).
+ *
+ * The filters are the columns that exist. §13 was written against a planned
+ * schema; `channelId`, `environment`, `paymentRail`, `paymentStatus`, and
+ * `exception` have nothing behind them and are refused.
+ */
+export function orderListFilters(
+  scope: { orgId: OrgId; storeIds: number[] | "all" },
+  sp: URLSearchParams,
+): SQL {
+  for (const [name, why] of Object.entries(UNSUPPORTED_ORDER_FILTERS)) {
+    if (sp.has(name)) throw badRequest(`${name} is not a supported filter: ${why}`);
+  }
+
+  // Org scope first and unconditional; every filter below only narrows it.
+  // Staff scoped to a subset of stores never see the rest of the org's orders.
+  const conds: SQL[] = [siteScopeForStaff(scope.orgId, scope.storeIds, orders.siteId)];
+
+  const siteId = intParam(sp, "siteId");
+  if (siteId != null) conds.push(eq(orders.siteId, siteId));
+  const customerId = intParam(sp, "customerId");
+  if (customerId != null) conds.push(eq(orders.customerId, customerId));
+  const productId = intParam(sp, "productId");
+  if (productId != null) conds.push(eq(orders.productId, productId));
+
+  const status = enumParam(sp, "status", ORDER_STATUSES);
+  if (status) conds.push(eq(orders.status, status));
+  const financialStatus = enumParam(sp, "financialStatus", FINANCIAL_STATUSES);
+  if (financialStatus) conds.push(eq(orders.financialStatus, financialStatus));
+  const fulfillmentStatus = enumParam(sp, "fulfillmentStatus", FULFILLMENT_STATUSES);
+  if (fulfillmentStatus) conds.push(eq(orders.fulfillmentStatus, fulfillmentStatus));
+  const provider = enumParam(sp, "provider", PROVIDERS);
+  if (provider) conds.push(eq(orders.provider, provider));
+
+  const { from, to } = dateRange(sp);
+  if (from) conds.push(gte(orders.createdAt, from));
+  if (to) conds.push(lte(orders.createdAt, to));
+
+  /**
+   * `q` searches what a merchant actually has in hand: the order number from a
+   * support email, the buyer's address, the transaction hash, the product name.
+   * `orders.email` is the copy frozen at checkout, so it still finds the order
+   * after the customer record is erased (§18.3).
+   *
+   * Callers must `leftJoin(products)` — the product-name term reaches across it.
+   */
+  const q = sp.get("q")?.trim();
+  if (q) {
+    const like = `%${q}%`;
+    const terms: SQL[] = [
+      ilike(orders.email, like),
+      ilike(orders.txHash, like),
+      ilike(products.name, like),
+      ilike(orders.agentName, like),
+    ];
+    if (/^\d+$/.test(q)) terms.push(eq(orders.id, Number(q)));
+    conds.push(or(...terms)!);
+  }
+
+  return and(...conds)!;
 }
 
 // ---------- slug helpers ----------

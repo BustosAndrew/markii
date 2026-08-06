@@ -1,47 +1,18 @@
-import { and, asc, count, desc, eq, gte, ilike, inArray, lte, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { badRequest, dateRange, enumParam, intParam, pagination } from "@/lib/api";
+import { pagination } from "@/lib/api";
 import { orgHandler } from "@/lib/auth/handler";
 import { customers, db, orderLines, orders, products } from "@/lib/db";
-import { serializeOrders } from "@/lib/queries";
-import { siteScope, siteScopeForStaff } from "@/lib/tenancy";
-
-const STATUSES = ["pending", "success", "cancel", "failed"] as const;
-const FINANCIAL_STATUSES = ["pending", "paid", "partially_refunded", "refunded", "voided"] as const;
-const FULFILLMENT_STATUSES = [
-  "unfulfilled",
-  "partially_fulfilled",
-  "fulfilled",
-  "not_required",
-] as const;
-const PROVIDERS = ["x402", "stripe"] as const;
-
-/**
- * §13's speculative filters, refused **by name** rather than left unread.
- *
- * Leaving them unread is the same silent no-op as accepting them: a caller
- * asking for `?exception=true` would be handed every order and have no way to
- * know the filter never ran. Each one names what to use instead, or why there is
- * nothing to use.
- */
-const UNSUPPORTED_FILTERS: Record<string, string> = {
-  channelId: "there is no channel model yet (§11 is planned)",
-  environment: "orders carry no test/production flag — test orders are excluded at write time",
-  exception: "orders carry no exception column; filter on status or fulfillmentStatus instead",
-  paymentRail: "use `provider` (x402 | stripe)",
-  paymentStatus: "use `financialStatus`",
-};
+import { orderListFilters, serializeOrders } from "@/lib/queries";
+import { siteScope } from "@/lib/tenancy";
 
 /**
  * `GET /api/orders` (§13) — the order list behind the Orders screen.
  *
- * **The filters are the columns that exist, not the ones §13 sketched.** That
- * section was written against a planned schema and names `channelId`,
- * `environment`, `paymentRail`, and `exception`; none of them are columns on
- * `orders` today. Accepting them here would mean either ignoring them — a filter
- * that silently matches everything is worse than one that 400s — or deriving
- * them, which is how a merchant ends up reading an "exception" Markii invented.
- * `provider` is the real payment-rail column and is filterable under that name.
+ * Filters, tenancy, and the refusal of §13's speculative parameters all live in
+ * `orderListFilters` so this and the CSV export cannot drift apart — an export
+ * that filtered differently from the screen it was launched from is the one copy
+ * that reaches an accountant.
  *
  * Reads only. `orders.refund`, `cancel`, `fulfill`, `addNote`, and
  * `resendConfirmation` are invoked through `POST /api/actions/:id` (§22 rule 1).
@@ -51,54 +22,7 @@ export const GET = orgHandler(
     const sp = new URL(req.url).searchParams;
     const { page, limit, offset } = pagination(sp);
 
-    for (const [name, why] of Object.entries(UNSUPPORTED_FILTERS)) {
-      if (sp.has(name)) throw badRequest(`${name} is not a supported filter: ${why}`);
-    }
-
-    // Org scope first and unconditional; every filter below only narrows it.
-    // Staff scoped to a subset of stores never see the rest of the org's orders.
-    const conds: SQL[] = [siteScopeForStaff(orgId, session.storeIds, orders.siteId)];
-
-    const siteId = intParam(sp, "siteId");
-    if (siteId != null) conds.push(eq(orders.siteId, siteId));
-    const customerId = intParam(sp, "customerId");
-    if (customerId != null) conds.push(eq(orders.customerId, customerId));
-    const productId = intParam(sp, "productId");
-    if (productId != null) conds.push(eq(orders.productId, productId));
-
-    const status = enumParam(sp, "status", STATUSES);
-    if (status) conds.push(eq(orders.status, status));
-    const financialStatus = enumParam(sp, "financialStatus", FINANCIAL_STATUSES);
-    if (financialStatus) conds.push(eq(orders.financialStatus, financialStatus));
-    const fulfillmentStatus = enumParam(sp, "fulfillmentStatus", FULFILLMENT_STATUSES);
-    if (fulfillmentStatus) conds.push(eq(orders.fulfillmentStatus, fulfillmentStatus));
-    const provider = enumParam(sp, "provider", PROVIDERS);
-    if (provider) conds.push(eq(orders.provider, provider));
-
-    const { from, to } = dateRange(sp);
-    if (from) conds.push(gte(orders.createdAt, from));
-    if (to) conds.push(lte(orders.createdAt, to));
-
-    /**
-     * `q` searches what a merchant actually has in hand: the order number from a
-     * support email, the buyer's address, the transaction hash, the product
-     * name. `orders.email` is the copy frozen at checkout, so it still finds the
-     * order after the customer record is erased (§18.3).
-     */
-    const q = sp.get("q")?.trim();
-    if (q) {
-      const like = `%${q}%`;
-      const terms: SQL[] = [
-        ilike(orders.email, like),
-        ilike(orders.txHash, like),
-        ilike(products.name, like),
-        ilike(orders.agentName, like),
-      ];
-      if (/^\d+$/.test(q)) terms.push(eq(orders.id, Number(q)));
-      conds.push(or(...terms)!);
-    }
-
-    const where = and(...conds);
+    const where = orderListFilters({ orgId, storeIds: session.storeIds }, sp);
 
     const sortMap: Record<string, SQL> = {
       createdAt: asc(orders.createdAt),

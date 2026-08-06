@@ -1,4 +1,4 @@
-import { apiGet } from "./client";
+import { apiGet, buildQuery } from "./client";
 import type { Order } from "./types";
 
 /**
@@ -74,4 +74,17 @@ export type OrdersQuery = {
 
 export function listOrders(query?: OrdersQuery, init?: RequestInit) {
   return apiGet<OrdersResponse>("/api/orders", query, init);
+}
+
+/**
+ * A download URL, not a fetch — the browser needs to navigate to it for the
+ * `content-disposition` attachment to land as a file.
+ *
+ * Pass the **same filters the screen is showing**; the route applies them from
+ * the same builder, so the file matches the list. Over 10,000 rows it answers
+ * 400 rather than handing back a truncated ledger, so a link that opens in a new
+ * tab should be prepared to surface that error.
+ */
+export function ordersExportUrl(query?: Omit<OrdersQuery, "page" | "limit" | "sort">) {
+  return `/api/orders/export${buildQuery(query)}`;
 }

@@ -30,7 +30,7 @@ carry an explicit status — **never call a `PLANNED` endpoint and never fake it
 | 10 | Channels | 🟡 PLANNED | E |
 | 11 | Product agent-data extension | 🟡 PLANNED | E |
 | 12 | Agent Test Lab | 🟡 PLANNED | E |
-| 13 | Orders (promoted) | partial — `GET /api/orders` and `GET /api/orders/:id` (lines, refunds, fulfillments, timeline) and the §18.7 order actions are ✅ LIVE; export PLANNED | C |
+| 13 | Orders (promoted) | ✅ LIVE — list, export, `GET /api/orders/:id` (lines, refunds, fulfillments, timeline), and the §18.7 order actions. The extended entity's speculative fields are not built | C |
 | 14 | Analytics v2 (funnel, channels, failures) | 🟡 PLANNED | E |
 | 15 | Automations, activity, notifications, team | 🟡 PLANNED | E |
 | 16 | Accounts, organizations, staff | partial — `/api/auth/*`, `/api/me`, `/api/org`, `/api/org/staff*`, `/api/org/tokens*`, `/api/org/switch`, and **org scoping of §1–8** are ✅ LIVE; **audit, sessions, and MFA** remain PLANNED. (Tokens and org switching were listed as planned here until 2026-08-03; both were already routed.) Frontend: `/dashboard/settings/team` and the sidebar org switcher | **A** |
@@ -983,11 +983,11 @@ this ships, the Test Lab UI is interface-only and must say so.
 
 ---
 
-## 13. Orders (promoted from Finances) — partial
+## 13. Orders (promoted from Finances) — ✅ LIVE
 
-`GET /api/orders` and `GET /api/orders/:id` are ✅ LIVE; the timeline ships **inside** the detail
-response rather than as its own call (§18.7). The CSV export is 🟡 PLANNED. Client service:
-`lib/api/orders.ts` — `listOrders`.
+`GET /api/orders`, `GET /api/orders/export`, and `GET /api/orders/:id` are ✅ LIVE; the timeline
+ships **inside** the detail response rather than as its own call (§18.7). Client service:
+`lib/api/orders.ts` — `listOrders`, `ordersExportUrl`.
 Settlement history moves under Orders as a tab (FR-OR-06); §7's finances endpoints stay live and
 back it.
 
@@ -1077,9 +1077,25 @@ arrived at a different moment. The shape below is the sketch, not the live one:
     "metadata": { }, "occurredAt": "2026-07-26T18:00:00.000Z" } ] }
 ```
 
-### `GET /api/orders/export` 🟡 PLANNED
-Same filters as the list. → `text/csv`. `GET /api/finances/sites/:idOrSlug/export` is ✅ LIVE and
-covers a single site's transactions in the meantime.
+### `GET /api/orders/export` ✅ LIVE
+
+Same filters as the list, **from the same builder** — an export that filtered differently from the
+screen it was launched from is the copy that reaches an accountant. → `text/csv`, newest first,
+`attachment; filename="markii-orders-YYYY-MM-DD.csv"`, `cache-control: private, no-store`.
+
+Columns: `id, created_at, site, status, financial_status, fulfillment_status, payment_rail,
+currency, subtotal, discount, tax, shipping, total, refunded, email, product, quantity, tx_hash,
+agent`.
+
+Money is written **per row against its own currency's exponent** (D31, `decimalMinor`), as a plain
+decimal with no symbol and no grouping separator — `$1,523.00` is two columns in a
+comma-separated file.
+
+**Over 10,000 rows the route answers 400 telling the caller to narrow the range.** A CSV truncated
+at row 10,000 is indistinguishable from a complete one, and streaming only moves the problem: a
+stream that hits the function timeout also arrives looking finished.
+
+`GET /api/finances/sites/:idOrSlug/export` stays ✅ LIVE and covers a single site's transactions.
 
 Operational mutations are **settled, and they are not routes**: `orders.refund`, `orders.cancel`,
 `orders.fulfill`, `orders.addNote`, and `orders.resendConfirmation` are registry actions invoked
