@@ -1,8 +1,13 @@
 import type { Organization, PlanId } from "./db";
 
 /**
- * Plan → entitlements. The numbers come from `docs/PRICING.md` §3 (D1, accepted
- * 2026-07-29) and this file is their **only** representation in code.
+ * Plan → entitlements. The numbers come from `docs/PRICING.md` §3 (**D39**,
+ * owner 2026-08-06, superseding D1) and this file is their **only**
+ * representation in code.
+ *
+ * Physical and digital carry different rates against **separate** thresholds —
+ * see `overageRateBps` below and `lib/commerce/product-class.ts` for how a sale
+ * is attributed to one.
  *
  * Entitlements are derived rather than stored on the org row on purpose: a
  * denormalized copy drifts the moment pricing changes, and then two gates
@@ -20,8 +25,20 @@ export type Entitlements = {
    * never a hardcoded 100 (D31).
    */
   gmvThresholdMinor: number;
-  /** Basis points on the slice **above** the threshold only. 50 = 0.50%. */
-  overageRateBps: number;
+  /**
+   * Basis points on the slice **above** the threshold only. 150 = 1.50%.
+   *
+   * **Physical and digital bill separately, against separate meters.** The
+   * threshold above is applied to each class independently: a merchant selling
+   * $40k physical and $40k digital on Growth is under the $50k line on both and
+   * pays nothing, rather than being $30k over a combined one.
+   *
+   * The rates differ because the competition differs (`docs/COMPETITORS.md`):
+   * Squarespace charges 0% on physical goods from $29/mo, so there is no room
+   * there — but it taxes digital and memberships at 5% on the same plan, which
+   * is the gap the digital rate is priced into.
+   */
+  overageRateBps: { physical: number; digital: number };
   addOns: { agentOps: boolean; chargebackAssist: boolean };
   media: { storageGb: number; monthlyEgressGb: number };
 };
@@ -45,8 +62,8 @@ const PLANS: Record<PlanId, PlanSpec> = {
   starter: {
     storeLimit: 1,
     staffSeatLimit: null,
-    gmvThresholdMinor: 150_000_00,
-    overageRateBps: 50,
+    gmvThresholdMinor: 1_000_00,
+    overageRateBps: { physical: 150, digital: 300 },
     media: { storageGb: 10, monthlyEgressGb: 50 },
     monthlyPriceMinor: 19_00,
     annualPerMonthMinor: 15_00,
@@ -55,8 +72,8 @@ const PLANS: Record<PlanId, PlanSpec> = {
   growth: {
     storeLimit: 3,
     staffSeatLimit: null,
-    gmvThresholdMinor: 750_000_00,
-    overageRateBps: 40,
+    gmvThresholdMinor: 50_000_00,
+    overageRateBps: { physical: 50, digital: 150 },
     media: { storageGb: 50, monthlyEgressGb: 250 },
     monthlyPriceMinor: 49_00,
     annualPerMonthMinor: 39_00,
@@ -65,8 +82,8 @@ const PLANS: Record<PlanId, PlanSpec> = {
   scale: {
     storeLimit: 10,
     staffSeatLimit: null,
-    gmvThresholdMinor: 3_000_000_00,
-    overageRateBps: 30,
+    gmvThresholdMinor: 100_000_00,
+    overageRateBps: { physical: 25, digital: 50 },
     media: { storageGb: 250, monthlyEgressGb: 1024 },
     monthlyPriceMinor: 129_00,
     annualPerMonthMinor: 99_00,
@@ -80,7 +97,7 @@ export type PlanCatalogEntry = {
   monthlyPriceMinor: number;
   annualPerMonthMinor: number;
   gmvThresholdMinor: number;
-  overageRateBps: number;
+  overageRateBps: { physical: number; digital: number };
   storeLimit: number;
   staffSeatLimit: number | null;
   media: Entitlements["media"];

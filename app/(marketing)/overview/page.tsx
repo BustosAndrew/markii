@@ -218,7 +218,7 @@ export default function OverviewPage() {
             {[
               { label: "Stores", value: "3" },
               { label: "Seats", value: "∞" },
-              { label: "Digital fee", value: "0%" },
+              { label: "Digital fee", value: "1.5%" },
             ].map((stat) => (
               <div key={stat.label}>
                 <p className="text-lg font-semibold tabular-nums text-foreground">

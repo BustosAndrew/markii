@@ -95,10 +95,17 @@ describe("billing", () => {
 
   it("says plainly that nothing is being charged", async () => {
     const res = await merchant.get("/api/billing/usage");
-    // Stripe is not connected. The meter shows numbers that look like a bill,
-    // so it has to say they are not one.
+    /**
+     * The meter shows numbers that look like a bill, so it has to say they are
+     * not one — and **`charging` must not flip merely because a credential
+     * exists**. An environment with `STRIPE_SECRET_KEY` set still charges
+     * nothing until subscription billing is built, and this assertion is what
+     * caught the meter claiming otherwise the moment a real key was added.
+     */
     expect(res.json.billingStatus.charging).toBe(false);
-    expect(res.json.billingStatus.reason).toMatch(/not connected|not being charged/i);
+    expect(res.json.billingStatus.reason).toMatch(
+      /not connected|(nothing|not) is being charged/i,
+    );
     expect(res.json.processorFeesNote).toMatch(/not part of your Markii bill/i);
   });
 
@@ -184,8 +191,9 @@ describe("billing", () => {
     const res = await merchant.get("/api/billing/subscription");
     expect(res.status).toBe(200);
     expect(res.json.planId).toBe("starter");
-    expect(res.json.entitlements.gmvThresholdMinor).toBe(150_000_00);
-    expect(res.json.entitlements.overageRateBps).toBe(50);
+    // D39: one threshold, applied separately to each class, and a rate per class.
+    expect(res.json.entitlements.gmvThresholdMinor).toBe(1_000_00);
+    expect(res.json.entitlements.overageRateBps).toEqual({ physical: 150, digital: 300 });
     // A fabricated `active` subscription is the most consequential lie
     // available here — a merchant would think they were covered.
     expect(res.json.subscription).toBeNull();

@@ -1,4 +1,4 @@
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { badRequest, conflict, notFound } from "../../api";
 import {
@@ -24,7 +24,9 @@ import {
 } from "../../commerce/refunds";
 import { revokeDeliveryForOrder } from "../../commerce/delivery";
 import { revokeMembershipsForOrder } from "../../commerce/memberships";
+import { allocate } from "../../commerce/allocation";
 import { recordUsage } from "../../commerce/orders";
+import { classifyProducts, type ProductClass } from "../../commerce/product-class";
 import { sendMerchantMail } from "../../email";
 import { orderMailContext, storeIdentity } from "../../email/context";
 import {
@@ -291,26 +293,91 @@ export const refundOrder = defineAction({
        * counted the sale, or subtracted from one that never did. Either leaves
        * the threshold permanently wrong in the merchant's disfavour or ours.
        */
-      const [sale] = await ctx.db
-        .select({ environment: usageRecords.environment })
+      const sales = await ctx.db
+        .select({
+          environment: usageRecords.environment,
+          productClass: usageRecords.productClass,
+          amountMinor: usageRecords.amountMinor,
+        })
         .from(usageRecords)
         .where(
           and(eq(usageRecords.orderId, order.id), eq(usageRecords.type, "sale")),
-        )
-        .limit(1);
+        );
 
-      await recordUsage(ctx.db, {
-        orgId: order.orgId,
-        siteId: order.siteId,
-        orderId: order.id,
-        type: "refund",
-        amountMinor: -computed.netSalesMinor,
-        currency: order.currency,
-        // No sale record means the sale predates metering and was never counted;
-        // `test` keeps its reversal out of a total it was never part of.
-        environment: sale?.environment ?? "test",
-        dedupeKey: `refund:${refund.id}`,
-      });
+      /**
+       * **The reversal is split the same way the sale was**, or it lands on the
+       * wrong threshold: physical and digital meter separately
+       * (`docs/PRICING.md` §3), and crediting a digital refund against the
+       * physical meter would give the merchant room they never earned on one
+       * while leaving the other permanently overstated.
+       */
+      const refundSplit: Record<ProductClass, number> = { physical: 0, digital: 0 };
+
+      if (computed.lines.length > 0) {
+        const lineRows = await ctx.db
+          .select({ id: orderLines.id, productId: orderLines.productId })
+          .from(orderLines)
+          .where(
+            inArray(
+              orderLines.id,
+              computed.lines.map((l: ComputedRefundLine) => l.orderLineId),
+            ),
+          );
+        const productByLine = new Map(lineRows.map((r) => [r.id, r.productId]));
+        const classOf = await classifyProducts(ctx.db, lineRows.map((r) => r.productId));
+
+        for (const l of computed.lines as ComputedRefundLine[]) {
+          const productId = productByLine.get(l.orderLineId) ?? null;
+          const cls = (productId != null && classOf.get(productId)) || "physical";
+          refundSplit[cls] += l.subtotalMinor - l.discountMinor;
+        }
+        /**
+         * Shipping-only and amount-based components carry no line, so whatever
+         * the computed net sales figure holds beyond the lines is apportioned
+         * rather than dropped — the reversal must total `netSalesMinor` exactly.
+         */
+        const remainder =
+          computed.netSalesMinor - (refundSplit.physical + refundSplit.digital);
+        if (remainder !== 0) refundSplit.physical += remainder;
+      } else {
+        /**
+         * An un-itemised refund names no lines, so it is apportioned across the
+         * classes **in the proportion the sale itself was metered**. That keeps
+         * a reversal from ever exceeding what a class was credited, which a flat
+         * "all physical" fallback could do on a digital-only order.
+         */
+        const weights = (["physical", "digital"] as const).map((cls) =>
+          sales
+            .filter((s) => (s.productClass ?? "physical") === cls)
+            .reduce((n, s) => n + s.amountMinor, 0),
+        );
+        const total = weights[0] + weights[1];
+        const parts =
+          total > 0
+            ? allocate(computed.netSalesMinor, weights)
+            : [computed.netSalesMinor, 0];
+        refundSplit.physical = parts[0];
+        refundSplit.digital = parts[1];
+      }
+
+      // No sale record means the sale predates metering and was never counted;
+      // `test` keeps its reversal out of a total it was never part of.
+      const environment = sales[0]?.environment ?? "test";
+
+      for (const cls of ["physical", "digital"] as const) {
+        if (refundSplit[cls] === 0) continue;
+        await recordUsage(ctx.db, {
+          orgId: order.orgId,
+          siteId: order.siteId,
+          orderId: order.id,
+          type: "refund",
+          amountMinor: -refundSplit[cls],
+          currency: order.currency,
+          productClass: cls,
+          environment,
+          dedupeKey: `refund:${refund.id}:${cls}`,
+        });
+      }
     }
 
     /**

@@ -50,16 +50,10 @@ export function ThresholdMeter({
     );
   }
 
-  const measured = usage.trailing12NetSalesMinor !== null;
-  const ratio = measured
-    ? Math.min(
-        100,
-        Math.max(
-          0,
-          (((usage.trailing12NetSalesMinor ?? 0) / Math.max(usage.thresholdMinor, 1)) * 100),
-        ),
-      )
-    : 0;
+  const CLASS_LABELS: Record<"physical" | "digital", string> = {
+    physical: "Physical goods",
+    digital: "Digital goods & memberships",
+  };
 
   return (
     <section className="rounded-[var(--radius-card)] border border-border bg-surface p-5 shadow-[var(--shadow-sm)]">
@@ -108,26 +102,68 @@ export function ThresholdMeter({
               </p>
             </div>
             <div className="text-right">
-              <p className="text-muted">Threshold</p>
+              <p className="text-muted">Threshold, each class</p>
               <p className="mt-1 font-medium text-foreground">
                 {money(usage.thresholdMinor, usage.currency)}
               </p>
             </div>
           </div>
 
-          <div className="mt-4 h-3 rounded-full bg-hover">
-            <div
-              className={cn(
-                "h-3 rounded-full",
-                usage.state === "above"
-                  ? "bg-brand"
-                  : usage.state === "approaching"
-                    ? "bg-warning-text"
-                    : "bg-chart-1",
-              )}
-              style={{ width: `${ratio}%` }}
-            />
+          {/*
+            One bar per fee class, never one for the sum. Physical and digital
+            run against separate thresholds (D39) — a merchant at $40k of each
+            on Growth is under the $50k line on both and owes nothing, and a
+            combined bar would show them $30k over a line neither crossed.
+          */}
+          <div className="mt-4 space-y-3">
+            {usage.byClass.map((m) => {
+              const pct = Math.min(
+                100,
+                Math.max(0, (m.trailing12NetSalesMinor / Math.max(m.thresholdMinor, 1)) * 100),
+              );
+              return (
+                <div key={m.productClass}>
+                  <div className="flex items-baseline justify-between gap-2 text-xs">
+                    <span className="text-muted">{CLASS_LABELS[m.productClass]}</span>
+                    <span className="tabular-nums text-muted">
+                      {money(m.trailing12NetSalesMinor, usage.currency)}
+                      {" · "}
+                      {(m.overageRateBps / 100).toFixed(m.overageRateBps % 100 === 0 ? 0 : 1)}%
+                      {" above"}
+                    </span>
+                  </div>
+                  <div className="mt-1.5 h-3 rounded-full bg-hover">
+                    <div
+                      className={cn(
+                        "h-3 rounded-full",
+                        m.state === "above"
+                          ? "bg-brand"
+                          : m.state === "approaching"
+                            ? "bg-warning-text"
+                            : "bg-chart-1",
+                      )}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
           </div>
+
+          {/*
+            Sales metered before the split belong to neither bar. Saying so is
+            the only honest option: bucketing them would move real money onto a
+            threshold on a guess, and hiding them would make the bars disagree
+            with the total above without explanation.
+          */}
+          {usage.unclassifiedRecordCount > 0 ? (
+            <p className="mt-3 text-xs text-muted">
+              {usage.unclassifiedRecordCount} earlier sale
+              {usage.unclassifiedRecordCount === 1 ? " is" : "s are"} counted in the total above
+              but in neither meter — they were recorded before physical and digital were
+              metered separately.
+            </p>
+          ) : null}
 
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <Metric

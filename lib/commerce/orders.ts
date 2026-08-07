@@ -20,6 +20,7 @@ import { allocate } from "./allocation";
 import { deliverableItems, issueDelivery } from "./delivery";
 import { recordRedemptions } from "./discounts";
 import { grantMembershipsForOrder } from "./memberships";
+import { classifyProducts, splitNetSales, type ProductClass } from "./product-class";
 import { consumeForSession, releaseForSession } from "./reservations";
 
 /**
@@ -85,6 +86,12 @@ export async function recordUsage(
     type: "sale" | "refund" | "chargeback_lost";
     amountMinor: number;
     currency: string;
+    /**
+     * Which fee schedule this money bills under (`docs/PRICING.md` §3).
+     * Physical and digital have different rates and separate thresholds, so a
+     * mixed basket writes one record per class.
+     */
+    productClass: ProductClass;
     environment: "test" | "production";
     /**
      * What caused this event — `sale:{orderId}`, `refund:{refundId}`. Retrying
@@ -114,6 +121,7 @@ export async function recordUsage(
       type: input.type,
       amountMinor: input.amountMinor,
       currency: input.currency,
+      productClass: input.productClass,
       convertedMinor: sameCurrency ? input.amountMinor : null,
       fxRate: sameCurrency ? "1" : null,
       environment: input.environment,
@@ -318,16 +326,56 @@ export async function completeCheckout(input: CompletionInput): Promise<Completi
       applied: current.appliedDiscounts,
     });
 
-    await recordUsage(tx, {
-      orgId: site.orgId,
-      siteId: site.id,
-      orderId: order.id,
-      type: "sale",
-      amountMinor: netSalesMinor,
-      currency: current.currency,
-      environment: environmentFor({ siteStatus: site.status, paymentVerified: true }),
-      dedupeKey: `sale:${order.id}`,
-    });
+    /**
+     * Metered **per fee class**, because physical and digital bill at different
+     * rates against separate thresholds (`docs/PRICING.md` §3).
+     *
+     * The split comes from `order_lines`, whose `discountMinor` is already
+     * allocated to sum back exactly to the order's own discount — so the two
+     * classes sum to `netSalesMinor` and no money falls between the thresholds.
+     * A class with nothing in it writes no record rather than a zero, which
+     * keeps "sold no digital" distinguishable from "sold digital worth nothing".
+     */
+    const meteredLines = await tx
+      .select({
+        productId: orderLines.productId,
+        subtotalMinor: orderLines.subtotalMinor,
+        discountMinor: orderLines.discountMinor,
+      })
+      .from(orderLines)
+      .where(eq(orderLines.orderId, order.id));
+
+    const classOf = await classifyProducts(tx, meteredLines.map((l) => l.productId));
+    const split = splitNetSales(meteredLines, classOf);
+
+    /**
+     * Un-itemised orders — the direct x402 one-shot writes no lines — have
+     * nothing to split, so they meter whole as `physical`. That is the cheaper
+     * rate on every plan, and inventing a class for money whose composition is
+     * unknown would move it onto a threshold on a guess.
+     */
+    if (meteredLines.length === 0) {
+      split.physical = netSalesMinor;
+      split.digital = 0;
+    }
+
+    const environment = environmentFor({ siteStatus: site.status, paymentVerified: true });
+    for (const cls of ["physical", "digital"] as const) {
+      if (split[cls] === 0) continue;
+      await recordUsage(tx, {
+        orgId: site.orgId,
+        siteId: site.id,
+        orderId: order.id,
+        type: "sale",
+        amountMinor: split[cls],
+        currency: current.currency,
+        productClass: cls,
+        environment,
+        // Keyed by class as well as order: two classes on one order are two
+        // genuine metering events, and one key would swallow the second.
+        dedupeKey: `sale:${order.id}:${cls}`,
+      });
+    }
 
     // The timeline starts here, so nothing that happens to this order later
     // sits above an unexplained beginning (§18.7).

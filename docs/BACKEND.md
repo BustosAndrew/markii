@@ -250,7 +250,15 @@ subscriptions, **Connect Standard** for merchant payments (D4).
 historical orders is lossy and painful.
 
 - **Usage records are immutable and written at event time** — one row per sale, refund, and lost
-  chargeback. **Never compute fees from a live join over `orders`**: orders mutate, ledgers must not.
+  chargeback **per fee class**. **Never compute fees from a live join over `orders`**: orders
+  mutate, ledgers must not.
+- **Every record carries `product_class`** (`physical` | `digital`, D39). Physical and digital bill
+  at different rates against **separate thresholds**, so a mixed basket writes two records and a
+  period closes into two assessments. The class is decided at *write* time by
+  `lib/commerce/product-class.ts` — a product that delivers a file (§18.8) or confers a membership
+  (§18.9) is digital — and frozen there, because a merchant detaching a file later must not move
+  last quarter's sales onto a different threshold. A null class means "metered before the split";
+  the meter reports those separately rather than bucketing them into either.
 - Store both original and billing-currency amounts **with the FX rate used**. Never retro-recompute.
 - **Test-mode orders never count** — enforce at write time, not by filtering at read time.
 - **Idempotency keys on every write.** Stripe webhooks retry; double-counted revenue is a billing

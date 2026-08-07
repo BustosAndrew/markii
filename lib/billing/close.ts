@@ -1,6 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, gte, lt, sql } from "drizzle-orm";
-import { db, feeAssessments, organizations, usageRecords, type DbHandle } from "../db";
+import {
+  db,
+  feeAssessments,
+  organizations,
+  usageRecords,
+  type DbHandle,
+  type FeeAssessment,
+} from "../db";
+import type { ProductClass } from "../commerce/product-class";
 import { entitlementsFor } from "../plans";
 import { computeThresholdFee } from "./fees";
 import { trailing12Start } from "./meter";
@@ -22,7 +30,8 @@ import { trailing12Start } from "./meter";
  */
 
 export type CloseResult = {
-  assessmentId: string;
+  /** Null only when the period was genuinely empty and nothing was assessed. */
+  assessmentId: string | null;
   orgId: string;
   periodStart: string;
   periodEnd: string;
@@ -34,6 +43,21 @@ export type CloseResult = {
   alreadyClosed: boolean;
   /** False while Stripe is unwired — an assessment is a measurement, not an invoice. */
   invoiced: boolean;
+  /**
+   * One entry per fee class assessed. `feeMinor` above is their **sum**, never a
+   * recomputation from combined sales — each class crossed its own threshold at
+   * its own rate (`docs/PRICING.md` §3).
+   */
+  byClass: {
+    productClass: ProductClass | null;
+    assessmentId: string;
+    billableMinor: number;
+    feeMinor: number;
+    overageRateBps: number;
+    t12NetSalesMinor: number;
+    periodNetSalesMinor: number;
+    recordCount: number;
+  }[];
 };
 
 /**
@@ -52,7 +76,7 @@ export async function closePeriod(input: {
 }): Promise<CloseResult> {
   const handle = input.handle ?? db;
 
-  const [existing] = await handle
+  const existingRows = await handle
     .select()
     .from(feeAssessments)
     .where(
@@ -60,22 +84,10 @@ export async function closePeriod(input: {
         eq(feeAssessments.orgId, input.orgId),
         eq(feeAssessments.periodStart, input.periodStart),
       ),
-    )
-    .limit(1);
+    );
 
-  if (existing) {
-    return {
-      assessmentId: existing.id,
-      orgId: existing.orgId,
-      periodStart: existing.periodStart.toISOString(),
-      periodEnd: existing.periodEnd.toISOString(),
-      billableMinor: existing.billableMinor,
-      feeMinor: existing.feeMinor,
-      currency: existing.currency,
-      recordCount: existing.recordCount,
-      alreadyClosed: true,
-      invoiced: existing.invoiced,
-    };
+  if (existingRows.length > 0) {
+    return summariseClose(existingRows, true);
   }
 
   const [org] = await handle
@@ -100,72 +112,143 @@ export async function closePeriod(input: {
       lt(usageRecords.occurredAt, to),
     );
 
-  const [t12Row] = await handle
-    .select({ total: sql<string>`coalesce(sum(${usageRecords.convertedMinor}), 0)` })
-    .from(usageRecords)
-    .where(production(trailing12Start(input.periodEnd), input.periodEnd));
+  /**
+   * Summed **per fee class**, because physical and digital run against separate
+   * thresholds at different rates (`docs/PRICING.md` §3). A blended rate would
+   * be a number no merchant is actually charged.
+   */
+  const classTotals = async (from: Date, to: Date) => {
+    const rows = await handle
+      .select({
+        productClass: usageRecords.productClass,
+        total: sql<string>`coalesce(sum(${usageRecords.convertedMinor}), 0)`,
+        n: sql<number>`count(*)::int`,
+      })
+      .from(usageRecords)
+      .where(production(from, to))
+      .groupBy(usageRecords.productClass);
 
-  const [periodRow] = await handle
-    .select({
-      total: sql<string>`coalesce(sum(${usageRecords.convertedMinor}), 0)`,
-      n: sql<number>`count(*)::int`,
-    })
-    .from(usageRecords)
-    .where(production(input.periodStart, input.periodEnd));
+    const out: Record<ProductClass, { total: number; count: number }> = {
+      physical: { total: 0, count: 0 },
+      digital: { total: 0, count: 0 },
+    };
+    for (const row of rows) {
+      // Unclassified records predate the split and belong to neither meter.
+      if (row.productClass == null) continue;
+      out[row.productClass] = { total: Number(row.total), count: Number(row.n) };
+    }
+    return out;
+  };
 
-  const t12 = Number(t12Row?.total ?? 0);
-  const periodNet = Number(periodRow?.total ?? 0);
+  const t12ByClass = await classTotals(trailing12Start(input.periodEnd), input.periodEnd);
+  const periodByClass = await classTotals(input.periodStart, input.periodEnd);
 
-  const fee = computeThresholdFee({
-    t12NetSalesMinor: t12,
-    periodNetSalesMinor: periodNet,
-    thresholdMinor: entitlements.gmvThresholdMinor,
-    overageRateBps: entitlements.overageRateBps,
-  });
+  const written: FeeAssessment[] = [];
+  for (const cls of ["physical", "digital"] as const) {
+    const t12 = t12ByClass[cls].total;
+    const periodNet = periodByClass[cls].total;
 
-  const id = `fee_${randomUUID().replace(/-/g, "").slice(0, 20)}`;
-
-  const [row] = await handle
-    .insert(feeAssessments)
-    .values({
-      id,
-      orgId: input.orgId,
-      periodStart: input.periodStart,
-      periodEnd: input.periodEnd,
-      planId: org.planId,
-      thresholdMinor: entitlements.gmvThresholdMinor,
-      overageRateBps: entitlements.overageRateBps,
+    const fee = computeThresholdFee({
       t12NetSalesMinor: t12,
       periodNetSalesMinor: periodNet,
-      billableMinor: fee.billableMinor,
-      feeMinor: fee.feeMinor,
-      currency: org.currency,
-      workings: { ...fee.workings, excessAtEndMinor: fee.excessAtEndMinor, excessAtStartMinor: fee.excessAtStartMinor },
-      // Nothing is billed while Stripe is unconnected, and the row says so
-      // rather than implying an invoice was raised.
-      invoiced: false,
-      recordCount: Number(periodRow?.n ?? 0),
-    })
-    // Two schedulers racing on the same period must not both assess it.
-    .onConflictDoNothing({ target: [feeAssessments.orgId, feeAssessments.periodStart] })
-    .returning();
+      thresholdMinor: entitlements.gmvThresholdMinor,
+      overageRateBps: entitlements.overageRateBps[cls],
+    });
 
-  if (!row) {
-    // Lost the race; the winner's row is authoritative.
-    return closePeriod(input);
+    /**
+     * A class with no activity writes no assessment. An empty row would claim a
+     * measurement was taken of something that never happened, and it would show
+     * up in invoice history as a zero-value line nobody sold.
+     */
+    if (periodByClass[cls].count === 0 && fee.feeMinor === 0) continue;
+
+    const id = `fee_${randomUUID().replace(/-/g, "").slice(0, 20)}`;
+    const [row] = await handle
+      .insert(feeAssessments)
+      .values({
+        id,
+        orgId: input.orgId,
+        periodStart: input.periodStart,
+        periodEnd: input.periodEnd,
+        planId: org.planId,
+        productClass: cls,
+        thresholdMinor: entitlements.gmvThresholdMinor,
+        overageRateBps: entitlements.overageRateBps[cls],
+        t12NetSalesMinor: t12,
+        periodNetSalesMinor: periodNet,
+        billableMinor: fee.billableMinor,
+        feeMinor: fee.feeMinor,
+        currency: org.currency,
+        workings: {
+          ...fee.workings,
+          excessAtEndMinor: fee.excessAtEndMinor,
+          excessAtStartMinor: fee.excessAtStartMinor,
+          productClass: cls,
+        },
+        // Nothing is billed while Stripe is unconnected, and the row says so
+        // rather than implying an invoice was raised.
+        invoiced: false,
+        recordCount: periodByClass[cls].count,
+      })
+      // Two schedulers racing on the same period must not both assess it.
+      .onConflictDoNothing({
+        target: [feeAssessments.orgId, feeAssessments.periodStart, feeAssessments.productClass],
+      })
+      .returning();
+
+    if (row) written.push(row);
   }
 
+  if (written.length === 0) {
+    /**
+     * Either the period was genuinely empty, or another worker won every race.
+     * Re-reading distinguishes them without guessing.
+     */
+    const raced = await handle
+      .select()
+      .from(feeAssessments)
+      .where(
+        and(
+          eq(feeAssessments.orgId, input.orgId),
+          eq(feeAssessments.periodStart, input.periodStart),
+        ),
+      );
+    return summariseClose(raced, raced.length > 0);
+  }
+
+  return summariseClose(written, false);
+}
+
+/**
+ * Folds per-class assessments into one period result.
+ *
+ * The fee is the **sum of the classes**, never a recomputation from combined
+ * sales: each class crossed its own threshold at its own rate, and re-deriving
+ * a total from the sum of sales would silently apply one threshold to both.
+ */
+function summariseClose(rows: FeeAssessment[], alreadyClosed: boolean): CloseResult {
+  const first = rows[0];
   return {
-    assessmentId: row.id,
-    orgId: row.orgId,
-    periodStart: row.periodStart.toISOString(),
-    periodEnd: row.periodEnd.toISOString(),
-    billableMinor: row.billableMinor,
-    feeMinor: row.feeMinor,
-    currency: row.currency,
-    recordCount: row.recordCount,
-    alreadyClosed: false,
-    invoiced: row.invoiced,
+    assessmentId: first?.id ?? null,
+    orgId: first?.orgId ?? "",
+    periodStart: first?.periodStart.toISOString() ?? "",
+    periodEnd: first?.periodEnd.toISOString() ?? "",
+    billableMinor: rows.reduce((n, r) => n + r.billableMinor, 0),
+    feeMinor: rows.reduce((n, r) => n + r.feeMinor, 0),
+    currency: first?.currency ?? "USD",
+    recordCount: rows.reduce((n, r) => n + r.recordCount, 0),
+    alreadyClosed,
+    invoiced: rows.every((r) => r.invoiced) && rows.length > 0,
+    byClass: rows.map((r) => ({
+      productClass: r.productClass,
+      assessmentId: r.id,
+      billableMinor: r.billableMinor,
+      feeMinor: r.feeMinor,
+      overageRateBps: r.overageRateBps,
+      t12NetSalesMinor: r.t12NetSalesMinor,
+      periodNetSalesMinor: r.periodNetSalesMinor,
+      recordCount: r.recordCount,
+    })),
   };
 }
 

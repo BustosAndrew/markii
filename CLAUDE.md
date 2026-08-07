@@ -1,8 +1,10 @@
 # CLAUDE.md
 
 Markii is a **commerce platform** — the Shopify/Squarespace category — differentiated by two things:
-storefronts that are natively legible to AI agents, and pricing that charges **no Markii transaction
-fee** until a merchant crosses an annual sales threshold.
+storefronts that are natively legible to AI agents, and **no platform penalty for bringing your own
+payment provider** — ever, on any plan, where Shopify and BigCommerce charge up to 2%. Markii's own
+fee starts only above an annual sales threshold, and **physical and digital goods are metered
+separately against separate thresholds at different rates** (D39 — `docs/PRICING.md` §3).
 
 Everything Shopify does **except fulfillment logistics**, plus a drag-and-drop site builder with
 custom code, and a chat-driven ops agent sold as an add-on. Multi-tenant storefronts (HTML +

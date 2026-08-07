@@ -157,7 +157,10 @@ describe("order operations", () => {
     const [usage] = await sql`select * from usage_records
       where order_id = ${orderId} and type = 'refund'`;
     expect(usage.amount_minor).toBe(-2500);
-    expect(usage.dedupe_key).toBe(`refund:${r.json.result.refundId}`);
+    // Keyed by class as well as refund (D39): physical and digital are two
+    // genuine metering events, and one key would swallow the second.
+    expect(usage.dedupe_key).toBe(`refund:${r.json.result.refundId}:physical`);
+    expect(usage.product_class).toBe("physical");
 
     const after = await merchant.get(`/api/orders/${orderId}`);
     expect(after.json.financialStatus).toBe("partially_refunded");
@@ -165,6 +168,47 @@ describe("order operations", () => {
     expect(after.json.totals.refundableMinor).toBe(5000);
     expect(after.json.refunds).toHaveLength(1);
     expect(after.json.refunds[0].moneyMovedByMarkii).toBe(false);
+  });
+
+  it("meters a digital sale against the digital threshold, not the physical one", async () => {
+    /**
+     * D39: physical and digital bill at different rates against separate
+     * thresholds, so the class has to be right in the ledger at write time —
+     * it is what decides which threshold a merchant's money counts against, and
+     * the ledger is deliberately immutable afterwards.
+     */
+    const [tier] = await sql`insert into membership_tiers (site_id, name, handle)
+      values (${site.id}, 'Test Tier', ${`tier-${Date.now()}`}) returning *`;
+    const [digitalProduct] = await sql`insert into products
+      (site_id, name, slug, price_cents, currency, stock, enabled, grants_tier_id)
+      values (${site.id}, 'Membership', ${`membership-${Date.now()}`}, 3000, 'USD', 99, true,
+              ${tier.id}) returning *`;
+
+    const c = await shopper.post(cart(), { productId: digitalProduct.id, quantity: 2 });
+    await trackCart(cleanup, c.json.token);
+    const session = await shopper.post(checkout("/session"), {
+      cartToken: c.json.token,
+      rail: "x402",
+    });
+    cleanup.checkoutSessionIds.push(session.json.id);
+    const paid = await shopper.post(checkout(`/session/${session.json.id}/complete`), {
+      paymentReference: `0xdigital${Date.now().toString(16)}`,
+    });
+    expect(paid.status).toBe(200);
+    await trackOrderCascade(cleanup, paid.json.orderId);
+
+    const rows = await sql`select product_class, amount_minor, dedupe_key from usage_records
+      where order_id = ${paid.json.orderId} and type = 'sale'`;
+
+    // A membership-granting product is digital by definition (§18.9), and the
+    // whole sale lands there — none of it on the physical meter.
+    expect(rows).toHaveLength(1);
+    expect(rows[0].product_class).toBe("digital");
+    expect(rows[0].amount_minor).toBe(6000);
+    expect(rows[0].dedupe_key).toBe(`sale:${paid.json.orderId}:digital`);
+
+    await sql`delete from products where id = ${digitalProduct.id}`;
+    await sql`delete from membership_tiers where id = ${tier.id}`;
   });
 
   it("meters two partial refunds separately rather than dropping the second", async () => {

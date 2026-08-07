@@ -13,8 +13,10 @@ sign-off before it is built, quoted, or published. The *structure* is the recomm
 2. **No penalty for bringing your own payment provider — ever, on any plan.** This is the core
    differentiator: Shopify charges up to 2% and BigCommerce up to 2% for exactly this, from the
    first sale.
-3. **No Markii transaction fee until a merchant is genuinely big.** Below the threshold, the only
-   per-sale cost is the merchant's own processor.
+3. **No Markii transaction fee below the threshold.** Below it the only per-sale cost is the
+   merchant's own processor. **Physical and digital meter separately, each against its own
+   threshold** (D37) — a merchant under the line on both pays nothing, even if their combined
+   sales exceed it.
 4. **Never mark up processor fees.** Stripe's cut is Stripe's, passed through at cost. Markii's cut
    is separate, named, and visible.
 5. **No cliffs and no forced upgrades.** Crossing the threshold applies a fee only to sales above
@@ -79,10 +81,10 @@ commerce and $79–105 for mid-tier; Markii undercuts both, hardest in the middl
 | Staff seats | **Unlimited** | **Unlimited** | **Unlimited** |
 | Media storage | 10 GB | 50 GB | 250 GB |
 | Monthly delivery (egress) | 50 GB | 250 GB | 1 TB |
-| **Markii fee threshold** (trailing 12-mo net sales) | $150k | $750k | $3M |
-| **Fee above threshold** | 0.5% | 0.4% | 0.3% |
+| **Markii fee threshold** (trailing 12-mo net sales, **counted separately for each class**) | $1k | $50k | $100k |
+| **Fee above threshold — physical goods** | 1.5% | 0.5% | 0.25% |
+| **Fee above threshold — digital goods & memberships** | 3% | 1.5% | 0.5% |
 | **Platform fee on any payment provider** | **0%** | **0%** | **0%** |
-| **Fee on digital goods & memberships** | **0%** | **0%** | **0%** |
 | Site builder, custom code, agent-native editing | ✅ | ✅ | ✅ |
 | **API + MCP access** | ✅ | ✅ | ✅ |
 | AI legibility layer (readiness, channels, test lab) | ✅ | ✅ | ✅ |
@@ -246,6 +248,7 @@ that month, every month, with no threshold at all. That contrast is the product.
 | Plan downgrade | New threshold applies at next period start, never retroactively |
 | Cancellation | Assess final period on close; no exit fee |
 | Trial | Subscription free; **fees still accrue and display**, invoiced only after conversion. A merchant doing $1M during a free trial is not free |
+| Product class | Every metered event carries `physical` or `digital`, frozen at write time from whether the product delivers a file (§18.8) or confers a membership (§18.9). Reclassifying later must never move money between thresholds retroactively |
 | Multi-store org | Threshold is **per organization**, aggregated across stores — otherwise splitting stores becomes a fee-avoidance loophole |
 | Currency swing | Rate locked at settlement date, stored per order; never retro-recompute |
 | Backdated/imported orders | Excluded from metering by default; flag `origin: "imported"` |

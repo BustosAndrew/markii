@@ -155,6 +155,20 @@
       "when": 1786009151620,
       "tag": "0021_stripe_webhook_events",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1786071565775,
+      "tag": "0022_usage_product_class",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1786071963571,
+      "tag": "0023_fee_assessment_class",
+      "breakpoints": true
     }
   ]
 }

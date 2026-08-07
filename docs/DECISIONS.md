@@ -18,7 +18,8 @@ when it's made, with the date — then update the doc it affects.
 
 | ID | Decision | Recommendation | Blocks |
 |---|---|---|---|
-| ~~D1~~ | ~~Price points, thresholds, fee rates~~ | ✅ **Accepted as proposed** (owner, 2026-07-29) — `docs/PRICING.md` §3 | — |
+| ~~D1~~ | ~~Price points, thresholds, fee rates~~ | ⚠️ **SUPERSEDED by D39** (2026-08-06). Was: accepted as proposed (owner, 2026-07-29) — $150k/$750k/$3M at 0.5%/0.4%/0.3% | — |
+| ~~D39~~ | ~~Split fee schedule: physical vs digital~~ | ✅ **Owner, 2026-08-06.** Thresholds $1k / $50k / $100k, **applied separately to each class**; above them 1.5%/0.5%/0.25% physical and 3%/1.5%/0.5% digital — §"Split fee schedule — D39" | Replaces D1's single rate |
 | ~~D2~~ | ~~Margin check~~ | ✅ **Costed 2026-07-29 — D1 holds.** ~92% margin at 1,000 merchants, ~83% at 100. Watch items: media usage (G5), support load (G4) — §"Unit economics — D2" | — |
 | ~~D28~~ | ~~POS / in-person retail~~ | ✅ **Deliberate no, not a deferral** (owner, 2026-07-29). Hardware, card-present certification, offline sync, and a retail support model make it a different company. Do not design for it | — |
 | ~~D3~~ | ~~Auth provider~~ | ✅ **Supabase Auth** (owner, 2026-07-29 — superseded Neon Auth when D6 chose Supabase). Same six verifications apply — §"Auth — D3" | — |
@@ -27,6 +28,53 @@ when it's made, with the date — then update the doc it affects.
 | ~~D27~~ | ~~Marketing email / campaigns~~ | ✅ **Integrate ESPs as Channels; no native campaigns at launch** (owner, 2026-07-29). Abandoned cart ships free. Native campaigns only as a later paid add-on — §"Marketing email — D27" | — |
 | ~~D6~~ | ~~Data architecture~~ | ✅ **Supabase** (owner, 2026-07-29) — replaces Neon for database, auth, and file storage. Latency still solved by **caching, not a distributed DB**. Migration plan in §"Data architecture" | — |
 | ~~D26~~ | ~~Distribution model~~ | ✅ **Both — open/public source *and* hosted cloud** (owner, 2026-07-29). **Licence still unchosen — see §"Distribution — D26"** | Licence choice blocks any external contribution |
+
+
+### Split fee schedule — D39 (owner, 2026-08-06)
+
+**Replaces D1's single threshold and single rate.**
+
+| | Starter | Growth | Scale |
+|---|---|---|---|
+| Threshold (T12 net sales, **per class**) | $1k | $50k | $100k |
+| Physical above threshold | 1.5% | 0.5% | 0.25% |
+| Digital / memberships above threshold | 3% | 1.5% | 0.5% |
+
+**The threshold is applied to each class independently.** A Growth merchant with $40k physical and
+$40k digital is under the $50k line on both and pays nothing, rather than being $30k over a
+combined one. This is why `usage_records.product_class` exists and why a period closes into one
+`fee_assessments` row per class — a blended rate would be a number no merchant is charged.
+
+**Why the classes differ.** `docs/COMPETITORS.md` (verified 2026-07-29): Squarespace charges **0%**
+on physical goods from Core ($29/mo) and Shopify charges 0% if you use Shopify Payments, so there
+is no room to undercut on physical. The same Squarespace plan taxes digital goods and memberships
+at **5%**, and a creator must reach $99/mo to escape it — that gap is what the digital rate is
+priced into, and D5 already names creators and digital sellers as the beachhead.
+
+**What this costs, stated plainly rather than discovered later:**
+
+- **"No transaction fee until you're big" is no longer the claim.** At a $1k Starter threshold
+  essentially every real merchant pays something. The landing page and `docs/PRICING.md` §1
+  principle 3 were rewritten to say "below the threshold" rather than "until you are genuinely big".
+- **On physical goods Markii is now the more expensive option** against Squarespace Core at Starter
+  and Growth. Break-even against Squarespace Core ($29/mo, 0% physical) versus Markii Starter
+  ($15/mo annual, 1.5% above $1k) lands near **$12,200/yr of physical sales** — above that a
+  physical-only merchant pays more here, and that does **not** reverse at a higher tier: Scale
+  still charges 0.25% on physical where Squarespace charges nothing.
+- **On digital goods Markii wins at every volume** on Starter: 3% above $1k against Squarespace
+  Core's 5% from the first sale. Against Squarespace **Plus** ($49/mo, 1% digital) versus Markii
+  Growth ($39/mo, 1.5% above $50k), Markii is cheaper until roughly **$150k/yr of digital sales**.
+- **At the top tier the fee comparison goes the other way.** Squarespace **Advanced** is $99/mo
+  with **0% on both** physical and digital; Markii Scale is the same $99/mo with 0.25% / 0.5%
+  above $100k. On platform fees alone Squarespace Advanced is cheaper at that price point, so
+  Scale has to be sold on storefront count, processor freedom, and the agent layer — never on
+  being the cheapest fee.
+- The **0% platform fee for bringing your own processor** is untouched on every plan, and remains
+  the differentiator that survives this change intact.
+
+**Scale rates were 0% / 0% when D39 was first recorded and changed to 0.25% / 0.5% the same day**
+(owner). The $100k Scale threshold is therefore load-bearing rather than decorative — under it a
+Scale merchant still pays nothing.
 
 ### D4 note — Connect account types, plainly
 

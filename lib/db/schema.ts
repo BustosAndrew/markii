@@ -1039,6 +1039,20 @@ export const usageRecords = pgTable(
     siteId: integer("site_id").references(() => sites.id, { onDelete: "set null" }),
     orderId: integer("order_id").references(() => orders.id, { onDelete: "set null" }),
     type: text("type", { enum: ["sale", "refund", "chargeback_lost"] }).notNull(),
+    /**
+     * Which fee schedule this money is billed under (`docs/PRICING.md` §3).
+     *
+     * Physical and digital carry **different rates and separate thresholds**, so
+     * a mixed basket writes two records rather than one — the split has to exist
+     * in the ledger, because the ledger is what a fee is computed from and it is
+     * deliberately immutable. Deriving it later from orders would mean joining
+     * live catalog rows whose digital assets may since have been detached.
+     *
+     * **Null means "written before the split existed"**, and the meter reports
+     * those separately rather than bucketing them. Guessing a class for
+     * historical money would silently move it between two thresholds.
+     */
+    productClass: text("product_class", { enum: ["physical", "digital"] }),
     /** As transacted. Negative for refunds and lost chargebacks. */
     amountMinor: integer("amount_minor").notNull(),
     currency: text("currency").notNull(),
@@ -1772,6 +1786,15 @@ export const feeAssessments = pgTable(
     planId: text("plan_id", { enum: PLAN_IDS }).notNull(),
     thresholdMinor: integer("threshold_minor").notNull(),
     overageRateBps: integer("overage_rate_bps").notNull(),
+    /**
+     * Which fee schedule this assessment is for (`docs/PRICING.md` §3). Physical
+     * and digital have different rates and separate thresholds, so a period
+     * closes into **one assessment per class** rather than one blended row — a
+     * blended rate would be a number nobody is charged.
+     *
+     * Null on assessments closed before the split existed.
+     */
+    productClass: text("product_class", { enum: ["physical", "digital"] }),
     t12NetSalesMinor: integer("t12_net_sales_minor").notNull(),
     periodNetSalesMinor: integer("period_net_sales_minor").notNull(),
     billableMinor: integer("billable_minor").notNull(),
@@ -1791,7 +1814,9 @@ export const feeAssessments = pgTable(
   },
   (t) => [
     // One assessment per org per period. Closing twice must not double-bill.
-    uniqueIndex("fee_assessments_period_uq").on(t.orgId, t.periodStart),
+    // One assessment per org per period **per class**. Closing twice must not
+    // double-bill, but physical and digital are two genuine assessments.
+    uniqueIndex("fee_assessments_period_uq").on(t.orgId, t.periodStart, t.productClass),
     index("fee_assessments_org_idx").on(t.orgId, t.periodStart),
   ],
 );

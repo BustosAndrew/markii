@@ -71,9 +71,28 @@ export type UsageResponse = {
   currency: string;
   /** Null until a first production sale exists — never 0, which reads as "nothing sold". */
   trailing12NetSalesMinor: number | null;
+  /** The same figure for both classes on a plan; each is measured against it separately. */
   thresholdMinor: number;
-  overageRateBps: number;
-  /** Null when nothing has been measured yet — do not render it as "below". */
+  /** Per class, because the rates differ (D39). */
+  overageRateBps: { physical: number; digital: number };
+  /**
+   * One meter per fee class. Physical and digital run against **separate**
+   * thresholds (D39), so this is what must be rendered — a single bar of the
+   * combined total can show a merchant over a line neither class crossed.
+   * Empty before a first production sale.
+   */
+  byClass: {
+    productClass: "physical" | "digital";
+    trailing12NetSalesMinor: number;
+    thresholdMinor: number;
+    overageRateBps: number;
+    state: "below" | "approaching" | "above";
+    periodNetSalesMinor: number;
+    billableThisPeriodMinor: number;
+    feeAccruedMinor: number;
+    projectedPeriodFeeMinor: number | null;
+  }[];
+  /** The worse of the two classes, so a merchant over on either sees it. */
   state: "below" | "approaching" | "above" | null;
   period: { start: string; end: string };
   periodNetSalesMinor: number | null;
@@ -90,6 +109,12 @@ export type UsageResponse = {
    * summed as zero, and the count is what makes the gap visible.
    */
   unconvertedRecordCount: number;
+  /**
+   * Sales metered before the physical/digital split existed (D39). They are in
+   * `trailing12NetSalesMinor` but in neither class meter, so the parts will not
+   * add to the total — reported rather than silently bucketed.
+   */
+  unclassifiedRecordCount: number;
   /** What the merchant is actually charged right now, and why. Always surface it. */
   billingStatus: { charging: boolean; reason: string };
 };

@@ -1,5 +1,6 @@
 import { and, eq, gte, isNull, lt, sql } from "drizzle-orm";
 import { db, organizations, usageRecords, type DbHandle } from "../db";
+import type { ProductClass } from "../commerce/product-class";
 import { entitlementsFor, planCatalog, planPricing } from "../plans";
 import {
   computeThresholdFee,
@@ -59,7 +60,7 @@ async function netSalesBetween(
   orgId: string,
   from: Date,
   to: Date,
-): Promise<{ netMinor: number; unconvertedCount: number }> {
+): Promise<NetSalesWindow> {
   const window = and(
     eq(usageRecords.orgId, orgId),
     eq(usageRecords.environment, "production"),
@@ -67,25 +68,90 @@ async function netSalesBetween(
     lt(usageRecords.occurredAt, to),
   );
 
-  const [converted] = await handle
-    .select({ total: sql<string>`coalesce(sum(${usageRecords.convertedMinor}), 0)` })
+  /**
+   * Grouped by fee class, because physical and digital meter against **separate
+   * thresholds** (`docs/PRICING.md` §3). One combined sum would put a merchant
+   * over a line neither class actually crossed.
+   */
+  const rows = await handle
+    .select({
+      productClass: usageRecords.productClass,
+      total: sql<string>`coalesce(sum(${usageRecords.convertedMinor}), 0)`,
+    })
     .from(usageRecords)
-    .where(window);
+    .where(window)
+    .groupBy(usageRecords.productClass);
+
+  const byClass: Record<ProductClass, number> = { physical: 0, digital: 0 };
+  let unclassifiedMinor = 0;
+  for (const row of rows) {
+    const amount = Number(row.total);
+    /**
+     * A null class is money metered before the split existed. It is **not**
+     * bucketed into either meter — doing so would move historical sales onto a
+     * threshold on a guess. It is reported instead, the same way an
+     * unconvertible currency is.
+     */
+    if (row.productClass == null) unclassifiedMinor += amount;
+    else byClass[row.productClass] += amount;
+  }
 
   const [gap] = await handle
     .select({ n: sql<number>`count(*)::int` })
     .from(usageRecords)
     .where(and(window, isNull(usageRecords.convertedMinor)));
 
-  return { netMinor: Number(converted?.total ?? 0), unconvertedCount: Number(gap?.n ?? 0) };
+  const [unclassified] = await handle
+    .select({ n: sql<number>`count(*)::int` })
+    .from(usageRecords)
+    .where(and(window, isNull(usageRecords.productClass)));
+
+  return {
+    byClass,
+    totalMinor: byClass.physical + byClass.digital + unclassifiedMinor,
+    unclassifiedMinor,
+    unconvertedCount: Number(gap?.n ?? 0),
+    unclassifiedCount: Number(unclassified?.n ?? 0),
+  };
 }
+
+type NetSalesWindow = {
+  byClass: Record<ProductClass, number>;
+  /** Every class plus anything unclassified — the merchant's real net sales. */
+  totalMinor: number;
+  unclassifiedMinor: number;
+  unconvertedCount: number;
+  unclassifiedCount: number;
+};
+
+/**
+ * One fee class's meter. Physical and digital each get their own, because each
+ * runs against its **own** threshold (`docs/PRICING.md` §3) — a merchant can be
+ * over on digital and under on physical at the same time, and a single combined
+ * meter cannot express that.
+ */
+export type ClassMeter = {
+  productClass: ProductClass;
+  trailing12NetSalesMinor: number;
+  thresholdMinor: number;
+  overageRateBps: number;
+  state: MeterState;
+  periodNetSalesMinor: number;
+  billableThisPeriodMinor: number;
+  feeAccruedMinor: number;
+  projectedPeriodFeeMinor: number | null;
+};
 
 export type UsageMeter = {
   currency: string;
   /** Null until a first production sale exists — never 0, which reads as "nothing sold". */
   trailing12NetSalesMinor: number | null;
+  /** The same figure for both classes on a plan; each is measured against it separately. */
   thresholdMinor: number;
-  overageRateBps: number;
+  /** Per class, since the rates differ (`docs/PRICING.md` §3). */
+  overageRateBps: { physical: number; digital: number };
+  /** One meter per fee class. Empty before a first production sale. */
+  byClass: ClassMeter[];
   state: MeterState | null;
   period: { start: string; end: string };
   periodNetSalesMinor: number | null;
@@ -98,6 +164,12 @@ export type UsageMeter = {
   dataSource: "production" | "not_yet_measured";
   /** Records whose currency could not be converted, so the number is known-incomplete. */
   unconvertedRecordCount: number;
+  /**
+   * Records metered before physical and digital split. They are in
+   * `trailing12NetSalesMinor` but in **neither** class meter, so the two will
+   * not add up to the total — deliberately, and reported rather than hidden.
+   */
+  unclassifiedRecordCount: number;
   /** What the merchant is actually charged right now, and why. */
   billingStatus: {
     charging: boolean;
@@ -156,6 +228,7 @@ export async function usageMeterFor(
       trailing12NetSalesMinor: null,
       thresholdMinor: entitlements.gmvThresholdMinor,
       overageRateBps: entitlements.overageRateBps,
+      byClass: [],
       state: null,
       period: { start: period.start.toISOString(), end: period.end.toISOString() },
       periodNetSalesMinor: null,
@@ -167,51 +240,104 @@ export async function usageMeterFor(
       processorFeesNote,
       dataSource: "not_yet_measured",
       unconvertedRecordCount: 0,
+      unclassifiedRecordCount: 0,
       billingStatus: billingStatus(),
     };
   }
 
-  const fee = computeThresholdFee({
-    t12NetSalesMinor: t12.netMinor,
-    periodNetSalesMinor: inPeriod.netMinor,
-    thresholdMinor: entitlements.gmvThresholdMinor,
-    overageRateBps: entitlements.overageRateBps,
+  /**
+   * **One meter per class, each against its own threshold.** The engine itself
+   * is unchanged — it is simply run twice, because the arithmetic of "the slice
+   * above the line" is identical whichever line you are measuring.
+   */
+  const elapsedMs = now.getTime() - period.start.getTime();
+  const totalMs = period.end.getTime() - period.start.getTime();
+
+  const byClass: ClassMeter[] = (["physical", "digital"] as const).map((cls) => {
+    const rate = entitlements.overageRateBps[cls];
+    const t12Class = t12.byClass[cls];
+    const periodClass = inPeriod.byClass[cls];
+
+    const fee = computeThresholdFee({
+      t12NetSalesMinor: t12Class,
+      periodNetSalesMinor: periodClass,
+      thresholdMinor: entitlements.gmvThresholdMinor,
+      overageRateBps: rate,
+    });
+    const projection = projectPeriodFee({
+      t12NetSalesMinor: t12Class,
+      periodNetSalesMinor: periodClass,
+      thresholdMinor: entitlements.gmvThresholdMinor,
+      overageRateBps: rate,
+      elapsedMs,
+      totalMs,
+    });
+
+    return {
+      productClass: cls,
+      trailing12NetSalesMinor: t12Class,
+      thresholdMinor: entitlements.gmvThresholdMinor,
+      overageRateBps: rate,
+      state: meterState(t12Class, entitlements.gmvThresholdMinor),
+      periodNetSalesMinor: periodClass,
+      billableThisPeriodMinor: fee.billableMinor,
+      feeAccruedMinor: fee.feeMinor,
+      projectedPeriodFeeMinor: projection?.projectedFeeMinor ?? null,
+    };
   });
 
-  const projection = projectPeriodFee({
-    t12NetSalesMinor: t12.netMinor,
-    periodNetSalesMinor: inPeriod.netMinor,
-    thresholdMinor: entitlements.gmvThresholdMinor,
-    overageRateBps: entitlements.overageRateBps,
-    elapsedMs: now.getTime() - period.start.getTime(),
-    totalMs: period.end.getTime() - period.start.getTime(),
-  });
+  const feeAccruedMinor = byClass.reduce((n, m) => n + m.feeAccruedMinor, 0);
+  const billableThisPeriodMinor = byClass.reduce((n, m) => n + m.billableThisPeriodMinor, 0);
+  const anyProjection = byClass.some((m) => m.projectedPeriodFeeMinor != null);
+  const projectedPeriodFeeMinor = anyProjection
+    ? byClass.reduce((n, m) => n + (m.projectedPeriodFeeMinor ?? 0), 0)
+    : null;
 
   const current = planPricing(org.planId);
-  const excessNow = Math.max(0, t12.netMinor - entitlements.gmvThresholdMinor);
+
+  /**
+   * The upgrade check runs on the class the merchant actually pays most on.
+   * Suggesting a plan on combined sales would recommend upgrades to merchants
+   * whose fee is entirely on one side of the split.
+   */
+  const dominant = byClass.reduce((a, b) => (b.feeAccruedMinor > a.feeAccruedMinor ? b : a));
+  const excessNow = Math.max(
+    0,
+    dominant.trailing12NetSalesMinor - entitlements.gmvThresholdMinor,
+  );
 
   return {
     currency: org.currency,
-    trailing12NetSalesMinor: t12.netMinor,
+    trailing12NetSalesMinor: t12.totalMinor,
     thresholdMinor: entitlements.gmvThresholdMinor,
     overageRateBps: entitlements.overageRateBps,
-    state: meterState(t12.netMinor, entitlements.gmvThresholdMinor),
+    byClass,
+    /** The worse of the two, so a merchant over on either sees it at the top. */
+    state: byClass.some((m) => m.state === "above")
+      ? "above"
+      : byClass.some((m) => m.state === "approaching")
+        ? "approaching"
+        : "below",
     period: { start: period.start.toISOString(), end: period.end.toISOString() },
-    periodNetSalesMinor: inPeriod.netMinor,
-    billableThisPeriodMinor: fee.billableMinor,
-    feeAccruedMinor: fee.feeMinor,
-    projectedPeriodFeeMinor: projection?.projectedFeeMinor ?? null,
-    projectionBasis: projection ? "run_rate_to_period_end" : null,
+    periodNetSalesMinor: inPeriod.totalMinor,
+    billableThisPeriodMinor,
+    feeAccruedMinor,
+    projectedPeriodFeeMinor,
+    projectionBasis: anyProjection ? "run_rate_to_period_end" : null,
     upgradeSuggestion: suggestUpgrade({
       currentPlanId: org.planId,
-      t12NetSalesMinor: t12.netMinor,
-      currentAnnualFeeMinor: Math.round((excessNow * entitlements.overageRateBps) / 10_000),
+      t12NetSalesMinor: dominant.trailing12NetSalesMinor,
+      currentAnnualFeeMinor: Math.round((excessNow * dominant.overageRateBps) / 10_000),
       currentMonthlyPriceMinor: current.monthlyPriceMinor,
-      candidates: planCatalog(),
+      candidates: planCatalog().map((p) => ({
+        ...p,
+        overageRateBps: p.overageRateBps[dominant.productClass],
+      })),
     }),
     processorFeesNote,
     dataSource: "production",
     unconvertedRecordCount: t12.unconvertedCount,
+    unclassifiedRecordCount: t12.unclassifiedCount,
     billingStatus: billingStatus(),
   };
 }
@@ -219,20 +345,33 @@ export async function usageMeterFor(
 /**
  * Whether anything is actually being charged.
  *
- * Stripe Billing is not wired — no `STRIPE_SECRET_KEY` exists — so fees accrue
- * and display but nothing is collected. Saying so on every meter response is
- * the difference between a merchant understanding their bill and being
- * surprised by one later. It is also the §4.4 trial framing, which requires the
- * same honesty for a different reason.
+ * **A credential is not a capability, and this is where that distinction bites.**
+ * This previously returned `charging: true` on the mere presence of
+ * `STRIPE_SECRET_KEY` — so the moment a key was added to an environment, every
+ * merchant's meter began saying "threshold fees are billed on your Markii
+ * invoice" with **no subscription, no invoice item, and no charging code behind
+ * it**. `/api/billing/subscription`, `/invoices`, and `/payment-method` all
+ * still refuse with `503 CONFIGURATION_REQUIRED`, and `fee_assessments.invoiced`
+ * is still hardcoded `false`. The claim was false in exactly the way `CLAUDE.md`
+ * forbids, and it was invisible until a real key existed.
+ *
+ * So `charging` is **false until the billing path is actually built**, not until
+ * a key appears. When subscriptions land, this should read the org's real
+ * subscription state — not an environment variable.
+ *
+ * Saying so on every meter response is the difference between a merchant
+ * understanding their bill and being surprised by one later. It is also the §4.4
+ * trial framing, which requires the same honesty for a different reason.
  */
 function billingStatus(): UsageMeter["billingStatus"] {
-  const configured = Boolean(process.env.STRIPE_SECRET_KEY);
-  return configured
-    ? { charging: true, reason: "Threshold fees are billed on your Markii invoice." }
-    : {
-        charging: false,
-        reason:
-          "Billing is not connected yet, so nothing is being charged. These figures show what " +
-          "would be owed — they are a measurement, not an invoice.",
-      };
+  const credentialed = Boolean(process.env.STRIPE_SECRET_KEY);
+  return {
+    charging: false,
+    reason: credentialed
+      ? "Stripe credentials are configured, but subscription billing is not implemented yet " +
+        "(docs/API.md §17), so nothing is being charged. These figures show what would be " +
+        "owed — they are a measurement, not an invoice."
+      : "Billing is not connected yet, so nothing is being charged. These figures show what " +
+        "would be owed — they are a measurement, not an invoice.",
+  };
 }

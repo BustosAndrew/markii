@@ -384,8 +384,8 @@ function PricingTeaser() {
           </h2>
           <p className="mt-3 max-w-md text-sm leading-6 text-muted">
             Starter from $15/mo billed yearly. 0% Markii fee on any payment
-            provider. 0% on digital goods. Threshold fees only after you grow —
-            never a forced upgrade.
+            provider. Threshold fees only after you grow, counted separately for
+            physical and digital — never a forced upgrade.
           </p>
           <ButtonLink href="/pricing" className="mt-6 gap-2">
             See plans
@@ -406,8 +406,8 @@ function PricingTeaser() {
             },
             {
               icon: Bot,
-              title: "0% on digital & memberships",
-              body: "Squarespace charges up to 5% until $99/mo",
+              title: "Digital priced for creators",
+              body: "3% above your threshold at Starter; Squarespace takes 5% from the first sale",
             },
           ].map((row) => (
             <li key={row.title} className="flex gap-3">

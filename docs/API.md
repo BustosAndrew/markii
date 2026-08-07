@@ -1450,22 +1450,46 @@ because nothing downstream of it is built.
 ```json
 {
   "currency": "USD",
-  "trailing12NetSalesMinor": 48200000,
-  "thresholdMinor": 50000000,
-  "overageRateBps": 40,
-  "state": "below" | "approaching" | "above",
+  "trailing12NetSalesMinor": 4820000,
+  "thresholdMinor": 5000000,
+  "overageRateBps": { "physical": 50, "digital": 150 },
+  "byClass": [
+    { "productClass": "physical", "trailing12NetSalesMinor": 4200000,
+      "thresholdMinor": 5000000, "overageRateBps": 50, "state": "approaching",
+      "periodNetSalesMinor": 400000, "billableThisPeriodMinor": 0,
+      "feeAccruedMinor": 0, "projectedPeriodFeeMinor": null },
+    { "productClass": "digital", "trailing12NetSalesMinor": 620000,
+      "thresholdMinor": 5000000, "overageRateBps": 150, "state": "below",
+      "periodNetSalesMinor": 120000, "billableThisPeriodMinor": 0,
+      "feeAccruedMinor": 0, "projectedPeriodFeeMinor": null }
+  ],
+  "state": "approaching",
   "period": { "start": "2026-07-01", "end": "2026-07-31" },
-  "periodNetSalesMinor": 6000000,
+  "periodNetSalesMinor": 520000,
   "billableThisPeriodMinor": 0,
   "feeAccruedMinor": 0,
-  "projectedPeriodFeeMinor": 64000,
-  "projectionBasis": "run_rate_to_period_end",
+  "projectedPeriodFeeMinor": null,
+  "projectionBasis": null,
   "upgradeSuggestion": { "planId": "scale", "monthlyDeltaMinor": 10000,
                          "projectedAnnualSavingMinor": 42000 } | null,
   "processorFeesNote": "Charged by your payment provider, not part of your Markii bill.",
-  "dataSource": "production"
+  "dataSource": "production",
+  "unconvertedRecordCount": 0,
+  "unclassifiedRecordCount": 0
 }
 ```
+
+**Render `byClass`, not the top-level totals, as the meter (D39).** Physical and digital run
+against **separate** thresholds at different rates, so a single bar of `trailing12NetSalesMinor`
+against `thresholdMinor` can show a merchant over a line that neither class actually crossed — a
+Growth merchant with $40k of each is under $50k on both and owes nothing. The top-level figures are
+the honest *totals* (`feeAccruedMinor` is the sum of the classes, never a recomputation from
+combined sales); `state` is the worse of the two.
+
+`unclassifiedRecordCount` counts sales metered before the split existed. They are inside
+`trailing12NetSalesMinor` and inside **neither** class meter, so the parts deliberately do not add
+to the total — bucketing them would move real money onto a threshold on a guess. Surface the gap
+the same way `unconvertedRecordCount` is surfaced.
 
 **Contract rules.** `billableThisPeriodMinor` uses the marginal formula in `docs/PRICING.md` §4.3 —
 only the slice above the threshold, never the whole period. Projections are always labeled as

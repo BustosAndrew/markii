@@ -15,8 +15,9 @@ const plans = [
     annual: 15,
     monthly: 19,
     stores: "1 storefront",
-    threshold: "$150k",
-    overage: "0.5%",
+    threshold: "$1k",
+    physical: "1.5%",
+    digital: "3%",
     highlight: false,
   },
   {
@@ -25,8 +26,9 @@ const plans = [
     annual: 39,
     monthly: 49,
     stores: "3 storefronts",
-    threshold: "$750k",
-    overage: "0.4%",
+    threshold: "$50k",
+    physical: "0.5%",
+    digital: "1.5%",
     highlight: true,
   },
   {
@@ -35,16 +37,17 @@ const plans = [
     annual: 99,
     monthly: 129,
     stores: "10 storefronts",
-    threshold: "$3M",
-    overage: "0.3%",
+    threshold: "$100k",
+    physical: "0.25%",
+    digital: "0.5%",
     highlight: false,
   },
 ] as const;
 
 const included = [
   "Unlimited staff seats",
-  "0% Markii fee on any payment provider",
-  "0% on digital goods & memberships",
+  "0% Markii fee on any payment provider — every plan, forever",
+  "Physical and digital metered separately, each against its own threshold",
   "Agent-legible storefronts (HTML, JSON-LD, llms.txt, agent.md)",
   "API + MCP access",
   "Dispute inbox",
@@ -66,9 +69,10 @@ export default function PricingPage() {
       </h1>
       <p className="mt-4 max-w-2xl text-lg leading-8 text-muted">
         Lower monthly than the $29 market cluster. Bring your own processor with
-        no platform penalty. Digital goods stay at 0%. Markii transaction fees
-        only apply after you cross a high annual threshold — and only to sales
-        above it.
+        no platform penalty — ever, on any plan. Markii&apos;s own fee starts
+        only after you pass your plan&apos;s annual threshold, and then applies
+        only to the sales above it. Physical and digital are metered separately,
+        each against its own threshold.
       </p>
       <p className="mt-3 text-xs text-muted-soft">
         Figures from Markii&apos;s pricing proposal (verified competitor sources
@@ -110,11 +114,14 @@ export default function PricingPage() {
               <li className="text-foreground">{plan.stores}</li>
               <li>
                 Fee threshold{" "}
-                <span className="text-foreground">{plan.threshold}</span> T12
+                <span className="text-foreground">{plan.threshold}</span> T12,
+                counted separately for physical and digital
               </li>
               <li>
-                Above threshold{" "}
-                <span className="text-foreground">{plan.overage}</span>
+                Above it:{" "}
+                <span className="text-foreground">{plan.physical}</span>{" "}
+                physical ·{" "}
+                <span className="text-foreground">{plan.digital}</span> digital
               </li>
             </ul>
             <ButtonLink
@@ -180,10 +187,20 @@ export default function PricingPage() {
           <strong className="font-medium text-foreground">2%</strong> for using
           your own processor from the first sale; Squarespace takes up to{" "}
           <strong className="font-medium text-foreground">5%</strong> on digital
-          goods until Advanced. Markii charges{" "}
-          <strong className="font-medium text-foreground">0%</strong> in both
-          cases, on every plan. Competitor figures verified 2026-07-29 from
-          first-party pricing pages.
+          goods until Advanced.
+        </p>
+        <p className="mt-3 text-sm leading-6 text-muted">
+          Markii charges{" "}
+          <strong className="font-medium text-foreground">0%</strong> for
+          bringing your own processor, on every plan, forever — that is the gap
+          we are built around, and the one nobody else closes. On digital goods
+          we charge{" "}
+          <strong className="font-medium text-foreground">3%</strong> above your
+          threshold at Starter, against Squarespace&apos;s 5% from the very
+          first sale. On physical goods Squarespace charges 0% from Core, so on
+          the platform fee alone they are cheaper than us there — what you get
+          back is the freedom to keep your own processor and its rates.
+          Competitor figures verified 2026-07-29 from first-party pricing pages.
         </p>
       </section>
 

@@ -213,19 +213,26 @@ describe("projectPeriodFee", () => {
 });
 
 describe("suggestUpgrade", () => {
+  /**
+   * The real catalog (D39), physical rates — which is what `usageMeterFor`
+   * passes: the suggestion is computed against the class the merchant actually
+   * pays most on, since upgrading now lowers the rate *and* raises the
+   * threshold, and the two classes have different rates.
+   */
   const candidates = [
-    { planId: "starter", monthlyPriceMinor: 19_00, gmvThresholdMinor: 150_000_00, overageRateBps: 50 },
-    { planId: "growth", monthlyPriceMinor: 49_00, gmvThresholdMinor: 750_000_00, overageRateBps: 40 },
-    { planId: "scale", monthlyPriceMinor: 129_00, gmvThresholdMinor: 3_000_000_00, overageRateBps: 30 },
+    { planId: "starter", monthlyPriceMinor: 19_00, gmvThresholdMinor: 1_000_00, overageRateBps: 150 },
+    { planId: "growth", monthlyPriceMinor: 49_00, gmvThresholdMinor: 50_000_00, overageRateBps: 50 },
+    { planId: "scale", monthlyPriceMinor: 129_00, gmvThresholdMinor: 100_000_00, overageRateBps: 25 },
   ];
 
   it("suggests an upgrade that would genuinely cost the merchant less", () => {
-    // Starter at $400k T12: fees are 0.5% of $250k = $1,250/yr. Growth's
-    // threshold is $750k, so fees vanish for $360/yr more in subscription.
+    // Starter at $200k physical: 1.5% of $199k = $2,985/yr. Growth cuts that to
+    // 0.5% of $150k = $750 for $360/yr more subscription — a $1,875 saving,
+    // against Scale's $1,415, so the middle plan is genuinely the right answer.
     const s = suggestUpgrade({
       currentPlanId: "starter",
-      t12NetSalesMinor: 400_000_00,
-      currentAnnualFeeMinor: 1_250_00,
+      t12NetSalesMinor: 200_000_00,
+      currentAnnualFeeMinor: 2_985_00,
       currentMonthlyPriceMinor: 19_00,
       candidates,
     });
@@ -234,11 +241,13 @@ describe("suggestUpgrade", () => {
   });
 
   it("suggests nothing when upgrading would cost more", () => {
-    // The honest answer for a small merchant is to stay put.
+    // $20k physical on Starter is $285/yr in fees. Growth erases them but costs
+    // $360/yr more, so the honest answer is to stay put — even though the
+    // upgrade does reduce the fee, which is the trap this guards.
     const s = suggestUpgrade({
       currentPlanId: "starter",
       t12NetSalesMinor: 20_000_00,
-      currentAnnualFeeMinor: 0,
+      currentAnnualFeeMinor: 285_00,
       currentMonthlyPriceMinor: 19_00,
       candidates,
     });
@@ -246,12 +255,12 @@ describe("suggestUpgrade", () => {
   });
 
   it("picks the plan with the largest saving, not merely the next one up", () => {
-    // At $5M, Scale saves far more than Growth. Suggesting the smaller step
-    // would keep more Markii revenue and cost the merchant money.
+    // At $2M, Scale saves $23,915 against Growth's $19,875. Suggesting the
+    // smaller step would keep more Markii revenue and cost the merchant money.
     const s = suggestUpgrade({
       currentPlanId: "starter",
-      t12NetSalesMinor: 5_000_000_00,
-      currentAnnualFeeMinor: Math.round(((5_000_000_00 - 150_000_00) * 50) / 10_000),
+      t12NetSalesMinor: 2_000_000_00,
+      currentAnnualFeeMinor: Math.round(((2_000_000_00 - 1_000_00) * 150) / 10_000),
       currentMonthlyPriceMinor: 19_00,
       candidates,
     });
