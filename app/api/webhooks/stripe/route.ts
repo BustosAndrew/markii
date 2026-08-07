@@ -40,10 +40,19 @@ import {
  * "unrecognised" stay different states in the record. The first is a gap this
  * codebase knows about; the second is Stripe sending something nobody expected.
  */
-const HANDLERS: Record<
-  string,
-  (event: StripeEventEnvelope) => Promise<{ detail?: string }>
-> = {
+type HandlerResult = {
+  detail?: string;
+  /**
+   * `false` when the handler ran but **changed nothing** — an event for an
+   * account this deployment does not know, say. Recorded as `ignored` rather
+   * than `processed`, because this table exists to answer "what did Stripe send
+   * and what did we do about it", and logging a no-op as processed misleads
+   * whoever reads it during a billing dispute.
+   */
+  changed?: boolean;
+};
+
+const HANDLERS: Record<string, (event: StripeEventEnvelope) => Promise<HandlerResult>> = {
   /**
    * The merchant's Connect account changed — verification completed, a
    * capability granted or revoked, new requirements raised.
@@ -61,7 +70,9 @@ const HANDLERS: Record<
       requirements?: { currently_due?: string[] };
     };
     const accountId = event.account ?? account.id;
-    if (!accountId) return { detail: "Event carried no account id; nothing to update." };
+    if (!accountId) {
+      return { changed: false, detail: "Event carried no account id; nothing to update." };
+    }
 
     const row = await integrationForAccount(accountId);
     if (!row) {
@@ -72,7 +83,7 @@ const HANDLERS: Record<
        * removed. Recording that is more useful than failing and retrying for
        * three days over an account nobody here owns.
        */
-      return { detail: `No connected account ${accountId} in this deployment.` };
+      return { changed: false, detail: `No connected account ${accountId} in this deployment.` };
     }
 
     await upsertIntegration(
@@ -108,10 +119,14 @@ const HANDLERS: Record<
    */
   "account.application.deauthorized": async (event) => {
     const accountId = event.account ?? (event.data.object as { id?: string }).id;
-    if (!accountId) return { detail: "Event carried no account id; nothing to disconnect." };
+    if (!accountId) {
+      return { changed: false, detail: "Event carried no account id; nothing to disconnect." };
+    }
 
     const row = await integrationForAccount(accountId);
-    if (!row) return { detail: `No connected account ${accountId} in this deployment.` };
+    if (!row) {
+      return { changed: false, detail: `No connected account ${accountId} in this deployment.` };
+    }
 
     /**
      * The account id is kept rather than cleared. It is not a credential, and a
@@ -282,11 +297,21 @@ export const POST = async (req: Request) => {
 
   try {
     const result = await handler(event);
+    const changed = result.changed !== false;
     await db
       .update(stripeWebhookEvents)
-      .set({ status: "processed", detail: result.detail ?? null, processedAt: new Date() })
+      .set({
+        status: changed ? "processed" : "ignored",
+        /** `ignored` must carry a reason — the database enforces it too. */
+        detail: result.detail ?? (changed ? null : "Handler made no change."),
+        processedAt: new Date(),
+      })
       .where(eq(stripeWebhookEvents.id, event.id));
-    return NextResponse.json({ ok: true, handled: true });
+    return NextResponse.json({
+      ok: true,
+      handled: changed,
+      ...(changed ? {} : { reason: result.detail ?? "Handler made no change." }),
+    });
   } catch (e) {
     const detail = e instanceof Error ? e.message : "handler threw";
     await db

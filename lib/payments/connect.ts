@@ -27,6 +27,29 @@ export function connectConfigured(): boolean {
 }
 
 /**
+ * The OAuth redirect URI, pinned by env rather than derived from the request.
+ *
+ * **Stripe matches this string exactly against what is registered**, and derives
+ * nothing. Building it from `appUrl()` alone is wrong in two situations that both
+ * happen routinely:
+ *
+ * - **Preview deployments.** `appUrl()` falls back to `VERCEL_URL`, which is a
+ *   different hostname on every deploy, so a preview would send Stripe a
+ *   `redirect_uri` it has never seen and the merchant gets an error page.
+ * - **Local development.** Stripe requires `https`, and the dev server is
+ *   `http://localhost:3000` unless it is started with `--experimental-https`.
+ *
+ * So the URI is configurable on its own, and only falls back to the app URL when
+ * nothing is set. Whatever it resolves to must be registered in Stripe verbatim.
+ */
+export function connectRedirectUri(appBaseUrl: string): string {
+  const pinned = process.env.STRIPE_CONNECT_REDIRECT_URI;
+  return pinned && pinned.length > 0
+    ? pinned
+    : `${appBaseUrl.replace(/\/$/, "")}/api/integrations/stripe/callback`;
+}
+
+/**
  * A random value tying the callback to the request that started it.
  *
  * **Without it the callback is a CSRF endpoint**: an attacker who gets a

@@ -62,3 +62,5 @@ yarn-error.log*
 next-env.d.ts
 
 .env.local
+# Local TLS for `pnpm dev:https` — contains a PRIVATE KEY. Never commit.
+certs/

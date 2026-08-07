@@ -5,8 +5,8 @@ import { useRef, useState } from "react";
 import { CreditCard, ShoppingBag, Wallet, type LucideIcon } from "lucide-react";
 import {
   disconnectIntegration,
+  startStripeConnect,
   putGoogle,
-  putStripe,
   putX402,
   syncGoogle,
   type GoogleIntegration,
@@ -48,7 +48,6 @@ export function IntegrationsPanel({
   >(null);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
-  const stripeKeyRef = useRef<HTMLInputElement>(null);
   const googleJsonRef = useRef<HTMLTextAreaElement>(null);
 
   async function refresh() {
@@ -189,33 +188,54 @@ export function IntegrationsPanel({
 
       <ProviderCard
         title="Stripe"
-        description="Optional fiat checkout. Paste a test secret key only — cleared from the form after connect."
+        description="Card payments through Connect Standard. You keep your own Stripe account, rates, dashboard, and payouts — Markii never sees your secret key, never holds your funds, and takes no cut of your payments."
         status={stripe}
         icon={CreditCard}
       >
         {stripe.status === "connected" && stripe.accountId ? (
-          <p className="mb-3 text-sm text-muted">Account {stripe.accountId}</p>
-        ) : null}
-        <StripeForm
-          keyRef={stripeKeyRef}
-          busy={busy}
-          onSave={async (secretKey) => {
+          <>
+            <p className="mb-1 text-sm text-muted">Account {stripe.accountId}</p>
+            {/*
+              Connected is not the same as able to take money. Stripe enables
+              charges only after verification, and a store told it can accept
+              cards in that window fails the shopper at card entry.
+            */}
+            <p className="mb-3 text-sm text-muted">
+              {stripe.chargesEnabled
+                ? "Card payments are enabled on your account."
+                : "Stripe has not enabled charges yet — card checkout stays off until it does." +
+                  (stripe.requirementsDue?.length
+                    ? ` Outstanding: ${stripe.requirementsDue.join(", ")}.`
+                    : "")}
+            </p>
+          </>
+        ) : (
+          <p className="mb-3 text-sm text-muted">
+            You will be sent to Stripe to authorise. Markii never asks for your secret key.
+          </p>
+        )}
+
+        <Button
+          type="button"
+          disabled={busy}
+          onClick={async () => {
             setBusy(true);
             setError(null);
             try {
-              const next = await putStripe({ secretKey });
-              setStripe(next);
-              await refresh();
+              const { url } = await startStripeConnect();
+              // Full navigation, not a router push: the destination is Stripe.
+              window.location.href = url;
             } catch (err) {
               setError(
-                err instanceof ApiClientError ? err.message : "Save failed.",
+                err instanceof ApiClientError ? err.message : "Could not start the Stripe connection.",
               );
-            } finally {
-              if (stripeKeyRef.current) stripeKeyRef.current.value = "";
               setBusy(false);
             }
           }}
-        />
+        >
+          {stripe.status === "connected" ? "Reconnect Stripe" : "Connect with Stripe"}
+        </Button>
+
         {stripe.status === "connected" ? (
           <Button
             type="button"
@@ -254,7 +274,15 @@ export function IntegrationsPanel({
                 lastSyncAt: null,
               });
             } else {
-              setStripe({ status: "not_connected", accountId: null });
+              setStripe({
+                status: "not_connected",
+                mode: "connect_standard",
+                accountId: null,
+                chargesEnabled: false,
+                payoutsEnabled: false,
+                connectedAt: null,
+                requirementsDue: [],
+              });
             }
             setDisconnectTarget(null);
             await refresh();
@@ -406,41 +434,3 @@ function GoogleForm({
   );
 }
 
-function StripeForm({
-  busy,
-  onSave,
-  keyRef,
-}: {
-  busy: boolean;
-  onSave: (secretKey: string) => Promise<void>;
-  keyRef: React.RefObject<HTMLInputElement | null>;
-}) {
-  return (
-    <form
-      className="flex flex-col gap-2 sm:flex-row"
-      autoComplete="off"
-      onSubmit={(e) => {
-        e.preventDefault();
-        const secretKey = keyRef.current?.value?.trim() ?? "";
-        void onSave(secretKey);
-      }}
-    >
-      <div className="min-w-0 flex-1">
-        <Label htmlFor="stripe-key" className="sr-only">
-          Stripe secret key
-        </Label>
-        <Input
-          id="stripe-key"
-          ref={keyRef}
-          type="password"
-          placeholder="sk_test_…"
-          autoComplete="new-password"
-          required
-        />
-      </div>
-      <Button type="submit" disabled={busy}>
-        Connect Stripe
-      </Button>
-    </form>
-  );
-}

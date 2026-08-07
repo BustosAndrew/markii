@@ -8,6 +8,7 @@ import {
   trackCart,
   trackOrderCascade,
 } from "./helpers";
+import { BASE_URL } from "./setup";
 
 /**
  * Billing and the threshold meter (§17, `docs/PRICING.md` §4).
@@ -212,6 +213,49 @@ describe("billing", () => {
     expect(stripe.requirementsDue).toEqual([]);
     // No secret is ever echoed back, under any key name.
     expect(JSON.stringify(stripe)).not.toMatch(/sk_/);
+  });
+
+  it("will not attach a Stripe account the merchant did not authorise", async () => {
+    /**
+     * The highest-severity failure available in this slice. Without a state
+     * check, anyone who gets a signed-in merchant to load the callback with
+     * *their* code attaches *their* Stripe account to *this* org — and every
+     * card payment the store takes afterwards settles into it.
+     */
+    const start = await merchant.get("/api/integrations/stripe/connect");
+    if (start.status === 503) return; // Connect not configured on this deployment
+
+    const sent = new URL(start.json.url).searchParams.get("state") ?? "";
+    expect(sent).toMatch(/^[0-9a-f]{64}$/);
+
+    const raw = (query: string) =>
+      fetch(`${BASE_URL}/api/integrations/stripe/callback?${query}`, {
+        headers: { cookie: (merchant as any).cookie },
+        redirect: "manual",
+      });
+
+    const forged = await raw(`code=ac_forged&state=${"0".repeat(64)}`);
+    const forgedTo = decodeURIComponent(forged.headers.get("location") ?? "");
+    expect(forgedTo).toMatch(/stripe=error/);
+    expect(forgedTo).toMatch(/did not start here/i);
+
+    // A stale state cannot be replayed indefinitely.
+    await sql`update integrations
+      set config = jsonb_set(config, '{oauthStateAt}',
+        ${JSON.stringify(new Date(Date.now() - 31 * 60_000).toISOString())}::jsonb)
+      where org_id = ${orgId} and provider = 'stripe'`;
+    const stale = await raw(`code=ac_fake&state=${sent}`);
+    expect(decodeURIComponent(stale.headers.get("location") ?? "")).toMatch(/expired/i);
+
+    // Cancelling on Stripe's screen is a decision, not a failure.
+    const cancelled = await raw(`error=access_denied&state=${sent}`);
+    expect(cancelled.headers.get("location") ?? "").toMatch(/stripe=cancelled/);
+
+    // Through all of that, no account was ever attached.
+    const [row] = await sql`select config, status from integrations
+      where org_id = ${orgId} and provider = 'stripe'`;
+    expect(row?.config?.accountId).toBeUndefined();
+    expect(row?.status).not.toBe("connected");
   });
 
   it("returns the plan catalog, marked proposed", async () => {

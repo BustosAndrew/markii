@@ -2,7 +2,12 @@ import { NextResponse } from "next/server";
 import { appUrl } from "@/lib/api";
 import { orgHandler } from "@/lib/auth/handler";
 import { getIntegration, upsertIntegration } from "@/lib/integrations";
-import { authorizeUrl, connectConfigured, newOauthState } from "@/lib/payments/connect";
+import {
+  authorizeUrl,
+  connectConfigured,
+  connectRedirectUri,
+  newOauthState,
+} from "@/lib/payments/connect";
 
 /**
  * `GET /api/integrations/stripe/connect` (§8) — start Connect Standard OAuth.
@@ -53,7 +58,7 @@ export const GET = orgHandler(
     );
 
     return NextResponse.json({
-      url: authorizeUrl({ state, redirectUri: `${appUrl()}/api/integrations/stripe/callback` }),
+      url: authorizeUrl({ state, redirectUri: connectRedirectUri(appUrl()) }),
       mode: "connect_standard",
       note:
         "You keep your own Stripe account, rates, dashboard, and payouts. Markii never sees your " +

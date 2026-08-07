@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { appUrl } from "@/lib/api";
 import { orgHandler } from "@/lib/auth/handler";
 import { getIntegration, upsertIntegration } from "@/lib/integrations";
 import { exchangeCode, fetchAccount } from "@/lib/payments/connect";
@@ -22,7 +21,16 @@ const STATE_TTL_MS = 30 * 60 * 1000;
 export const GET = orgHandler(
   async (req, { orgId }) => {
     const sp = new URL(req.url).searchParams;
-    const settings = `${appUrl()}/dashboard/integrations`;
+    /**
+     * Built from the **request's own origin**, not `appUrl()`.
+     *
+     * The merchant's browser is mid-flow here, and sending it to a different
+     * origin than the one it is authenticated on drops the session cookie — over
+     * https locally that means arriving at the dashboard logged out, with
+     * nothing to explain why. The request URL is the one origin guaranteed to
+     * match where they actually are.
+     */
+    const settings = new URL("/dashboard/integrations", req.url).toString();
     const fail = (reason: string) =>
       NextResponse.redirect(`${settings}?stripe=error&reason=${encodeURIComponent(reason)}`);
 
@@ -61,7 +69,9 @@ export const GET = orgHandler(
     const account = await fetchAccount(exchanged.accountId);
 
     /** The one-time state is consumed, so a replayed callback cannot re-attach. */
-    const { oauthState: _s, oauthStateAt: _t, ...rest } = existing?.config ?? {};
+    const rest = { ...(existing?.config ?? {}) };
+    delete rest.oauthState;
+    delete rest.oauthStateAt;
 
     await upsertIntegration(
       orgId,

@@ -18,7 +18,20 @@ export type GoogleIntegration = {
 
 export type StripeIntegration = {
   status: IntegrationStatus;
+  /** Connect Standard (D4) — the merchant keeps their own account. */
+  mode: "connect_standard";
+  /** The merchant's own `acct_…`. Never a key; Markii is never given one. */
   accountId: string | null;
+  /**
+   * **The gate for offering the card rail.** Connected is not the same as able
+   * to take money — Stripe enables charges only after verification, and a store
+   * told it can accept cards in that window fails the shopper at card entry.
+   */
+  chargesEnabled: boolean;
+  payoutsEnabled: boolean;
+  connectedAt: string | null;
+  /** Stripe's own outstanding requirements, when it has named any. */
+  requirementsDue: string[];
   message?: string;
 };
 
@@ -56,8 +69,19 @@ export function syncGoogle(init?: RequestInit) {
   );
 }
 
-export function putStripe(body: { secretKey: string }, init?: RequestInit) {
-  return apiPut<StripeIntegration>("/api/integrations/stripe", body, init);
+/**
+ * Connect Standard OAuth (D4). Returns the URL to send the merchant to.
+ *
+ * There is deliberately no `putStripe`. Markii never accepts a merchant secret
+ * key — a live `sk_` is full control of their account, and the route that used
+ * to take one now refuses.
+ */
+export function startStripeConnect(init?: RequestInit) {
+  return apiGet<{ url: string; mode: "connect_standard"; note: string }>(
+    "/api/integrations/stripe/connect",
+    undefined,
+    init,
+  );
 }
 
 export function disconnectIntegration(

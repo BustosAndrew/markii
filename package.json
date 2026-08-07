@@ -4,6 +4,7 @@
   "private": true,
   "packageManager": "pnpm@11.11.0",
   "scripts": {
+    "dev:https": "next dev --experimental-https --experimental-https-key ./certs/localhost-key.pem --experimental-https-cert ./certs/localhost.pem",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
