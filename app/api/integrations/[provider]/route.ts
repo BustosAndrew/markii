@@ -15,7 +15,15 @@ const configSchemas: Record<Provider, z.ZodType<Record<string, string>>> = {
     merchantId: z.string().min(1),
     serviceAccountJson: z.string().min(2),
   }),
-  stripe: z.object({ secretKey: z.string().startsWith("sk_") }),
+  /**
+   * **Refuses everything.** Stripe is connected through Connect Standard OAuth
+   * (D4), where the merchant keeps their own account and Markii holds a
+   * revocable connection — never their secret key. This route used to accept
+   * and store `sk_…` in plaintext jsonb, which hands Markii full control of a
+   * merchant's charges, refunds, payouts, and customer data, and is exactly
+   * what `docs/API.md` §8 says must never happen.
+   */
+  stripe: z.never(),
 };
 
 function parseProvider(raw: string): Provider {
@@ -26,6 +34,16 @@ function parseProvider(raw: string): Provider {
 
 export const PUT = orgHandler(async (req, { params, orgId }) => {
   const provider = parseProvider((await params).provider);
+
+  if (provider === "stripe") {
+    throw badRequest(
+      "Stripe is connected through Connect Standard OAuth, not by supplying a key. Markii never " +
+        "stores a merchant secret key — you keep your own Stripe account, rates, dashboard, and " +
+        "payouts (docs/DECISIONS.md D4). The connection is established by the OAuth flow and kept " +
+        "current by account.updated webhooks.",
+    );
+  }
+
   const config = configSchemas[provider].parse(await req.json());
   if (provider === "google") {
     try {

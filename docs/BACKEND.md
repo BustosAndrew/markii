@@ -277,8 +277,13 @@ records `received` / `processed` / `ignored` / `failed` with a mandatory reason 
 **Connect and platform events use separate signing secrets and the route never falls back between
 them** — an event with `account` is a merchant's, one without is Markii's own.
 
-Add handlers to the `HANDLERS` map as each capability lands. Until then every recognised type is
-recorded as `ignored` with a reason, never silently dropped, and **no billing state changes**.
+**Two handlers are live**: `account.updated` and `account.application.deauthorized` keep each
+merchant's Connect connection and card-rail eligibility current — `chargesEnabled` is the gate,
+because connected is not the same as able to take money. They resolve the tenant by matching the
+event's `account` against stored connections, so an event for an unknown account resolves to
+nothing rather than to somebody. Add further handlers to the `HANDLERS` map as each capability
+lands; until then every recognised type is recorded as `ignored` with a reason, never silently
+dropped, and **no billing state changes**.
 
 ### 4. Phase C — commerce core
 

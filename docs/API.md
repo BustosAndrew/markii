@@ -34,7 +34,7 @@ carry an explicit status — **never call a `PLANNED` endpoint and never fake it
 | 14 | Analytics v2 (funnel, channels, failures) | 🟡 PLANNED | E |
 | 15 | Automations, activity, notifications, team | 🟡 PLANNED | E |
 | 16 | Accounts, organizations, staff | partial — `/api/auth/*`, `/api/me`, `/api/org`, `/api/org/staff*`, `/api/org/tokens*`, `/api/org/switch`, and **org scoping of §1–8** are ✅ LIVE; **audit, sessions, and MFA** remain PLANNED. (Tokens and org switching were listed as planned here until 2026-08-03; both were already routed.) Frontend: `/dashboard/settings/team` and the sidebar org switcher | **A** |
-| 17 | Billing, plans, metering, threshold fees | partial — ✅ LIVE: usage ledger, threshold fee engine, meter, plan catalog, entitlements, period-close assessments, and the **Stripe webhook** (verified + idempotent, no handlers yet). 🟡 Stripe-dependent routes (subscription changes, payment method, invoices) refuse with 503 CONFIGURATION_REQUIRED; **nothing is charged** | B |
+| 17 | Billing, plans, metering, threshold fees | partial — ✅ LIVE: usage ledger, threshold fee engine, meter, plan catalog, entitlements, period-close assessments, and the **Stripe webhook** (verified + idempotent; Connect account handlers live, billing handlers not built). 🟡 Stripe-dependent routes (subscription changes, payment method, invoices) refuse with 503 CONFIGURATION_REQUIRED; **nothing is charged** | B |
 | 18 | Commerce core (variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping, **memberships**) | partial — §18.1–18.6 ✅ LIVE **except** the §18.4 card rail and §18.6 Stripe Tax; §18.5 gift cards are ⛔ **deferred** (D33). §18.7 order operations, §18.8 digital delivery, and §18.9 membership gating + shopper login ✅ LIVE, **except** processor-executed refunds (Markii records a refund and meters it; the merchant moves the money) and recurring/auto-renewing membership billing | C |
 | 19 | Site builder & content | 🟡 PLANNED | D |
 | 20 | Disputes & chargebacks | 🟡 PLANNED | F |
@@ -621,18 +621,57 @@ Columns: `id,date,product,quantity,amount,currency,provider,status,tx_hash,agent
 `{ "merchantId": "123456", "serviceAccountJson": "{…}" }` → `200` status object.
 ### `POST /api/integrations/google/sync` — push all live products to GMC. → `{ "synced": 42, "failed": 0 }`
 
-### `PUT /api/integrations/stripe`
-`{ "secretKey": "sk_test_…" }` → `200` status object.
+### `PUT /api/integrations/stripe` — ⛔ refuses, by design
 
-**v3 note (`docs/DECISIONS.md` §D4):** this endpoint is superseded by **Connect Standard OAuth** —
-the merchant authorizes Markii and keeps their own Stripe account, rates, dashboard, and payouts.
-Markii stores a revocable token and `stripe_account_id`, **never a merchant secret key**, and
-charges are created with `Stripe-Account`.
+**Returns 400 for any body.** This endpoint used to accept `{ "secretKey": "sk_…" }` and store it
+in `integrations.config` as plaintext; migration `0024` purges any key it wrote and marks those
+rows `not_connected`. A live `sk_` grants full control of a merchant's account — charges, refunds,
+payouts, customer PII, deletion — and holding one for every merchant makes a single database
+compromise equal to full financial control of the platform.
+
+Stripe is connected through **Connect Standard OAuth** (`docs/DECISIONS.md` §D4): the merchant
+authorizes Markii and keeps their own Stripe account, rates, dashboard, and payouts. Markii stores
+a revocable connection and `stripe_account_id`, **never a merchant secret key**, and charges are
+created with `Stripe-Account`.
+
+**Connection state is kept current by webhooks, not by polling.** `account.updated` writes
+`chargesEnabled`, `payoutsEnabled`, and Stripe's outstanding `requirements.currently_due`;
+`account.application.deauthorized` turns the card rail off the moment a merchant revokes access
+from their own dashboard — which under Standard they can do at any time without telling Markii.
+Both are ✅ LIVE (§17).
 
 Markii takes **no `application_fee_amount`, ever**: platform fees are billed on Markii's own
 subscription invoice (§17) and never skimmed from the merchant's payment flow. Credentials are
 write-only — never echoed by `GET /api/integrations`, never logged, never placed in a prompt.
-Status returns `{ mode: "connect_standard", accountId, chargesEnabled, payoutsEnabled, connectedAt }`.
+Status returns `{ status, mode: "connect_standard", accountId, chargesEnabled, payoutsEnabled,
+connectedAt, requirementsDue[] }`. **`chargesEnabled` is the gate for offering the card rail** —
+connected is not the same as able to take money, and a storefront that offers card checkout while
+Stripe is still verifying fails the shopper after stock was already held for them.
+
+### `GET /api/integrations/stripe/connect` — ✅ LIVE
+
+Starts Connect Standard OAuth. → `{ url, mode: "connect_standard", note }`. Returns the URL rather
+than redirecting, so the dashboard can say what is about to happen before sending the merchant to
+Stripe. `503 CONFIGURATION_REQUIRED` when `STRIPE_CONNECT_CLIENT_ID` is unset.
+
+Mints a one-time `state` stored against the org.
+
+### `GET /api/integrations/stripe/callback` — ✅ LIVE
+
+Where Stripe returns. Exchanges the code for `stripe_user_id` (`acct_…`), reads the account once so
+the merchant sees a truthful state immediately, stores `accountId` / `chargesEnabled` /
+`payoutsEnabled` / `requirementsDue` / `connectedAt`, and redirects to
+`/dashboard/integrations?stripe=connected`.
+
+**The `state` check is the security of this endpoint.** Without it, anyone who gets a signed-in
+merchant to load this URL with their own `code` attaches *their* Stripe account to *that
+merchant's* org — and every card payment the store takes afterwards settles into the attacker's
+account. State must match the one minted for the org, must be within 30 minutes, and is consumed on
+use so a replayed callback cannot re-attach.
+
+**The OAuth access token is deliberately not stored.** Under Standard, Markii acts with its own
+platform key plus `Stripe-Account`; the token has no additional use here, and an unused stored
+credential is pure liability.
 
 ### `DELETE /api/integrations/:provider`
 Disconnect. → `{ "status": "not_connected" }`
@@ -1417,13 +1456,19 @@ interface UsageRecord {            // immutable; written at event time, never de
 | `GET` | `/api/billing/invoices` · `/:id` | History + line-itemized detail |
 | `POST` | `/api/billing/payment-method` | Stripe SetupIntent client secret; card data never touches Markii |
 | `POST` | `/api/billing/addons/:addon` · `DELETE` | Toggle add-on entitlement |
-| `POST` | `/api/webhooks/stripe` | ✅ LIVE — signature-verified, idempotent, retry-safe. **No handlers yet** (see below) |
+| `POST` | `/api/webhooks/stripe` | ✅ LIVE — signature-verified, idempotent, retry-safe. Handles `account.updated` and `account.application.deauthorized`; billing handlers not built (see below) |
 
 ### `POST /api/webhooks/stripe` — ✅ LIVE (unauthenticated, signature-verified)
 
 Built **ahead of** the routes it will feed, because an event dropped while a handler was missing is
-never redelivered. It verifies, records, and acknowledges; it does not yet change billing state,
-because nothing downstream of it is built.
+never redelivered.
+
+**Connect account state is handled.** `account.updated` writes `chargesEnabled`, `payoutsEnabled`,
+and `requirements.currently_due` onto the merchant's integration row;
+`account.application.deauthorized` turns the card rail off. Those need nothing from Stripe's API
+beyond the event itself, which is why they land first. **Billing state is still untouched** —
+subscriptions, invoices, and payment methods refuse with `503`, so there is nothing downstream for
+those events to update.
 
 - **Two endpoints point here.** Connect delivers events for *merchants'* accounts as well as
   Markii's own. An event carrying `account` is a connected merchant's; one without it is the

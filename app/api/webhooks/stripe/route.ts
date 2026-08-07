@@ -1,6 +1,7 @@
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { db, stripeWebhookEvents } from "@/lib/db";
+import { db, integrations, stripeWebhookEvents } from "@/lib/db";
+import { upsertIntegration } from "@/lib/integrations";
 import {
   parseStripeEvent,
   verifyStripeSignature,
@@ -17,21 +18,23 @@ import {
  * the platform's. Confusing the two would let a merchant's `invoice.paid` mark
  * Markii's own subscription current, or the reverse (`docs/BACKEND.md`).
  *
- * **Nothing here changes billing state yet, and that is deliberate.** The
- * subscription, invoice, and payment-method routes still refuse with
- * `503 CONFIGURATION_REQUIRED` (§17), so there is nothing downstream for an
- * event to update. This endpoint verifies, records, and acknowledges — which is
- * the part that must exist *before* those land, because an event dropped while
- * the handler was missing is not redelivered later. Handlers get added to
- * `HANDLED_TYPES` as each capability is built; until then every recognised type
- * is recorded as `ignored` **with a reason**, never silently swallowed.
+ * **Connect account state is handled; billing state is not, and that is
+ * deliberate.** `account.updated` and `account.application.deauthorized` keep a
+ * merchant's card-rail eligibility current, because those need nothing from
+ * Stripe's API beyond the event itself. Everything about *charging* —
+ * subscriptions, invoices, payment methods — still refuses with
+ * `503 CONFIGURATION_REQUIRED` (§17), so there is nothing downstream for those
+ * events to update yet. Handlers get added to `HANDLERS` as each capability is
+ * built; until then every recognised type is recorded as `ignored` **with a
+ * reason**, never silently swallowed, because an event dropped while its handler
+ * was missing is not redelivered later.
  *
  * Not an action (§22): there is no actor and no organization on the request.
  * Stripe is an unauthenticated caller proving itself with a signature.
  */
 
 /**
- * Event types with a handler behind them. Empty today — see above.
+ * Event types with a handler behind them.
  *
  * The map exists rather than a bare `if` so that "recognised but unhandled" and
  * "unrecognised" stay different states in the record. The first is a gap this
@@ -40,7 +43,118 @@ import {
 const HANDLERS: Record<
   string,
   (event: StripeEventEnvelope) => Promise<{ detail?: string }>
-> = {};
+> = {
+  /**
+   * The merchant's Connect account changed — verification completed, a
+   * capability granted or revoked, new requirements raised.
+   *
+   * **`charges_enabled` is the only honest gate for offering the card rail.** An
+   * account can be connected and still unable to take payments while Stripe
+   * waits on documents, and a storefront that offers card checkout in that
+   * window fails the shopper at the moment they enter their card.
+   */
+  "account.updated": async (event) => {
+    const account = event.data.object as {
+      id?: string;
+      charges_enabled?: boolean;
+      payouts_enabled?: boolean;
+      requirements?: { currently_due?: string[] };
+    };
+    const accountId = event.account ?? account.id;
+    if (!accountId) return { detail: "Event carried no account id; nothing to update." };
+
+    const row = await integrationForAccount(accountId);
+    if (!row) {
+      /**
+       * Not an error. Stripe sends events for every account connected to the
+       * platform, including ones this deployment does not know about — a
+       * connection made against a different environment, or one already
+       * removed. Recording that is more useful than failing and retrying for
+       * three days over an account nobody here owns.
+       */
+      return { detail: `No connected account ${accountId} in this deployment.` };
+    }
+
+    await upsertIntegration(
+      row.orgId,
+      "stripe",
+      "connected",
+      {
+        ...row.config,
+        accountId,
+        chargesEnabled: String(Boolean(account.charges_enabled)),
+        payoutsEnabled: String(Boolean(account.payouts_enabled)),
+        requirementsDue: (account.requirements?.currently_due ?? []).join(","),
+      },
+      account.charges_enabled
+        ? null
+        : "Stripe has not enabled charges on this account yet — card checkout stays off until it does.",
+    );
+    return {
+      detail: `charges_enabled=${Boolean(account.charges_enabled)} payouts_enabled=${Boolean(
+        account.payouts_enabled,
+      )}`,
+    };
+  },
+
+  /**
+   * The merchant revoked Markii's access from their own Stripe dashboard.
+   *
+   * **This has to turn the card rail off immediately.** Markii cannot create
+   * charges on that account any more, so a storefront still offering card
+   * checkout would take a shopper to a payment that cannot succeed. Under
+   * Connect Standard the merchant can do this at any time without telling us,
+   * which is precisely why the webhook is the only way to find out.
+   */
+  "account.application.deauthorized": async (event) => {
+    const accountId = event.account ?? (event.data.object as { id?: string }).id;
+    if (!accountId) return { detail: "Event carried no account id; nothing to disconnect." };
+
+    const row = await integrationForAccount(accountId);
+    if (!row) return { detail: `No connected account ${accountId} in this deployment.` };
+
+    /**
+     * The account id is kept rather than cleared. It is not a credential, and a
+     * merchant who reconnects the same account should be recognisable — while
+     * `chargesEnabled: false` is what actually gates the rail.
+     */
+    await upsertIntegration(
+      row.orgId,
+      "stripe",
+      "not_connected",
+      {
+        ...row.config,
+        accountId,
+        chargesEnabled: "false",
+        payoutsEnabled: "false",
+      },
+      "This Stripe account was disconnected from Markii in the Stripe dashboard.",
+    );
+    return { detail: `Disconnected ${accountId}; card rail is off for org ${row.orgId}.` };
+  },
+};
+
+/**
+ * Finds which org a Connect event belongs to.
+ *
+ * The webhook is unauthenticated and carries no session, so the connected
+ * account id is the **only** link back to a tenant — and it is matched against
+ * stored connections rather than trusted as an org identifier, so an event for
+ * an unknown account resolves to nothing instead of to somebody.
+ */
+async function integrationForAccount(accountId: string) {
+  const [row] = await db
+    .select()
+    .from(integrations)
+    .where(
+      and(
+        eq(integrations.provider, "stripe"),
+        sql`${integrations.config} ->> 'accountId' = ${accountId}`,
+      ),
+    )
+    .limit(1);
+  return row ?? null;
+}
 
 /**
  * Types this codebase intends to handle once §17's Stripe half is built. Listed
@@ -58,7 +172,16 @@ const EXPECTED_TYPES = new Set([
   "customer.subscription.deleted",
   "invoice.paid",
   "invoice.payment_failed",
+  "invoice.created",
+  "invoice.finalized",
+  "customer.subscription.trial_will_end",
+  "payment_intent.canceled",
+  "payment_method.attached",
+  "payment_method.detached",
+  /** Handled today — listed so the expected/unexpected split stays complete. */
   "account.updated",
+  "account.application.deauthorized",
+  "charge.dispute.closed",
 ]);
 
 function secretFor(hasAccount: boolean): string | undefined {

@@ -50,7 +50,8 @@ checkout, discounts, tax, shipping, order operations, digital delivery; and rule
 **Phase B billing is half built.** The threshold fee engine, the meter, plan catalog, entitlements,
 and period-close assessments are live (`lib/billing/`), as is the **Stripe webhook receiver**
 (`/api/webhooks/stripe` — signature-verified, idempotent on Stripe's event id, separate secrets for
-platform and Connect events; **no handlers yet, so no billing state changes**). Everything else
+platform and Connect events; **Connect account state is handled — `account.updated` and
+`account.application.deauthorized` gate the card rail — but nothing charges**). Everything else
 needing Stripe — subscriptions, plan changes, payment methods, invoices — refuses with
 `503 CONFIGURATION_REQUIRED`. **Nothing is charged**, and every billing response says so.
 

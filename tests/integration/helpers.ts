@@ -83,6 +83,7 @@ export class Client {
   get = <T = any>(p: string) => this.call<T>("GET", p);
   post = <T = any>(p: string, b?: unknown) => this.call<T>("POST", p, b);
   patch = <T = any>(p: string, b?: unknown) => this.call<T>("PATCH", p, b);
+  put = <T = any>(p: string, b?: unknown) => this.call<T>("PUT", p, b);
   del = <T = any>(p: string) => this.call<T>("DELETE", p);
 
   /** Invoke a registry action (§22). `dryRun` returns the diff without writing. */

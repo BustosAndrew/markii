@@ -176,6 +176,44 @@ describe("billing", () => {
     await sql`delete from usage_records where org_id = ${orgId} and environment = 'test'`;
   });
 
+  it("refuses a merchant Stripe secret key instead of storing it", async () => {
+    /**
+     * A live `sk_` grants full control of a merchant's account — charges,
+     * refunds, payouts, customer PII. Connect Standard (D4) needs only a
+     * revocable connection and an `acct_` id, so this route accepts neither a
+     * key nor anything else.
+     */
+    const res = await merchant.put("/api/integrations/stripe", { secretKey: "sk_live_notreal" });
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(res.json)).toMatch(/Connect Standard|never stores a merchant secret key/i);
+
+    // And nothing was written.
+    const rows = await sql`select config from integrations
+      where org_id = ${orgId} and provider = 'stripe'`;
+    for (const row of rows) expect(row.config?.secretKey).toBeUndefined();
+  });
+
+  it("reports the Connect connection without inventing one", async () => {
+    const res = await merchant.get("/api/integrations");
+    expect(res.status).toBe(200);
+
+    const stripe = res.json.stripe;
+    expect(stripe.mode).toBe("connect_standard");
+    expect(stripe.status).toBe("not_connected");
+    expect(stripe.accountId).toBeNull();
+    /**
+     * The load-bearing assertion: `chargesEnabled` must not be true because the
+     * *platform* holds credentials. It is a fact about the merchant's own Stripe
+     * account, and a storefront offering card checkout on the strength of a
+     * platform key would fail the shopper after stock was already held.
+     */
+    expect(stripe.chargesEnabled).toBe(false);
+    expect(stripe.payoutsEnabled).toBe(false);
+    expect(stripe.requirementsDue).toEqual([]);
+    // No secret is ever echoed back, under any key name.
+    expect(JSON.stringify(stripe)).not.toMatch(/sk_/);
+  });
+
   it("returns the plan catalog, marked proposed", async () => {
     const res = await merchant.get("/api/billing/plans");
     expect(res.status).toBe(200);

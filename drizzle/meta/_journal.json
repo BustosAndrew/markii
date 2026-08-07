@@ -169,6 +169,13 @@
       "when": 1786071963571,
       "tag": "0023_fee_assessment_class",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1786080205862,
+      "tag": "0024_purge_stripe_secret_keys",
+      "breakpoints": true
     }
   ]
 }
