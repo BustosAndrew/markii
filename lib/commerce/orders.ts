@@ -250,6 +250,13 @@ export async function completeCheckout(input: CompletionInput): Promise<Completi
         currency: current.currency,
         provider: current.provider,
         txHash: current.provider === "x402" ? input.paymentReference : null,
+        /**
+         * Written for **both** rails, unlike `txHash`. A card refund has to name
+         * the PaymentIntent it reverses, and `orders.refund` starts from the
+         * order — leaving the reference only on the checkout session would make
+         * the merchant's financial record unable to say what was charged.
+         */
+        paymentReference: input.paymentReference,
         agentUserAgent: input.userAgent ?? "",
         agentName: input.agentName ?? "Other",
         agentWalletAddress: input.payerReference ?? null,

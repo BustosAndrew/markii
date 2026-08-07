@@ -35,7 +35,7 @@ carry an explicit status — **never call a `PLANNED` endpoint and never fake it
 | 15 | Automations, activity, notifications, team | 🟡 PLANNED | E |
 | 16 | Accounts, organizations, staff | partial — `/api/auth/*`, `/api/me`, `/api/org`, `/api/org/staff*`, `/api/org/tokens*`, `/api/org/switch`, and **org scoping of §1–8** are ✅ LIVE; **audit, sessions, and MFA** remain PLANNED. (Tokens and org switching were listed as planned here until 2026-08-03; both were already routed.) Frontend: `/dashboard/settings/team` and the sidebar org switcher | **A** |
 | 17 | Billing, plans, metering, threshold fees | partial — ✅ LIVE: usage ledger, threshold fee engine, meter, plan catalog, entitlements, period-close assessments, and the **Stripe webhook** (verified + idempotent; Connect account handlers live, billing handlers not built). 🟡 Stripe-dependent routes (subscription changes, payment method, invoices) refuse with 503 CONFIGURATION_REQUIRED; **nothing is charged** | B |
-| 18 | Commerce core (variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping, **memberships**) | partial — §18.1–18.6 ✅ LIVE **except** the §18.4 card rail and §18.6 Stripe Tax; §18.5 gift cards are ⛔ **deferred** (D33). §18.7 order operations, §18.8 digital delivery, and §18.9 membership gating + shopper login ✅ LIVE, **except** processor-executed refunds (Markii records a refund and meters it; the merchant moves the money) and recurring/auto-renewing membership billing | C |
+| 18 | Commerce core (variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping, **memberships**) | partial — §18.1–18.6 ✅ LIVE, including the §18.4 card rail (Stripe Connect direct charges), **except** §18.6 Stripe Tax; §18.5 gift cards are ⛔ **deferred** (D33). §18.7 order operations (incl. **processor-executed card refunds**), §18.8 digital delivery, and §18.9 membership gating + shopper login ✅ LIVE, **except** recurring/auto-renewing membership billing | C |
 | 19 | Site builder & content | 🟡 PLANNED | D |
 | 20 | Disputes & chargebacks | 🟡 PLANNED | F |
 | 21 | Agent Ops add-on | 🟡 PLANNED | F (last) |
@@ -1456,19 +1456,29 @@ interface UsageRecord {            // immutable; written at event time, never de
 | `GET` | `/api/billing/invoices` · `/:id` | History + line-itemized detail |
 | `POST` | `/api/billing/payment-method` | Stripe SetupIntent client secret; card data never touches Markii |
 | `POST` | `/api/billing/addons/:addon` · `DELETE` | Toggle add-on entitlement |
-| `POST` | `/api/webhooks/stripe` | ✅ LIVE — signature-verified, idempotent, retry-safe. Handles `account.updated` and `account.application.deauthorized`; billing handlers not built (see below) |
+| `POST` | `/api/webhooks/stripe` | ✅ LIVE — signature-verified, idempotent, retry-safe. Handles Connect account state, `payment_intent.*`, and refunds; Markii's own billing handlers not built (see below) |
 
 ### `POST /api/webhooks/stripe` — ✅ LIVE (unauthenticated, signature-verified)
 
 Built **ahead of** the routes it will feed, because an event dropped while a handler was missing is
 never redelivered.
 
-**Connect account state is handled.** `account.updated` writes `chargesEnabled`, `payoutsEnabled`,
-and `requirements.currently_due` onto the merchant's integration row;
-`account.application.deauthorized` turns the card rail off. Those need nothing from Stripe's API
-beyond the event itself, which is why they land first. **Billing state is still untouched** —
-subscriptions, invoices, and payment methods refuse with `503`, so there is nothing downstream for
-those events to update.
+**The merchant's money is handled; Markii's own billing is not.** Handlers exist for everything the
+card rail depends on:
+
+| Event | What it does |
+|---|---|
+| `account.updated` | Writes `chargesEnabled`, `payoutsEnabled`, and `requirements.currently_due` onto the merchant's integration row |
+| `account.application.deauthorized` | Turns the card rail off the moment a merchant revokes access from their own dashboard |
+| `payment_intent.succeeded` | **The authoritative completion signal** — completes the checkout idempotently, whether or not the shopper's browser ever came back. Re-checks the amount against the frozen quote |
+| `payment_intent.payment_failed` · `payment_intent.canceled` | Releases the stock reservation. The expiry sweep is a backstop, not the mechanism |
+| `charge.refunded` | Detects a charge refunded **outside** Markii (from the merchant's own dashboard) and flags the gap on the order timeline. Deliberately writes no refund row — see §18.7 |
+| `charge.refund.updated` | A previously `pending` refund that failed. Flags it on the timeline; never silently reverses the refund record |
+
+**Markii's own billing state is still untouched** — subscriptions, invoices, and payment methods
+refuse with `503`, so there is nothing downstream for those events to update. Their types are listed
+in `EXPECTED_TYPES`, so an operator can see in `stripe_webhook_events` which expected events are
+arriving and being parked rather than guessing from Stripe's dashboard.
 
 - **Two endpoints point here.** Connect delivers events for *merchants'* accounts as well as
   Markii's own. An event carrying `account` is a connected merchant's; one without it is the
@@ -1482,6 +1492,10 @@ those events to update.
 - **Idempotent on Stripe's event id**, which is the primary key of `stripe_webhook_events`. A
   redelivery collides instead of running a handler twice — `invoice.paid` processed twice is a
   merchant charged twice.
+- **A `failed` event is reprocessed on redelivery; anything else is a duplicate.** The row is
+  claimed *before* the handler runs, so treating every collision as a duplicate would make the
+  `500`-so-Stripe-retries path a no-op and discard the event the retry existed to deliver. Handlers
+  are idempotent, so a second run of one that failed part-way is safe.
 - **Status codes are chosen for Stripe's retry behaviour**, which is the opposite of the SES
   webhook's: missing secret → `503`, bad signature → `400`, duplicate → `200`, recognised but
   unhandled → `200` with the reason recorded, handler threw → **`500` so Stripe retries** over its
@@ -1928,7 +1942,7 @@ money they never charged. A store on `provider: "none"` is unaffected.
 **Markii never gives tax advice** (`docs/DECISIONS.md` G2). Under Connect Standard the merchant is
 the seller of record and the taxpayer; `GET /api/settings/tax` returns that disclaimer as data.
 
-### 18.7 Order operations ✅ LIVE · 🟡 processor-executed refunds PLANNED
+### 18.7 Order operations ✅ LIVE · processor-executed refunds ✅ LIVE on card, ⛔ impossible on x402
 
 Extends §13. Reads are REST; **every mutation is an action** (§22 rule 1), so the `POST
 /api/orders/:id/…` routes this section originally sketched are invoked as
@@ -1940,7 +1954,7 @@ Extends §13. Reads are REST; **every mutation is an action** (§22 rule 1), so 
 
 | Action | Risk | Notes |
 |---|---|---|
-| `orders.refund` | high | Partial or full, by line (+ optional shipping) or by amount on un-itemised orders |
+| `orders.refund` | high | Partial or full, by line (+ optional shipping) or by amount on un-itemised orders. `method: "processor"` issues it on the card rail; `"manual"` records one the merchant issued |
 | `orders.cancel` | high | Unpaid orders only; releases stock |
 | `orders.fulfill` | medium | **Manual only**: status, tracking number, carrier, notify |
 | `orders.addNote` | low | Append-only timeline entry, `internal` or `customer` |
@@ -1965,13 +1979,43 @@ environment its sale was never counted in. Idempotency is keyed `refund:{refundI
 `usage_records` moved off its old `(orderId, type)` unique key: two partial refunds on one order are
 two real events, and that key silently dropped the second.
 
-**Markii records refunds; it does not move the money.** `method: "manual"` — the default and
-currently the only accepted value — means the merchant issued the refund themselves and is telling
-Markii about it; `processorReference` holds the Stripe refund id or the hash of their return
-transfer. `method: "processor"` is **refused with the reason**: card refunds need a connected
-Stripe account (`lib/payments` reports `configuration_required`), and x402/USDC settlements are
-irreversible with no path back from Markii at all (§20). Every refund in the API response carries
-`moneyMovedByMarkii: false` so no surface can imply otherwise.
+**Two refund methods, and every surface says which one happened.**
+
+`method: "manual"` (the default) means the merchant issued the refund themselves and is telling
+Markii about it; `processorReference` holds their own Stripe refund id or the hash of their return
+transfer. It is always available, on every rail.
+
+`method: "processor"` makes Markii issue the refund on the rail:
+
+| Rail | Behaviour |
+|---|---|
+| card (Stripe Connect) | ✅ Creates the refund on the **merchant's own** connected account, out of their own balance. No `refund_application_fee`, no `reverse_transfer` — Markii took no cut of the payment, so it gives nothing back (D4) |
+| x402 / USDC | ⛔ **Refused, permanently.** On-chain settlement is final and Markii holds no key that could reverse one. The refusal names the alternative: send the transfer from the receiving wallet and record it as `manual` (§20) |
+
+Refunds carry **`moneyMovedByMarkii`**, which is now `true` for a processor refund and `false` for a
+manual one — read it rather than assuming; the two are indistinguishable in a list and are not the
+same event. The action result adds `processorRefundId` and `processorStatus`.
+
+`method: "processor"` is refused — **with nothing written, so no half-recorded refund is left
+behind** — when the order names no Stripe payment (placed before the card rail), when Markii is not
+connected to the merchant's Stripe account, or when `processorReference` is also supplied (that
+belongs to `manual`; accepting it would overwrite what the merchant typed with Stripe's own id).
+Each refusal names the missing thing, because a disconnected account and an unreversible rail need
+different actions from different people.
+
+**A `pending` Stripe refund counts as issued.** Most card refunds return `succeeded` at once, but
+some settle asynchronously, and refusing those would leave money moving at Stripe with nothing
+recorded here. The status is on the timeline entry and in `processorStatus`. If it later fails,
+`charge.refund.updated` (§17) writes that onto the order timeline — it does **not** silently reverse
+the refund record, because un-refunding means re-taking stock and reinstating revoked downloads,
+which is a judgement about a real customer.
+
+**Refunds issued outside Markii are flagged, not invented.** Under Connect Standard a merchant may
+refund from their own Stripe dashboard at any time. `charge.refunded` (§17) detects that the charge
+is more refunded than Markii knows and writes an order-timeline note naming the gap. It does not
+create a refund row: a Stripe charge does not say which lines came back, whether to restock them, or
+how much of the money was tax and shipping, and guessing there meters revenue that never existed
+(D36).
 
 **Restocking** returns units to the **location the stock left from**, recorded on the order line at
 completion — not to whichever location is default today. Variant-less products still move the legacy

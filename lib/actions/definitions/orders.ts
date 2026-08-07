@@ -37,6 +37,9 @@ import {
   type RenderedEmail,
   type TemplateId,
 } from "../../email/templates";
+import { getIntegration } from "../../integrations";
+import { stripeConfigured } from "../../payments";
+import { createStripeRefund, refundIdempotencyKey } from "../../payments/stripe-refunds";
 import { siteScope } from "../../tenancy";
 import { defineAction } from "../registry";
 import type { ActionContext } from "../types";
@@ -46,12 +49,14 @@ import type { ActionContext } from "../types";
  *
  * **Recording what happened and making it happen are different things**, and
  * this file keeps them apart everywhere it matters. Markii never holds merchant
- * funds (`docs/PRICING.md`), the card rail is not wired
- * (`lib/payments` reports `configuration_required`), and x402/USDC settlement is
- * irreversible with no chargeback path (§20). So a refund here is normally the
- * merchant telling Markii about money they sent back themselves — and it is
- * written down as exactly that, rather than as a success message for a transfer
- * nobody made.
+ * funds (`docs/PRICING.md`), so `method: "manual"` is the merchant telling
+ * Markii about money they sent back themselves — written down as exactly that,
+ * never as a success message for a transfer nobody made.
+ *
+ * `method: "processor"` now genuinely moves money, but only on the card rail:
+ * the refund is created on the merchant's own Stripe account, out of their own
+ * balance. x402/USDC settlement stays irreversible with no chargeback path
+ * (§20), so that rail still refuses and says why.
  *
  * The same rule governs fulfillment: Markii does no fulfillment logistics
  * (`docs/PLAN.md` §3), so a tracking number is text a merchant typed and is
@@ -118,14 +123,128 @@ async function logEvent(
 // Refunds
 // ---------------------------------------------------------------------------
 
+/** What a rail did, or would have done on a dry run. */
+type ExecutedRefund = { refundId: string | null; status: string };
+
+/**
+ * Pushes money back on the rail the order was paid on (§18.7).
+ *
+ * **Every refusal here names the thing that is missing**, because they need
+ * different actions from different people: an unreversible rail is physics, a
+ * disconnected Stripe account is the merchant's to reconnect, and absent
+ * platform credentials are Markii's problem. Collapsing them into "refund
+ * failed" sends a merchant to fix the wrong thing while a shopper waits for
+ * their money.
+ *
+ * Every path that refuses still leaves `method: "manual"` available, so a
+ * merchant is never blocked from *recording* a refund they issued themselves.
+ */
+async function executeProcessorRefund(
+  ctx: ActionContext,
+  order: Order & { orgId: string },
+  input: { amountMinor: number; reason: string; suppliedReference?: string },
+): Promise<ExecutedRefund> {
+  /**
+   * There is no such thing as an x402 refund, and there never will be. An
+   * on-chain settlement is final and Markii holds no key that could reverse one
+   * — the merchant sends a new transfer from their own wallet and records it.
+   */
+  if (order.provider === "x402") {
+    throw conflict(
+      "x402/USDC settlements are final — there is no way to reverse one from Markii. " +
+        "Send the refund from the receiving wallet, then record it here with " +
+        'method: "manual" and the transaction hash as processorReference.',
+    );
+  }
+
+  /**
+   * A caller-supplied reference means "here is the refund I already made",
+   * which is the manual path. Accepting it here would either be ignored or
+   * overwritten by Stripe's own id — both of which silently discard something
+   * the merchant typed.
+   */
+  if (input.suppliedReference) {
+    throw badRequest(
+      'processorReference records a refund you issued yourself — use it with method: "manual". ' +
+        'With method: "processor" Markii creates the refund and stores Stripe\'s id for you.',
+    );
+  }
+
+  if (!stripeConfigured()) {
+    throw conflict(
+      "Card refunds are not available on this platform yet. Refund in your Stripe dashboard, " +
+        'then record it here with method: "manual" and the Stripe refund id.',
+    );
+  }
+
+  /**
+   * The order has to name the payment it is reversing. Orders placed before the
+   * card rail existed carry no PaymentIntent, and there is no way to find one
+   * after the fact that would not amount to guessing which charge to reverse.
+   */
+  if (!order.paymentReference) {
+    throw conflict(
+      "This order has no Stripe payment recorded against it, so there is nothing to reverse " +
+        'automatically. Refund it in your Stripe dashboard and record it with method: "manual".',
+    );
+  }
+
+  const connection = await getIntegration(order.orgId, "stripe");
+  if (connection?.status !== "connected" || !connection.config.accountId) {
+    /**
+     * Under Connect Standard a merchant can revoke Markii's access at any time
+     * from their own dashboard — the deauthorization webhook is how we find
+     * out. The charge still exists on their account and is still refundable
+     * **by them**; it is only Markii that can no longer touch it.
+     */
+    throw conflict(
+      "Markii is not connected to a Stripe account for this store, so it cannot issue the " +
+        "refund. Reconnect Stripe in Settings → Payments, or refund in your Stripe dashboard " +
+        'and record it here with method: "manual".',
+    );
+  }
+
+  /**
+   * **Nothing may escape the process on a dry run** (§22). Every check above
+   * still ran, which is the point of asking — the caller learns whether this
+   * refund would work without a shopper being paid back by a preview.
+   */
+  if (ctx.dryRun) return { refundId: null, status: "not_executed_dry_run" };
+
+  const result = await createStripeRefund({
+    accountId: connection.config.accountId,
+    paymentIntentId: order.paymentReference,
+    amountMinor: input.amountMinor,
+    currency: order.currency,
+    reason: input.reason,
+    orderId: order.id,
+    /**
+     * Derived from the order's refund state rather than from this invocation,
+     * so a retry after a failed commit collides with itself at Stripe instead
+     * of paying the shopper twice.
+     */
+    idempotencyKey: refundIdempotencyKey(order.id, order.refundedMinor, input.amountMinor),
+  });
+
+  /**
+   * Stripe's own wording, unchanged. "Insufficient funds in your Stripe
+   * balance" and "charge has already been refunded" are different problems with
+   * different fixes, and the merchant is the one who has to act on either.
+   */
+  if (!result.ok) throw conflict(`Stripe refused the refund: ${result.reason}`);
+
+  return { refundId: result.refundId, status: result.status };
+}
+
 export const refundOrder = defineAction({
   id: "orders.refund",
   description:
     "Refund an order in full or in part. Refund by line (with the units to return and whether " +
     "to restock them) plus any shipping, or by amount for older orders that have no line " +
     "detail. Markii records the refund, returns stock, and meters the reversal against net " +
-    'sales — it does **not** move money unless a payment rail is connected, so method "manual" ' +
-    "means the merchant issued the refund themselves.",
+    'sales. method "manual" means the merchant issued the refund themselves and is telling ' +
+    'Markii about it; method "processor" issues it on the rail — supported on card (Stripe ' +
+    "Connect, from the merchant's own balance) and refused on x402, whose settlements are final.",
   input: z
     .object({
       orderId: z.number().int().positive(),
@@ -151,10 +270,14 @@ export const refundOrder = defineAction({
       note: z.string().max(2000).optional(),
       /**
        * `manual` records a refund the merchant sent themselves. `processor`
-       * asks the rail — which currently refuses rather than pretending.
+       * asks the rail to make it — card only; x402 refuses with the reason.
        */
       method: z.enum(["manual", "processor"]).default("manual"),
-      /** Stripe refund id, or the hash of the merchant's return transfer. */
+      /**
+       * The merchant's own reference for a `manual` refund: a Stripe refund id
+       * they issued from their dashboard, or the hash of their return transfer.
+       * Refused with `processor`, which produces its own reference.
+       */
       processorReference: z.string().max(200).optional(),
       notifyCustomer: z.boolean().default(false),
     })
@@ -196,26 +319,33 @@ export const refundOrder = defineAction({
       { restock: input.restock },
     );
 
-    /**
-     * The honest refusal. Neither rail can push money back from here: Stripe is
-     * not wired, and an on-chain settlement cannot be reversed by the recipient
-     * at all. Recording `succeeded` because a row was written would be a success
-     * toast for an action that did not happen.
-     */
-    if (input.method === "processor") {
-      throw conflict(
-        order.provider === "x402"
-          ? "x402/USDC settlements are final — there is no way to reverse one from Markii. " +
-              "Send the refund from the receiving wallet, then record it here with " +
-              'method: "manual" and the transaction hash as processorReference.'
-          : "Automatic card refunds need a connected Stripe account, which this environment " +
-              'does not have. Refund in the Stripe dashboard, then record it with method: "manual" ' +
-              "and the Stripe refund id as processorReference.",
-      );
-    }
-
     const rail: "stripe" | "x402" | "manual" | "external" =
       order.provider === "x402" ? "x402" : "stripe";
+
+    /**
+     * **The money moves here, before anything is written down.**
+     *
+     * Deliberately not a `ctx.effect()`, even though a Stripe call is exactly
+     * the kind of unrollbackable side effect effects exist for. Effects run
+     * *after* commit and their failures are logged rather than raised, so a
+     * refund queued as an effect would leave a committed refund row, a credited
+     * meter, and restocked units behind a transfer that never happened — the
+     * precise fabrication `CLAUDE.md` forbids.
+     *
+     * Calling first inverts the residual risk into the survivable direction: if
+     * the transaction fails after Stripe accepted, money moved with nothing
+     * recorded. That is visible (the refund is in the merchant's own Stripe
+     * dashboard) and self-correcting, because the idempotency key makes the
+     * retry return the same refund instead of issuing a second one.
+     */
+    const executed =
+      input.method === "processor"
+        ? await executeProcessorRefund(ctx, order, {
+            amountMinor: computed.amountMinor,
+            reason: input.reason,
+            suppliedReference: input.processorReference,
+          })
+        : null;
 
     const [refund] = await ctx.db
       .insert(refunds)
@@ -231,9 +361,9 @@ export const refundOrder = defineAction({
         reason: input.reason,
         note: input.note ?? null,
         restock: input.restock,
-        method: "manual",
+        method: input.method,
         rail,
-        processorReference: input.processorReference ?? null,
+        processorReference: executed ? executed.refundId : input.processorReference ?? null,
         actorType: ctx.actor.type,
         actorId: ctx.actor.id,
         invocationId: ctx.invocationId,
@@ -422,10 +552,21 @@ export const refundOrder = defineAction({
     await logEvent(ctx, {
       orderId: order.id,
       type: "refunded",
+      /**
+       * The two methods are different facts and the timeline says which. A
+       * merchant reading "refunded" needs to know whether Markii moved the money
+       * or is recording that they did — and, on the processor path, that Stripe
+       * may still report it as `pending` for a day or two before the shopper
+       * sees it. Flattening those into one sentence is how a support thread
+       * starts.
+       */
       message:
         `Refunded ${computed.amountMinor} ${order.currency}` +
         (computed.shippingMinor > 0 ? ` (including ${computed.shippingMinor} shipping)` : "") +
-        ` — recorded as issued by the merchant on the ${rail} rail.`,
+        (executed
+          ? ` via Stripe on the ${rail} rail (refund ${executed.refundId ?? "not issued — dry run"}` +
+            `, status ${executed.status}).`
+          : ` — recorded as issued by the merchant on the ${rail} rail.`),
       data: {
         refundId: refund.id,
         amountMinor: computed.amountMinor,
@@ -438,8 +579,11 @@ export const refundOrder = defineAction({
         licenceKeysReturned: revocation.keysReturned,
         membershipsRevoked: membershipRevocation.membershipsRevoked,
         membershipTiersRevoked: membershipRevocation.tierNames,
-        method: "manual",
+        method: input.method,
         rail,
+        ...(executed
+          ? { processorRefundId: executed.refundId, processorStatus: executed.status }
+          : {}),
       },
       visibility: "customer",
     });
@@ -490,10 +634,20 @@ export const refundOrder = defineAction({
       /** Digital access withdrawn, so a refunded buyer does not keep the file. */
       downloadsRevoked: revocation.grantsRevoked,
       licenceKeysReturned: revocation.keysReturned,
-      /** Stated plainly: Markii wrote this down, it did not move the money. */
-      moneyMoved: false,
-      method: "manual" as const,
+      /**
+       * Stated plainly, and now it varies: `false` means Markii wrote the
+       * refund down and the merchant moved the money, `true` means Markii
+       * issued it on the rail. Every surface that shows a refund reads this
+       * rather than assuming, so neither can imply the other happened.
+       *
+       * A dry run never moves money however it is asked, so it reports `false`.
+       */
+      moneyMoved: executed?.refundId != null,
+      method: input.method,
       rail,
+      /** Stripe's id and status, so a `pending` refund is visible as pending. */
+      processorRefundId: executed?.refundId ?? null,
+      processorStatus: executed?.status ?? null,
     };
   },
 });

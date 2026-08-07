@@ -265,7 +265,7 @@ describe("order operations", () => {
     expect(await levelOf(v.id)).toBe(before);
   });
 
-  it("refuses a processor-executed refund instead of pretending", async () => {
+  it("refuses a processor-executed refund on x402, whose settlements are final", async () => {
     const v = await makeVariant("processor", 5);
     const orderId = await buy(v.id, 1);
     const detail = await merchant.get(`/api/orders/${orderId}`);
@@ -276,12 +276,110 @@ describe("order operations", () => {
       method: "processor",
     });
     expect(refused(r)).toBe(true);
-    // x402 settlement is irreversible; the refusal has to say so.
+    // On-chain settlement cannot be reversed by the recipient at all; the
+    // refusal has to say so rather than read as a missing integration.
     expect(JSON.stringify(r.json)).toMatch(/final|irreversible|wallet/i);
 
     // And nothing was written — no half-recorded refund left behind.
     const rows = await sql`select id from refunds where order_id = ${orderId}`;
     expect(rows).toHaveLength(0);
+  });
+
+  /**
+   * The guards on the card rail, which is where a processor refund actually
+   * moves money. Each one decides whether Markii calls Stripe at all, so they
+   * are tested against a real order and a real database rather than trusted.
+   *
+   * The orders are flipped to `provider = 'stripe'` directly: opening a genuine
+   * card checkout needs a connected Connect account, and the branches under test
+   * are precisely the ones that run when there is not one.
+   */
+  describe("processor refunds on the card rail", () => {
+    async function stripeOrder(name: string, paymentReference: string | null) {
+      const v = await makeVariant(name, 5);
+      const orderId = await buy(v.id, 1);
+      await sql`update orders set provider = 'stripe',
+        payment_reference = ${paymentReference} where id = ${orderId}`;
+      const detail = await merchant.get(`/api/orders/${orderId}`);
+      return { orderId, lineId: detail.json.lines[0].id };
+    }
+
+    /** Nothing may be half-written when the rail refuses. */
+    async function nothingRecorded(orderId: number) {
+      const rows = await sql`select id from refunds where order_id = ${orderId}`;
+      expect(rows).toHaveLength(0);
+      const [order] = await sql`select refunded_minor, financial_status from orders
+        where id = ${orderId}`;
+      expect(order.refunded_minor).toBe(0);
+      expect(order.financial_status).toBe("paid");
+    }
+
+    it("refuses when the order names no Stripe payment to reverse", async () => {
+      const { orderId, lineId } = await stripeOrder("pr-noref", null);
+
+      const r = await merchant.invoke("orders.refund", {
+        orderId,
+        lines: [{ orderLineId: lineId, quantity: 1 }],
+        method: "processor",
+      });
+      expect(refused(r)).toBe(true);
+      // There is no way to find the charge after the fact that is not a guess
+      // about which payment to reverse.
+      expect(JSON.stringify(r.json)).toMatch(/no Stripe payment/i);
+      await nothingRecorded(orderId);
+    });
+
+    it("refuses when Markii is not connected to the merchant's Stripe account", async () => {
+      const { orderId, lineId } = await stripeOrder("pr-nodisconnect", "pi_3NotConnected");
+
+      const r = await merchant.invoke("orders.refund", {
+        orderId,
+        lines: [{ orderLineId: lineId, quantity: 1 }],
+        method: "processor",
+      });
+      expect(refused(r)).toBe(true);
+      // The charge is still refundable by the merchant in their own dashboard —
+      // the refusal has to point there rather than read as a dead end.
+      expect(JSON.stringify(r.json)).toMatch(/not connected|Settings/i);
+      await nothingRecorded(orderId);
+    });
+
+    it("refuses a processorReference on the processor path instead of discarding it", async () => {
+      const { orderId, lineId } = await stripeOrder("pr-ref", "pi_3WithReference");
+
+      const r = await merchant.invoke("orders.refund", {
+        orderId,
+        lines: [{ orderLineId: lineId, quantity: 1 }],
+        method: "processor",
+        processorReference: "re_merchantIssuedThisThemselves",
+      });
+      expect(refused(r)).toBe(true);
+      // Supplying one means "here is the refund I already made" — the manual
+      // path. Accepting it here would overwrite it with Stripe's own id and
+      // silently lose what the merchant typed.
+      expect(JSON.stringify(r.json)).toMatch(/manual/i);
+      await nothingRecorded(orderId);
+    });
+
+    it("still records a manual refund on a card order, and says Markii moved nothing", async () => {
+      const { orderId, lineId } = await stripeOrder("pr-manual", "pi_3ManualPath");
+
+      const r = await merchant.invoke("orders.refund", {
+        orderId,
+        lines: [{ orderLineId: lineId, quantity: 1 }],
+        method: "manual",
+        processorReference: "re_issuedInStripeDashboard",
+      });
+      expect(r.json.ok).toBe(true);
+      // No refusal on the card rail ever blocks a merchant from recording a
+      // refund they issued themselves.
+      expect(r.json.result.moneyMoved).toBe(false);
+      expect(r.json.result.method).toBe("manual");
+
+      const detail = await merchant.get(`/api/orders/${orderId}`);
+      expect(detail.json.refunds[0].moneyMovedByMarkii).toBe(false);
+      expect(detail.json.refunds[0].processorReference).toBe("re_issuedInStripeDashboard");
+    });
   });
 
   it("refuses to cancel a paid order, directing to a refund", async () => {

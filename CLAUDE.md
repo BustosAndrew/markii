@@ -47,13 +47,21 @@ registry (§22); commerce core (§18.1–18.8) — variants, inventory, collecti
 checkout, discounts, tax, shipping, order operations, digital delivery; and rule-based readiness
 (§9). Supabase Storage backs both uploads and the files merchants sell.
 
-**Phase B billing is half built.** The threshold fee engine, the meter, plan catalog, entitlements,
-and period-close assessments are live (`lib/billing/`), as is the **Stripe webhook receiver**
-(`/api/webhooks/stripe` — signature-verified, idempotent on Stripe's event id, separate secrets for
-platform and Connect events; **Connect account state is handled — `account.updated` and
-`account.application.deauthorized` gate the card rail — but nothing charges**). Everything else
-needing Stripe — subscriptions, plan changes, payment methods, invoices — refuses with
-`503 CONFIGURATION_REQUIRED`. **Nothing is charged**, and every billing response says so.
+**The card rail is built.** Stripe Connect Standard, end to end: OAuth connect, **direct charges on
+the merchant's own account** (`lib/payments/stripe-charges.ts`), server-side verification at
+`/complete`, and **processor-executed refunds** out of the merchant's own balance
+(`lib/payments/stripe-refunds.ts`). Markii takes **no `application_fee_amount`** and no
+`refund_application_fee` — it is never in the funds flow (D4). `orders.paymentReference` is the
+rail-neutral link back to the charge; `txHash` stays x402-only.
+
+**Phase B billing is still half built — the half that charges *the merchant* is missing.** The
+threshold fee engine, meter, plan catalog, entitlements, and period-close assessments are live
+(`lib/billing/`), as is the **Stripe webhook receiver** (`/api/webhooks/stripe` —
+signature-verified, idempotent on Stripe's event id, separate secrets for platform and Connect
+events). Its handlers now cover Connect account state, `payment_intent.*`, and refunds — everything
+the card rail depends on. But **subscriptions, plan changes, payment methods, and invoices still
+refuse with `503 CONFIGURATION_REQUIRED`**: Markii does not bill anyone, and every billing response
+says so.
 
 **Email plumbing is built; no mail is sent.** `lib/email/` has the SES v2 transport (hand-rolled
 SigV4 over `fetch`), per-merchant sending identities, the suppression list, a signature-verified
@@ -68,23 +76,26 @@ access after it expired. A refund revokes them, mirroring digital delivery — c
 refund, keep it* for files but not for memberships would only move the hole. Memberships do **not**
 auto-renew (that needs Phase B recurring billing).
 
-**Still planned:** the **card rail** (no `STRIPE_SECRET_KEY`; `lib/payments/` reports
-*configuration required*), Stripe Tax, processor-executed refunds, recurring membership billing,
-shopper auth mail via Supabase's Send Email Hook, and abandoned-cart mail. Everything in §10–15 and
-§19–21 is untouched.
+**Still planned:** Markii's own **subscription billing** (plan changes, invoices, payment methods —
+all `503`), Stripe Tax, recurring membership billing, shopper auth mail via Supabase's Send Email
+Hook, and abandoned-cart mail. Everything in §10–15 and §19–21 is untouched.
 
 **Deferred until further notice — do not build, and do not let schema anticipate it:** **gift
 cards** (D33, 2026-08-03). The metering exclusion in `docs/PRICING.md` §4.1 is asserted but
 unimplemented, so a naive implementation mis-bills merchants in one direction or the other —
 `lib/commerce/orders.ts` carries the detail.
 
-**Two credentials gate almost everything that remains, and neither is a switch.**
-`STRIPE_SECRET_KEY` is a *prerequisite* for the card rail, subscriptions, invoices, and processor
-refunds — those routes refuse unconditionally today and still need implementing once the key
-exists. AWS SES credentials are the opposite: the code is finished, so credentials plus sandbox
-escape plus a merchant's verified domain are all that stand between here and real mail. Until then
-both refuse rather than stub — see the `configuration_required` pattern in `lib/payments/`,
-`app/api/billing/`, and `lib/email/`.
+**What remains is gated by work, not by credentials.** `STRIPE_SECRET_KEY` exists now, and the card
+rail was written on top of it — but a key was only ever a *prerequisite* for Markii's own
+subscription billing, which still has to be built and still refuses with `503`. AWS SES is the
+opposite case: the code is finished, so credentials plus sandbox escape plus a merchant's verified
+domain are all that stand between here and real mail. Both refuse rather than stub — see the
+`configuration_required` pattern in `lib/payments/`, `app/api/billing/`, and `lib/email/`.
+
+Two credentials also gate the card rail at *runtime*, and they fail differently:
+`NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` is required for Stripe Elements to mount (its absence refuses
+the checkout rather than rendering an empty card form), and `STRIPE_CONNECT_WEBHOOK_SECRET` verifies
+merchant events — the route **never** falls back to the platform secret.
 
 Always check the **status legend at the top of `docs/API.md`** before calling an endpoint — it is
 per-section and kept current. Call `/api/*` only — never `lib/db` / Drizzle from frontend screens.

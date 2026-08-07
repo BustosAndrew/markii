@@ -61,11 +61,14 @@ returns the keys. Storage and egress are metered against G5's quotas and reporte
 `advisoryOnly`, since those numbers are not signed off and blocking a merchant's customers on an
 unagreed figure is worse than not gating yet.
 
-**What is still missing** is the card rail (`lib/payments/` reports `configuration_required`; no
-`STRIPE_SECRET_KEY` exists yet), Stripe Tax, **processor-executed refunds** —
-`orders.refund` records a refund the merchant issued and refuses `method: "processor"` with the
-reason, since Stripe is unwired and x402 settlement is irreversible — and **membership gating**,
-which has no content model to gate until Phase D.
+**The card rail is now built** (Stripe Connect Standard, direct charges), and with it
+**processor-executed refunds**: `orders.refund` with `method: "processor"` creates the refund on the
+merchant's own account out of their own balance. `method: "manual"` still records a refund the
+merchant issued themselves and is the only option on x402, whose settlement is irreversible.
+
+**What is still missing** is Markii's own subscription billing (plan changes, invoices, payment
+methods — all `503`), Stripe Tax, and **content** membership gating, which has no content model to
+gate until Phase D.
 
 **Storage buckets are not in the migration chain.** Supabase creates them through its Storage API,
 not DDL, so a fresh environment has none and uploads fail until `pnpm storage:init` runs. It is
@@ -277,13 +280,29 @@ records `received` / `processed` / `ignored` / `failed` with a mandatory reason 
 **Connect and platform events use separate signing secrets and the route never falls back between
 them** — an event with `account` is a merchant's, one without is Markii's own.
 
-**Two handlers are live**: `account.updated` and `account.application.deauthorized` keep each
-merchant's Connect connection and card-rail eligibility current — `chargesEnabled` is the gate,
-because connected is not the same as able to take money. They resolve the tenant by matching the
-event's `account` against stored connections, so an event for an unknown account resolves to
-nothing rather than to somebody. Add further handlers to the `HANDLERS` map as each capability
-lands; until then every recognised type is recorded as `ignored` with a reason, never silently
-dropped, and **no billing state changes**.
+**Six handlers are live**, covering everything the card rail depends on. `account.updated` and
+`account.application.deauthorized` keep each merchant's Connect connection and card-rail eligibility
+current — `chargesEnabled` is the gate, because connected is not the same as able to take money.
+`payment_intent.succeeded` is the **authoritative** completion signal (a browser can be closed
+mid-redirect, and its word was never evidence anyway); `payment_intent.payment_failed` and
+`.canceled` release the reservation. `charge.refunded` and `charge.refund.updated` reconcile refunds
+— see below. They resolve the tenant by matching the event's `account` against stored connections,
+so an event for an unknown account resolves to nothing rather than to somebody. Add further handlers
+to the `HANDLERS` map as each capability lands; until then every recognised type is recorded as
+`ignored` with a reason, never silently dropped, and **no billing state changes**.
+
+**The two refund handlers flag rather than fabricate**, and that is the whole design. Under Connect
+Standard a merchant can refund from their own Stripe dashboard whenever they like, and Markii would
+otherwise never know: the order would keep showing `paid`, the meter would keep counting a reversed
+sale, and the stock would never come back. But a Stripe charge does not say which lines were
+returned, whether to restock them, or how much of the money was tax and shipping — and `computeRefund`
+refuses to guess, because guessing there meters revenue that never existed (D36). So `charge.refunded`
+writes the discrepancy onto the order timeline and leaves the merchant to record it properly.
+
+`charge.refunded` reads the order **`for update`**. Markii's own refund path calls Stripe while
+holding that same lock and commits immediately after, so the event routinely arrives before the
+refund row exists — an unlocked read would see a stale `refundedMinor` and report the platform's own
+refund as one issued behind its back.
 
 ### 4. Phase C — commerce core
 
@@ -292,11 +311,14 @@ Contract `docs/API.md` §18. The largest phase. Order within it:
 1. ~~**Variants and options**~~ — done
 2. ~~**Inventory as an append-only ledger**~~ — done
 3. ~~**Collections** (manual + rule-based), **customers**~~ — done
-4. ~~**Cart and checkout**~~ — done for the x402 rail; card rail waits on Stripe credentials
+4. ~~**Cart and checkout**~~ — done on both rails. The card rail creates a PaymentIntent as a direct
+   charge on the merchant's connected account and verifies it **server-side** at `/complete`; a
+   browser posting "it worked" is a free-goods bug, exactly as it would be on x402
 5. ~~**Discounts**, tax, shipping rates~~ — done. Stripe Tax still open; **gift cards are deferred
    until further notice (D33)** — do not build, and do not let schema anticipate them
-6. ~~**Orders**: refunds, cancellations, manual fulfillment status, timeline~~ — done. Executing a
-   refund on a rail (rather than recording one) waits on Stripe credentials
+6. ~~**Orders**: refunds, cancellations, manual fulfillment status, timeline~~ — done, **including
+   executing a card refund on the rail** rather than only recording one (`method: "processor"`).
+   x402 refuses permanently: its settlement is final and no key here can reverse it
 7. ~~**Digital delivery** — signed expiring URLs, download limits, licence keys~~ — done
 8. ~~**Membership gating** (§18.9) and the **shopper login** it required (§18.3)~~ — done 2026-08-03
    (D34). The blocker was neither of the two the docs named: there was **no shopper identity**, so
@@ -467,6 +489,8 @@ goes live — that badge is the frontend's only signal that something is callabl
 | Any auth mutation running in the browser | The session cookie cannot be `HttpOnly` (D30) — XSS in merchant custom code reaches an admin session |
 | Computing fees from `orders` instead of usage records | Wrong invoices after any refund |
 | Non-idempotent webhook handling | Double-charged merchants |
+| Queueing a processor refund as a `ctx.effect()` | Effects run **after** commit and only log their failures — a committed refund row, a credited meter, and restocked units behind a transfer that never happened. Call the rail first, then write |
+| An idempotency key derived from the invocation rather than the refund | The retry it needs to survive is a *new* invocation, so the key changes and the shopper is paid twice |
 | Read-then-write inventory checks | Overselling the last unit |
 | Proxying large file downloads | Double bandwidth cost, function timeouts |
 | Service-role key in a `NEXT_PUBLIC_*` var | Full database compromise |

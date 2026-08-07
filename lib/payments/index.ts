@@ -43,17 +43,14 @@ export function stripeConfigured(): boolean {
 /**
  * Card payments via Stripe Connect Standard.
  *
- * **Connection state is live; charge creation is not.** `account.updated`
- * webhooks keep `chargesEnabled` current per merchant, so this can already tell
- * a merchant who has not connected from one Stripe has not verified — but no
- * PaymentIntent is created yet, and this reports exactly that rather than
- * inventing a client secret.
+ * Card data goes only to Stripe-hosted Elements (PCI SAQ-A), charges are created
+ * with `Stripe-Account` against the merchant's own account, and Markii takes
+ * **no `application_fee_amount`** — merchants keep their own account and Markii
+ * never holds their funds (`docs/DECISIONS.md` D4, `docs/PRICING.md`).
  *
- * When it lands, card data still goes only to Stripe-hosted elements (PCI
- * SAQ-A), charges are created with `Stripe-Account` against the merchant's own
- * account, and Markii takes **no `application_fee_amount`** — merchants keep
- * their own account and Markii never holds their funds (`docs/DECISIONS.md` D4,
- * `docs/PRICING.md`).
+ * `account.updated` webhooks keep `chargesEnabled` current per merchant, which
+ * is what lets this tell a merchant who has not connected apart from one Stripe
+ * has not finished verifying — two different problems with two different fixes.
  */
 async function startStripe(
   orgId: string,

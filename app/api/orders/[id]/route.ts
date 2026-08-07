@@ -152,11 +152,13 @@ export const GET = orgHandler(
         ...r,
         lines: refundLineRows.filter((x) => x.line.refundId === r.id).map((x) => x.line),
         /**
-         * Stated on every refund: Markii recorded this, it did not move the
-         * money. Card refunds need a connected Stripe account and x402
-         * settlements cannot be reversed at all (§18.7, §20).
+         * Stated on every refund, because the two cases look identical in a
+         * list and are not the same event. `method: "processor"` means Markii
+         * issued the refund on the merchant's Stripe account; `manual` means
+         * the merchant moved the money and told Markii about it — which is the
+         * only option on x402, whose settlements cannot be reversed (§20).
          */
-        moneyMovedByMarkii: false,
+        moneyMovedByMarkii: r.method === "processor",
         createdAt: r.createdAt.toISOString(),
       })),
       fulfillments: fulfillmentRows.map((f) => ({

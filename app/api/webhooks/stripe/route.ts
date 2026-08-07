@@ -1,6 +1,14 @@
 import { and, eq, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { checkoutSessions, db, integrations, stripeWebhookEvents } from "@/lib/db";
+import {
+  checkoutSessions,
+  db,
+  integrations,
+  orderEvents,
+  orders,
+  refunds,
+  stripeWebhookEvents,
+} from "@/lib/db";
 import { completeCheckout, failCheckout } from "@/lib/commerce/orders";
 import { upsertIntegration } from "@/lib/integrations";
 import {
@@ -19,11 +27,13 @@ import {
  * the platform's. Confusing the two would let a merchant's `invoice.paid` mark
  * Markii's own subscription current, or the reverse (`docs/BACKEND.md`).
  *
- * **Connect account state is handled; billing state is not, and that is
- * deliberate.** `account.updated` and `account.application.deauthorized` keep a
- * merchant's card-rail eligibility current, because those need nothing from
- * Stripe's API beyond the event itself. Everything about *charging* —
- * subscriptions, invoices, payment methods — still refuses with
+ * **The card rail is handled; Markii's own billing state is not, and that is
+ * deliberate.** Connect account state (`account.updated`,
+ * `account.application.deauthorized`), payment outcomes
+ * (`payment_intent.*`), and refunds (`charge.refunded`,
+ * `charge.refund.updated`) all have handlers, because those are the merchant's
+ * money and it is already moving. Everything about *Markii charging the
+ * merchant* — subscriptions, invoices, payment methods — still refuses with
  * `503 CONFIGURATION_REQUIRED` (§17), so there is nothing downstream for those
  * events to update yet. Handlers get added to `HANDLERS` as each capability is
  * built; until then every recognised type is recorded as `ignored` **with a
@@ -165,6 +175,160 @@ const HANDLERS: Record<string, (event: StripeEventEnvelope) => Promise<HandlerRe
   "payment_intent.canceled": releaseIntent,
 
   /**
+   * A charge on the merchant's account was refunded — **by anyone**.
+   *
+   * Markii's own processor refunds land here too, and they are the easy case:
+   * the refund is already recorded, so this reconciles to nothing. The case this
+   * handler exists for is the other one — a merchant refunding from their own
+   * Stripe dashboard, which Connect Standard entitles them to do and which
+   * Markii would otherwise never learn about. Their order would keep showing
+   * `paid`, the threshold meter would keep counting a sale that was reversed,
+   * and the stock would never come back.
+   *
+   * **It flags rather than fabricates.** A refund row needs to know which lines
+   * were returned, whether to restock them, and how much of the money was tax
+   * and shipping — none of which a Stripe charge carries, and all of which
+   * `computeRefund` refuses to guess (D36: guessing there meters revenue that
+   * never existed). So this writes the discrepancy onto the order timeline and
+   * leaves the merchant to record it properly, which is a minute of their work
+   * against a permanently wrong ledger.
+   */
+  "charge.refunded": async (event) => {
+    const charge = event.data.object as {
+      id?: string;
+      payment_intent?: string;
+      amount_refunded?: number;
+      currency?: string;
+    };
+    if (!charge.payment_intent) {
+      return { changed: false, detail: "Charge carries no PaymentIntent; no order to match." };
+    }
+    const refundedAtStripe = charge.amount_refunded ?? 0;
+
+    return db.transaction(async (tx) => {
+      /**
+       * Bounded, because the lock below is held across a network call to Stripe
+       * and Stripe's own webhook delivery times out around 30 seconds. Waiting
+       * indefinitely would burn the delivery attempt; failing fast records the
+       * event as `failed` and lets the retry — which now genuinely reprocesses,
+       * see the claim logic below — arrive when the lock is long gone.
+       */
+      await tx.execute(sql`set local lock_timeout = '8s'`);
+
+      /**
+       * **`for update` is what makes this race-free.** Markii's own refund path
+       * calls Stripe while holding this exact lock and commits straight after,
+       * so the event can easily arrive before the refund row exists. Reading
+       * without the lock would see a stale `refundedMinor` and report the
+       * platform's own refund as one issued behind its back.
+       */
+      const [order] = await tx
+        .select()
+        .from(orders)
+        .where(eq(orders.paymentReference, charge.payment_intent!))
+        .limit(1)
+        .for("update");
+      if (!order) {
+        return { changed: false, detail: `No order for PaymentIntent ${charge.payment_intent}.` };
+      }
+
+      if (refundedAtStripe <= order.refundedMinor) {
+        return {
+          changed: false,
+          detail:
+            `Stripe reports ${refundedAtStripe} refunded on order ${order.id}; Markii already ` +
+            `has ${order.refundedMinor}. Nothing to reconcile.`,
+        };
+      }
+
+      const gap = refundedAtStripe - order.refundedMinor;
+      const currency = (charge.currency ?? order.currency).toUpperCase();
+      await tx.insert(orderEvents).values({
+        orderId: order.id,
+        type: "note",
+        message:
+          `Stripe reports ${refundedAtStripe} ${currency} refunded on this order, but Markii has ` +
+          `only ${order.refundedMinor} recorded — ${gap} ${currency} was refunded outside Markii. ` +
+          "Record it here so the stock, the customer's downloads, and your threshold meter match " +
+          "the money.",
+        data: {
+          source: "stripe_webhook",
+          chargeId: charge.id ?? null,
+          paymentIntentId: charge.payment_intent,
+          amountRefundedAtStripe: refundedAtStripe,
+          amountRefundedInMarkii: order.refundedMinor,
+          unrecordedMinor: gap,
+          currency,
+        },
+        visibility: "internal",
+        actorType: "system",
+      });
+
+      return {
+        detail: `Flagged ${gap} ${currency} refunded outside Markii on order ${order.id}.`,
+      };
+    });
+  },
+
+  /**
+   * A refund changed state after it was created — in practice, one that was
+   * `pending` and has now `failed`.
+   *
+   * This is the other half of accepting `pending` when the refund was issued
+   * (`lib/payments/stripe-refunds.ts`). Refusing pending refunds would leave
+   * money moving at Stripe with nothing recorded here; accepting them means
+   * committing to hear about the small number that never land.
+   *
+   * **It does not reverse the refund row.** Un-refunding means re-taking stock
+   * from a shopper, re-metering the sale, and reinstating downloads that were
+   * revoked — a judgement about a real customer, which `orders.refund` already
+   * declines to automate (`undoable: false`). The timeline says what happened
+   * and the merchant decides.
+   */
+  "charge.refund.updated": async (event) => {
+    const refund = event.data.object as {
+      id?: string;
+      status?: string;
+      failure_reason?: string;
+      amount?: number;
+    };
+    if (!refund.id) return { changed: false, detail: "Event carried no refund id." };
+    if (refund.status === "succeeded" || refund.status === "pending") {
+      return { changed: false, detail: `Refund ${refund.id} is "${refund.status}"; nothing wrong.` };
+    }
+
+    const [row] = await db
+      .select({ id: refunds.id, orderId: refunds.orderId, amountMinor: refunds.amountMinor })
+      .from(refunds)
+      .where(eq(refunds.processorReference, refund.id))
+      .limit(1);
+    if (!row) {
+      return { changed: false, detail: `No Markii refund recorded against ${refund.id}.` };
+    }
+
+    await db.insert(orderEvents).values({
+      orderId: row.orderId,
+      type: "note",
+      message:
+        `Stripe refund ${refund.id} is now "${refund.status}"` +
+        (refund.failure_reason ? ` (${refund.failure_reason})` : "") +
+        `. The ${row.amountMinor} recorded as refund ${row.id} did not reach the customer. ` +
+        "The refund is still recorded here — stock was returned and access revoked — so decide " +
+        "whether to reissue it or reverse the record.",
+      data: {
+        source: "stripe_webhook",
+        refundId: row.id,
+        processorRefundId: refund.id,
+        status: refund.status ?? null,
+        failureReason: refund.failure_reason ?? null,
+      },
+      visibility: "internal",
+      actorType: "system",
+    });
+    return { detail: `Flagged failed Stripe refund ${refund.id} on order ${row.orderId}.` };
+  },
+
+  /**
    * The merchant revoked Markii's access from their own Stripe dashboard.
    *
    * **This has to turn the card rail off immediately.** Markii cannot create
@@ -257,7 +421,6 @@ async function integrationForAccount(accountId: string) {
  */
 const EXPECTED_TYPES = new Set([
   "checkout.session.completed",
-  "charge.refunded",
   "charge.dispute.created",
   "customer.subscription.created",
   "customer.subscription.updated",
@@ -273,6 +436,8 @@ const EXPECTED_TYPES = new Set([
   "payment_intent.succeeded",
   "payment_intent.payment_failed",
   "payment_intent.canceled",
+  "charge.refunded",
+  "charge.refund.updated",
   "account.updated",
   "account.application.deauthorized",
   "charge.dispute.closed",
@@ -357,9 +522,30 @@ export const POST = async (req: Request) => {
     .returning({ id: stripeWebhookEvents.id });
 
   if (claimed.length === 0) {
-    // Already seen. Acknowledged so Stripe stops retrying, and reported as the
-    // duplicate it is rather than as fresh work.
-    return NextResponse.json({ ok: true, duplicate: true });
+    /**
+     * Already claimed — but *claimed* is not *done*, and the difference is what
+     * makes the 500-so-Stripe-retries path below actually work.
+     *
+     * The row is written before the handler runs, so a handler that throws
+     * leaves a `failed` row behind. Treating every collision as a duplicate
+     * would make the retry a no-op and quietly discard the event the retry
+     * existed to deliver — the 500 would look like it asked for another attempt
+     * and then refuse it.
+     *
+     * So a `failed` row is reprocessed and anything else is a genuine
+     * redelivery. Handlers are idempotent (`completeCheckout` returns the
+     * existing order, the integration writes are upserts, and the refund
+     * handlers do their reads and writes in one transaction), so a second run
+     * of one that failed part-way is safe.
+     */
+    const [seen] = await db
+      .select({ status: stripeWebhookEvents.status })
+      .from(stripeWebhookEvents)
+      .where(eq(stripeWebhookEvents.id, event.id))
+      .limit(1);
+    if (seen?.status !== "failed") {
+      return NextResponse.json({ ok: true, duplicate: true });
+    }
   }
 
   const handler = HANDLERS[event.type];

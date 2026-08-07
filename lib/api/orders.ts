@@ -116,9 +116,13 @@ export type OrderRefund = {
   processorReference: string | null;
   lines: { id: number; refundId: number; orderLineId: number; quantity: number }[];
   /**
-   * Always `false` today, and shown as such. Markii never holds merchant funds,
-   * the card rail is unwired, and x402 settlement is irreversible — so recording
-   * a refund and moving the money are different facts (§18.7).
+   * `true` when Markii issued this refund on the card rail, `false` when the
+   * merchant moved the money and Markii recorded it — the only possibility on
+   * x402, whose settlement is irreversible (§18.7).
+   *
+   * **Read it rather than assuming either way.** The two look identical in a
+   * list and are not the same event, and Markii never holds merchant funds in
+   * either case: a card refund comes out of the merchant's own Stripe balance.
    */
   moneyMovedByMarkii: boolean;
   createdAt: string;

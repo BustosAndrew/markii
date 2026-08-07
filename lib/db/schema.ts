@@ -197,6 +197,18 @@ export const orders = pgTable(
     currency: text("currency").notNull().default("USDC"),
     provider: text("provider", { enum: ["x402", "stripe"] }).notNull().default("x402"),
     txHash: text("tx_hash"),
+    /**
+     * The rail's own identifier for the payment: a Stripe PaymentIntent id, or
+     * the x402 transaction hash.
+     *
+     * `txHash` stays exactly as it is — v1, x402-only, and read by §1–8. This is
+     * the **rail-neutral** field beside it, and a processor refund is why it has
+     * to exist: reversing a card payment means naming the intent it reverses,
+     * and the order is the only record a refund starts from. Before this, a
+     * Stripe order stored its intent id solely on the checkout session, so the
+     * order — the merchant's financial record — could not say what was charged.
+     */
+    paymentReference: text("payment_reference"),
     agentUserAgent: text("agent_user_agent").notNull().default(""),
     agentName: text("agent_name").notNull().default("Other"),
     agentWalletAddress: text("agent_wallet_address"),
@@ -250,6 +262,9 @@ export const orders = pgTable(
     index("orders_created_idx").on(t.createdAt),
     index("orders_financial_status_idx").on(t.financialStatus),
     index("orders_fulfillment_status_idx").on(t.fulfillmentStatus),
+    // Stripe's refund and dispute events name a PaymentIntent, never an order —
+    // this is the only way back to ours.
+    index("orders_payment_reference_idx").on(t.paymentReference),
   ],
 );
 

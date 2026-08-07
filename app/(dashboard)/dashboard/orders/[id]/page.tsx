@@ -220,10 +220,12 @@ function Refunds({ refunds, currency }: { refunds: OrderRefund[]; currency: stri
           </div>
           {r.note ? <p className="mt-2 text-sm text-muted">{r.note}</p> : null}
           {/*
-            Stated on every refund. Markii never holds merchant funds, the card
-            rail is unwired, and x402 settlement cannot be reversed — so for a
-            `manual` refund the merchant is the one who sent the money back.
-            Implying otherwise would be a success toast for an unwired action.
+            Stated on every refund, because the two are indistinguishable in a
+            list and are not the same event. Markii can now issue a card refund
+            on the merchant's own Stripe account (§18.7) — but x402 settlement
+            still cannot be reversed, so a `manual` refund means the merchant
+            sent the money back themselves. Implying otherwise would be a
+            success toast for a transfer nobody made.
           */}
           <p className="mt-2 text-xs text-muted">
             {r.moneyMovedByMarkii
