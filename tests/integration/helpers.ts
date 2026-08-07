@@ -104,11 +104,61 @@ export function refused(r: ApiResult): boolean {
 }
 
 /**
- * Signs up a merchant, confirms their email, and signs them in.
+ * Creates a confirmed staff user **without sending any email**.
  *
- * Email confirmation is on, so sign-up alone yields no session — the route
- * correctly reports `emailConfirmationRequired` rather than pretending. Tests
- * confirm directly in the database instead of going through the mail.
+ * Supabase applies an auth email rate limit per project, and the suite creates a
+ * merchant in `beforeAll` of every test file — so going through the public
+ * sign-up route meant one run could exhaust the quota and the *next* run failed
+ * in setup with `over_email_send_rate_limit`, which looks nothing like a rate
+ * limit from the test output. Every file paid the cost of exercising sign-up,
+ * and none of them was testing sign-up.
+ *
+ * The admin API creates the user already confirmed and sends nothing.
+ * `app_metadata.user_kind` is stamped here for the same reason the sign-up route
+ * stamps it rather than trusting `user_metadata` (D32): it is service-role only,
+ * and it is the copy `isStaffUser()` reads. A fixture user without it would be
+ * refused by every authorised route, which is not the thing under test.
+ *
+ * **The real sign-up route still has coverage** — see the sign-up test in
+ * `tenancy.test.ts`, which is where that behaviour belongs.
+ */
+async function createConfirmedStaffUser(email: string, password: string): Promise<void> {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !serviceKey) {
+    throw new Error(
+      "Integration tests need NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY to create " +
+        "fixture users without sending mail.",
+    );
+  }
+
+  const res = await fetch(`${url}/auth/v1/admin/users`, {
+    method: "POST",
+    headers: {
+      apikey: serviceKey,
+      authorization: `Bearer ${serviceKey}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      email,
+      password,
+      /** Already confirmed, so no confirmation mail is generated at all. */
+      email_confirm: true,
+      app_metadata: { user_kind: "staff" },
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`admin user creation failed (${res.status}): ${body.slice(0, 300)}`);
+  }
+}
+
+/**
+ * Creates a merchant and signs them in.
+ *
+ * The org is provisioned by `ensureFirstOrg`, which **sign-in** calls as well as
+ * sign-up — so creating the user out of band loses nothing.
  */
 export async function signUpMerchant(client: Client, label: string) {
   const stamp = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
@@ -116,11 +166,7 @@ export async function signUpMerchant(client: Client, label: string) {
   const email = `test-${label}-${stamp}@markii.shop`;
   const password = `Tv!${stamp}aA9`;
 
-  client.clearCookies();
-  const up = await client.post("/api/auth/sign-up", { email, password });
-  if (up.status >= 400) throw new Error(`sign-up failed: ${JSON.stringify(up.json)}`);
-
-  await sql`update auth.users set email_confirmed_at = now() where email = ${email}`;
+  await createConfirmedStaffUser(email, password);
 
   client.clearCookies();
   const inn = await client.post("/api/auth/sign-in", { email, password });
@@ -155,24 +201,61 @@ export class Cleanup {
   variantIds: number[] = [];
   locationIds: number[] = [];
   merchantEmails: string[] = [];
+  /**
+   * Storefront shoppers (D32) — a **separate identity domain** that owns no org,
+   * so nothing above removes them. Tracked here rather than in one test file so
+   * the next file that creates a shopper gets cleanup for free; 33 leaked rows
+   * accumulated while this lived locally and one fixture forgot to register.
+   */
+  shopperEmails: string[] = [];
   /** Test-owned stores. Deleting the org cascades everything beneath it. */
   orgIds: string[] = [];
   siteIds: number[] = [];
 
   async run() {
-    for (const id of this.usageRecordIds) await sql`delete from usage_records where id = ${id}`;
+    /**
+     * **Every step runs even if an earlier one fails.**
+     *
+     * This used to abort on the first error, which is how test users
+     * accumulated: a foreign-key complaint partway through left everything
+     * after it undone, silently, on exactly the runs where cleanup mattered
+     * most. Failures are collected and rethrown at the end, so nothing is
+     * hidden and nothing is skipped.
+     */
+    const failures: string[] = [];
+    const attempt = async (what: string, fn: () => Promise<unknown>) => {
+      try {
+        await fn();
+      } catch (e) {
+        failures.push(`${what}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    };
+
+    for (const id of this.usageRecordIds) {
+      await attempt("usage record", () => sql`delete from usage_records where id = ${id}`);
+    }
     for (const id of this.checkoutSessionIds) {
-      await sql`delete from checkout_sessions where id = ${id}`;
+      await attempt("checkout session", () => sql`delete from checkout_sessions where id = ${id}`);
     }
-    for (const id of this.orderIds) await sql`delete from orders where id = ${id}`;
-    for (const id of this.cartIds) await sql`delete from carts where id = ${id}`;
-    for (const id of this.discountIds) await sql`delete from discounts where id = ${id}`;
-    for (const id of this.shippingZoneIds) await sql`delete from shipping_zones where id = ${id}`;
+    for (const id of this.orderIds) {
+      await attempt("order", () => sql`delete from orders where id = ${id}`);
+    }
+    for (const id of this.cartIds) {
+      await attempt("cart", () => sql`delete from carts where id = ${id}`);
+    }
+    for (const id of this.discountIds) {
+      await attempt("discount", () => sql`delete from discounts where id = ${id}`);
+    }
+    for (const id of this.shippingZoneIds) {
+      await attempt("shipping zone", () => sql`delete from shipping_zones where id = ${id}`);
+    }
     for (const id of this.variantIds) {
-      await sql`delete from inventory_ledger where variant_id = ${id}`;
-      await sql`delete from variants where id = ${id}`;
+      await attempt("ledger", () => sql`delete from inventory_ledger where variant_id = ${id}`);
+      await attempt("variant", () => sql`delete from variants where id = ${id}`);
     }
-    for (const id of this.locationIds) await sql`delete from locations where id = ${id}`;
+    for (const id of this.locationIds) {
+      await attempt("location", () => sql`delete from locations where id = ${id}`);
+    }
 
     /**
      * The safety net, and the reason it is not just belt-and-braces: orders and
@@ -182,14 +265,32 @@ export class Cleanup {
      * that actually happened while writing these.
      */
     for (const id of this.siteIds) {
-      await sql`delete from usage_records where site_id = ${id}`;
-      await sql`delete from orders where site_id = ${id}`;
+      await attempt("site usage", () => sql`delete from usage_records where site_id = ${id}`);
+      await attempt("site orders", () => sql`delete from orders where site_id = ${id}`);
     }
 
     // Cascades to sites, products, carts, discounts, zones, tax settings.
-    for (const id of this.orgIds) await sql`delete from organizations where id = ${id}`;
+    for (const id of this.orgIds) {
+      await attempt("org", () => sql`delete from organizations where id = ${id}`);
+    }
 
-    for (const email of this.merchantEmails) await removeMerchant(email);
+    for (const email of this.merchantEmails) {
+      await attempt("merchant", () => removeMerchant(email));
+    }
+
+    /**
+     * Shoppers last: sites (and the customer rows beneath them) are gone by now,
+     * so nothing still points at the auth row being removed.
+     */
+    for (const email of this.shopperEmails) {
+      await attempt("shopper", () => sql`delete from auth.users where email = ${email}`);
+    }
+
+    if (failures.length > 0) {
+      throw new Error(
+        `cleanup completed with ${failures.length} failure(s): ${failures.join(" | ")}`,
+      );
+    }
   }
 }
 

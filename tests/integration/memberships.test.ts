@@ -22,7 +22,6 @@ import {
 const cleanup = new Cleanup();
 const merchant = new Client();
 /** Shopper identities this file created, removed in `afterAll`. */
-const shopperEmails: string[] = [];
 
 let slug: string;
 let siteId: number;
@@ -73,7 +72,7 @@ async function signUpShopper(client: Client, label: string, storeSlug = slug) {
   if (!res.ok) throw new Error(`admin create failed: ${await res.text()}`);
   // `auth.users` rows do not cascade from the site, so the suite owns removing
   // them; a leaked shopper would collide with nothing but would accumulate.
-  shopperEmails.push(email);
+  cleanup.shopperEmails.push(email);
 
   client.clearCookies();
   const inRes = await client.post(`/_sites/${storeSlug}/api/auth/sign-in`, { email, password });
@@ -109,12 +108,10 @@ beforeAll(async () => {
 }, 120_000);
 
 afterAll(async () => {
-  // Sites (and the customers beneath them) go first, so nothing still points at
-  // a shopper when their auth row is removed.
+  // Shoppers are removed inside `cleanup.run()`, after the sites and customer
+  // rows that reference them — and now in the same guarded sequence, so a
+  // failure earlier in cleanup no longer skips them.
   await cleanup.run();
-  for (const email of shopperEmails) {
-    await sql`delete from auth.users where email = ${email}`;
-  }
 });
 
 describe("membership gating", () => {
@@ -276,6 +273,9 @@ describe("shopper identity (§18.3, D32)", () => {
   it("stamps user_kind=customer in app_metadata via the real sign-up route", async () => {
     const stamp = `${Date.now()}${Math.floor(Math.random() * 10_000)}`;
     const email = `test-shopper-kind-${stamp}@markii.shop`;
+    // Registered like every other fixture. Forgetting this is what leaked one
+    // shopper per run for four days.
+    cleanup.shopperEmails.push(email);
     const shopper = shopperClient();
 
     const up = await shopper.post(`/_sites/${slug}/api/auth/sign-up`, {

@@ -6,6 +6,8 @@ import { parseAgentName } from "@/lib/agents";
 import { loadStore } from "@/lib/commerce/cart";
 import { deliveryForOrder } from "@/lib/commerce/delivery";
 import { completeCheckout, failCheckout } from "@/lib/commerce/orders";
+import { getIntegration } from "@/lib/integrations";
+import { retrievePaymentIntent } from "@/lib/payments/stripe-charges";
 import { checkoutSessions, db, orders } from "@/lib/db";
 import { sendDeliveryMail } from "@/lib/email/deliver";
 import { defaultWallet } from "@/lib/integrations";
@@ -59,10 +61,52 @@ export const POST = handler(async (req, { params }) => {
 
   const input = schema.parse(JSON.parse((await req.text()) || "{}"));
 
+  /**
+   * **The card rail asks Stripe, never the caller.** A browser posting "it
+   * worked" is a free-goods bug, exactly as a fabricated transaction hash would
+   * be on x402. The PaymentIntent id came from us at session creation and is
+   * stored on the session, so the client cannot substitute another one either.
+   *
+   * The webhook (`payment_intent.succeeded`) does the same check and calls the
+   * same completion. Both are safe to run: `completeCheckout` is idempotent, and
+   * whichever arrives second gets the existing order back.
+   */
   if (session.provider === "stripe") {
-    // No Stripe credentials exist yet, so there is nothing to verify against.
-    // Accepting the caller's word here would be a free-goods bug.
-    throw conflict("Card checkout is not implemented yet (docs/API.md §18.4).");
+    if (!session.paymentReference) {
+      throw conflict("This checkout has no payment attached.");
+    }
+    const connection = await getIntegration(site.orgId, "stripe");
+    const accountId = connection?.config.accountId;
+    if (!accountId) {
+      throw conflict("This store is no longer connected to Stripe.");
+    }
+
+    const intent = await retrievePaymentIntent(accountId, session.paymentReference);
+    if (!intent.ok) throw conflict(`Could not verify the payment: ${intent.reason}`);
+    if (!intent.paid) {
+      throw conflict(`This payment has not completed (Stripe reports "${intent.status}").`);
+    }
+    /**
+     * The amount is re-checked against the frozen quote. A PaymentIntent can be
+     * updated after creation, and paying less than the basket costs must not
+     * release the goods.
+     */
+    if (intent.amountMinor !== session.totalMinor) {
+      throw conflict("The amount paid does not match this checkout.");
+    }
+
+    const done = await completeCheckout({
+      session,
+      paymentReference: session.paymentReference,
+      payerReference: input.payerReference ?? null,
+      userAgent: req.headers.get("user-agent"),
+    });
+    return NextResponse.json({
+      ok: true,
+      orderId: done.orderId,
+      alreadyCompleted: done.alreadyCompleted,
+      delivery: await deliveryForOrder(db, done.orderId, tenantBaseUrl(slug)),
+    });
   }
 
   /**

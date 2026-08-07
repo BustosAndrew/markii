@@ -1,6 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { db, integrations, stripeWebhookEvents } from "@/lib/db";
+import { checkoutSessions, db, integrations, stripeWebhookEvents } from "@/lib/db";
+import { completeCheckout, failCheckout } from "@/lib/commerce/orders";
 import { upsertIntegration } from "@/lib/integrations";
 import {
   parseStripeEvent,
@@ -109,6 +110,61 @@ const HANDLERS: Record<string, (event: StripeEventEnvelope) => Promise<HandlerRe
   },
 
   /**
+   * The card payment succeeded. **This is the authoritative completion signal.**
+   *
+   * The shopper's browser also posts to `/complete`, but a browser can be closed
+   * mid-redirect and its word is not evidence anyway. Stripe telling us is what
+   * guarantees an order exists for money that moved. Both paths call the same
+   * idempotent `completeCheckout`, so whichever arrives second returns the
+   * existing order rather than creating a second one.
+   */
+  "payment_intent.succeeded": async (event) => {
+    const intent = event.data.object as { id?: string; amount?: number };
+    if (!intent.id) return { changed: false, detail: "Event carried no PaymentIntent id." };
+
+    const [session] = await db
+      .select()
+      .from(checkoutSessions)
+      .where(eq(checkoutSessions.paymentReference, intent.id))
+      .limit(1);
+    if (!session) {
+      return { changed: false, detail: `No checkout session for ${intent.id}.` };
+    }
+    if (session.status === "completed" && session.orderId != null) {
+      return { changed: false, detail: `Session ${session.id} was already completed.` };
+    }
+
+    /**
+     * The amount is re-checked against the frozen quote. A PaymentIntent can be
+     * updated after it is created, and paying less than the basket costs must
+     * not release the goods.
+     */
+    if (typeof intent.amount === "number" && intent.amount !== session.totalMinor) {
+      return {
+        changed: false,
+        detail: `Amount ${intent.amount} does not match session total ${session.totalMinor}; not completed.`,
+      };
+    }
+
+    const done = await completeCheckout({
+      session,
+      paymentReference: intent.id,
+      payerReference: null,
+    });
+    return { detail: `Completed session ${session.id} as order ${done.orderId}.` };
+  },
+
+  /**
+   * The payment failed or was abandoned. **Release the stock.**
+   *
+   * A reservation held for a card that declined is the last unit of someone
+   * else's order sitting idle until the sweep catches it. The sweep is a
+   * backstop, not the mechanism.
+   */
+  "payment_intent.payment_failed": releaseIntent,
+  "payment_intent.canceled": releaseIntent,
+
+  /**
    * The merchant revoked Markii's access from their own Stripe dashboard.
    *
    * **This has to turn the card rail off immediately.** Markii cannot create
@@ -149,6 +205,29 @@ const HANDLERS: Record<string, (event: StripeEventEnvelope) => Promise<HandlerRe
   },
 };
 
+/** Shared by the failure and cancellation events, which differ only in wording. */
+async function releaseIntent(event: StripeEventEnvelope): Promise<HandlerResult> {
+  const intent = event.data.object as { id?: string };
+  if (!intent.id) return { changed: false, detail: "Event carried no PaymentIntent id." };
+
+  const [session] = await db
+    .select()
+    .from(checkoutSessions)
+    .where(eq(checkoutSessions.paymentReference, intent.id))
+    .limit(1);
+  if (!session) return { changed: false, detail: `No checkout session for ${intent.id}.` };
+  if (session.status === "completed") {
+    /**
+     * A late failure event for a checkout that already completed must not
+     * release stock the buyer has paid for.
+     */
+    return { changed: false, detail: `Session ${session.id} already completed; stock kept.` };
+  }
+
+  await failCheckout(session.id, `Stripe reported ${event.type}`);
+  return { detail: `Released the reservation for session ${session.id}.` };
+}
+
 /**
  * Finds which org a Connect event belongs to.
  *
@@ -178,8 +257,6 @@ async function integrationForAccount(accountId: string) {
  */
 const EXPECTED_TYPES = new Set([
   "checkout.session.completed",
-  "payment_intent.succeeded",
-  "payment_intent.payment_failed",
   "charge.refunded",
   "charge.dispute.created",
   "customer.subscription.created",
@@ -190,10 +267,12 @@ const EXPECTED_TYPES = new Set([
   "invoice.created",
   "invoice.finalized",
   "customer.subscription.trial_will_end",
-  "payment_intent.canceled",
   "payment_method.attached",
   "payment_method.detached",
   /** Handled today — listed so the expected/unexpected split stays complete. */
+  "payment_intent.succeeded",
+  "payment_intent.payment_failed",
+  "payment_intent.canceled",
   "account.updated",
   "account.application.deauthorized",
   "charge.dispute.closed",

@@ -4,7 +4,9 @@ import { Cleanup, Client, refused, sql, signUpMerchant } from "./helpers";
 /**
  * Tenancy and the merchant configuration surface (§16, §18.5, §18.6).
  *
- * Two real organizations, created through the real sign-up route. The point is
+ * Two real organizations. Fixture users are created through the admin API so the
+ * suite sends no mail (see `createConfirmedStaffUser`); the public sign-up route
+ * has its own test below. The point is
  * not that org B *sees nothing* — it is that org B cannot **write** to org A's
  * data, which is the failure that actually costs someone money. Cross-tenant
  * writes were a real bug found during Phase A org-scoping.
@@ -305,4 +307,61 @@ describe("tenancy and merchant configuration", () => {
       expect(r.json.exhausted).toBe(true);
     });
   });
+
+  /**
+   * The **public sign-up route**, exercised once rather than in every file's
+   * setup.
+   *
+   * The fixtures above create users through the admin API so the suite does not
+   * burn Supabase's auth email quota — which means this is the only place the
+   * real route is covered, and the properties below are the ones that matter:
+   * it does not hand back a session when confirmation is required, and it does
+   * not fabricate one.
+   */
+  it("signs a new merchant up without pretending they are signed in", async () => {
+    const fresh = new Client();
+    const stamp = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
+    const email = `test-signup-${stamp}@markii.shop`;
+    cleanup.merchantEmails.push(email);
+
+    const up = await fresh.post("/api/auth/sign-up", {
+      email,
+      password: `Tv!${stamp}aA9`,
+    });
+
+    /**
+     * Supabase enforces an auth email rate limit per project. Hitting it here
+     * is an environment condition, not a defect in the route — and failing the
+     * suite for it would teach everyone to ignore this test.
+     */
+    if (up.status === 400 && /rate limit/i.test(JSON.stringify(up.json))) {
+      console.warn("[tenancy] sign-up skipped: Supabase auth email rate limit");
+      return;
+    }
+
+    expect(up.status).toBe(201);
+    expect(up.json.ok).toBe(true);
+    // Confirmation is on, so there is no session yet — and the route says so
+    // rather than implying the merchant is in.
+    expect(up.json.emailConfirmationRequired).toBe(true);
+    expect(up.json).not.toHaveProperty("session");
+
+    /**
+     * The org is provisioned at sign-up, idempotently.
+     *
+     * `owner_id` is cast because it is **text** while `auth.users.id` is
+     * **uuid** — the schema deliberately has no foreign key across to Supabase's
+     * auth schema (see `organizations`), so the types never met and Postgres
+     * will not compare them implicitly.
+     */
+    const orgs = await sql`select count(*)::int c from organizations
+      where owner_id = (select id::text from auth.users where email = ${email})`;
+    expect(orgs[0].c).toBe(1);
+
+    // `user_kind` is the authoritative staff marker and lives in app_metadata,
+    // which only the service role can write (D32).
+    const [u] = await sql`select raw_app_meta_data from auth.users where email = ${email}`;
+    expect((u?.raw_app_meta_data as any)?.user_kind).toBe("staff");
+  });
+
 });

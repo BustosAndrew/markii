@@ -1,4 +1,5 @@
 import { defaultWallet, getIntegration } from "../integrations";
+import { createPaymentIntent } from "./stripe-charges";
 
 /**
  * Payment rails (§18.4).
@@ -54,7 +55,16 @@ export function stripeConfigured(): boolean {
  * their own account and Markii never holds their funds (`docs/DECISIONS.md` D4,
  * `docs/PRICING.md`).
  */
-async function startStripe(orgId: string): Promise<PaymentStart> {
+async function startStripe(
+  orgId: string,
+  charge?: {
+    amountMinor: number;
+    currency: string;
+    sessionId: string;
+    siteId: number;
+    email: string | null;
+  },
+): Promise<PaymentStart> {
   /**
    * Three different "no", and conflating them sends a merchant to fix the wrong
    * thing. Markii's own credentials missing is *our* problem; an unconnected or
@@ -104,13 +114,52 @@ async function startStripe(orgId: string): Promise<PaymentStart> {
     };
   }
 
-  // Deliberately not stubbed further. A fake client secret would fail at the
-  // moment the shopper enters card details, after stock was already held.
+  /**
+   * Availability only — the caller is asking whether the rail works, not opening
+   * a payment. Answering `ok` without instructions would be wrong, so this
+   * reports the rail as usable with an empty instruction set only when a charge
+   * was actually requested below.
+   */
+  if (!charge) {
+    return { ok: true, rail: "stripe", instructions: { accountId: connection.config.accountId } };
+  }
+
+  const intent = await createPaymentIntent({
+    accountId: connection.config.accountId,
+    amountMinor: charge.amountMinor,
+    currency: charge.currency,
+    sessionId: charge.sessionId,
+    siteId: charge.siteId,
+    email: charge.email,
+  });
+  if (!intent.ok) {
+    return { ok: false, rail: "stripe", code: "unavailable", message: intent.reason };
+  }
+  if (!intent.publishableKey) {
+    /**
+     * Card details may only ever be entered into Stripe-hosted Elements (PCI
+     * SAQ-A), and Elements cannot mount without a publishable key. Opening a
+     * PaymentIntent the shopper has no way to pay would hold stock for a
+     * checkout that cannot finish.
+     */
+    return {
+      ok: false,
+      rail: "stripe",
+      code: "configuration_required",
+      message: "Card payments are not fully configured on this platform.",
+      resolution: "Set NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY so Stripe Elements can load.",
+    };
+  }
+
   return {
-    ok: false,
+    ok: true,
     rail: "stripe",
-    code: "unavailable",
-    message: "Card checkout is not implemented yet (docs/API.md §18.4).",
+    instructions: {
+      paymentIntentId: intent.paymentIntentId,
+      clientSecret: intent.clientSecret,
+      publishableKey: intent.publishableKey,
+      accountId: connection.config.accountId,
+    },
   };
 }
 
@@ -137,9 +186,24 @@ export async function startPayment(input: {
   rail: PaymentRail;
   orgId: string;
   siteWallet: string | null;
+  /**
+   * Present when a real payment is being opened; absent when a caller only
+   * wants to know whether the rail is usable.
+   *
+   * **The split matters.** `railStatus` asks about every rail on every
+   * storefront render — creating a PaymentIntent there would open an
+   * authorisation on a merchant's account for a basket nobody has agreed to buy.
+   */
+  charge?: {
+    amountMinor: number;
+    currency: string;
+    sessionId: string;
+    siteId: number;
+    email: string | null;
+  };
 }): Promise<PaymentStart> {
   return input.rail === "stripe"
-    ? startStripe(input.orgId)
+    ? startStripe(input.orgId, input.charge)
     : startX402(input.orgId, input.siteWallet);
 }
 

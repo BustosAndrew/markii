@@ -107,10 +107,24 @@ export const POST = handler(async (req, { params }) => {
     );
   }
 
+  /**
+   * Minted before the payment starts, because on the card rail it *is* the
+   * idempotency key: a retried session creation reuses the same PaymentIntent
+   * rather than opening a second authorisation on the shopper's card.
+   */
+  const sessionId = randomUUID();
+
   const payment = await startPayment({
     rail: input.rail,
     orgId: site.orgId,
     siteWallet: site.walletAddress,
+    charge: {
+      amountMinor: priced.totalMinor,
+      currency: priced.currency,
+      sessionId,
+      siteId: site.id,
+      email: cart.email,
+    },
   });
   if (!payment.ok) {
     // Refused before anything is reserved — a shopper who cannot pay must not
@@ -121,11 +135,24 @@ export const POST = handler(async (req, { params }) => {
     );
   }
 
+  /**
+   * The PaymentIntent id, stored so the webhook can find this checkout when
+   * Stripe reports the payment. `payment_reference` is uniquely indexed, which
+   * is what stops one intent settling two sessions.
+   *
+   * If the reservation below fails, this intent is orphaned. It is never
+   * confirmed, so no money moves and Stripe expires it on its own — preferable
+   * to a cancellation call that can itself fail and leave a worse mess.
+   */
+  const paymentIntentId =
+    typeof payment.instructions.paymentIntentId === "string"
+      ? payment.instructions.paymentIntentId
+      : null;
+
   // Reclaim stock from checkouts that were abandoned, so an idle store does not
   // refuse a real sale for inventory nobody is buying.
   await sweepExpiredReservations();
 
-  const sessionId = randomUUID();
   const expiresAt = new Date(Date.now() + RESERVATION_TTL_MS);
   const requests = await reservationsForCart(cart.id);
 
@@ -153,6 +180,7 @@ export const POST = handler(async (req, { params }) => {
       // become the order's lines, and lines that do not sum to the subtotal
       // charged are a refund that returns the wrong money (§18.7).
       lineSnapshot: snapshotLines(priced),
+      paymentReference: paymentIntentId,
       expiresAt,
     });
     await reserveForSession(tx, sessionId, requests, expiresAt);
