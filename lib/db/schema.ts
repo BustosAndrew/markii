@@ -477,6 +477,49 @@ export const organizations = pgTable(
   ],
 );
 
+/**
+ * MFA recovery codes for a staff account (D40).
+ *
+ * **Supabase ships TOTP and no backup codes**, so without this table a merchant
+ * who loses their phone loses their store, their catalogue, and their money —
+ * recoverable only by a hand-run service-role reset. D40 makes MFA mandatory for
+ * every merchant, which turns that from an unlucky edge case into a guaranteed
+ * one at some volume.
+ *
+ * **Keyed by `auth.users.id`, not by staff membership.** A person in three
+ * organizations has one set of factors and one set of codes; scoping these to
+ * `staff` would mint three, and using the wrong org's would look like a forged
+ * code. No foreign key, matching `staff.userId` — the `auth` schema belongs to
+ * `supabase_auth_admin`.
+ *
+ * **Only hashes are stored.** A recovery code is a bearer credential equivalent
+ * to the second factor, so a database leak that included them would hand over
+ * every account MFA was protecting.
+ */
+export const mfaRecoveryCodes = pgTable(
+  "mfa_recovery_codes",
+  {
+    id: text("id").primaryKey(),
+    /** `auth.users.id`. */
+    userId: text("user_id").notNull(),
+    /** scrypt(code, salt) — never the code. */
+    codeHash: text("code_hash").notNull(),
+    salt: text("salt").notNull(),
+    /**
+     * Single use. Consumed rather than deleted so "a code was used at this
+     * time" survives, which is the first thing anyone asks when an account is
+     * accessed unexpectedly.
+     */
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("mfa_recovery_codes_user_idx").on(t.userId),
+    // Regenerating replaces the whole set, so one hash can appear once per user.
+    uniqueIndex("mfa_recovery_codes_hash_uq").on(t.userId, t.codeHash),
+  ],
+);
+
 export const staff = pgTable(
   "staff",
   {

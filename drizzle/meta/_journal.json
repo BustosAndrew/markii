@@ -211,6 +211,13 @@
       "when": 1786168428054,
       "tag": "0029_membership_renewal_idempotency",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1786172435149,
+      "tag": "0030_mfa_recovery_codes",
+      "breakpoints": true
     }
   ]
 }
