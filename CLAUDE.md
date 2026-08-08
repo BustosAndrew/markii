@@ -246,6 +246,14 @@ campaigns. Rationale in `docs/DECISIONS.md` §G10.
   **never authorize on `auth.getUser()` alone** (membership lookup is the gate), **host-only session
   cookies — never `domain=.markii.shop`** (a parent-domain cookie reaches every storefront, where
   merchant custom code runs), and an explicit **`user_kind`** checked on every path.
+- **MFA is mandatory for merchants and never for shoppers** (D40, decided 2026-08-07, **not built**).
+  Every staff account enrols at sign-up and is challenged to `aal2` at every sign-in, plus a fresh
+  step-up before sensitive changes — the sharpest being the **x402 wallet address, which is the
+  money destination** and is today a plain authenticated write. Step-up belongs in the **action
+  registry** beside `riskTier`, not in route handlers, or the agent path routes around it (§22
+  rule 1). Shoppers are excluded on `user_kind` — guest checkout would make shopper MFA bypassable
+  anyway. **Recovery codes are ship-blocking**: Supabase ships TOTP but no backup codes, so without
+  our own a lost phone locks a merchant out of everything.
 - **Merchant-side AI writes go through propose → approve → execute**, with an audit entry and an
   undo path. Retrieved catalog/customer content is untrusted data, never instruction
   (`docs/AGENT-OPS.md` §3).

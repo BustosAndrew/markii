@@ -21,6 +21,7 @@ when it's made, with the date — then update the doc it affects.
 | ~~D1~~ | ~~Price points, thresholds, fee rates~~ | ⚠️ **SUPERSEDED by D39** (2026-08-06). Was: accepted as proposed (owner, 2026-07-29) — $150k/$750k/$3M at 0.5%/0.4%/0.3% | — |
 | ~~D39~~ | ~~Split fee schedule: physical vs digital~~ | ✅ **Owner, 2026-08-06.** Thresholds $1k / $50k / $100k, **applied separately to each class**; above them 1.5%/0.5%/0.25% physical and 3%/1.5%/0.5% digital — §"Split fee schedule — D39" | Replaces D1's single rate |
 | ~~D2~~ | ~~Margin check~~ | ✅ **Costed 2026-07-29 — D1 holds.** ~92% margin at 1,000 merchants, ~83% at 100. Watch items: media usage (G5), support load (G4) — §"Unit economics — D2" | — |
+| ~~D40~~ | ~~MFA scope~~ | ✅ **Owner, 2026-08-07.** **Mandatory for every merchant** — at sign-up, at every sign-in, plus step-up before sensitive changes. **Shoppers excluded** (guest checkout makes it bypassable anyway). §"MFA scope — D40". Not built; recovery codes are ship-blocking | Phase A gap |
 | ~~D28~~ | ~~POS / in-person retail~~ | ✅ **Deliberate no, not a deferral** (owner, 2026-07-29). Hardware, card-present certification, offline sync, and a retail support model make it a different company. Do not design for it | — |
 | ~~D3~~ | ~~Auth provider~~ | ✅ **Supabase Auth** (owner, 2026-07-29 — superseded Neon Auth when D6 chose Supabase). Same six verifications apply — §"Auth — D3" | — |
 | ~~D4~~ | ~~Stripe integration model~~ | ✅ **Connect Standard** (owner, 2026-07-29). Express optional later, never penalized. Direct API keys considered and dropped. **Markii does not negotiate rates on merchants' behalf** — see §D4 | — |
@@ -29,6 +30,90 @@ when it's made, with the date — then update the doc it affects.
 | ~~D6~~ | ~~Data architecture~~ | ✅ **Supabase** (owner, 2026-07-29) — replaces Neon for database, auth, and file storage. Latency still solved by **caching, not a distributed DB**. Migration plan in §"Data architecture" | — |
 | ~~D26~~ | ~~Distribution model~~ | ✅ **Both — open/public source *and* hosted cloud** (owner, 2026-07-29). **Licence still unchosen — see §"Distribution — D26"** | Licence choice blocks any external contribution |
 
+
+### MFA scope — D40 (owner, 2026-08-07)
+
+**MFA is mandatory for every merchant account** — at sign-up, at every sign-in, and again as a
+step-up before sensitive changes. **Shoppers are never affected.**
+
+Three mechanisms:
+
+1. **Enrolment at account creation.** A merchant account is not usable until a factor is enrolled.
+2. **Challenge at every sign-in.** The session reaches `aal2` or it does not reach the dashboard.
+3. **Step-up re-authentication on sensitive changes** — a *fresh* `aal2` challenge, valid for a short
+   window ("sudo mode"), required again for the next sensitive action. Distinct from (2): having
+   signed in with MFA an hour ago is not consent to change where the money goes now.
+
+**This supersedes the earlier payment-scoped version of this decision** (same day). That version
+required MFA only once an org turned on an "accept payments" toggle, on proportionality grounds — an
+org with no rail has nothing worth stealing. Mandatory-always is the stricter call and it is the one
+that stands: it removes an entire class of "not protected yet" window, and it means the payments
+toggle needs no enrolment gate of its own, because enrolment already happened at sign-up. The toggle
+may still exist as a deliberate opt-in to taking money; it is simply no longer what triggers MFA.
+
+**Shoppers are excluded, and this is load-bearing** (confirmed 2026-08-07). Staff and storefront
+customers share one Supabase project (D32), so "require MFA" must key on `user_kind === "staff"` —
+the marker only the service role can write. Forcing a second factor on storefront shoppers would
+wreck merchants' conversion; they are the merchant's customers, not ours, and a membership buyer is
+not an admin.
+
+It would also be **bypassable**, which is the stronger reason. Guest checkout exists — a shopper who
+declines TOTP simply does not make an account and still buys, downloads, and receives licence keys.
+Mandatory shopper MFA would impose the full friction on the people who *do* register while
+protecting nothing an attacker could not reach by not registering. Making it meaningful would mean
+removing guest checkout, which is a much larger commerce decision and not on the table.
+
+Where shopper accounts *are* worth protecting, the answer is **step-up on specific actions** rather
+than a blanket challenge: re-auth before changing the account email (the recovery vector) and before
+re-issuing download links or licence keys. An account takeover then yields a list of past orders and
+nothing carryable. Not built.
+
+**Two consequences of mandatory-at-every-sign-in, both easy to discover too late:**
+
+- **Recovery codes stop being optional and become ship-blocking.** When MFA gated only
+  payment-accepting orgs, a lost phone was a bad day for a few merchants. Now it locks *every*
+  merchant out of *everything*, with a hand-run service-role reset as the only way back. Supabase
+  ships TOTP but no backup codes, so these have to be built — hashed, single-use — in the same
+  change as enrolment, not after it.
+- **The integration suite signs merchants in constantly.** `signUpMerchant` runs in most of the ten
+  test files, so a sign-in that demands `aal2` breaks the entire suite at once. TOTP is computable,
+  so the fix is for the helper to enrol a factor and derive codes itself — the suite should exercise
+  the real MFA path rather than bypass it behind an env flag, which would leave the thing every
+  merchant depends on untested.
+
+**What counts as sensitive**, in rough order of what an attacker would actually want:
+
+| Change | Why |
+|---|---|
+| **x402 wallet address** | **This is the money destination.** Changing it redirects a merchant's revenue to the attacker. Today it is a plain authenticated write (`PUT /api/integrations/x402`) — the single highest-value target in the product, with no step-up on it |
+| The payments toggle itself | Turning it off, or on, changes whether money can move |
+| Stripe connect / disconnect | Same, for the card rail |
+| Staff roles and invites | Privilege escalation — an attacker grants themselves a second way in |
+| API token creation | Persistent access that outlives the session and skips it entirely |
+| Email / phone changes | Account-recovery vectors; owning these owns the account |
+| Disabling MFA | Obvious, and easy to forget |
+
+**Step-up belongs in the action registry, not in route handlers.** §22 rule 1 means there is exactly
+one mutation path, so a `requiresStepUp` check beside the existing `riskTier` covers the UI, the
+HTTP API, agent tools, and MCP simultaneously — and **an agent cannot route around it**, which is
+the whole reason the registry exists. Adding the check per-route would leave the agent path open.
+
+**Still to settle when it is built:**
+
+- **What "accepting payments" means in code.** `chargesEnabled === "true"` for Stripe (connected is
+  *not* enough — Stripe gates charges behind verification), or a wallet address on a purchasable
+  store for x402. Both rails, since they are peers.
+- **The requirement is per-org, but the session is not.** Staff may belong to several orgs, so the
+  check belongs where the *active org* is resolved (`getSession`), not at sign-in.
+- **Recovery codes are the hard part, not TOTP.** Supabase ships TOTP (`auth.mfa.*`) but **no backup
+  codes**. Without our own, a lost phone means a lost store, recoverable only by a service-role
+  reset by hand.
+- **Enforcement is `aal2`, not enrolment.** Supabase keeps a session at `aal1` until challenged;
+  treating "has a factor enrolled" as protected is decoration.
+
+**Sequencing.** `lib/supabase/middleware.ts` is imported nowhere, so nothing guards `/dashboard` at
+all today (`docs/FRONTEND.md`). Close that first — a second factor on an unguarded route is the
+wrong order.
 
 ### Split fee schedule — D39 (owner, 2026-08-06)
 

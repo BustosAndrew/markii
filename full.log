@@ -1,8 +1,0 @@
-$ cross-env MARKII_ALLOW_INTEGRATION_TESTS=1 vitest run --project integration
-
- RUN  v4.1.10 C:/Users/LittleBoomer/Documents/GitHub/markii
-
-
-  reminder: the dev server must be running with DEMO_SKIP_PAYMENT_VERIFICATION=1,
-  or checkout-completion tests will try to settle payments on-chain.
-

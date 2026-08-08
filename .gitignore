@@ -64,3 +64,7 @@ next-env.d.ts
 .env.local
 # Local TLS for `pnpm dev:https` — contains a PRIVATE KEY. Never commit.
 certs/
+
+# Scratch output from test runs redirected to a file (`pnpm test:integration > x.log`).
+# One of these was committed once; ignoring the pattern is cheaper than remembering.
+*.log
