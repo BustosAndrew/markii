@@ -256,10 +256,20 @@ gets quietly reversed later.
 >   subscription moved under `parent.subscription_details`. Inheriting the account default would make
 >   a plan change work on one deployment and 404 on another.
 >
-> **Still not built: threshold-fee invoicing.** `fee_assessments.invoiced` is `false` on every row,
-> and `GET /api/billing/usage` still reports `charging: false` — deliberately. Subscriptions working
-> does not mean threshold fees are charged, and letting one flag stand for both would repeat the
-> exact error `billingStatus()`'s docstring was written to warn about.
+> **Threshold-fee invoicing is built** (`lib/billing/fee-invoice.ts`, `billing.invoiceAssessments`).
+> A closed assessment becomes a Stripe invoice **item**, which rides onto the merchant's next
+> subscription invoice as a named line — one relationship, one invoice, one dunning path. Three
+> things to know:
+>
+> - **The item/invoice distinction is load-bearing.** A pending invoice item with no subscription
+>   invoice to ride on is never billed, never expires, and later attaches to whatever invoice
+>   eventually appears — charging a merchant for a period they have forgotten. `assessmentBillable`
+>   refuses that case rather than creating one.
+> - **Idempotent on the assessment id**, because the caller writes `invoiced = true` in a
+>   transaction that can roll back after Stripe has already accepted the item.
+> - **`charging` is now per merchant, not per deployment.** It reads the org's own subscription
+>   state. That is the same rule that kept it `false` when only a credential existed — report the
+>   capability, never the environment.
 >
 > Two things worth knowing before extending the meter:
 >

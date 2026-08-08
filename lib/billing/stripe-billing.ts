@@ -1,6 +1,7 @@
 import "server-only";
 import type { PlanId } from "../db";
 import { planPricing } from "../plans";
+import { matchedPublishableKey } from "../stripe-mode";
 
 /**
  * Stripe Billing — **Markii charging the merchant** (§17).
@@ -56,26 +57,10 @@ export function billingConfigured(): boolean {
 }
 
 /**
- * The publishable key Elements should mount with — **only if it is in the same
- * mode as the secret key**.
- *
- * A `pk_live_…` paired with an `sk_test_…` is the worst kind of misconfiguration
- * available here, because everything server-side succeeds. A real client secret
- * is issued, the browser mounts Elements against the other environment, and the
- * failure lands on a merchant who has already typed their card number — Stripe
- * answers "No such setup_intent", which reads as a Markii bug.
- *
- * Returning `null` on a mismatch turns that into the same refusal a missing key
- * gets, which callers already handle.
+ * Re-exported so callers of this module do not have to know the guard is shared
+ * with the card rail — it is the same hazard on both sides of the money.
  */
-export function matchedPublishableKey(): string | null {
-  const secret = process.env.STRIPE_SECRET_KEY;
-  const publishable = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
-  if (!secret || !publishable) return null;
-  const secretLive = !secret.startsWith("sk_test") && !secret.startsWith("rk_test");
-  const publishableLive = !publishable.startsWith("pk_test");
-  return secretLive === publishableLive ? publishable : null;
-}
+export { matchedPublishableKey } from "../stripe-mode";
 
 const missingCredentials: StripeFailure = {
   ok: false,

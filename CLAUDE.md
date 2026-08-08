@@ -69,10 +69,16 @@ is refused when Stripe's amount disagrees with `lib/plans.ts`**, because Markii 
 does not display; and **the action and the webhook share one derivation** (`lib/billing/mirror.ts`)
 so they cannot disagree about what a status grants.
 
-**The threshold fee is still measured, not billed.** `fee_assessments.invoiced` is `false` on every
-row and `/api/billing/usage` reports `charging: false` — deliberately, and separately from the
-subscription. Subscriptions working does not make threshold fees charged, and one flag standing for
-both would be the same false claim in a new place.
+**The threshold fee is billed too, onto the same invoice.** `billing.invoiceAssessments` turns a
+closed assessment into a Stripe invoice **item**, which rides onto the merchant's next subscription
+invoice as a named line showing its own arithmetic — one relationship, one invoice, one dunning
+path. It refuses to bill twice, to raise a zero line, to convert currencies with no FX provider, and
+to create an item for an org with no subscription (a pending item with nothing to ride on is never
+billed and later attaches to whatever invoice appears). `charging` on the meter is now **per
+merchant, not per deployment** — the same rule that kept it false when only a credential existed.
+
+**Nothing here is scheduled.** Period close and fee invoicing run when invoked; there is no job
+runner, and a billing step that assumed one would quietly never charge anyone.
 
 **Email plumbing is built; no mail is sent.** `lib/email/` has the SES v2 transport (hand-rolled
 SigV4 over `fetch`), per-merchant sending identities, the suppression list, a signature-verified
@@ -87,14 +93,17 @@ access after it expired. A refund revokes them, mirroring digital delivery — c
 refund, keep it* for files but not for memberships would only move the hole. Memberships do **not**
 auto-renew (that needs Phase B recurring billing).
 
-**Still planned:** **threshold-fee invoicing** (turning a closed `fee_assessment` into a Stripe
-invoice line), add-on toggles, Stripe Tax, recurring membership billing, shopper auth mail via
-Supabase's Send Email Hook, and abandoned-cart mail. Everything in §10–15 and §19–21 is untouched.
+**Still planned:** add-on toggles (`/api/billing/addons/:addon`), invoice detail (`/invoices/:id`),
+Stripe Tax, recurring membership billing, shopper auth mail via Supabase's Send Email Hook, and
+abandoned-cart mail. Everything in §10–15 and §19–21 is untouched.
 
 **Deferred until further notice — do not build, and do not let schema anticipate it:** **gift
 cards** (D33, 2026-08-03). The metering exclusion in `docs/PRICING.md` §4.1 is asserted but
 unimplemented, so a naive implementation mis-bills merchants in one direction or the other —
-`lib/commerce/orders.ts` carries the detail.
+`lib/commerce/orders.ts` carries the detail. **This got sharper now that threshold fees are actually
+invoiced:** while gift cards do not exist the metering base is not wrong, but the day they ship
+without their own tender term, that stops being a wrong *measurement* and becomes a wrong *charge*
+on a real invoice. Implement the exclusion in the same change as gift cards, not after.
 
 **What remains is gated by work, not by credentials.** `STRIPE_SECRET_KEY` exists and both the card
 rail and subscription billing are written on top of it. Subscription billing needs one piece of
@@ -109,6 +118,11 @@ Two credentials also gate the card rail at *runtime*, and they fail differently:
 `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` is required for Stripe Elements to mount (its absence refuses
 the checkout rather than rendering an empty card form), and `STRIPE_CONNECT_WEBHOOK_SECRET` verifies
 merchant events — the route **never** falls back to the platform secret.
+
+**The publishable key must be in the same mode as `STRIPE_SECRET_KEY`**, and that is checked, not
+assumed (`lib/stripe-mode.ts`, used by both rails). A `pk_live_` against an `sk_test_` succeeds on
+every server call and fails only in the browser — after a shopper has typed their card and stock is
+already reserved. A mismatch is treated as a missing key, so both rails refuse up front.
 
 Always check the **status legend at the top of `docs/API.md`** before calling an endpoint — it is
 per-section and kept current. Call `/api/*` only — never `lib/db` / Drizzle from frontend screens.

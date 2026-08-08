@@ -9,6 +9,7 @@ import {
   suggestUpgrade,
   type MeterState,
 } from "./fees";
+import { statusGrantsPlan } from "./mirror";
 
 /**
  * The threshold meter (§17 `GET /api/billing/usage`).
@@ -241,7 +242,7 @@ export async function usageMeterFor(
       dataSource: "not_yet_measured",
       unconvertedRecordCount: 0,
       unclassifiedRecordCount: 0,
-      billingStatus: billingStatus(),
+      billingStatus: billingStatus(org.subscriptionStatus),
     };
   }
 
@@ -338,7 +339,7 @@ export async function usageMeterFor(
     dataSource: "production",
     unconvertedRecordCount: t12.unconvertedCount,
     unclassifiedRecordCount: t12.unclassifiedCount,
-    billingStatus: billingStatus(),
+    billingStatus: billingStatus(org.subscriptionStatus),
   };
 }
 
@@ -358,32 +359,46 @@ export async function usageMeterFor(
  * So `charging` is **false until the billing path is actually built**, not until
  * a key appears.
  *
- * **Subscription billing has since landed, and this still returns `false`** —
- * which is the same distinction one layer up. Markii now charges merchants for
- * *plans*, but this meter is the **threshold fee**, and nothing invoices it:
- * `fee_assessments.invoiced` is still hardcoded `false`, and no code turns an
- * assessment into an invoice line. Flipping `charging` because subscriptions
- * work would repeat the original error with a better excuse — a merchant reading
- * "these fees are billed on your Markii invoice" would go looking for a line
- * item that does not exist.
+ * **It is now genuinely capable of being true**, and the rule that got it here
+ * is unchanged: it reports the *capability*, never the credential.
+ * `billing.invoiceAssessments` turns a closed assessment into an invoice item on
+ * the merchant's next Markii invoice, so threshold fees really can be charged —
+ * but only for an org with a subscription for that line to ride on. An org
+ * without one is still measured and still billed nothing, and this has to keep
+ * saying so.
  *
- * The org's subscription state is deliberately **not** consulted here. It
- * answers a different question, and `GET /api/billing/subscription` answers it.
+ * The distinction that survives from the original bug: **the merchant's own
+ * state decides this, not the environment.** Two orgs on the same deployment
+ * get different answers, which is exactly the point — `charging` was wrong
+ * before because it was a property of the process rather than of the merchant.
  *
  * Saying so on every meter response is the difference between a merchant
  * understanding their bill and being surprised by one later. It is also the §4.4
  * trial framing, which requires the same honesty for a different reason.
  */
-function billingStatus(): UsageMeter["billingStatus"] {
-  const credentialed = Boolean(process.env.STRIPE_SECRET_KEY);
-  return {
-    charging: false,
-    reason: credentialed
-      ? "Threshold fees are measured but not invoiced, so nothing is being charged for them: no " +
-        "code turns an assessment into an invoice line, and fee_assessments.invoiced is false on " +
-        "every row. Markii's own subscription billing is separate and does work (docs/API.md " +
-        "§17). These figures are a measurement, not an invoice."
-      : "Billing is not connected yet, so nothing is being charged. These figures show what " +
+function billingStatus(subscriptionStatus: string | null): UsageMeter["billingStatus"] {
+  if (!process.env.STRIPE_SECRET_KEY) {
+    return {
+      charging: false,
+      reason:
+        "Billing is not connected yet, so nothing is being charged. These figures show what " +
         "would be owed — they are a measurement, not an invoice.",
+    };
+  }
+  if (!statusGrantsPlan(subscriptionStatus ?? "")) {
+    return {
+      charging: false,
+      reason:
+        "No active Markii subscription, so nothing is being charged: a threshold fee is added to " +
+        "a subscription invoice, and there is no subscription to add it to. These figures show " +
+        "what would be owed — they are a measurement, not an invoice.",
+    };
+  }
+  return {
+    charging: true,
+    reason:
+      "Threshold fees above your plan's included volume are added to your Markii subscription " +
+      "invoice as a named line. The period in progress is still a projection — only a closed " +
+      "period is billed.",
   };
 }

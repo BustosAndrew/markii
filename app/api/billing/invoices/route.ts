@@ -61,6 +61,13 @@ export const GET = orgHandler(
         workings: r.workings,
         recordCount: r.recordCount,
         invoiced: r.invoiced,
+        /**
+         * Null on an invoiced assessment means "settled, nothing owed" — the
+         * merchant was under their threshold. That is a different state from
+         * unbilled, and `invoiced` alone cannot express it.
+         */
+        stripeInvoiceItemId: r.stripeInvoiceItemId,
+        invoicedAt: r.invoicedAt?.toISOString() ?? null,
         closedAt: r.closedAt.toISOString(),
       })),
       total: rows.length,
@@ -70,17 +77,42 @@ export const GET = orgHandler(
       invoicesState: invoices.state,
       /**
        * Said plainly next to the assessments, because they carry money-shaped
-       * numbers that a screen could easily render as amounts owed.
+       * numbers that a screen could easily render as amounts owed. An assessment
+       * is a measurement **until** `invoiced` — the two states now genuinely
+       * both occur, so this reports which rather than asserting one.
        */
-      assessmentsState: {
-        code: "measurement_only" as const,
-        message:
-          "Threshold fees are measured but not yet invoiced — no assessment below has been billed.",
-      },
+      assessmentsState: assessmentsState(rows),
     });
   },
   { permission: "billing.read" },
 );
+
+/**
+ * Whether the assessments on this page have been billed.
+ *
+ * Reported rather than asserted. Before `billing.invoiceAssessments` existed
+ * this was always "measurement only"; now a period can be billed, settled at
+ * zero, or still pending, and a screen that assumed any one of them would
+ * mislabel the other two.
+ */
+function assessmentsState(rows: { invoiced: boolean; feeMinor: number }[]) {
+  if (rows.length === 0) return null;
+  const pending = rows.filter((r) => !r.invoiced);
+  if (pending.length === 0) {
+    return {
+      code: "billed" as const,
+      message: "Every assessment shown has been settled — billed, or closed at nothing owed.",
+    };
+  }
+  const owing = pending.filter((r) => r.feeMinor > 0).length;
+  return {
+    code: "pending" as const,
+    message:
+      `${pending.length} assessment(s) here are measurements, not yet billed` +
+      (owing ? `; ${owing} carry a fee that has not been raised.` : " and none carry a fee."),
+    resolution: owing ? "Raise them with billing.invoiceAssessments." : undefined,
+  };
+}
 
 /** Stripe's invoices, with the three outcomes kept distinct rather than collapsed to an empty list. */
 async function fetchInvoices(customerId: string | null, limit: number) {

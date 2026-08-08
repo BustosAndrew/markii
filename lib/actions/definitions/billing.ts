@@ -1,7 +1,15 @@
-import { eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { badRequest, notFound, ApiError } from "../../api";
-import { organizations, PLAN_IDS } from "../../db";
+import { feeAssessments, organizations, PLAN_IDS } from "../../db";
+import { formatMinor } from "../../api/money";
+import {
+  assessmentBillable,
+  createFeeInvoiceItem,
+  feeLineDescription,
+  type BillableAssessment,
+} from "../../billing/fee-invoice";
+import { statusGrantsPlan } from "../../billing/mirror";
 import {
   billingConfigured,
   cancelAtPeriodEnd,
@@ -429,6 +437,164 @@ export const startPaymentMethodSetup = defineAction({
       clientSecret: intent.clientSecret,
       publishableKey: intent.publishableKey,
       customerId: customer.customerId,
+    };
+  },
+});
+
+/**
+ * Bills closed threshold-fee assessments (§17, `docs/PRICING.md` §4).
+ *
+ * **This is the action that turns a measurement into a charge**, and it is the
+ * only one. Everything else about the threshold fee — the ledger, the marginal
+ * engine, the meter, period close — deliberately stopped short of money;
+ * `fee_assessments.invoiced` was hardcoded `false` and every surface said so.
+ *
+ * It adds an invoice **item** per assessment, which rides onto the merchant's
+ * next Markii subscription invoice as a named line showing its own arithmetic.
+ * Nothing is finalised or captured here: Stripe bills it with the plan on the
+ * normal cycle, so a merchant gets one invoice for one relationship.
+ *
+ * **Nothing is scheduled.** Like period close and the absent T12 rollup, this
+ * runs when it is invoked — there is no job runner in this codebase, and a
+ * billing step that silently depended on one would quietly never charge anyone.
+ */
+export const invoiceAssessments = defineAction({
+  id: "billing.invoiceAssessments",
+  description:
+    "Bill closed threshold-fee assessments by adding them to the organization's next Markii " +
+    "invoice. Each assessment bills exactly once. Call with dryRun to see what would be charged " +
+    "and why, without raising anything.",
+  input: z
+    .object({
+      /**
+       * Explicit ids, or every unbilled assessment. Defaulting to "all closed
+       * and unbilled" is safe only because each one refuses individually and
+       * bills at most once.
+       */
+      assessmentIds: z.array(z.string().min(1).max(64)).max(100).optional(),
+    })
+    .strict(),
+  permission: "billing.write",
+  /** Charging a merchant real money. §22 rule 3: never auto-runs, whoever asks. */
+  riskTier: "high",
+  async run(input, ctx) {
+    if (!ctx.actor.orgId) throw notFound("Organization");
+    const orgId = ctx.actor.orgId;
+    const org = await loadOrg(ctx.db, orgId);
+
+    const rows = await ctx.db
+      .select()
+      .from(feeAssessments)
+      .where(and(eq(feeAssessments.orgId, orgId), eq(feeAssessments.invoiced, false)))
+      .orderBy(asc(feeAssessments.periodStart));
+
+    const wanted = input.assessmentIds
+      ? rows.filter((r) => input.assessmentIds?.includes(r.id))
+      : rows;
+
+    /**
+     * Read once, from the org's own mirror. A subscription that does not grant
+     * a plan does not get billed a usage fee either — an `incomplete` signup has
+     * no invoice for the item to ride on, which is the failure mode
+     * `assessmentBillable` exists to refuse.
+     */
+    const context = {
+      customerId: org.stripeCustomerId,
+      subscriptionActive: statusGrantsPlan(org.subscriptionStatus ?? ""),
+      billingCurrency: org.currency,
+    };
+
+    const billed: { id: string; feeMinor: number; invoiceItemId: string | null }[] = [];
+    const skipped: { id: string; reason: string }[] = [];
+
+    for (const row of wanted) {
+      const assessment: BillableAssessment = {
+        id: row.id,
+        periodStart: row.periodStart,
+        periodEnd: row.periodEnd,
+        planId: row.planId,
+        productClass: row.productClass,
+        currency: row.currency,
+        feeMinor: row.feeMinor,
+        billableMinor: row.billableMinor,
+        thresholdMinor: row.thresholdMinor,
+        overageRateBps: row.overageRateBps,
+        invoiced: row.invoiced,
+      };
+
+      const verdict = assessmentBillable(assessment, context);
+      if (!verdict.ok) {
+        /**
+         * A zero fee is *settled*, not skipped: the merchant was under their
+         * threshold and owes nothing, so the period closes rather than staying
+         * pending forever and being re-examined every run.
+         */
+        if (row.feeMinor <= 0 && !ctx.dryRun) {
+          await ctx.db
+            .update(feeAssessments)
+            .set({ invoiced: true, invoicedAt: new Date() })
+            .where(eq(feeAssessments.id, row.id));
+          billed.push({ id: row.id, feeMinor: 0, invoiceItemId: null });
+          continue;
+        }
+        skipped.push({ id: row.id, reason: verdict.message });
+        continue;
+      }
+
+      if (ctx.dryRun) {
+        billed.push({ id: row.id, feeMinor: row.feeMinor, invoiceItemId: null });
+        continue;
+      }
+
+      const item = await createFeeInvoiceItem({
+        customerId: context.customerId as string,
+        assessment,
+        description: feeLineDescription(assessment, (m) => formatMinor(m, assessment.currency)),
+      });
+      if (!item.ok) {
+        /**
+         * Stop rather than continue. If Stripe is refusing or unreachable, the
+         * next assessment will fail the same way, and a partial run that
+         * reported "3 billed, 7 failed" invites a re-run that has to reason
+         * about which is which. Each item is already durable and idempotent, so
+         * stopping loses nothing.
+         */
+        skipped.push({ id: row.id, reason: item.message });
+        break;
+      }
+
+      await ctx.db
+        .update(feeAssessments)
+        .set({ invoiced: true, invoicedAt: new Date(), stripeInvoiceItemId: item.invoiceItemId })
+        .where(eq(feeAssessments.id, row.id));
+
+      ctx.recordDiff({
+        entity: "feeAssessment",
+        entityId: row.id,
+        path: "invoiced",
+        before: false,
+        after: true,
+      });
+      billed.push({ id: row.id, feeMinor: row.feeMinor, invoiceItemId: item.invoiceItemId });
+    }
+
+    const chargedMinor = billed.reduce((sum, b) => sum + b.feeMinor, 0);
+    return {
+      billed,
+      skipped,
+      chargedMinor,
+      currency: org.currency,
+      /**
+       * True only when something was actually raised. A run that settled nothing
+       * but zero-fee periods moved no money, and saying otherwise would be the
+       * §4.4 framing problem in reverse.
+       */
+      charging: !ctx.dryRun && billed.some((b) => b.invoiceItemId !== null),
+      dryRun: ctx.dryRun,
+      note: ctx.dryRun
+        ? "Nothing was raised. These are the assessments that would be billed."
+        : "Raised as invoice items — they appear on the next Markii subscription invoice, " +
+          "not as a separate charge.",
     };
   },
 });

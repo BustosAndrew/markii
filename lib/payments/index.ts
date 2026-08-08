@@ -135,16 +135,19 @@ async function startStripe(
   if (!intent.publishableKey) {
     /**
      * Card details may only ever be entered into Stripe-hosted Elements (PCI
-     * SAQ-A), and Elements cannot mount without a publishable key. Opening a
-     * PaymentIntent the shopper has no way to pay would hold stock for a
-     * checkout that cannot finish.
+     * SAQ-A), and Elements cannot mount without a publishable key — **or with
+     * one from the other mode**. Opening a PaymentIntent the shopper has no way
+     * to pay would hold stock for a checkout that cannot finish.
      */
     return {
       ok: false,
       rail: "stripe",
       code: "configuration_required",
       message: "Card payments are not fully configured on this platform.",
-      resolution: "Set NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY so Stripe Elements can load.",
+      resolution:
+        "Set NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY so Stripe Elements can load, and make sure it is " +
+        "in the same mode as STRIPE_SECRET_KEY — a pk_live_ key cannot confirm a PaymentIntent " +
+        "opened by an sk_test_ key.",
     };
   }
 

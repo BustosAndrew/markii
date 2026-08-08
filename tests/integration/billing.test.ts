@@ -352,9 +352,102 @@ describe("billing", () => {
     expect(Array.isArray(res.json.invoices)).toBe(true);
     // A fresh org has been billed nothing either way.
     expect(res.json.invoices).toEqual([]);
-    expect(res.json.assessmentsState.code).toBe("measurement_only");
-    // No assessment claims to have been invoiced.
-    for (const a of res.json.assessments) expect(a.invoiced).toBe(false);
+    /**
+     * Null when there is nothing to describe; otherwise it reports whether the
+     * assessments shown are still measurements. It must never claim they are
+     * billed when they are not.
+     */
+    if (res.json.assessments.length === 0) {
+      expect(res.json.assessmentsState).toBeNull();
+    } else {
+      expect(["pending", "billed"]).toContain(res.json.assessmentsState.code);
+    }
+    // Nothing claims to be invoiced without a time to go with it.
+    for (const a of res.json.assessments) {
+      if (a.invoiced) expect(a.invoicedAt).toBeTruthy();
+      else expect(a.stripeInvoiceItemId).toBeNull();
+    }
+  });
+
+  /**
+   * Turning an assessment into a charge (§17, `docs/PRICING.md` §4).
+   *
+   * The refusals matter more than the happy path here, and only a real request
+   * can show them: the action reads the org's *own* subscription state, and the
+   * guard it depends on is invisible to a unit test that constructs its own
+   * context object.
+   */
+  describe("invoiceAssessments", () => {
+    const invoke = (body: unknown, dryRun = false) =>
+      merchant.post(`/api/actions/billing.invoiceAssessments${dryRun ? "?dryRun=1" : ""}`, body);
+
+    async function seedAssessment(feeMinor: number, periodStart: string) {
+      const start = new Date(`${periodStart}T00:00:00Z`);
+      // The month after `start`. A string replace here silently produced
+      // period_end === period_start for every month but July, which the
+      // `fee_assessments_period_ordered` constraint correctly rejected.
+      const end = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1));
+      const [row] = await sql`insert into fee_assessments
+        (id, org_id, period_start, period_end, plan_id, product_class, threshold_minor,
+         overage_rate_bps, t12_net_sales_minor, period_net_sales_minor, billable_minor,
+         fee_minor, currency, record_count)
+        values (${`fa_test_${periodStart}_${feeMinor}`}, ${orgId}, ${start}, ${end},
+         'growth', 'physical', 5000000, 50,
+         6000000, 1000000, ${feeMinor === 0 ? 0 : 2500_00}, ${feeMinor}, 'USD', 1)
+        returning *`;
+      return row;
+    }
+
+    /**
+     * **The trap the module is shaped around.** A pending Stripe invoice item
+     * with no subscription invoice to ride on is never billed and never
+     * expires — it silently attaches to whatever invoice appears months later.
+     * This org has no subscription, so nothing may be raised.
+     */
+    it("refuses to raise a fee with no subscription for it to ride on", async () => {
+      const a = await seedAssessment(12_50, "2026-07-01");
+      const res = await invoke({});
+      expect(res.status).toBe(200);
+      expect(res.json.result.charging).toBe(false);
+      expect(res.json.result.skipped.map((s: any) => s.id)).toContain(a.id);
+      expect(res.json.result.skipped[0].reason).toMatch(/subscription|never be billed/i);
+
+      // And it really was not billed.
+      const [after] = await sql`select invoiced, stripe_invoice_item_id
+        from fee_assessments where id = ${a.id}`;
+      expect(after.invoiced).toBe(false);
+      expect(after.stripe_invoice_item_id).toBeNull();
+    });
+
+    /**
+     * Owing nothing is *settled*, not pending. Left unbilled it would be
+     * re-examined on every future run forever.
+     */
+    it("settles a zero-fee period without raising a line", async () => {
+      const a = await seedAssessment(0, "2026-06-01");
+      const res = await invoke({ assessmentIds: [a.id] });
+      expect(res.status).toBe(200);
+
+      const [after] = await sql`select invoiced, invoiced_at, stripe_invoice_item_id
+        from fee_assessments where id = ${a.id}`;
+      expect(after.invoiced).toBe(true);
+      // Settled, but no charge exists — the state `invoiced` alone cannot express.
+      expect(after.stripe_invoice_item_id).toBeNull();
+      // The schema refuses an invoiced row with no time on it.
+      expect(after.invoiced_at).not.toBeNull();
+      expect(res.json.result.charging).toBe(false);
+    });
+
+    /** A dry run must leave the ledger exactly as it found it (§22 rule 2). */
+    it("writes nothing on a dry run", async () => {
+      const a = await seedAssessment(9_99, "2026-05-01");
+      const res = await invoke({ assessmentIds: [a.id] }, true);
+      expect(res.status).toBe(200);
+      expect(res.json.dryRun).toBe(true);
+
+      const [after] = await sql`select invoiced from fee_assessments where id = ${a.id}`;
+      expect(after.invoiced).toBe(false);
+    });
   });
 
   it("keeps another org's sales out of this meter", async () => {

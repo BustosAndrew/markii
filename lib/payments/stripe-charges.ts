@@ -19,6 +19,8 @@ import "server-only";
  * does not touch.
  */
 
+import { matchedPublishableKey } from "../stripe-mode";
+
 const PAYMENT_INTENTS = "https://api.stripe.com/v1/payment_intents";
 
 export type ChargeStart =
@@ -106,8 +108,14 @@ export async function createPaymentIntent(input: {
      * Needed by Stripe-hosted Elements in the browser, which is the only place
      * card details may ever go (PCI SAQ-A). Null is a real state — the rail is
      * unusable without it, and saying so beats rendering an empty card form.
+     *
+     * **Null also covers a key from the other mode**, which is the more
+     * dangerous case because it looks configured. A `pk_live_` cannot confirm a
+     * PaymentIntent opened by an `sk_test_`, so the shopper's card would be
+     * rejected by Stripe *after* stock was reserved for them — see
+     * `lib/stripe-mode.ts`.
      */
-    publishableKey: process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? null,
+    publishableKey: matchedPublishableKey(),
   };
 }
 

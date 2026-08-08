@@ -190,6 +190,13 @@
       "when": 1786158990518,
       "tag": "0026_org_subscription",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1786162061807,
+      "tag": "0027_fee_assessment_invoicing",
+      "breakpoints": true
     }
   ]
 }

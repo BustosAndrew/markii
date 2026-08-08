@@ -1397,7 +1397,7 @@ Never return an invitation as "delivered" unless a mail provider actually accept
 
 ---
 
-## 17. Billing, plans, metering, threshold fees — ✅ LIVE except threshold-fee invoicing · Phase B
+## 17. Billing, plans, metering, threshold fees — ✅ LIVE · Phase B
 
 Full model in **`docs/PRICING.md`**. Processor: Stripe Billing (subscriptions) + Stripe Connect
 (merchant payouts). Markii never holds merchant funds.
@@ -1426,12 +1426,23 @@ Three rules this half is built around:
 - **One derivation of "what Stripe says".** The action and the webhook both write through
   `mirrorSubscription`, so they cannot disagree about what a status grants.
 
-**🟡 Still not billed: the threshold fee.** `fee_assessments.invoiced` is `false` on every row and
-no code turns an assessment into an invoice line, so `GET /api/billing/usage` still reports
-`billingStatus.charging: false` — deliberately, and separately from the subscription. Subscriptions
-working does not mean threshold fees are charged, and one flag standing for both would be the same
-false claim in a new place. The figures are a measurement, not an invoice — the framing §4.4
-requires for trial orgs, for the same reason.
+**✅ LIVE — threshold-fee invoicing.** `billing.invoiceAssessments` turns a closed assessment into a
+Stripe **invoice item**, which rides onto the merchant's next subscription invoice as a named line
+showing its own arithmetic. An item, not a separate invoice: one relationship, one invoice, one
+dunning path.
+
+The refusals are the design (`assessmentBillable`). It will not bill an assessment twice, will not
+raise a zero-fee line, will not convert currencies with no FX provider wired, and — most
+importantly — **will not create an item for an org with no active subscription**, because a pending
+invoice item with nothing to ride on is never billed, never expires, and later attaches to whatever
+invoice eventually appears.
+
+`billingStatus.charging` on `GET /api/billing/usage` is now **per merchant, not per deployment**:
+true only for an org whose subscription can actually carry the line. That is the same rule that made
+it `false` when only a credential existed — it reports the capability, never the environment.
+
+**Nothing here is scheduled.** Period close and invoicing both run when invoked; there is no job
+runner in this codebase, and a billing step that assumed one would quietly never charge anyone.
 
 **Add-on toggles (`/api/billing/addons/:addon`) are still unbuilt.**
 
@@ -1477,7 +1488,8 @@ interface UsageRecord {            // immutable; written at event time, never de
 | `POST` | `/api/billing/subscription` | ✅ Create/change plan. **Returns Stripe's proration preview and writes nothing unless `confirm: true`.** Delegates to `billing.changePlan` (§22) |
 | `DELETE` | `/api/billing/subscription` | ✅ Cancel at period end — never immediately; the merchant paid through the period. Delegates to `billing.setCancellation` |
 | `GET` | `/api/billing/usage` | ✅ **The threshold meter** — see below. Measured, still not invoiced |
-| `GET` | `/api/billing/invoices` | ✅ Stripe invoices **and** the assessment ledger, under separate keys. They are different things: one is a demand for payment, the other a measurement. `/:id` detail not built |
+| `GET` | `/api/billing/invoices` | ✅ Stripe invoices **and** the assessment ledger, under separate keys. Each assessment carries `invoiced`, `invoicedAt`, and `stripeInvoiceItemId` — a null item id on an invoiced row means *settled, nothing owed*, which `invoiced` alone cannot express. `/:id` detail not built |
+| `POST` | `/api/actions/billing.invoiceAssessments` | ✅ Bill closed assessments onto the next subscription invoice. `?dryRun=1` shows what would be charged and why |
 | `POST` | `/api/billing/payment-method` | ✅ Stripe SetupIntent client secret; card data never touches Markii. Must be followed by `billing.setDefaultPaymentMethod` or the card is attached but not charged |
 | `POST` | `/api/billing/addons/:addon` · `DELETE` | 🟡 Toggle add-on entitlement — not built |
 | `POST` | `/api/webhooks/stripe` | ✅ LIVE — signature-verified, idempotent, retry-safe. Handles Connect account state, `payment_intent.*`, refunds, **and Markii's own `customer.subscription.*` / `invoice.*`** (see below) |

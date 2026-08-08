@@ -1883,11 +1883,26 @@ export const feeAssessments = pgTable(
     /** The formula's inputs, for an invoice line that shows its own arithmetic. */
     workings: jsonb("workings").$type<Record<string, unknown>>().notNull().default({}),
     /**
-     * Whether this was actually billed. False while Stripe is unwired — the
-     * assessment is a measurement, and calling it an invoice would be a claim
-     * that money changed hands.
+     * Whether this was actually billed — **the line between a measurement and a
+     * charge**. Calling an assessment an invoice before this is true would be a
+     * claim that money changed hands.
+     *
+     * True also covers "settled, nothing owed": a merchant under their threshold
+     * owes nothing, and that period is closed rather than perpetually pending.
+     * `stripeInvoiceItemId` is what distinguishes the two.
      */
     invoiced: boolean("invoiced").notNull().default(false),
+    /**
+     * The Stripe invoice **item** raised for this period, null when nothing was
+     * owed. An item, not an invoice: the fee rides onto the merchant's next
+     * subscription invoice as a named line, which is what `docs/PRICING.md`
+     * promises and what avoids billing one relationship twice a month.
+     *
+     * Stored so a second attempt can see the first succeeded even if the
+     * transaction that was going to record it rolled back.
+     */
+    stripeInvoiceItemId: text("stripe_invoice_item_id"),
+    invoicedAt: timestamp("invoiced_at", { withTimezone: true }),
     /** How many usage records fed it, for reconciliation against a later recount. */
     recordCount: integer("record_count").notNull().default(0),
     closedAt: timestamp("closed_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1898,6 +1913,12 @@ export const feeAssessments = pgTable(
     // double-bill, but physical and digital are two genuine assessments.
     uniqueIndex("fee_assessments_period_uq").on(t.orgId, t.periodStart, t.productClass),
     index("fee_assessments_org_idx").on(t.orgId, t.periodStart),
+    /**
+     * One assessment per Stripe invoice item. Two rows pointing at the same item
+     * would mean one charge was recorded as billing two periods — and the second
+     * period would then never be billed at all.
+     */
+    uniqueIndex("fee_assessments_invoice_item_uq").on(t.stripeInvoiceItemId),
   ],
 );
 

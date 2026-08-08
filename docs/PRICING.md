@@ -303,6 +303,25 @@ that month, every month, with no threshold at all. That contrast is the product.
 **Rules:** the meter renders *not yet measured* rather than `0` before any sale exists; a merchant
 in trial sees "would have been charged" framing; never display a projected fee as if it were owed.
 
+**How the fee actually reaches a merchant (implemented).** A closed `fee_assessment` becomes a
+Stripe **invoice item**, which Stripe pulls onto that merchant's next subscription invoice as a
+named line carrying its own arithmetic — the period, the class, the billable slice, the threshold,
+and the rate. It is deliberately not a separate invoice: one relationship should produce one
+invoice and one dunning path.
+
+Two consequences fall out of that and are enforced rather than assumed
+(`assessmentBillable` in `lib/billing/fee-invoice.ts`):
+
+- **A fee needs a subscription to ride on.** An invoice item raised against a customer with no
+  active subscription is never billed and never expires — it silently waits and then attaches to
+  whatever invoice appears months later. Markii refuses to create one instead.
+- **Only a closed period is billed, and only once.** The period in progress stays a projection, and
+  the write is idempotent on the assessment id so a retry cannot raise a second charge.
+
+An assessment marked `invoiced` with **no** invoice item is a real and distinct state: the merchant
+was under their threshold and owed nothing, so the period is settled rather than left pending
+forever.
+
 ## 7. Build order
 
 1. Plans, entitlements, Stripe Billing subscription lifecycle, invoices, dunning

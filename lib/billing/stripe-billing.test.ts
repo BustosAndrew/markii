@@ -1,13 +1,8 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { allActions } from "../actions";
 import { planPricing } from "../plans";
 import { statusGrantsPlan, isSubscriptionStatus, FLOOR_PLAN } from "./mirror";
-import {
-  expectedUnitAmountMinor,
-  matchedPublishableKey,
-  priceLookupKey,
-  toSnapshot,
-} from "./stripe-billing";
+import { expectedUnitAmountMinor, priceLookupKey, toSnapshot } from "./stripe-billing";
 
 /**
  * The pure half of Markii's own subscription billing (§17).
@@ -168,63 +163,6 @@ describe("FLOOR_PLAN", () => {
 });
 
 /**
- * The mode guard. This is not a style check — a `pk_live_` paired with an
- * `sk_test_` succeeds on every server-side call and fails only in the browser,
- * against Stripe's own card element, after the merchant has typed their card
- * number. That mismatch was live in this repo's `.env.local` when the guard was
- * written.
- */
-describe("matchedPublishableKey", () => {
-  const original = {
-    secret: process.env.STRIPE_SECRET_KEY,
-    publishable: process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY,
-  };
-  const set = (secret?: string, publishable?: string) => {
-    if (secret === undefined) delete process.env.STRIPE_SECRET_KEY;
-    else process.env.STRIPE_SECRET_KEY = secret;
-    if (publishable === undefined) delete process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
-    else process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY = publishable;
-  };
-
-  afterEach(() => set(original.secret, original.publishable));
-
-  it("returns the key when both are test mode", () => {
-    set("sk_test_abc", "pk_test_xyz");
-    expect(matchedPublishableKey()).toBe("pk_test_xyz");
-  });
-
-  it("returns the key when both are live mode", () => {
-    set("sk_live_abc", "pk_live_xyz");
-    expect(matchedPublishableKey()).toBe("pk_live_xyz");
-  });
-
-  it("refuses a live publishable key against a test secret", () => {
-    set("sk_test_abc", "pk_live_xyz");
-    expect(matchedPublishableKey()).toBeNull();
-  });
-
-  it("refuses a test publishable key against a live secret", () => {
-    set("sk_live_abc", "pk_test_xyz");
-    expect(matchedPublishableKey()).toBeNull();
-  });
-
-  /** Restricted keys carry the mode the same way, so they must be read the same way. */
-  it("treats a restricted test key as test mode", () => {
-    set("rk_test_abc", "pk_test_xyz");
-    expect(matchedPublishableKey()).toBe("pk_test_xyz");
-    set("rk_test_abc", "pk_live_xyz");
-    expect(matchedPublishableKey()).toBeNull();
-  });
-
-  it("is null when either key is missing", () => {
-    set(undefined, "pk_test_xyz");
-    expect(matchedPublishableKey()).toBeNull();
-    set("sk_test_abc", undefined);
-    expect(matchedPublishableKey()).toBeNull();
-  });
-});
-
-/**
  * The registry is only the single mutation path if the definitions are actually
  * imported — "an action nobody imports does not exist" (`lib/actions/index.ts`).
  * A billing action that silently failed to register would not fail loudly; the
@@ -236,6 +174,7 @@ describe("billing action registration", () => {
   it("registers every billing action", () => {
     expect(billing().map((a) => a.id).sort()).toEqual([
       "billing.changePlan",
+      "billing.invoiceAssessments",
       "billing.setCancellation",
       "billing.setDefaultPaymentMethod",
       "billing.startPaymentMethodSetup",
@@ -250,9 +189,13 @@ describe("billing action registration", () => {
    * §22 rule 3: pricing is `high`, which the registry reports as
    * `requiresHumanApproval` and which can never be configured to auto-run. An
    * agent may propose an upgrade; a person confirms it.
+   *
+   * Raising a threshold-fee charge is the same tier for a blunter reason — it
+   * moves real money out of a merchant's account.
    */
-  it("puts the plan change behind human approval", () => {
-    const change = billing().find((a) => a.id === "billing.changePlan");
-    expect(change?.riskTier).toBe("high");
+  it("puts anything that charges money behind human approval", () => {
+    for (const id of ["billing.changePlan", "billing.invoiceAssessments"]) {
+      expect(billing().find((a) => a.id === id)?.riskTier).toBe("high");
+    }
   });
 });
