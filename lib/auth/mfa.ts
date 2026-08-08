@@ -213,18 +213,23 @@ export async function assertStepUp(
     });
   }
 
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-
   /**
-   * `amr` carries a timestamp per authentication method, so the most recent MFA
-   * entry answers "was this person here just now?" — which `aal2` alone cannot.
-   * A session that cleared MFA this morning is still `aal2` this evening, and
-   * treating that as consent to move a payout address is the gap step-up closes.
+   * **`currentAuthenticationMethods`, not `session.user.amr`.** The AMR claim
+   * lives in the JWT, and Supabase surfaces it here rather than on the user
+   * object — reading the user was the first version of this and it always saw
+   * `undefined`, so step-up refused every caller including ones that had just
+   * authenticated. It failed closed, which is the right direction to fail, but
+   * it would have made every marked action unusable.
+   *
+   * Each entry carries a timestamp, so the most recent MFA method answers "was
+   * this person here just now?" — which `aal2` alone cannot. A session that
+   * cleared MFA this morning is still `aal2` this evening, and treating that as
+   * consent to move a payout address is exactly the gap step-up closes.
    */
-  const amr = (session as { user?: { amr?: { method: string; timestamp: number }[] } } | null)?.user
-    ?.amr;
+  const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+  const amr = aal?.currentAuthenticationMethods as
+    | { method: string; timestamp: number }[]
+    | undefined;
 
   if (stepUpSatisfied(amr)) return;
 

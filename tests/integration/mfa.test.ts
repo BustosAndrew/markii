@@ -265,6 +265,76 @@ describe("what MFA does not apply to", () => {
   }, 60_000);
 });
 
+/**
+ * The x402 wallet address is the **payout destination** — changing it redirects
+ * a merchant's revenue, which makes it the highest-value write in the product.
+ *
+ * Until it was moved into the registry it ran under `orgHandler` with **no
+ * permission option at all**, so any authenticated staff member could change it,
+ * `viewer` and `analyst` included. These pin both halves of the fix.
+ */
+describe("payout destination is privileged", () => {
+  const WALLET = "0x1111111111111111111111111111111111111111";
+
+  it("lets an owner change it, and records who did", async () => {
+    const client = new Client();
+    const m = await signUpMerchant(client, "walletowner");
+    cleanup.merchantEmails.push(m.email);
+    const orgId = (await client.get("/api/me")).json.org.id;
+
+    const res = await client.put("/api/integrations/x402", { walletAddress: WALLET });
+    expect(res.status).toBeLessThan(400);
+
+    const [row] = await sql`select config from integrations
+      where org_id = ${orgId} and provider = 'x402'`;
+    expect(row.config.walletAddress).toBe(WALLET);
+
+    /**
+     * The audit row is the point of moving this into the registry — before, a
+     * redirected payout left no record of who redirected it.
+     */
+    const [audit] = await sql`select actor_id, action_id, diff from action_invocations
+      where org_id = ${orgId} and action_id = 'integrations.connect'
+      order by created_at desc limit 1`;
+    expect(audit, "changing the payout address must be audited").toBeTruthy();
+    expect(JSON.stringify(audit.diff)).toContain(WALLET);
+  }, 120_000);
+
+  /**
+   * **The privilege hole.** A `viewer` is read-only by definition; before the
+   * conversion they could redirect the merchant's money.
+   */
+  it("refuses a read-only role", async () => {
+    const ownerClient = new Client();
+    const owner = await signUpMerchant(ownerClient, "walletboss");
+    cleanup.merchantEmails.push(owner.email);
+    const orgId = (await ownerClient.get("/api/me")).json.org.id;
+
+    const viewerClient = new Client();
+    const viewer = await signUpMerchant(viewerClient, "walletviewer");
+    cleanup.merchantEmails.push(viewer.email);
+    const [viewerUser] = await sql`select id from auth.users where email = ${viewer.email}`;
+
+    // Put the viewer into the owner's org, read-only.
+    await sql`insert into staff (id, org_id, user_id, email, role, status)
+      values (${`stf_test_${Date.now()}`}, ${orgId}, ${viewerUser.id}, ${viewer.email},
+              'viewer', 'active')`;
+    await viewerClient.post("/api/org/switch", { orgId });
+
+    const res = await viewerClient.put("/api/integrations/x402", {
+      walletAddress: "0x2222222222222222222222222222222222222222",
+    });
+    expect(refused(res), "a viewer must not be able to redirect revenue").toBe(true);
+
+    const [row] = await sql`select config from integrations
+      where org_id = ${orgId} and provider = 'x402'`;
+    // Unchanged — asserted against the database, not the response.
+    expect(row?.config?.walletAddress).not.toBe(
+      "0x2222222222222222222222222222222222222222",
+    );
+  }, 180_000);
+});
+
 describe("totpCode", () => {
   /** RFC 6238 test vector — proves the helper, which the whole suite now leans on. */
   it("matches the RFC 6238 SHA-1 vector", () => {

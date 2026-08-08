@@ -1,31 +1,25 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
 import { badRequest } from "@/lib/api";
+import { invokeAction } from "@/lib/actions";
 import { orgHandler } from "@/lib/auth/handler";
-import { assertStepUp } from "@/lib/auth/mfa";
-import {
-  getIntegration,
-  integrationStatus,
-  upsertIntegration,
-  type Provider,
-} from "@/lib/integrations";
+import type { Provider } from "@/lib/integrations";
 
-const configSchemas: Record<Provider, z.ZodType<Record<string, string>>> = {
-  x402: z.object({ walletAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/, "not a valid EVM address") }),
-  google: z.object({
-    merchantId: z.string().min(1),
-    serviceAccountJson: z.string().min(2),
-  }),
-  /**
-   * **Refuses everything.** Stripe is connected through Connect Standard OAuth
-   * (D4), where the merchant keeps their own account and Markii holds a
-   * revocable connection — never their secret key. This route used to accept
-   * and store `sk_…` in plaintext jsonb, which hands Markii full control of a
-   * merchant's charges, refunds, payouts, and customer data, and is exactly
-   * what `docs/API.md` §8 says must never happen.
-   */
-  stripe: z.never(),
-};
+/**
+ * `/api/integrations/:provider` (§8) — connect or disconnect a rail.
+ *
+ * **These delegate to the registry now; they used to mutate directly.** That was
+ * a §22 rule 1 violation, and it cost exactly what the rule predicts: the route
+ * ran with **no permission check at all**, so any authenticated staff member —
+ * `analyst` and `viewer` included, whose roles are read-only by definition —
+ * could change the x402 wallet address, which is where the merchant's revenue is
+ * paid. It also had nowhere to hang a step-up requirement, so one had to be
+ * bolted on by hand.
+ *
+ * `integrations.connect` / `integrations.disconnect` now carry the permission
+ * (`billing.write` — owner and administrator only), the `high` risk tier, and
+ * `requiresStepUp`, and every change lands in `action_invocations` with the old
+ * and new wallet address on the diff.
+ */
 
 function parseProvider(raw: string): Provider {
   if (raw !== "x402" && raw !== "google" && raw !== "stripe")
@@ -33,57 +27,30 @@ function parseProvider(raw: string): Provider {
   return raw;
 }
 
-/**
- * **Step-up before changing where money goes** (D40).
- *
- * `x402.walletAddress` is the payout destination: changing it redirects a
- * merchant's revenue, which makes this the highest-value write in the product.
- * Disconnecting a rail is the same decision in reverse.
- *
- * **This check belongs in the action registry and is here under protest.** §22
- * rule 1 says no route handler mutates outside the registry, and this one
- * predates that rule — so there is no `defineAction` to hang `requiresStepUp`
- * on. A route-level check is complete only because no agent path to this
- * mutation exists *yet*; the moment it becomes an action, the check moves and
- * this comment goes with it. Leaving it unguarded until then would mean the one
- * write worth stealing is the one write with no second factor.
- */
-async function stepUpForMoneyMove(session: { actor: { type: "user" | "agent" | "token" | "system" } }, what: string) {
-  await assertStepUp(session.actor, what);
-}
-
-export const PUT = orgHandler(async (req, { params, orgId, session }) => {
+export const PUT = orgHandler(async (req, { params, session }) => {
   const provider = parseProvider((await params).provider);
-  await stepUpForMoneyMove(session, `integrations.connect:${provider}`);
+  const config = (await req.json()) as Record<string, string>;
 
-  if (provider === "stripe") {
-    throw badRequest(
-      "Stripe is connected through Connect Standard OAuth, not by supplying a key. Markii never " +
-        "stores a merchant secret key — you keep your own Stripe account, rates, dashboard, and " +
-        "payouts (docs/DECISIONS.md D4). The connection is established by the OAuth flow and kept " +
-        "current by account.updated webhooks.",
-    );
-  }
-
-  const config = configSchemas[provider].parse(await req.json());
-  if (provider === "google") {
-    try {
-      JSON.parse(config.serviceAccountJson);
-    } catch {
-      throw badRequest("serviceAccountJson is not valid JSON");
-    }
-  }
-  const existing = await getIntegration(orgId, provider);
-  const row = await upsertIntegration(orgId, provider, "connected", {
-    ...existing?.config,
-    ...config,
-  });
-  return NextResponse.json(integrationStatus(provider, row));
+  const outcome = await invokeAction(
+    "integrations.connect",
+    { provider, config },
+    { actor: session.actor },
+  );
+  /**
+   * The resource, not the invocation envelope — this endpoint predates the
+   * registry and clients read the status object directly. The audit row still
+   * gets written either way.
+   */
+  return NextResponse.json(outcome.result);
 });
 
-export const DELETE = orgHandler(async (_req, { params, orgId, session }) => {
+export const DELETE = orgHandler(async (_req, { params, session }) => {
   const provider = parseProvider((await params).provider);
-  await stepUpForMoneyMove(session, `integrations.disconnect:${provider}`);
-  const row = await upsertIntegration(orgId, provider, "not_connected", {});
-  return NextResponse.json(integrationStatus(provider, row));
+
+  const outcome = await invokeAction(
+    "integrations.disconnect",
+    { provider },
+    { actor: session.actor },
+  );
+  return NextResponse.json(outcome.result);
 });
