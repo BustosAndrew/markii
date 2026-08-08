@@ -1444,7 +1444,12 @@ it `false` when only a credential existed — it reports the capability, never t
 **Nothing here is scheduled.** Period close and invoicing both run when invoked; there is no job
 runner in this codebase, and a billing step that assumed one would quietly never charge anyone.
 
-**Add-on toggles (`/api/billing/addons/:addon`) are still unbuilt.**
+**⛔ Add-ons refuse to be sold, and the reason is the product, not the plumbing.** Agent Ops and
+Chargeback Assist are Phase F (`docs/DECISIONS.md` §G10) and neither exists. Every piece the sale
+would need is already built — a price would resolve, a subscription item would attach, the mirror
+would record it — so the refusal is deliberate rather than pending: charging $29/mo for a product
+that does not exist is the fabricated-success rule with a card behind it. `GET` is real, because
+Chargeback Assist arriving **included** on Scale is a legitimate `true`.
 
 ```ts
 interface Entitlements {           // gate features on THIS, never on plan name
@@ -1488,10 +1493,12 @@ interface UsageRecord {            // immutable; written at event time, never de
 | `POST` | `/api/billing/subscription` | ✅ Create/change plan. **Returns Stripe's proration preview and writes nothing unless `confirm: true`.** Delegates to `billing.changePlan` (§22) |
 | `DELETE` | `/api/billing/subscription` | ✅ Cancel at period end — never immediately; the merchant paid through the period. Delegates to `billing.setCancellation` |
 | `GET` | `/api/billing/usage` | ✅ **The threshold meter** — see below. Measured, still not invoiced |
-| `GET` | `/api/billing/invoices` | ✅ Stripe invoices **and** the assessment ledger, under separate keys. Each assessment carries `invoiced`, `invoicedAt`, and `stripeInvoiceItemId` — a null item id on an invoiced row means *settled, nothing owed*, which `invoiced` alone cannot express. `/:id` detail not built |
+| `GET` | `/api/billing/invoices` | ✅ Stripe invoices **and** the assessment ledger, under separate keys. Each assessment carries `invoiced`, `invoicedAt`, and `stripeInvoiceItemId` — a null item id on an invoiced row means *settled, nothing owed*, which `invoiced` alone cannot express |
+| `GET` | `/api/billing/invoices/:id` | ✅ One invoice, line-itemized. **The id is caller-supplied and `in_…` is a shared namespace**, so the invoice's customer is checked against the org's own and a mismatch answers `404`, not `403` — "forbidden" would confirm it exists. Threshold-fee lines carry the assessment that produced them |
 | `POST` | `/api/actions/billing.invoiceAssessments` | ✅ Bill closed assessments onto the next subscription invoice. `?dryRun=1` shows what would be charged and why |
 | `POST` | `/api/billing/payment-method` | ✅ Stripe SetupIntent client secret; card data never touches Markii. Must be followed by `billing.setDefaultPaymentMethod` or the card is attached but not charged |
-| `POST` | `/api/billing/addons/:addon` · `DELETE` | 🟡 Toggle add-on entitlement — not built |
+| `GET` | `/api/billing/addons/:addon` | ✅ What the org actually has. Reports `includedInPlan` apart from `purchased`, so a Scale merchant is never asked to buy Chargeback Assist their plan already includes |
+| `POST` · `DELETE` | `/api/billing/addons/:addon` | ⛔ **Refuses with `409`** — Agent Ops and Chargeback Assist are Phase F and do not exist, so there is nothing to sell. Not a missing-credential `503`: no configuration makes an unbuilt product exist |
 | `POST` | `/api/webhooks/stripe` | ✅ LIVE — signature-verified, idempotent, retry-safe. Handles Connect account state, `payment_intent.*`, refunds, **and Markii's own `customer.subscription.*` / `invoice.*`** (see below) |
 
 ### `POST /api/webhooks/stripe` — ✅ LIVE (unauthenticated, signature-verified)

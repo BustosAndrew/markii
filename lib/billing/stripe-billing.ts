@@ -665,57 +665,131 @@ export type InvoiceSummary = {
   /** Stripe-hosted, so nothing here renders or stores a PDF. */
   hostedInvoiceUrl: string | null;
   invoicePdfUrl: string | null;
-  lines: { description: string; amountMinor: number; quantity: number | null }[];
+  lines: {
+    description: string;
+    amountMinor: number;
+    quantity: number | null;
+    /** Set on a threshold-fee line, linking it to the assessment it came from. */
+    assessmentId?: string | null;
+  }[];
 };
+
+/**
+ * One invoice, **scoped to the customer that asked for it**.
+ *
+ * The id comes from the URL, so it is a caller-supplied identifier for an object
+ * in a namespace shared by every Markii merchant. Fetching it and returning it
+ * would let any authenticated merchant read any other merchant's invoice — their
+ * legal name, address, spend, and plan — by guessing or replaying an `in_…`.
+ * Stripe will happily serve it, because the platform key is authorised for all
+ * of them.
+ *
+ * So the customer is checked against the org's own stored id **after** the fetch
+ * and before anything is returned, and a mismatch is reported as *not found*
+ * rather than *forbidden* — "forbidden" would confirm the invoice exists.
+ *
+ * This is the §16 rule ("never accept `orgId` from the client") applied to a
+ * foreign key space: the org comes from the session, never from the path.
+ */
+export async function retrieveInvoice(
+  customerId: string,
+  invoiceId: string,
+): Promise<{ ok: true; invoice: InvoiceSummary } | StripeFailure> {
+  const res = await call<StripeInvoice>(
+    `/invoices/${encodeURIComponent(invoiceId)}`,
+    { method: "GET" },
+  );
+  if (!res.ok) return res;
+
+  const owner =
+    typeof res.data.customer === "string" ? res.data.customer : (res.data.customer?.id ?? null);
+  if (owner !== customerId) {
+    return {
+      ok: false,
+      code: "unavailable",
+      message: "No such invoice for this organization.",
+      status: 404,
+    };
+  }
+  const invoice = toInvoiceSummary(res.data);
+  if (!invoice) return { ok: false, code: "unavailable", message: "Stripe returned an unusable invoice." };
+  return { ok: true, invoice };
+}
+
+type StripeInvoice = {
+  id?: string;
+  customer?: string | { id?: string };
+  number?: string | null;
+  status?: string;
+  currency?: string;
+  total?: number;
+  amount_paid?: number;
+  amount_due?: number;
+  created?: number;
+  period_start?: number | null;
+  period_end?: number | null;
+  hosted_invoice_url?: string | null;
+  invoice_pdf?: string | null;
+  lines?: {
+    data?: {
+      description?: string | null;
+      amount?: number;
+      quantity?: number | null;
+      metadata?: Record<string, string>;
+    }[];
+  };
+};
+
+function toInvoiceSummary(i: StripeInvoice): InvoiceSummary | null {
+  if (!i.id) return null;
+  return {
+    id: i.id,
+    number: i.number ?? null,
+    status: i.status ?? "draft",
+    currency: (i.currency ?? "usd").toUpperCase(),
+    totalMinor: i.total ?? 0,
+    amountPaidMinor: i.amount_paid ?? 0,
+    amountDueMinor: i.amount_due ?? 0,
+    createdAt: (secondsToDate(i.created) ?? new Date(0)).toISOString(),
+    periodStart: secondsToDate(i.period_start)?.toISOString() ?? null,
+    periodEnd: secondsToDate(i.period_end)?.toISOString() ?? null,
+    hostedInvoiceUrl: i.hosted_invoice_url ?? null,
+    invoicePdfUrl: i.invoice_pdf ?? null,
+    lines: (i.lines?.data ?? []).map((l) => ({
+      description: l.description ?? "",
+      amountMinor: l.amount ?? 0,
+      quantity: l.quantity ?? null,
+      /**
+       * Carried through so a threshold-fee line can be tied back to the
+       * assessment that produced it — which is what makes "why this number"
+       * answerable from the invoice rather than only from the ledger.
+       */
+      assessmentId: l.metadata?.markii_assessment_id ?? null,
+    })),
+  };
+}
 
 /** Markii's own invoices to this org. Distinct from `fee_assessments`, which are measurements. */
 export async function listInvoices(
   customerId: string,
   limit: number,
 ): Promise<{ ok: true; invoices: InvoiceSummary[] } | StripeFailure> {
-  const res = await call<{
-    data?: {
-      id?: string;
-      number?: string | null;
-      status?: string;
-      currency?: string;
-      total?: number;
-      amount_paid?: number;
-      amount_due?: number;
-      created?: number;
-      period_start?: number | null;
-      period_end?: number | null;
-      hosted_invoice_url?: string | null;
-      invoice_pdf?: string | null;
-      lines?: { data?: { description?: string | null; amount?: number; quantity?: number | null }[] };
-    }[];
-  }>(`/invoices?customer=${encodeURIComponent(customerId)}&limit=${Math.min(Math.max(limit, 1), 100)}`, {
-    method: "GET",
-  });
+  /**
+   * Scoped by `customer` in the query rather than filtered afterwards, so Stripe
+   * never returns another merchant's invoice in the first place. The detail
+   * endpoint cannot do this — it is given an id — which is why it verifies
+   * ownership explicitly.
+   */
+  const res = await call<{ data?: StripeInvoice[] }>(
+    `/invoices?customer=${encodeURIComponent(customerId)}&limit=${Math.min(Math.max(limit, 1), 100)}`,
+    { method: "GET" },
+  );
   if (!res.ok) return res;
 
   return {
     ok: true,
     invoices: (res.data.data ?? [])
-      .filter((i): i is typeof i & { id: string } => Boolean(i.id))
-      .map((i) => ({
-        id: i.id,
-        number: i.number ?? null,
-        status: i.status ?? "draft",
-        currency: (i.currency ?? "usd").toUpperCase(),
-        totalMinor: i.total ?? 0,
-        amountPaidMinor: i.amount_paid ?? 0,
-        amountDueMinor: i.amount_due ?? 0,
-        createdAt: (secondsToDate(i.created) ?? new Date(0)).toISOString(),
-        periodStart: secondsToDate(i.period_start)?.toISOString() ?? null,
-        periodEnd: secondsToDate(i.period_end)?.toISOString() ?? null,
-        hostedInvoiceUrl: i.hosted_invoice_url ?? null,
-        invoicePdfUrl: i.invoice_pdf ?? null,
-        lines: (i.lines?.data ?? []).map((l) => ({
-          description: l.description ?? "",
-          amountMinor: l.amount ?? 0,
-          quantity: l.quantity ?? null,
-        })),
-      })),
+      .map(toInvoiceSummary)
+      .filter((i): i is InvoiceSummary => i !== null),
   };
 }

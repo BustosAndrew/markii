@@ -450,6 +450,57 @@ describe("billing", () => {
     });
   });
 
+  /**
+   * `GET /api/billing/invoices/:id` — the id is caller-supplied, and it names an
+   * object in a namespace shared by every Markii merchant. These assert the
+   * scoping rather than the formatting.
+   */
+  describe("invoice detail", () => {
+    it("does not leak an invoice this org does not own", async () => {
+      // A well-formed id that is certainly not this org's. It must answer the
+      // same way whether or not it exists in Stripe — anything else confirms
+      // existence to a caller who has no business knowing.
+      const res = await merchant.get("/api/billing/invoices/in_1QsomeOtherMerchantInvoice");
+      expect([404, 503]).toContain(res.status);
+      if (res.status === 404) expect(res.json.error.code).toBe("NOT_FOUND");
+    });
+
+    it("refuses something that is not an invoice id without asking Stripe", async () => {
+      const res = await merchant.get("/api/billing/invoices/..%2F..%2Fsecrets");
+      expect([400, 404]).toContain(res.status);
+    });
+  });
+
+  /**
+   * Add-ons are Phase F and unbuilt, so the only correct answer to "sell me one"
+   * is no. The entitlement must not move either — that is the free-capability
+   * hole in a different costume.
+   */
+  describe("add-ons", () => {
+    it("reports the entitlement without offering to sell it", async () => {
+      const res = await merchant.get("/api/billing/addons/agentOps");
+      expect(res.status).toBe(200);
+      expect(res.json.entitled).toBe(false);
+      expect(res.json.availability.code).toBe("not_built");
+    });
+
+    it("refuses to sell an add-on that does not exist, and grants nothing", async () => {
+      const res = await merchant.post("/api/billing/addons/agentOps", {});
+      expect(res.status).toBe(409);
+
+      const [org] = await sql`select add_on_agent_ops from organizations where id = ${orgId}`;
+      expect(org.add_on_agent_ops).toBe(false);
+
+      const after = await merchant.get("/api/billing/subscription");
+      expect(after.json.entitlements.addOns.agentOps).toBe(false);
+    });
+
+    it("404s an add-on nobody has heard of", async () => {
+      const res = await merchant.get("/api/billing/addons/teleportation");
+      expect(res.status).toBe(404);
+    });
+  });
+
   it("keeps another org's sales out of this meter", async () => {
     const outsider = new Client();
     const { email } = await signUpMerchant(outsider, "billing-outsider");

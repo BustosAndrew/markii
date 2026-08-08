@@ -93,9 +93,13 @@ access after it expired. A refund revokes them, mirroring digital delivery — c
 refund, keep it* for files but not for memberships would only move the hole. Memberships do **not**
 auto-renew (that needs Phase B recurring billing).
 
-**Still planned:** add-on toggles (`/api/billing/addons/:addon`), invoice detail (`/invoices/:id`),
-Stripe Tax, recurring membership billing, shopper auth mail via Supabase's Send Email Hook, and
-abandoned-cart mail. Everything in §10–15 and §19–21 is untouched.
+**§17 is complete.** Add-on *purchase* deliberately refuses with `409` rather than being unbuilt:
+Agent Ops and Chargeback Assist are Phase F and do not exist, and selling a $29/mo subscription to
+a product nobody can use is the fabricated-success rule with a card behind it. The billing path for
+them is already there the day they ship.
+
+**Still planned:** Stripe Tax, recurring membership billing, shopper auth mail via Supabase's Send
+Email Hook, and abandoned-cart mail. Everything in §10–15 and §19–21 is untouched.
 
 **Deferred until further notice — do not build, and do not let schema anticipate it:** **gift
 cards** (D33, 2026-08-03). The metering exclusion in `docs/PRICING.md` §4.1 is asserted but
