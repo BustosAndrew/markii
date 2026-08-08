@@ -1,12 +1,14 @@
 import "server-only";
 
-import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm";
 import { conflict } from "../api";
 import {
   customerMemberships,
+  customers,
   db,
   membershipTiers,
   products,
+  sites,
   type DbHandle,
 } from "../db";
 
@@ -205,6 +207,295 @@ export async function assertCartAccess(
       "available to members only, and your membership is not active. Remove " +
       `${blocked.length === 1 ? "it" : "them"} or renew before checking out.`,
   );
+}
+
+/**
+ * A recurring membership in the cart, if there is one.
+ *
+ * **A subscription cannot share a basket, and this is what enforces it.** Stripe
+ * settles a subscription through its own invoice, not through the one-off
+ * PaymentIntent the rest of checkout uses, so a cart holding both would need two
+ * payments for one basket: two authorisations on the shopper's card, two things
+ * that can fail independently, and a half-paid order if one does. Quantity is
+ * capped for the same reason — two of one membership is one membership billed
+ * twice.
+ *
+ * Refusing is not a limitation being papered over; it is the only version of
+ * this that cannot half-succeed. The shopper is told to check out separately.
+ */
+export async function recurringMembershipInCart(
+  siteId: number,
+  lines: { productId: number; quantity: number }[],
+  handle: DbHandle = db,
+): Promise<{
+  productId: number;
+  name: string;
+  tierId: number;
+  interval: "month" | "year";
+  stripeRecurringPriceId: string | null;
+} | null> {
+  const ids = [...new Set(lines.map((l) => l.productId))];
+  if (ids.length === 0) return null;
+
+  const recurring = await handle
+    .select({
+      id: products.id,
+      name: products.name,
+      tierId: products.grantsTierId,
+      interval: products.grantsRenewalInterval,
+      priceId: products.stripeRecurringPriceId,
+    })
+    .from(products)
+    .where(
+      and(
+        inArray(products.id, ids),
+        eq(products.siteId, siteId),
+        ne(products.grantsRenewalInterval, "none"),
+      ),
+    );
+
+  if (recurring.length === 0) return null;
+
+  if (recurring.length > 1) {
+    throw conflict(
+      "Only one subscription can be bought at a time. Each renews on its own schedule, so " +
+        "they have to be checked out separately.",
+    );
+  }
+
+  const sub = recurring[0];
+  const otherLines = lines.filter((l) => l.productId !== sub.id);
+  if (otherLines.length > 0) {
+    throw conflict(
+      `"${sub.name}" renews automatically and has to be bought on its own. Check out the other ` +
+        "items separately.",
+    );
+  }
+
+  const line = lines.find((l) => l.productId === sub.id);
+  if (line && line.quantity > 1) {
+    throw conflict(`"${sub.name}" is a subscription — one per customer, not ${line.quantity}.`);
+  }
+
+  return {
+    productId: sub.id,
+    name: sub.name,
+    tierId: sub.tierId as number,
+    interval: sub.interval as "month" | "year",
+    stripeRecurringPriceId: sub.priceId,
+  };
+}
+
+/**
+ * Extend a membership that a Stripe subscription just renewed (§18.9).
+ *
+ * Called from the Connect `invoice.paid` webhook, which is the **only** thing
+ * that grants recurring access — never subscription creation, because a
+ * subscription exists before its first invoice is paid.
+ *
+ * Idempotent on the invoice: Stripe redelivers for three days, and a second
+ * delivery must not extend a member by another period for one payment. The
+ * caller passes the invoice id and this refuses a repeat.
+ */
+export async function extendRenewedMembership(
+  handle: DbHandle,
+  input: {
+    subscriptionId: string;
+    /** Days of access this payment buys, from `intervalDays`. */
+    days: number;
+    /** Stripe's invoice id — the idempotency key. */
+    invoiceId: string;
+  },
+  now: Date = new Date(),
+): Promise<
+  | {
+      ok: true;
+      membershipId: number;
+      endsAt: Date | null;
+      alreadyApplied: boolean;
+      /** Who to meter the renewal against (§17). Resolved here so the caller never guesses. */
+      orgId: string;
+      siteId: number;
+    }
+  | { ok: false; reason: string }
+> {
+  /**
+   * Joined out to the store rather than trusting anything on the event. The
+   * subscription id is the only thing Stripe gives us, and the org it meters
+   * against has to come from Markii's own rows — a merchant controls the
+   * metadata on their own account.
+   */
+  const [membership] = await handle
+    .select({
+      id: customerMemberships.id,
+      endsAt: customerMemberships.endsAt,
+      revokedAt: customerMemberships.revokedAt,
+      lastRenewalInvoiceId: customerMemberships.lastRenewalInvoiceId,
+      siteId: customers.siteId,
+      orgId: sites.orgId,
+    })
+    .from(customerMemberships)
+    .innerJoin(customers, eq(customers.id, customerMemberships.customerId))
+    .innerJoin(sites, eq(sites.id, customers.siteId))
+    .where(eq(customerMemberships.stripeSubscriptionId, input.subscriptionId))
+    .limit(1);
+
+  if (!membership) {
+    return { ok: false, reason: `No membership for subscription ${input.subscriptionId}.` };
+  }
+
+  /**
+   * The last invoice that extended this membership, kept on the row so a
+   * redelivery is recognisable. Without it, Stripe's three-day retry window
+   * would hand a member up to three extra periods for one payment.
+   */
+  if (membership.lastRenewalInvoiceId === input.invoiceId) {
+    return {
+      ok: true,
+      membershipId: membership.id,
+      endsAt: membership.endsAt,
+      alreadyApplied: true,
+      orgId: membership.orgId,
+      siteId: membership.siteId,
+    };
+  }
+
+  const endsAt = extendedEndsAt(
+    { endsAt: membership.endsAt, revokedAt: membership.revokedAt },
+    input.days,
+    now,
+  );
+
+  await handle
+    .update(customerMemberships)
+    .set({
+      endsAt,
+      /**
+       * A successful renewal reinstates a revoked membership, matching the
+       * one-off purchase path: taking the money and leaving access revoked is
+       * the worse failure.
+       */
+      revokedAt: null,
+      lastRenewalInvoiceId: input.invoiceId,
+      updatedAt: now,
+    })
+    .where(eq(customerMemberships.id, membership.id));
+
+  return {
+    ok: true,
+    membershipId: membership.id,
+    endsAt,
+    alreadyApplied: false,
+    orgId: membership.orgId,
+    siteId: membership.siteId,
+  };
+}
+
+/**
+ * Confer a membership from a subscription's **first** paid invoice (§18.9).
+ *
+ * Checkout deliberately writes no membership row — there is no honest state for
+ * "exists but not yet paid" — so the first `invoice.paid` is what creates it.
+ * Later invoices find the row by `stripe_subscription_id` and go through
+ * `extendRenewedMembership` instead.
+ *
+ * **The ids come from Stripe metadata and are re-checked here, not trusted.** A
+ * merchant can edit metadata on their own connected account, so this verifies
+ * the product really belongs to the customer's store and really grants a tier.
+ * Without that, a merchant could mint a membership on somebody else's store by
+ * writing another store's customer id into their own subscription.
+ */
+export async function grantSubscriptionMembership(
+  handle: DbHandle,
+  input: {
+    customerId: number;
+    productId: number;
+    subscriptionId: string;
+    days: number;
+    invoiceId: string;
+  },
+  now: Date = new Date(),
+): Promise<
+  | { ok: true; membershipId: number; tierId: number; endsAt: Date | null; orgId: string; siteId: number }
+  | { ok: false; reason: string }
+> {
+  const [customer] = await handle
+    .select({ id: customers.id, siteId: customers.siteId, orgId: sites.orgId })
+    .from(customers)
+    .innerJoin(sites, eq(sites.id, customers.siteId))
+    .where(eq(customers.id, input.customerId))
+    .limit(1);
+  if (!customer) return { ok: false, reason: `No customer ${input.customerId}.` };
+
+  /**
+   * Scoped to the customer's own site. This is the check that makes the metadata
+   * safe to read at all.
+   */
+  const [product] = await handle
+    .select({ id: products.id, tierId: products.grantsTierId })
+    .from(products)
+    .where(and(eq(products.id, input.productId), eq(products.siteId, customer.siteId)))
+    .limit(1);
+  if (!product) {
+    return {
+      ok: false,
+      reason: `Product ${input.productId} is not on customer ${input.customerId}'s store.`,
+    };
+  }
+  if (product.tierId === null) {
+    return { ok: false, reason: `Product ${input.productId} grants no membership tier.` };
+  }
+  const tierId = product.tierId;
+
+  const [current] = await handle
+    .select({ endsAt: customerMemberships.endsAt, revokedAt: customerMemberships.revokedAt })
+    .from(customerMemberships)
+    .where(
+      and(
+        eq(customerMemberships.customerId, input.customerId),
+        eq(customerMemberships.tierId, tierId),
+      ),
+    )
+    .limit(1);
+
+  const endsAt = extendedEndsAt(current ?? null, input.days, now);
+
+  const [row] = await handle
+    .insert(customerMemberships)
+    .values({
+      customerId: input.customerId,
+      tierId,
+      startsAt: now,
+      endsAt,
+      source: "purchase",
+      stripeSubscriptionId: input.subscriptionId,
+      lastRenewalInvoiceId: input.invoiceId,
+    })
+    .onConflictDoUpdate({
+      /**
+       * A shopper who already holds this tier from a one-off purchase and then
+       * subscribes keeps their remaining time — `extendedEndsAt` builds on it —
+       * and the row gains the subscription that will now renew it.
+       */
+      target: [customerMemberships.customerId, customerMemberships.tierId],
+      set: {
+        endsAt,
+        revokedAt: null,
+        stripeSubscriptionId: input.subscriptionId,
+        lastRenewalInvoiceId: input.invoiceId,
+        updatedAt: now,
+      },
+    })
+    .returning({ id: customerMemberships.id });
+
+  return {
+    ok: true,
+    membershipId: row.id,
+    tierId,
+    endsAt,
+    orgId: customer.orgId,
+    siteId: customer.siteId,
+  };
 }
 
 /**

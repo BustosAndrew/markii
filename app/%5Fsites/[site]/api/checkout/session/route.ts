@@ -11,7 +11,7 @@ import {
   loadStore,
   setCartContact,
 } from "@/lib/commerce/cart";
-import { assertCartAccess } from "@/lib/commerce/memberships";
+import { assertCartAccess, recurringMembershipInCart } from "@/lib/commerce/memberships";
 import { priceCart, snapshotLines } from "@/lib/commerce/pricing";
 import {
   RESERVATION_TTL_MS,
@@ -74,6 +74,52 @@ export const POST = handler(async (req, { params }) => {
    * and then decline to hand over the goods.
    */
   await assertCartAccess(site.id, priced.lines, await currentCustomerId(site.id));
+
+  /**
+   * A recurring membership (§18.9) does not settle through a PaymentIntent — it
+   * settles through Stripe's own subscription invoice — so a cart holding one
+   * alongside anything else would need two payments for one basket.
+   *
+   * Refused **here**, before stock is reserved or a payment opened, because this
+   * is the last point where a refusal costs nobody anything. It throws a `409`
+   * naming the product, so the shopper knows what to remove.
+   */
+  const recurring = await recurringMembershipInCart(
+    site.id,
+    priced.lines.map((l) => ({ productId: l.productId, quantity: l.quantity })),
+  );
+  if (recurring) {
+    /**
+     * Sent to the subscription route rather than charged once here. A single
+     * PaymentIntent for something sold as a subscription would give the shopper
+     * one period and never renew it, while the storefront said otherwise — the
+     * fabricated-success rule applied to a purchase.
+     *
+     * A `409` with the destination, not a redirect: the two routes return
+     * different shapes (a client secret confirmed against the *merchant's*
+     * account, not a PaymentIntent), so a client that followed a 3xx blindly
+     * would read fields that are not there.
+     */
+    return NextResponse.json(
+      {
+        error: {
+          code: "CONFLICT",
+          message: `"${recurring.name}" renews automatically, so it is bought as a subscription.`,
+          details: {
+            productId: recurring.productId,
+            interval: recurring.interval,
+            /** Where this cart actually checks out. */
+            useEndpoint: `/_sites/${slug}/api/checkout/subscription`,
+            resolution:
+              `POST the same cartToken to /_sites/${slug}/api/checkout/subscription. It returns a ` +
+              "client secret to confirm in Stripe Elements against the store's own account.",
+          },
+        },
+      },
+      { status: 409 },
+    );
+  }
+
   if (priced.issues.length > 0) {
     throw conflict(
       "This cart cannot be checked out yet — some items are unavailable or out of stock.",

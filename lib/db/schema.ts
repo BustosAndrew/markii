@@ -89,6 +89,21 @@ export const categories = pgTable(
 );
 
 /**
+ * How a membership-granting product renews (§18.9).
+ *
+ * `none` is a one-off purchase that extends access and then lapses — the only
+ * behaviour that existed before recurring billing. The other two make the sale a
+ * Stripe Subscription **on the merchant's own account**.
+ *
+ * Declared here rather than beside `PLAN_IDS` because `products` below reads it
+ * at module load: a `const` further down the file is hoisted but uninitialised,
+ * so the table definition would throw before any query ran. TypeScript cannot
+ * see that — only running the module does.
+ */
+export const MEMBERSHIP_INTERVALS = ["none", "month", "year"] as const;
+export type MembershipInterval = (typeof MEMBERSHIP_INTERVALS)[number];
+
+/**
  * A membership tier a store sells access with (§18.9).
  *
  * Tiers belong to a **store**, not an org: a customer is a customer of one
@@ -164,6 +179,34 @@ export const products = pgTable(
       onDelete: "set null",
     }),
     grantsDurationDays: integer("grants_duration_days"),
+    /**
+     * Whether buying this **renews by itself** (§18.9).
+     *
+     * `none` is the original behaviour and stays the default: a one-off purchase
+     * that extends `ends_at` by `grants_duration_days` and then lapses.
+     *
+     * `month` / `year` make the purchase a **Stripe Subscription on the
+     * merchant's own connected account** — shopper pays merchant, Markii takes
+     * no cut (D4). That choice is what makes recurring memberships possible at
+     * all here: **Stripe is the scheduler.** Nothing in this deployment runs
+     * jobs, so a renewal Markii had to trigger itself would simply never happen.
+     * Each Stripe invoice extends `ends_at`, and a cancellation just stops the
+     * invoices — which keeps membership status *derived* rather than stored,
+     * exactly as `customer_memberships` requires.
+     */
+    grantsRenewalInterval: text("grants_renewal_interval", { enum: MEMBERSHIP_INTERVALS })
+      .notNull()
+      .default("none"),
+    /**
+     * The recurring Price on the **merchant's** Stripe account, created the
+     * first time this product is sold as a subscription. Stored because a Price
+     * is immutable in the ways that matter — recreating one per checkout would
+     * scatter a merchant's dashboard with duplicates of the same plan.
+     *
+     * Belongs to the merchant's account, so it is meaningless against Markii's
+     * platform key. Never read it without a `Stripe-Account` header.
+     */
+    stripeRecurringPriceId: text("stripe_recurring_price_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -588,6 +631,17 @@ export const customers = pgTable(
     marketingConsentAt: timestamp("marketing_consent_at", { withTimezone: true }),
     tags: jsonb("tags").$type<string[]>().notNull().default([]),
     note: text("note"),
+    /**
+     * This shopper as a Customer on the **merchant's** Stripe account (§18.9),
+     * created only when they buy a recurring membership.
+     *
+     * Scoped to the store for the same reason the row is: the shopper is the
+     * *merchant's* customer, not Markii's, and the same person buying from two
+     * merchants is two Stripe customers on two unrelated accounts. It is
+     * therefore useless against Markii's platform key — reading it without a
+     * `Stripe-Account` header finds nothing, or worse, someone else.
+     */
+    stripeCustomerId: text("stripe_customer_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -595,6 +649,12 @@ export const customers = pgTable(
     // One customer record per email per store. The same person shopping at two
     // merchants is two records — they are the merchants' customers, not Markii's.
     uniqueIndex("customers_site_email_uq").on(t.siteId, t.email),
+    /**
+     * Unique **per site**, not globally: two merchants' accounts can legitimately
+     * mint the same `cus_…` id, and a global unique would reject the second
+     * merchant's shopper for a collision that is not one.
+     */
+    uniqueIndex("customers_site_stripe_customer_uq").on(t.siteId, t.stripeCustomerId),
     index("customers_site_idx").on(t.siteId),
     index("customers_auth_user_idx").on(t.authUserId),
   ],
@@ -631,6 +691,38 @@ export const customerMemberships = pgTable(
     source: text("source", { enum: ["purchase", "manual"] }).notNull(),
     /** The order that conferred it, when it came from a purchase. */
     orderId: integer("order_id").references(() => orders.id, { onDelete: "set null" }),
+    /**
+     * The Stripe Subscription **on the merchant's account** that renews this
+     * (§18.9). Null for a one-off purchase or a manual grant, which is most of
+     * them.
+     *
+     * **It does not decide whether the membership is active** — `ends_at` still
+     * does, derived at read time. This only records what will extend `ends_at`
+     * next. That separation is what keeps the no-stored-status invariant intact:
+     * if Stripe stops billing for any reason, the membership lapses on its own
+     * rather than staying "active" because a subscription row said so.
+     */
+    stripeSubscriptionId: text("stripe_subscription_id"),
+    /**
+     * When the shopper (or merchant) stopped the renewal. Access continues to
+     * `ends_at` — they paid for the period, and cutting it short would delete
+     * time they already bought.
+     *
+     * Distinct from `revoked_at`, which is the merchant taking access away *now*.
+     * A member investigating "why did this stop" needs to tell those apart.
+     */
+    renewalCanceledAt: timestamp("renewal_canceled_at", { withTimezone: true }),
+    /**
+     * The last Stripe invoice that extended this membership — **the renewal
+     * idempotency key**.
+     *
+     * Stripe redelivers a webhook for three days, and `invoice.paid` is what
+     * buys another period. Without recognising a repeat, one payment could
+     * extend a member by three periods; the webhook table's dedupe does not
+     * cover it, because a genuinely *new* invoice must always be applied and a
+     * redelivery of an old one never must.
+     */
+    lastRenewalInvoiceId: text("last_renewal_invoice_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -644,6 +736,12 @@ export const customerMemberships = pgTable(
     uniqueIndex("customer_memberships_customer_tier_uq").on(t.customerId, t.tierId),
     index("customer_memberships_customer_idx").on(t.customerId),
     index("customer_memberships_tier_idx").on(t.tierId),
+    /**
+     * How a renewal webhook finds the membership to extend. Unique because one
+     * Stripe subscription renews exactly one membership — two rows claiming it
+     * would both be extended by a single payment.
+     */
+    uniqueIndex("customer_memberships_stripe_subscription_uq").on(t.stripeSubscriptionId),
   ],
 );
 

@@ -82,7 +82,18 @@ export async function recordUsage(
   input: {
     orgId: string;
     siteId: number | null;
-    orderId: number;
+    /**
+     * Null for revenue that has no order behind it — a **membership renewal**
+     * (§18.9), which Stripe bills on the merchant's own subscription schedule
+     * and which produces no checkout.
+     *
+     * It is still real revenue on the merchant's account, so it still meters:
+     * excluding it would understate their threshold and undercharge Markii,
+     * while inventing an order to hang it on would put a row in `orders` that no
+     * shopper ever placed and that every order screen would then have to
+     * explain.
+     */
+    orderId: number | null;
     type: "sale" | "refund" | "chargeback_lost";
     amountMinor: number;
     currency: string;

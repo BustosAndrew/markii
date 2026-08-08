@@ -10,7 +10,12 @@ import {
   refunds,
   stripeWebhookEvents,
 } from "@/lib/db";
-import { completeCheckout, failCheckout } from "@/lib/commerce/orders";
+import { completeCheckout, failCheckout, recordUsage } from "@/lib/commerce/orders";
+import {
+  extendRenewedMembership,
+  grantSubscriptionMembership,
+} from "@/lib/commerce/memberships";
+import { membershipSubscriptionOwner } from "@/lib/commerce/membership-billing";
 import { mirrorCancellation, mirrorSubscription } from "@/lib/billing/mirror";
 import { retrieveSubscription, toSnapshot } from "@/lib/billing/stripe-billing";
 import { upsertIntegration } from "@/lib/integrations";
@@ -210,8 +215,21 @@ const HANDLERS: Record<string, (event: StripeEventEnvelope) => Promise<HandlerRe
    * merchant loses access — never at the moment they click cancel.
    */
   "customer.subscription.deleted": async (event) => {
-    const guard = platformOnly(event);
-    if (guard) return guard;
+    /**
+     * On a connected account this is a *shopper's* membership subscription
+     * ending, not Markii's billing. It revokes nothing: `ends_at` already covers
+     * the period they paid for and status is derived from it, so access lapses
+     * on its own once nothing extends it. Ending it here would delete time the
+     * member had bought.
+     */
+    if (event.account) {
+      return {
+        changed: false,
+        detail:
+          "Shopper membership subscription ended on a connected account. Access runs to ends_at " +
+          "and lapses on its own (§18.9); nothing to revoke.",
+      };
+    }
 
     const sub = event.data.object as { id?: string; customer?: string };
     if (!sub.id) return { changed: false, detail: "Event carried no subscription id." };
@@ -493,8 +511,10 @@ function platformOnly(event: StripeEventEnvelope): HandlerResult | null {
     ? {
         changed: false,
         detail:
-          `Billing event arrived on connected account ${event.account}. Markii's own ` +
-          "subscriptions live on the platform account; a merchant's own billing is theirs.",
+          `Subscription lifecycle event on connected account ${event.account} changes no Markii ` +
+          "billing state. A shopper's recurring membership is granted by invoice.paid (§18.9), " +
+          "not by the subscription being created or updated — a subscription exists before its " +
+          "first invoice is paid.",
       }
     : null;
 }
@@ -538,8 +558,14 @@ async function subscriptionChanged(event: StripeEventEnvelope): Promise<HandlerR
  * second derivation to keep in step with the first.
  */
 async function invoiceSettled(event: StripeEventEnvelope): Promise<HandlerResult> {
-  const guard = platformOnly(event);
-  if (guard) return guard;
+  /**
+   * **The same event type means opposite things on the two endpoints.** On the
+   * platform account it is Markii billing a merchant; on a connected account it
+   * is a *shopper* paying a *merchant* for a recurring membership (§18.9).
+   * Forking on `account` is what keeps a merchant's own customers from touching
+   * Markii's billing state, and vice versa.
+   */
+  if (event.account) return membershipRenewed(event);
 
   const invoice = event.data.object as {
     id?: string;
@@ -580,6 +606,164 @@ async function invoiceSettled(event: StripeEventEnvelope): Promise<HandlerResult
   return {
     detail: `${event.type} for ${subscriptionId}: ${orgId} is ${result.status} on ${result.planId}.`,
     changed: result.planChanged || event.type === "invoice.paid",
+  };
+}
+
+/**
+ * A shopper's recurring membership was paid for (§18.9) — **the only thing that
+ * grants recurring access.**
+ *
+ * Not subscription creation, deliberately: a subscription exists in
+ * `incomplete` before its first invoice is paid, so granting there would hand a
+ * shopper access before their card was charged. This is the same rule
+ * `payment_intent.succeeded` follows for one-off orders — Stripe saying money
+ * moved is the authority, and nothing else is.
+ *
+ * `invoice.payment_failed` deliberately does **nothing**: `ends_at` already
+ * covers the period the member paid for, status is derived from it, and Stripe
+ * retries for days. Access lapses on its own if the retries never succeed, which
+ * is both correct and kinder than revoking on a first decline.
+ */
+async function membershipRenewed(event: StripeEventEnvelope): Promise<HandlerResult> {
+  if (event.type !== "invoice.paid") {
+    return {
+      changed: false,
+      detail:
+        `${event.type} on a connected account changes no membership — access already runs to ` +
+        "ends_at, and Stripe retries a failed payment for days.",
+    };
+  }
+
+  const invoice = event.data.object as {
+    id?: string;
+    subscription?: string | { id?: string };
+    parent?: { subscription_details?: { subscription?: string | { id?: string } } };
+    lines?: { data?: { period?: { start?: number; end?: number } }[] };
+    currency?: string;
+    subtotal?: number;
+    total_excluding_tax?: number | null;
+    amount_paid?: number;
+  };
+
+  const raw = invoice.parent?.subscription_details?.subscription ?? invoice.subscription ?? null;
+  const subscriptionId = typeof raw === "string" ? raw : (raw?.id ?? null);
+  if (!subscriptionId || !invoice.id) {
+    return { changed: false, detail: "Connected-account invoice is not for a subscription." };
+  }
+
+  /**
+   * The period Stripe actually billed, rather than a nominal 31 or 366 days.
+   * Using Stripe's own bounds keeps `ends_at` in step with what the shopper was
+   * charged for, including a proration or a trial that made this period an
+   * unusual length.
+   */
+  const period = invoice.lines?.data?.[0]?.period;
+  const days =
+    period?.start && period?.end && period.end > period.start
+      ? Math.max(1, Math.round((period.end - period.start) / 86_400))
+      : 31;
+
+  let result = await extendRenewedMembership(db, {
+    subscriptionId,
+    days,
+    invoiceId: invoice.id,
+  });
+
+  /**
+   * **First payment.** Checkout writes no membership row — there is no honest
+   * state for "exists but not yet paid" — so the first invoice is what creates
+   * it, resolved from the subscription's metadata. `grantSubscriptionMembership`
+   * re-checks those ids against Markii's own rows rather than trusting them: a
+   * merchant controls the metadata on their own account.
+   */
+  if (!result.ok && event.account) {
+    const owner = await membershipSubscriptionOwner(event.account, subscriptionId);
+    if (owner.ok && owner.customerId && owner.productId) {
+      const granted = await grantSubscriptionMembership(db, {
+        customerId: owner.customerId,
+        productId: owner.productId,
+        subscriptionId,
+        days,
+        invoiceId: invoice.id,
+      });
+      if (granted.ok) {
+        result = {
+          ok: true,
+          membershipId: granted.membershipId,
+          endsAt: granted.endsAt,
+          alreadyApplied: false,
+          orgId: granted.orgId,
+          siteId: granted.siteId,
+        };
+      } else {
+        return { changed: false, detail: granted.reason };
+      }
+    }
+  }
+
+  if (!result.ok) {
+    /**
+     * Not an error. A merchant's Stripe account carries every subscription they
+     * sell, including ones Markii knows nothing about — a plan they run outside
+     * the platform, or a membership since deleted.
+     */
+    return { changed: false, detail: result.reason };
+  }
+  if (result.alreadyApplied) {
+    return {
+      changed: false,
+      detail: `Invoice ${invoice.id} already extended membership ${result.membershipId}.`,
+    };
+  }
+
+  /**
+   * **The renewal meters** (§17, `docs/PRICING.md` §4.1).
+   *
+   * A renewal is real revenue on the merchant's account with no order behind it,
+   * so it writes a `usage_record` with a null `orderId`. Leaving it out would
+   * understate the merchant's threshold — and now that threshold fees are
+   * actually invoiced, an understated threshold is an undercharge on a real
+   * invoice rather than a wrong number on a dashboard.
+   *
+   * **A membership is `digital`** (`lib/commerce/product-class.ts`): it bills
+   * against the digital threshold at the digital rate, which is a different
+   * schedule from physical goods (D39).
+   */
+  const meteredMinor =
+    invoice.total_excluding_tax ?? invoice.subtotal ?? invoice.amount_paid ?? 0;
+
+  if (meteredMinor > 0) {
+    await recordUsage(db, {
+      orgId: result.orgId,
+      siteId: result.siteId,
+      /** No order exists — Stripe billed this on its own schedule. */
+      orderId: null,
+      type: "sale",
+      /**
+       * **Excludes tax**, per §4.1's net-sales definition: metering tax would
+       * bill a merchant against money they merely collected for a government.
+       * `total_excluding_tax` is Stripe's own figure for exactly that;
+       * `subtotal` is the fallback on invoices that predate it.
+       */
+      amountMinor: meteredMinor,
+      currency: (invoice.currency ?? "usd").toUpperCase(),
+      productClass: "digital",
+      /**
+       * Stripe's own flag, not an inference. A merchant testing their store in
+       * test mode must never move a real threshold (§4.1), and this is the only
+       * trustworthy source for which mode the money moved in.
+       */
+      environment: event.livemode ? "production" : "test",
+      /** One metering event per invoice, so a redelivery cannot double-count. */
+      dedupeKey: `renewal:${invoice.id}`,
+    });
+  }
+
+  return {
+    detail:
+      `Membership ${result.membershipId} extended ${days} day(s) to ` +
+      `${result.endsAt?.toISOString() ?? "no expiry"}; metered ${meteredMinor} ` +
+      `${(invoice.currency ?? "usd").toUpperCase()} as digital.`,
   };
 }
 

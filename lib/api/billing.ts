@@ -1,32 +1,37 @@
-import { apiGet, apiPost } from "./client";
+import { apiDelete, apiGet, apiPost } from "./client";
 import { callWhenLive } from "./planned";
 
 const BILLING_SECTION = "API §17";
 
 /**
- * §17 landed in halves, and the split is exactly where Stripe starts.
+ * §17 is now ✅ LIVE **in full** — subscriptions, plan changes with a proration
+ * preview, payment methods, invoices, and threshold-fee invoicing.
  *
- * The meter, the plan catalog, entitlements, and the closed-period assessments
- * are computed from Markii's own ledger and are ✅ LIVE. Everything that needs a
- * `STRIPE_SECRET_KEY` — plan changes, cancellation, a SetupIntent — is routed
- * but refuses with `503 CONFIGURATION_REQUIRED`.
+ * It previously landed in halves, and these types described the earlier half:
+ * `subscription` was pinned to `null` and `invoices` to `never[]`, which was
+ * accurate when nothing could exist. Left alone they would have been worse than
+ * stale — TypeScript would have stopped a screen from reading data the API was
+ * really returning, which is the two-sided-flip failure `docs/FRONTEND.md`
+ * records. **Backend owns correcting this in the same change that moves the
+ * badge.**
  *
- * Those refusing routes are **not** gated to `false` here. Gating them would
- * make a screen say "coming soon", which is the wrong fact: the contract is
- * agreed, the route exists, and what is missing is a credential. Let them call
- * and render the refusal — `isConfigurationRequired()` in `./planned`
- * distinguishes it from a planned section.
+ * One route still refuses by design: buying an add-on answers `409`, because
+ * Agent Ops and Chargeback Assist do not exist. That is not gated to `false`
+ * either — the contract is agreed and the route is real; what is missing is the
+ * product. Let it call and render the refusal.
  */
 const BILLING_API_LIVE = true;
 
 export type PlanId = "starter" | "growth" | "scale";
+export type BillingInterval = "month" | "year";
 
 export type Entitlements = {
   storeLimit: number;
   staffSeatLimit: number | null;
   gmvThresholdMinor: number;
-  overageRateBps: number;
-  media: { storageGb: number; egressGb: number };
+  /** Per fee class — physical and digital bill at different rates (D39). */
+  overageRateBps: { physical: number; digital: number };
+  media: { storageGb: number; monthlyEgressGb: number };
   addOns: { agentOps: boolean; chargebackAssist: boolean };
 };
 
@@ -35,7 +40,7 @@ export type PlanCatalogItem = {
   monthlyPriceMinor: number;
   annualPerMonthMinor: number;
   gmvThresholdMinor: number;
-  overageRateBps: number;
+  overageRateBps: { physical: number; digital: number };
   storeLimit: number;
   staffSeatLimit: number | null;
   media: Entitlements["media"];
@@ -131,28 +136,57 @@ export type SubscriptionResponse = {
   };
   /** The metering window the threshold fee is computed over — **not** a Stripe billing period. */
   meteringPeriod: { start: string; end: string; basis: "calendar_month" };
-  /** Null: no Stripe subscription object exists on this deployment. */
-  subscription: null;
+  /** Null when this org has never subscribed. */
+  subscription: Subscription | null;
+  /** Present only when the card lookup itself failed — distinct from "no card". */
+  paymentMethodState: { code: "unavailable"; message: string } | null;
   subscriptionState: {
-    code: "configuration_required";
+    code: "active" | "not_subscribed" | "inactive" | "configuration_required";
     message: string;
-    resolution: string;
-    charging: false;
+    resolution?: string;
+    /** Whether the *subscription* is charging. Threshold fees are reported separately. */
+    charging: boolean;
+    thresholdFeesCharging?: boolean;
   };
+};
+
+export type Subscription = {
+  planId: PlanId;
+  interval: BillingInterval | null;
+  /**
+   * Stored verbatim from Stripe, so wider than the five worth rendering:
+   * `incomplete`, `incomplete_expired`, and `paused` also occur.
+   */
+  status: string;
+  /** Stripe's billing period — **not** the metering period above. */
+  currentPeriodStart: string | null;
+  currentPeriodEnd: string | null;
+  trialEndsAt: string | null;
+  cancelAtPeriodEnd: boolean;
+  paymentMethod: { brand: string; last4: string; expMonth: number; expYear: number } | null;
+  /**
+   * **Gate on this, not on `status` and not on the subscription merely
+   * existing.** A subscription can exist and grant nothing — `incomplete` is one
+   * whose first invoice was never paid — and showing a tier for it would tell a
+   * merchant they are on a plan nobody is charging them for.
+   */
+  entitlesPlan: boolean;
 };
 
 /**
  * A closed period's fee assessment — **not an invoice**.
  *
- * An invoice is a demand for payment raised by Stripe Billing, which is not
- * connected. These rows are what each period measured; an invoice will one day
- * cite them rather than replace them.
+ * An invoice is a demand for payment; an assessment is what a period *measured*.
+ * They now both exist and arrive under separate keys, and **must not be merged
+ * into one list**.
  */
 export type FeeAssessment = {
   id: string;
   periodStart: string;
   periodEnd: string;
   planId: PlanId;
+  /** Null on assessments closed before physical/digital split (D39). */
+  productClass: "physical" | "digital" | null;
   currency: string;
   thresholdMinor: number;
   overageRateBps: number;
@@ -164,7 +198,45 @@ export type FeeAssessment = {
   workings: unknown;
   recordCount: number;
   invoiced: boolean;
+  /**
+   * Null on an `invoiced` row means **settled, nothing owed** — the merchant was
+   * under their threshold. `invoiced` alone cannot express that, so render the
+   * two together or a $0 period reads as an unpaid bill.
+   */
+  stripeInvoiceItemId: string | null;
+  invoicedAt: string | null;
   closedAt: string;
+};
+
+export type InvoiceLine = {
+  description: string;
+  amountMinor: number;
+  quantity: number | null;
+  /** Set on a threshold-fee line, linking it to the assessment that produced it. */
+  assessmentId?: string | null;
+};
+
+export type Invoice = {
+  id: string;
+  number: string | null;
+  status: string;
+  currency: string;
+  totalMinor: number;
+  amountPaidMinor: number;
+  amountDueMinor: number;
+  createdAt: string;
+  periodStart: string | null;
+  periodEnd: string | null;
+  /** Stripe-hosted. Link these — never proxy or re-render a merchant's invoice. */
+  hostedInvoiceUrl: string | null;
+  invoicePdfUrl: string | null;
+  lines: InvoiceLine[];
+};
+
+/** `GET /api/billing/invoices/:id` — lines carry the assessment behind a fee. */
+export type InvoiceDetail = Omit<Invoice, "lines"> & {
+  lines: (InvoiceLine & { feeAssessment: FeeAssessment | null })[];
+  documentsAreStripeHosted: true;
 };
 
 export type InvoicesResponse = {
@@ -172,12 +244,19 @@ export type InvoicesResponse = {
   total: number;
   page: number;
   limit: number;
-  invoices: never[];
-  invoicesState: {
-    code: "configuration_required";
-    message: string;
-    resolution: string;
-  };
+  /** Stripe's real invoices. Empty is a real answer, not a placeholder. */
+  invoices: Invoice[];
+  /** Null when invoices were fetched fine — the states are why the list is empty. */
+  invoicesState:
+    | { code: "configuration_required"; message: string; resolution?: string }
+    | { code: "not_subscribed"; message: string }
+    | { code: "unavailable"; message: string }
+    | null;
+  /** Null when there are no assessments to describe. */
+  assessmentsState:
+    | { code: "pending"; message: string; resolution?: string }
+    | { code: "billed"; message: string }
+    | null;
 };
 
 export function listPlans(init?: RequestInit) {
@@ -193,17 +272,59 @@ export function getSubscription(init?: RequestInit) {
 }
 
 /**
- * Refuses with `503 CONFIGURATION_REQUIRED` until Stripe Billing is connected.
+ * Mutating billing routes delegate to the action registry (§22), so they return
+ * an **invocation outcome** rather than the resource. The value is under
+ * `result`.
+ */
+export type ActionOutcome<T> = {
+  invocationId: string;
+  ok: boolean;
+  result?: T;
+  dryRun: boolean;
+};
+
+export type PlanChangePreview = {
+  kind: "first_subscription" | "plan_change";
+  amountDueMinor: number;
+  currency: string;
+  lines: { description: string; amountMinor: number }[];
+  nextChargeAt: string | null;
+};
+
+export type PlanChangeResult = {
+  /** False on a preview. Nothing was charged and no entitlement moved. */
+  confirmed: boolean;
+  charging: boolean;
+  note: string;
+  /** Present only on a preview. */
+  preview?: PlanChangePreview;
+  subscriptionId?: string;
+  status?: string;
+  planId?: PlanId;
+  /** Present when a first subscription needs confirming in Stripe Elements. */
+  clientSecret?: string | null;
+  publishableKey?: string | null;
+};
+
+/**
+ * Change plan — **two steps, and the first one writes nothing.**
  *
- * It does not quietly move `organizations.planId` instead: that would grant a
- * higher threshold and extra storefronts with nothing sold behind them.
+ * Without `confirm: true` this returns Stripe's own proration preview
+ * (`result.preview`); call again with `confirm: true` to apply exactly what the
+ * merchant was shown. Do not compute the amount locally — proration depends on
+ * elapsed period, existing credits, and customer balance, so a local estimate
+ * will sometimes disagree with the real charge.
+ *
+ * `organizations.planId` moves only once Stripe says the subscription is paid,
+ * so a `confirmed` response with an `incomplete` status has **not** granted the
+ * plan yet.
  */
 export function updateSubscription(
-  body: { planId: PlanId; interval: "month" | "year" },
+  body: { planId: PlanId; interval?: BillingInterval; confirm?: boolean },
   init?: RequestInit,
 ) {
   return callWhenLive(BILLING_API_LIVE, BILLING_SECTION, () =>
-    apiPost<SubscriptionResponse>("/api/billing/subscription", body, init),
+    apiPost<ActionOutcome<PlanChangeResult>>("/api/billing/subscription", body, init),
   );
 }
 
@@ -222,13 +343,85 @@ export function listInvoices(
   );
 }
 
+/** One invoice, line-itemized. A fee line carries the assessment behind it. */
+export function getInvoice(id: string, init?: RequestInit) {
+  return callWhenLive(BILLING_API_LIVE, BILLING_SECTION, () =>
+    apiGet<InvoiceDetail>(`/api/billing/invoices/${encodeURIComponent(id)}`, undefined, init),
+  );
+}
+
 /**
- * A Stripe SetupIntent client secret. Refuses until Stripe is connected — a
- * fake secret fails inside Stripe's own card element, after the merchant has
- * typed their card number.
+ * Cancel at period end. **Never immediate** — the merchant paid through the end
+ * of the period, so a consequence summary should say what they keep and until
+ * when (`subscription.currentPeriodEnd`).
+ */
+export function cancelSubscription(init?: RequestInit) {
+  return callWhenLive(BILLING_API_LIVE, BILLING_SECTION, () =>
+    apiDelete<ActionOutcome<{ cancelAtPeriodEnd: boolean; endsAt: string | null }>>(
+      "/api/billing/subscription",
+      init,
+    ),
+  );
+}
+
+/**
+ * A Stripe SetupIntent client secret, plus the publishable key Elements must
+ * mount with.
+ *
+ * **Use the returned `publishableKey`, never one read from elsewhere.** The
+ * server refuses when the publishable and secret keys are in different Stripe
+ * modes — a `pk_live_` cannot confirm a secret issued by an `sk_test_` — and
+ * handing you the key it validated is how it tells you which one is safe.
  */
 export function createSetupIntent(init?: RequestInit) {
   return callWhenLive(BILLING_API_LIVE, BILLING_SECTION, () =>
-    apiPost<{ clientSecret: string }>("/api/billing/payment-method", undefined, init),
+    apiPost<ActionOutcome<{ clientSecret: string; publishableKey: string; customerId: string }>>(
+      "/api/billing/payment-method",
+      undefined,
+      init,
+    ),
+  );
+}
+
+/**
+ * **Required after Elements confirms a SetupIntent.** Attaching a card does not
+ * make it the one invoices are charged to — skip this and the merchant sees a
+ * saved card while the next renewal fails against nothing.
+ */
+export function setDefaultPaymentMethod(paymentMethodId: string, init?: RequestInit) {
+  return callWhenLive(BILLING_API_LIVE, BILLING_SECTION, () =>
+    apiPost<ActionOutcome<{ applied: boolean }>>(
+      "/api/actions/billing.setDefaultPaymentMethod",
+      { paymentMethodId },
+      init,
+    ),
+  );
+}
+
+export type Addon = "agentOps" | "chargebackAssist";
+
+export type AddonResponse = {
+  addon: Addon;
+  label: string;
+  /** What gates read. True via purchase **or** because the plan includes it. */
+  entitled: boolean;
+  includedInPlan: boolean;
+  purchased: boolean;
+  pricing: { monthlyPriceMinor: number; currency: string; status: "proposed" };
+  /** Always `not_built` today — the products do not exist. */
+  availability: { code: "not_built"; message: string; detail: string };
+};
+
+/**
+ * What the org actually has. Render `includedInPlan` apart from `purchased` — a
+ * Scale merchant already has Chargeback Assist and must not be asked to buy it.
+ *
+ * There is deliberately **no purchase function here.** `POST` answers `409`
+ * because Agent Ops and Chargeback Assist do not exist, so show them as
+ * unavailable with the reason — never as an upsell with a working buy button.
+ */
+export function getAddon(addon: Addon, init?: RequestInit) {
+  return callWhenLive(BILLING_API_LIVE, BILLING_SECTION, () =>
+    apiGet<AddonResponse>(`/api/billing/addons/${addon}`, undefined, init),
   );
 }

@@ -90,8 +90,23 @@ credentials, and merchant mail is never rerouted through Resend to hide that (G1
 buying a granting product confers one inside the order transaction. **Membership status is derived
 per request, never stored** — nothing here schedules jobs, so a stored status would keep granting
 access after it expired. A refund revokes them, mirroring digital delivery — closing *buy, use,
-refund, keep it* for files but not for memberships would only move the hole. Memberships do **not**
-auto-renew (that needs Phase B recurring billing).
+refund, keep it* for files but not for memberships would only move the hole.
+
+**Recurring memberships are half built, and the built half is the renewal machinery.** A product may
+carry `grantsRenewalInterval` (`month`/`year`), which makes the sale a Stripe Subscription **on the
+merchant's own Connect account** — shopper pays merchant, no application fee (D4).
+**Stripe is the scheduler**, which is what makes recurrence possible at all when nothing here runs
+jobs: `invoice.paid` on the *Connect* endpoint extends `endsAt`, so status stays derived and a
+cancellation simply stops the extensions rather than revoking anything. It is idempotent on the
+invoice id (`lastRenewalInvoiceId`) — Stripe's three-day retry would otherwise grant three periods
+for one payment, which `stripe_webhook_events` does **not** protect against, since a genuinely new
+invoice must always extend and a redelivery never must. A renewal **meters** as a `usage_record`
+with a null `orderId`, classed `digital` (`docs/PRICING.md` §4.1).
+
+**The purchase flow is not built: checkout refuses a recurring product with a `409`** rather than
+silently charging once, which would give a shopper one period and never renew while the storefront
+said otherwise. A subscription also may not share a cart — it settles through Stripe's invoice, not
+the one-off PaymentIntent, so a mixed basket would need two payments for one order.
 
 **§17 is complete.** Add-on *purchase* deliberately refuses with `409` rather than being unbuilt:
 Agent Ops and Chargeback Assist are Phase F and do not exist, and selling a $29/mo subscription to

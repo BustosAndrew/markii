@@ -261,10 +261,25 @@ customers, orders, discounts, settings. Contract: §18. Then storefront cart + c
 
 **Memberships (§18.9) are LIVE and have one rule worth knowing:** status is **derived per request,
 never stored**, so there is no `status` field to read and no cached value to refresh — a membership
-is active because `endsAt` has not passed. Render from what the API returns each time. Recurring
-(auto-renewing) memberships are being built now and will add a subscription-style checkout to the
-storefront; that is the one place backend work is still moving under you, so leave storefront
-membership purchase until it lands.
+is active because `endsAt` has not passed. Render from what the API returns each time.
+
+**Recurring memberships are partly built, and the storefront half is the missing half.** A product
+can now be marked `grantsRenewalInterval: "month" | "year"`, and the renewal machinery behind it
+works — Stripe bills it on the merchant's own account and each payment extends the membership. But
+**checkout refuses a recurring product with a `409`** naming the product, because the subscription
+purchase flow is not wired yet.
+
+What that means for you:
+
+- **Do not build storefront purchase for a recurring product yet.** It will refuse. The `409`
+  details carry `productId` and `interval`, so a cart can render the reason honestly if a merchant
+  marks a product recurring before the flow lands.
+- **A subscription cannot share a cart**, and that is permanent, not temporary: it settles through
+  Stripe's own invoice rather than the one-off PaymentIntent, so a mixed basket would need two
+  payments for one order. The cart UI should keep them separate rather than letting a shopper build
+  a basket that cannot check out. Quantity is capped at 1 for the same reason.
+- **Dashboard product editing can expose the interval now** — the field and its constraints exist
+  (a renewal interval requires a granting tier, enforced in the database).
 
 ### 7. Readiness UI
 Score card on overview, issues table, issue drawer. Contract: §9.

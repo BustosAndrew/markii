@@ -1,0 +1,13 @@
+-- Renewal idempotency for recurring memberships (§18.9).
+--
+-- Stripe redelivers a webhook over a three-day window, and `invoice.paid` is
+-- what buys a member another period. Recognising a repeat is not optional: one
+-- payment redelivered three times would extend a member by three periods.
+--
+-- `stripe_webhook_events` does **not** cover this. That table dedupes on
+-- Stripe's event id, which is exactly right for "have I seen this event" — but a
+-- genuinely new invoice must always extend, and a redelivery of an older one
+-- never must, and only the invoice id distinguishes those. The event table also
+-- deliberately reprocesses a `failed` row, so a handler that half-succeeded gets
+-- run again; without this column that retry would double-extend.
+ALTER TABLE "customer_memberships" ADD COLUMN "last_renewal_invoice_id" text;

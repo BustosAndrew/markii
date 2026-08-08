@@ -186,12 +186,22 @@ Precision here is a trust issue. Define once, apply everywhere, show the formula
 
 ```
 net_sales = sum(order line item totals)
+          + membership renewals (§18.9 — recurring revenue with no order)
           − discounts
           − refunds (credited in the period the refund occurs)
           − chargebacks lost
 excludes: taxes, shipping charges, gift-card purchases (counted on redemption),
           tips, test-mode orders, cancelled/failed/unauthorized orders
 ```
+
+- **Membership renewals count, and they have no order** (decided 2026-08-07). A recurring
+  membership is a Stripe subscription on the merchant's own account, so Stripe bills it on its own
+  schedule and no checkout happens — there is no order to sum. It is still revenue the merchant
+  received, so a renewal writes a `usage_record` with a **null `order_id`** on `invoice.paid`.
+  Excluding it would understate the threshold and undercharge Markii; inventing an order to carry it
+  would put rows in `orders` that no shopper placed and that every order screen would then have to
+  explain. Renewals meter as **digital** (D39), keyed `renewal:{invoiceId}` so a redelivered webhook
+  cannot double-count, and on the **tax-excluded** invoice figure like every other line above.
 
 - **Currency:** normalize to the org's billing currency at the settlement-date rate; store both the
   original amount and the converted amount with the rate used.

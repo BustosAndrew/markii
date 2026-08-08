@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
   Cleanup,
   Client,
@@ -247,6 +247,194 @@ describe("membership gating", () => {
     });
     expect(refused(session)).toBe(true);
   });
+});
+
+/**
+ * Recurring memberships (§18.9).
+ *
+ * A subscription settles through Stripe's own invoice, not the one-off
+ * PaymentIntent the rest of checkout uses — so a cart holding one alongside
+ * anything else would need two payments for one basket. These assert the cart is
+ * refused **before** stock is reserved or a payment opened, which is the last
+ * point a refusal costs nobody anything.
+ */
+describe("recurring memberships", () => {
+  /** Restored after each test so the rest of the suite sees a one-off product. */
+  const makeRecurring = (interval: "month" | "year") =>
+    sql`update products set grants_renewal_interval = ${interval} where id = ${grantingProductId}`;
+  const makeOneOff = () =>
+    sql`update products set grants_renewal_interval = 'none' where id = ${grantingProductId}`;
+
+  afterEach(async () => {
+    await makeOneOff();
+  });
+
+  it("refuses a subscription sharing a cart with anything else", async () => {
+    const shopper = shopperClient();
+    const { email } = await signUpShopper(shopper, "recurmixed");
+    await makeRecurring("month");
+
+    const cart = await shopper.post(`/_sites/${slug}/api/cart`, {
+      productId: grantingProductId,
+      quantity: 1,
+    });
+    expect(cart.status).toBe(201);
+    await trackCart(cleanup, cart.json.token);
+
+    const added = await shopper.patch(`/_sites/${slug}/api/cart/${cart.json.token}`, {
+      add: { productId: openProductId, quantity: 1 },
+    });
+    expect(added.status).toBeLessThan(400);
+
+    const session = await shopper.post(`/_sites/${slug}/api/checkout/session`, {
+      cartToken: cart.json.token,
+      rail: "x402",
+      email,
+    });
+    expect(refused(session)).toBe(true);
+    // It must name the product, or the shopper does not know what to remove.
+    expect(JSON.stringify(session.json)).toMatch(/renews automatically|separately/i);
+  }, 120_000);
+
+  /**
+   * A subscription-only cart is not an error — it belongs on the other route,
+   * and the refusal has to say so or a storefront has no way to find it.
+   */
+  it("points a subscription cart at the subscription endpoint", async () => {
+    const shopper = shopperClient();
+    const { email } = await signUpShopper(shopper, "recurroute");
+    await makeRecurring("month");
+
+    const cart = await shopper.post(`/_sites/${slug}/api/cart`, {
+      productId: grantingProductId,
+      quantity: 1,
+    });
+    expect(cart.status).toBe(201);
+    await trackCart(cleanup, cart.json.token);
+
+    const session = await shopper.post(`/_sites/${slug}/api/checkout/session`, {
+      cartToken: cart.json.token,
+      rail: "x402",
+      email,
+    });
+    expect(session.status).toBe(409);
+    expect(session.json.error.details.useEndpoint).toBe(
+      `/_sites/${slug}/api/checkout/subscription`,
+    );
+  }, 120_000);
+
+  /**
+   * **A subscription needs an account.** A renewal arriving months later has no
+   * browser session to attach to, so a guest subscription would be a recurring
+   * charge with nobody to give the access to.
+   */
+  it("refuses a guest buying a subscription", async () => {
+    const shopper = shopperClient();
+    await makeRecurring("month");
+
+    const cart = await shopper.post(`/_sites/${slug}/api/cart`, {
+      productId: grantingProductId,
+      quantity: 1,
+    });
+    expect(cart.status).toBe(201);
+    await trackCart(cleanup, cart.json.token);
+
+    const res = await shopper.post(`/_sites/${slug}/api/checkout/subscription`, {
+      cartToken: cart.json.token,
+    });
+    expect(refused(res)).toBe(true);
+    expect(JSON.stringify(res.json)).toMatch(/sign in/i);
+  }, 120_000);
+
+  /** The subscription route is not a second way to buy an ordinary product. */
+  it("refuses a non-recurring cart on the subscription endpoint", async () => {
+    const shopper = shopperClient();
+    await signUpShopper(shopper, "recurwrong");
+
+    const cart = await shopper.post(`/_sites/${slug}/api/cart`, {
+      productId: openProductId,
+      quantity: 1,
+    });
+    expect(cart.status).toBe(201);
+    await trackCart(cleanup, cart.json.token);
+
+    const res = await shopper.post(`/_sites/${slug}/api/checkout/subscription`, {
+      cartToken: cart.json.token,
+    });
+    expect(refused(res)).toBe(true);
+    expect(JSON.stringify(res.json)).toMatch(/no recurring membership|checkout\/session/i);
+  }, 120_000);
+
+  /**
+   * Two of one subscription is one membership billed twice — there is no second
+   * thing to receive.
+   */
+  it("refuses quantity above one", async () => {
+    const shopper = shopperClient();
+    const { email } = await signUpShopper(shopper, "recurqty");
+    await makeRecurring("month");
+
+    const cart = await shopper.post(`/_sites/${slug}/api/cart`, {
+      productId: grantingProductId,
+      quantity: 2,
+    });
+    expect(cart.status).toBe(201);
+    await trackCart(cleanup, cart.json.token);
+
+    const session = await shopper.post(`/_sites/${slug}/api/checkout/session`, {
+      cartToken: cart.json.token,
+      rail: "x402",
+      email,
+    });
+    expect(refused(session)).toBe(true);
+  }, 120_000);
+
+  /**
+   * **Never silently falls back to a one-off charge.** A single payment for
+   * something sold as a subscription gives the shopper one period and never
+   * renews it, while the storefront said it would.
+   */
+  it("refuses a subscription-only cart rather than charging once", async () => {
+    const shopper = shopperClient();
+    const { email } = await signUpShopper(shopper, "reconly");
+    await makeRecurring("year");
+
+    const cart = await shopper.post(`/_sites/${slug}/api/cart`, {
+      productId: grantingProductId,
+      quantity: 1,
+    });
+    expect(cart.status).toBe(201);
+    await trackCart(cleanup, cart.json.token);
+
+    const session = await shopper.post(`/_sites/${slug}/api/checkout/session`, {
+      cartToken: cart.json.token,
+      rail: "x402",
+      email,
+    });
+    expect(refused(session)).toBe(true);
+    expect(session.status).toBe(409);
+  }, 120_000);
+
+  /** The default must leave every existing product behaving exactly as before. */
+  it("leaves a one-off membership product checking out normally", async () => {
+    const shopper = shopperClient();
+    const { email } = await signUpShopper(shopper, "reconeoff");
+
+    const cart = await shopper.post(`/_sites/${slug}/api/cart`, {
+      productId: grantingProductId,
+      quantity: 1,
+    });
+    expect(cart.status).toBe(201);
+    await trackCart(cleanup, cart.json.token);
+
+    const session = await shopper.post(`/_sites/${slug}/api/checkout/session`, {
+      cartToken: cart.json.token,
+      rail: "x402",
+      email,
+    });
+    expect(refused(session)).toBe(false);
+    if (session.json?.id) cleanup.checkoutSessionIds.push(session.json.id);
+  }, 120_000);
 });
 
 describe("shopper identity (§18.3, D32)", () => {
