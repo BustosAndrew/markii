@@ -103,10 +103,22 @@ for one payment, which `stripe_webhook_events` does **not** protect against, sin
 invoice must always extend and a redelivery never must. A renewal **meters** as a `usage_record`
 with a null `orderId`, classed `digital` (`docs/PRICING.md` §4.1).
 
-**The purchase flow is not built: checkout refuses a recurring product with a `409`** rather than
-silently charging once, which would give a shopper one period and never renew while the storefront
-said otherwise. A subscription also may not share a cart — it settles through Stripe's invoice, not
-the one-off PaymentIntent, so a mixed basket would need two payments for one order.
+**The purchase flow is `/_sites/{slug}/api/checkout/subscription`**, separate from
+`/checkout/session` because a subscription opens no PaymentIntent and reserves no stock; the one-off
+route points a subscription cart at it with a `409` carrying `useEndpoint`. It requires a signed-in
+shopper — a renewal months later has no session to attach to. **No membership row is written at
+checkout**: there is no honest state for "exists but not yet paid", so the subscription's metadata
+carries the link and the first `invoice.paid` creates the membership, re-checking those ids against
+Markii's own rows because a merchant controls metadata on their own account. A subscription may not
+share a cart — it settles through Stripe's invoice, not the PaymentIntent, so a mixed basket would
+need two payments for one order.
+
+**Members can cancel their own renewal** (`DELETE
+/_sites/{slug}/api/account/memberships/{id}/renewal`). It stops the renewal, never the membership:
+access runs to `endsAt`, and `renewalCanceledAt` stays distinct from `revokedAt` because *"I
+cancelled"* and *"the merchant removed me"* are different facts. The local row is written **only
+after Stripe confirms** — marking it cancelled first would tell a member a charge had stopped while
+it had not.
 
 **§17 is complete.** Add-on *purchase* deliberately refuses with `409` rather than being unbuilt:
 Agent Ops and Chargeback Assist are Phase F and do not exist, and selling a $29/mo subscription to

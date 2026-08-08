@@ -280,6 +280,14 @@ What that means for you:
   a basket that cannot check out. Quantity is capped at 1 for the same reason.
 - **Dashboard product editing can expose the interval now** — the field and its constraints exist
   (a renewal interval requires a granting tier, enforced in the database).
+- **A shopper account area now exists and is buildable**:
+  `GET /_sites/{slug}/api/account/memberships` lists what they hold, and
+  `DELETE /_sites/{slug}/api/account/memberships/{id}/renewal` stops a renewal.
+  Two fields are worth rendering apart: **`status`** answers *do I have access?* and **`renews`**
+  answers *will I be charged?* They differ all the time — a cancelled membership stays `active`
+  until `accessEndsAt`. Showing only the first surprises someone on the day their card is charged,
+  or on the day it is not. Use `cancellable` to decide whether to show the button at all; a one-off
+  purchase has no renewal to stop and the route refuses.
 
 ### 7. Readiness UI
 Score card on overview, issues table, issue drawer. Contract: §9.

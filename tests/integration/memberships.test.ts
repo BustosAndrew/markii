@@ -346,6 +346,101 @@ describe("recurring memberships", () => {
     expect(JSON.stringify(res.json)).toMatch(/sign in/i);
   }, 120_000);
 
+  /**
+   * A recurring charge a shopper cannot stop themselves is not acceptable, so
+   * these cover the account routes that let them. The id comes from the URL, so
+   * the scoping matters more than the happy path.
+   */
+  describe("self-service cancellation", () => {
+    it("refuses an anonymous caller", async () => {
+      const anon = shopperClient();
+      const list = await anon.get(`/_sites/${slug}/api/account/memberships`);
+      expect(list.status).toBe(401);
+
+      const cancel = await anon.del(`/_sites/${slug}/api/account/memberships/1/renewal`);
+      expect(refused(cancel)).toBe(true);
+    });
+
+    it("lists only the caller's own memberships", async () => {
+      const shopper = shopperClient();
+      const { email } = await signUpShopper(shopper, "cancellist");
+      const [customer] = await sql`select id from customers
+        where site_id = ${siteId} and email = ${email}`;
+
+      await merchant.post("/api/actions/memberships.grant", {
+        customerId: customer.id,
+        tierId,
+        durationDays: 30,
+      });
+
+      const res = await shopper.get(`/_sites/${slug}/api/account/memberships`);
+      expect(res.status).toBe(200);
+      expect(res.json.memberships).toHaveLength(1);
+      expect(res.json.memberships[0].tier.name).toBe("Gold");
+      // A manual grant does not renew, so there is nothing to cancel.
+      expect(res.json.memberships[0].renews).toBe(false);
+      expect(res.json.memberships[0].cancellable).toBe(false);
+      expect(res.json.memberships[0].status).toBe("active");
+    }, 120_000);
+
+    /**
+     * **The tenancy check.** Another shopper's membership must answer *not
+     * found* — `403` would confirm the row exists.
+     */
+    it("does not let one shopper cancel another's membership", async () => {
+      const owner = shopperClient();
+      const { email } = await signUpShopper(owner, "cancelowner");
+      const [customer] = await sql`select id from customers
+        where site_id = ${siteId} and email = ${email}`;
+
+      await merchant.post("/api/actions/memberships.grant", {
+        customerId: customer.id,
+        tierId,
+        durationDays: 30,
+      });
+      const [membership] = await sql`select id from customer_memberships
+        where customer_id = ${customer.id} and tier_id = ${tierId}`;
+
+      // Pretend it renews, so a leak would be a real cancelled subscription.
+      await sql`update customer_memberships set stripe_subscription_id = ${`sub_test_${Date.now()}`}
+        where id = ${membership.id}`;
+
+      const attacker = shopperClient();
+      await signUpShopper(attacker, "cancelattacker");
+
+      const res = await attacker.del(
+        `/_sites/${slug}/api/account/memberships/${membership.id}/renewal`,
+      );
+      expect(res.status).toBe(404);
+
+      const [after] = await sql`select renewal_canceled_at from customer_memberships
+        where id = ${membership.id}`;
+      expect(after.renewal_canceled_at, "another shopper must not stop this renewal").toBeNull();
+    }, 120_000);
+
+    /** A one-off purchase has no subscription behind it, so there is nothing to stop. */
+    it("refuses to cancel a membership that does not renew", async () => {
+      const shopper = shopperClient();
+      const { email } = await signUpShopper(shopper, "canceloneoff");
+      const [customer] = await sql`select id from customers
+        where site_id = ${siteId} and email = ${email}`;
+
+      await merchant.post("/api/actions/memberships.grant", {
+        customerId: customer.id,
+        tierId,
+        durationDays: 30,
+      });
+      const [membership] = await sql`select id from customer_memberships
+        where customer_id = ${customer.id} and tier_id = ${tierId}`;
+
+      const res = await shopper.del(
+        `/_sites/${slug}/api/account/memberships/${membership.id}/renewal`,
+      );
+      expect(refused(res)).toBe(true);
+      expect(JSON.stringify(res.json)).toMatch(/does not renew|nothing to cancel/i);
+    }, 120_000);
+  });
+
   /** The subscription route is not a second way to buy an ordinary product. */
   it("refuses a non-recurring cart on the subscription endpoint", async () => {
     const shopper = shopperClient();
