@@ -182,3 +182,64 @@ export async function assertMfaSatisfied(): Promise<void> {
 
   throw new ApiError("MFA_REQUIRED", 403, gate.reason, { gate });
 }
+
+/**
+ * Step-up enforcement for the action registry (D40).
+ *
+ * **Only human sessions are challenged.** A `token` actor never had a factor to
+ * present and never will — it is a credential in its own right, revoked rather
+ * than re-authenticated. A `system` actor is a migration or a seed with no
+ * browser at all. Demanding a factor from either would not make them safer; it
+ * would make them impossible, and the pressure would then be to drop the
+ * requirement from the action instead.
+ *
+ * An `agent` actor **is** challenged, through the human it acts for: §22 exists
+ * so an agent gets no privileged path, and "the assistant did it" is not a
+ * reason to skip proving a person is present for a payout change.
+ */
+export async function assertStepUp(
+  actor: { type: "user" | "agent" | "token" | "system" },
+  actionId: string,
+): Promise<void> {
+  if (actor.type === "token" || actor.type === "system") return;
+
+  const { getSupabaseServerClient } = await import("../supabase/server");
+  const { ApiError } = await import("../api");
+
+  const supabase = await getSupabaseServerClient();
+  if (!supabase) {
+    throw new ApiError("MFA_REQUIRED", 403, "This change needs re-authentication.", {
+      gate: { status: "challenge", reason: "Authentication is unavailable." },
+    });
+  }
+
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  /**
+   * `amr` carries a timestamp per authentication method, so the most recent MFA
+   * entry answers "was this person here just now?" — which `aal2` alone cannot.
+   * A session that cleared MFA this morning is still `aal2` this evening, and
+   * treating that as consent to move a payout address is the gap step-up closes.
+   */
+  const amr = (session as { user?: { amr?: { method: string; timestamp: number }[] } } | null)?.user
+    ?.amr;
+
+  if (stepUpSatisfied(amr)) return;
+
+  throw new ApiError(
+    "MFA_REQUIRED",
+    403,
+    "Confirm it is you before making this change.",
+    {
+      gate: {
+        status: "challenge",
+        reason: `"${actionId}" changes payments, access, or credentials.`,
+      },
+      /** So a client knows how long a fresh challenge buys before re-prompting. */
+      stepUpWindowMs: STEP_UP_WINDOW_MS,
+      action: actionId,
+    },
+  );
+}

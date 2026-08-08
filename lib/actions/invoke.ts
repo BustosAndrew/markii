@@ -1,4 +1,5 @@
 import { ApiError, forbidden, notFound } from "../api";
+import { assertStepUp } from "../auth/mfa";
 import { actionInvocations, db, type DiffEntry } from "../db";
 import { authorize, getAction } from "./registry";
 import type { ActionContext, Actor, InvocationOutcome } from "./types";
@@ -43,6 +44,25 @@ export async function invokeAction<TResult = unknown>(
   // Permission first: an unauthorized caller learns nothing about the input shape.
   if (!(await authorize(actor, def.permission))) {
     throw forbidden(`Missing permission "${def.permission}" for action "${def.id}"`);
+  }
+
+  /**
+   * Step-up (D40): a **fresh** second factor for anything that moves money or
+   * grants access.
+   *
+   * Checked here rather than in a route handler because §22 rule 1 makes this
+   * the only mutation path — so this one check covers the dashboard, the HTTP
+   * API, agent tools, and MCP simultaneously, and no caller has a way around it.
+   * That is the entire reason the registry exists, and a per-route check would
+   * have left the agent path open.
+   *
+   * **Skipped on a dry run**, which writes nothing and exists precisely so an
+   * agent can show a human what *would* happen before asking them to authorise
+   * it. Demanding a factor to render a proposal would put the challenge before
+   * the decision.
+   */
+  if (def.requiresStepUp && !dryRun) {
+    await assertStepUp(actor, def.id);
   }
 
   const input = def.input.parse(rawInput) as never;

@@ -44,6 +44,12 @@ export function describeAction(def: ActionDefinition<never, unknown>) {
     riskTier: def.riskTier,
     undoable: def.undoable ?? false,
     /**
+     * Advertised so an agent knows before invoking that a human will have to
+     * re-authenticate — the same reason `requiresHumanApproval` is published.
+     * Discovering it from a refusal is worse than reading it from the registry.
+     */
+    requiresStepUp: def.requiresStepUp ?? false,
+    /**
      * `high` never auto-runs, whoever asks (§22 rule 3). Stated in the registry
      * so an agent knows before invoking that a human gate is coming.
      */

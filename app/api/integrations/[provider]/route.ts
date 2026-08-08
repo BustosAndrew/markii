@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { badRequest } from "@/lib/api";
 import { orgHandler } from "@/lib/auth/handler";
+import { assertStepUp } from "@/lib/auth/mfa";
 import {
   getIntegration,
   integrationStatus,
@@ -32,8 +33,28 @@ function parseProvider(raw: string): Provider {
   return raw;
 }
 
-export const PUT = orgHandler(async (req, { params, orgId }) => {
+/**
+ * **Step-up before changing where money goes** (D40).
+ *
+ * `x402.walletAddress` is the payout destination: changing it redirects a
+ * merchant's revenue, which makes this the highest-value write in the product.
+ * Disconnecting a rail is the same decision in reverse.
+ *
+ * **This check belongs in the action registry and is here under protest.** §22
+ * rule 1 says no route handler mutates outside the registry, and this one
+ * predates that rule — so there is no `defineAction` to hang `requiresStepUp`
+ * on. A route-level check is complete only because no agent path to this
+ * mutation exists *yet*; the moment it becomes an action, the check moves and
+ * this comment goes with it. Leaving it unguarded until then would mean the one
+ * write worth stealing is the one write with no second factor.
+ */
+async function stepUpForMoneyMove(session: { actor: { type: "user" | "agent" | "token" | "system" } }, what: string) {
+  await assertStepUp(session.actor, what);
+}
+
+export const PUT = orgHandler(async (req, { params, orgId, session }) => {
   const provider = parseProvider((await params).provider);
+  await stepUpForMoneyMove(session, `integrations.connect:${provider}`);
 
   if (provider === "stripe") {
     throw badRequest(
@@ -60,8 +81,9 @@ export const PUT = orgHandler(async (req, { params, orgId }) => {
   return NextResponse.json(integrationStatus(provider, row));
 });
 
-export const DELETE = orgHandler(async (_req, { params, orgId }) => {
+export const DELETE = orgHandler(async (_req, { params, orgId, session }) => {
   const provider = parseProvider((await params).provider);
+  await stepUpForMoneyMove(session, `integrations.disconnect:${provider}`);
   const row = await upsertIntegration(orgId, provider, "not_connected", {});
   return NextResponse.json(integrationStatus(provider, row));
 });

@@ -64,6 +64,25 @@ export type ActionDefinition<TInput = unknown, TResult = unknown> = {
   input: z.ZodType<TInput>;
   permission: Permission;
   riskTier: RiskTier;
+  /**
+   * Requires a **fresh** second factor before it runs (D40 step-up).
+   *
+   * Separate from `riskTier`, because they answer different questions. `high`
+   * means "a human must approve this" — an agent may propose it. Step-up means
+   * "prove you are still at the keyboard", and the threat is the unattended
+   * laptop rather than the confident agent. An action can need either, both, or
+   * neither.
+   *
+   * Set it on anything that moves money or grants access: the x402 wallet
+   * address (the payout destination), payment-rail toggles, staff roles and
+   * invites, API tokens, and disabling MFA itself.
+   *
+   * **It is checked in `invokeAction`, not in a route handler.** §22 rule 1 means
+   * there is one mutation path, so the check here covers the UI, the HTTP API,
+   * agent tools, and MCP at once — and an agent cannot route around it. A
+   * per-route check would leave exactly that gap.
+   */
+  requiresStepUp?: boolean;
   /** Whether an inverse can be recorded. Undo itself arrives with Phase C's first undoable action. */
   undoable?: boolean;
   /**

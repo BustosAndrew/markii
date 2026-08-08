@@ -56,6 +56,8 @@ export const addSendingDomain = defineAction({
    * customer sees, and a wrong one is visible to shoppers rather than staff.
    */
   riskTier: "medium",
+  /** D40 step-up: moves money or grants access. */
+  requiresStepUp: true,
   undoable: true,
   async run(input, ctx) {
     if (!ctx.actor.orgId) throw notFound("Organization");

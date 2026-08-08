@@ -111,6 +111,8 @@ export const changePlan = defineAction({
    * whoever asks. An agent may propose an upgrade; a person confirms it.
    */
   riskTier: "high",
+  /** D40 step-up: moves money or grants access. */
+  requiresStepUp: true,
   async run(input, ctx) {
     if (!ctx.actor.orgId) throw notFound("Organization");
     if (!billingConfigured()) {
@@ -477,6 +479,8 @@ export const invoiceAssessments = defineAction({
   permission: "billing.write",
   /** Charging a merchant real money. §22 rule 3: never auto-runs, whoever asks. */
   riskTier: "high",
+  /** D40 step-up: moves money or grants access. */
+  requiresStepUp: true,
   async run(input, ctx) {
     if (!ctx.actor.orgId) throw notFound("Organization");
     const orgId = ctx.actor.orgId;
@@ -614,6 +618,8 @@ export const setDefaultCard = defineAction({
   input: z.object({ paymentMethodId: z.string().min(1).max(255) }).strict(),
   permission: "billing.write",
   riskTier: "medium",
+  /** D40 step-up: moves money or grants access. */
+  requiresStepUp: true,
   async run(input, ctx) {
     if (!ctx.actor.orgId) throw notFound("Organization");
     const org = await loadOrg(ctx.db, ctx.actor.orgId);

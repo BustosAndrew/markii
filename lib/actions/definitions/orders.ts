@@ -285,6 +285,8 @@ export const refundOrder = defineAction({
   permission: "commerce.write",
   /** Money leaves and stock returns; §22 rule 3 keeps this off any auto-execute path. */
   riskTier: "high",
+  /** D40 step-up: moves money or grants access. */
+  requiresStepUp: true,
   /**
    * A refund cannot be undone by deleting the row: the money is gone and the
    * usage record is immutable by design (§17). Correcting one means recording
