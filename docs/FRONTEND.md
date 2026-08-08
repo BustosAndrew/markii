@@ -50,6 +50,70 @@ lib/api/              typed client per domain (products, sites, categories, orde
 
 ---
 
+## Backend status — what you can actually build against today
+
+**The backend is now ahead of the frontend for the entire launch scope.** The build order below was
+written when the opposite was true; read this table first, because the sequencing advice ("do
+API-independent work so you don't outrun the backend") no longer applies to A, B, or C.
+
+| Area | Contract | State | What it means for you |
+|---|---|---|---|
+| Auth, orgs, staff, roles | §16 | ✅ LIVE | Build it. Forms post to `/api/auth/*`, identity from `GET /api/me` |
+| Commerce core | §18.1–18.8 | ✅ LIVE | Variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping, order ops, digital delivery |
+| Membership gating | §18.9 | ✅ LIVE | Tiers gate products; buying a granting product confers one |
+| Readiness | §9 | ✅ LIVE | Score, issues, triage |
+| **Billing & metering** | §17 | ✅ **LIVE — newly** | See below. This changed most recently and most sharply |
+| Card checkout (Stripe) | §18.4 | ✅ LIVE | Elements mount with a publishable key the server hands you |
+| Add-on **purchase** | §17 | ⛔ Refuses `409` | Agent Ops / Chargeback Assist do not exist. Show them as unavailable — never as "coming soon with a buy button" |
+| Email delivery | §24 | 🟡 Plumbed, sends nothing | Every send records `not_configured`. Surfaces must say so, not imply mail went out |
+| Site builder, Channels, Test Lab, Agent Ops chat | §19–21 | ⛔ Deferred | Out of launch scope — do not start |
+
+### §17 billing changed shape — screens built against the old refusals need revisiting
+
+Billing used to answer `503 CONFIGURATION_REQUIRED` for everything except reads. It no longer does,
+and a screen that treats `503` as the normal case will now render the wrong branch.
+
+What moved:
+
+- `GET /api/billing/subscription` returns a real `subscription` object, or `null` when the org has
+  never subscribed. `subscriptionState.code` is now one of `active` · `not_subscribed` ·
+  `inactive` · `configuration_required` — the last only when the deployment has no Stripe key.
+- **`subscription.entitlesPlan` is the flag to gate on, not `status`.** A subscription can exist and
+  grant nothing (`incomplete` = first invoice never paid). Showing a tier because a subscription
+  object exists would tell a merchant they are on a plan nobody is charging them for.
+- `POST /api/billing/subscription` is **two-step**. Without `confirm: true` it returns a proration
+  preview and writes nothing; send `confirm: true` to apply what the merchant just saw. Do not skip
+  the preview — the amount is Stripe's arithmetic, and a locally computed estimate will sometimes
+  disagree with the real charge.
+- `POST /api/billing/payment-method` returns a real SetupIntent `clientSecret` **and** a
+  `publishableKey`. Mount Elements with the key the server returns — never one hardcoded or read
+  from a different env var, because the server refuses when the two are in different Stripe modes
+  and returning that key is how it tells you.
+- **Collecting a card is not using it.** After Elements confirms, call
+  `billing.setDefaultPaymentMethod` with the returned payment-method id, or the card is attached but
+  invoices still fail against nothing.
+- `GET /api/billing/invoices` returns `invoices` (Stripe's, real) **and** `assessments` (the
+  threshold-fee ledger) under separate keys. **They are not the same thing and must not be merged
+  into one list** — an invoice is a demand for payment, an assessment is a measurement.
+- `GET /api/billing/invoices/:id` gives line-itemized detail. PDFs are **Stripe-hosted**: link
+  `hostedInvoiceUrl` / `invoicePdfUrl`, never proxy or re-render them.
+- `GET /api/billing/usage` → `billingStatus.charging` is now **per merchant**. It is `true` only for
+  an org whose subscription can carry a fee line. Render the `reason` string; it is written to be
+  shown.
+
+### The threshold meter is still the screen most easily made dishonest
+
+`docs/PRICING.md` §6 is required reading before you write it. The three rules that matter:
+
+- Before a first production sale every figure is `null` with `dataSource: "not_yet_measured"` —
+  render *not yet measured*, **never `0`**. A zero is a measurement; there has not been one.
+- `projectedPeriodFeeMinor` travels with `projectionBasis`. Never display a projection as an amount
+  owed.
+- `unconvertedRecordCount` / `unclassifiedRecordCount` mean the number is **known-incomplete**. Say
+  so rather than showing a clean total.
+
+---
+
 ## Known gaps in the current shell
 
 The shell shipped 2026-07-30 (screens, themes, design-system additions, typed services for the
@@ -142,8 +206,13 @@ analytics funnel, Agent Ops chat, native email campaigns.
 
 ## Build order
 
-Work top-down. Early items need **no new backend**, which matters because you will otherwise outrun
-the backend.
+Work top-down. **The original reason for this order has expired**: it front-loaded API-independent
+work so you would not outrun the backend, and A, B, and C are now all LIVE (see the status table
+above). Nothing here is blocked on a contract any more.
+
+The order still holds for a different reason — themes and the design system are what everything
+after them leans on, and themes are the launch-critical work for the target merchant. But if you
+would rather take billing or commerce first, nothing stops you.
 
 ### 1. Storefront themes — start here
 No API dependency at all. Three or four themes on the existing renderer in `app/%5Fsites/[site]/`.
@@ -166,13 +235,36 @@ permanent redirects from old paths.
 from a component, no `createBrowserClient`, no client-side session read; identity comes from
 `GET /api/me`. Then org switcher, staff, invites, roles. Contract: §16.
 
-### 5. Billing (Phase B)
+### 5. Billing (Phase B) — fully backed, and the shape changed
 Start with the **threshold meter** — it is the most important component in the product and the one
 most easily made dishonest. Read `docs/PRICING.md` §6 before writing it. Contract: §17.
+
+Then, in the order a merchant meets them: plan comparison → **proration preview → confirm** (two
+calls, never one) → card collection via Elements → `setDefaultPaymentMethod` → invoice history →
+invoice detail. Dunning banners key off `subscriptionState.code === "inactive"` and the `past_due`
+status, which **still grants access** — do not lock a merchant out of their dashboard over a card
+Stripe is still retrying.
+
+Two screens that need care rather than effort:
+
+- **Add-ons.** `GET` is real and tells you whether a tier includes one (`includedInPlan`) versus
+  whether it was bought (`purchased`). Buying refuses with `409` because the products do not exist.
+  Render them as unavailable with the reason — **not** as a purchasable upsell, and not as "coming
+  soon" beside a working buy button.
+- **Cancellation.** Ends at period end, never immediately. The consequence summary must say what
+  the merchant keeps and until when (`currentPeriodEnd`), because that is exactly what the backend
+  guarantees.
 
 ### 6. Commerce (Phase C)
 Variants first (option-matrix editor is the hardest single screen), then inventory, collections,
 customers, orders, discounts, settings. Contract: §18. Then storefront cart + checkout.
+
+**Memberships (§18.9) are LIVE and have one rule worth knowing:** status is **derived per request,
+never stored**, so there is no `status` field to read and no cached value to refresh — a membership
+is active because `endsAt` has not passed. Render from what the API returns each time. Recurring
+(auto-renewing) memberships are being built now and will add a subscription-style checkout to the
+storefront; that is the one place backend work is still moving under you, so leave storefront
+membership purchase until it lands.
 
 ### 7. Readiness UI
 Score card on overview, issues table, issue drawer. Contract: §9.
@@ -228,9 +320,25 @@ keyboard operation, visible focus, and status never signalled by colour alone.
 shape the contract does not have, raise it and update the doc first — do not invent a response and
 build against it.
 
-Endpoints land roughly in phase order (A → B → C). Expect to be ahead: the build order above puts
-API-independent work first for exactly that reason. When blocked, pick up theme or design-system
-work rather than mocking a response.
+**Always check the per-section status legend at the top of `docs/API.md` before calling anything.**
+It is kept current, and it is the difference between an endpoint that works and one that returns a
+documented refusal.
+
+**You are no longer ahead of the backend — the reverse.** A, B, and C are LIVE. When something is
+blocked it is now far more likely to be a *deliberate* refusal (an unbuilt product, a missing
+credential) than unfinished work, and those refusals are documented rather than accidental. Render
+the refusal honestly; do not mock past it.
+
+**Two practical frictions while both of us are working:**
+
+- **`docs/API.md` is the file we will both edit.** Pull before touching it.
+- **Response shapes can move under a screen** when a `503` becomes real, as §17 just did. If a
+  screen was built against a refusal, re-check it against the contract rather than assuming it still
+  matches.
+
+Backend files (`app/api/`, `lib/db/`, `lib/billing/`, `lib/commerce/`, `lib/actions/`, `drizzle/`)
+and frontend files (`app/(dashboard)/`, `components/`, `lib/api/`) are otherwise disjoint, so the
+two streams do not collide in practice.
 
 ---
 
@@ -239,6 +347,12 @@ work rather than mocking a response.
 - All five states implemented (loading, empty, error, partial, permission)
 - Calls a typed service in `lib/api/*`, never inline `fetch`, never `lib/db`
 - Only LIVE endpoints called; PLANNED areas show honest placeholder states
+- **A documented refusal is rendered as itself.** `503 CONFIGURATION_REQUIRED`, `409` on an unbuilt
+  add-on, and `charging: false` on the meter each carry a reason string written to be shown. Showing
+  a generic "something went wrong" throws away the one useful thing in the response — and showing a
+  success state instead is the fabricated-success rule in `CLAUDE.md`
+- **Money gated on entitlements, never on plan name or subscription existence** — `entitlesPlan` and
+  the `entitlements` object are the flags; plans change and capabilities are stable
 - Keyboard operable, labelled, visible focus, contrast-compliant
 - Money formatted from integer minor units with explicit currency
 - Responsive: desktop-first for dashboards, mobile-first for storefronts

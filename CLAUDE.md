@@ -205,6 +205,15 @@ campaigns. Rationale in `docs/DECISIONS.md` §G10.
   *configuration required* / *not yet measured* / *coming soon*, and test/demo state is labeled.
 - **No mock data or mock route handlers** for PLANNED areas — current direction is real states
   only. New modules get a typed service in `lib/api/*` before any screen calls anything.
+- **A backend change the frontend can see is not done until the frontend instructions say so.**
+  The team is two people working in parallel, so `docs/FRONTEND.md` and `lib/api/*` are how the
+  other side learns anything changed. **Going LIVE is a two-sided flip**: when a status badge moves
+  in `docs/API.md`, the same change must flip the matching `*_API_LIVE` constant, correct the
+  response types in `lib/api/*`, and note the shape change in `docs/FRONTEND.md`. This has already
+  failed once — Phases B and C, readiness, the action registry, and email all shipped and moved
+  their badges while every constant stayed `false`, so those endpoints were live and reachable from
+  no screen. **A stale type is worse than a missing one**: a field pinned to `null` or `never[]`
+  makes TypeScript *forbid* reading data the API really returns.
 - Every data surface covers loading, empty, error, partial, and (once auth lands) permission
   states.
 - **Pricing claims are factual claims.** Comparisons come from `docs/COMPETITORS.md` (verified
