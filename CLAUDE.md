@@ -258,14 +258,25 @@ campaigns. Rationale in `docs/DECISIONS.md` §G10.
   **never authorize on `auth.getUser()` alone** (membership lookup is the gate), **host-only session
   cookies — never `domain=.markii.shop`** (a parent-domain cookie reaches every storefront, where
   merchant custom code runs), and an explicit **`user_kind`** checked on every path.
-- **MFA is mandatory for merchants and never for shoppers** (D40, decided 2026-08-07, **not built**).
-  Every staff account enrols at sign-up and is challenged to `aal2` at every sign-in, plus a fresh
-  step-up before sensitive changes — the sharpest being the **x402 wallet address, which is the
-  money destination** and is today a plain authenticated write. Step-up belongs in the **action
-  registry** beside `riskTier`, not in route handlers, or the agent path routes around it (§22
-  rule 1). Shoppers are excluded on `user_kind` — guest checkout would make shopper MFA bypassable
-  anyway. **Recovery codes are ship-blocking**: Supabase ships TOTP but no backup codes, so without
-  our own a lost phone locks a merchant out of everything.
+- **MFA is mandatory for merchants and never for shoppers** (D40, ✅ **built** 2026-08-08; the
+  screens are not). Every staff account enrols TOTP and is challenged to `aal2` at every sign-in.
+  **Enforcement lives in `getSession()`**, not in `requireSession` or `requireAuthContext` — both are
+  real entry points, and guarding only the second left `/api/me` serving unenrolled merchants until
+  the tests caught it. It answers **`403 MFA_REQUIRED`, never `401`**: the caller is authenticated,
+  and a 401 loops them through a sign-in that cannot help. **API tokens are exempt** — a scoped token
+  is its own credential, revoked rather than re-authenticated. Shoppers are excluded on `user_kind`;
+  guest checkout would make shopper MFA bypassable anyway. **Recovery codes** (`lib/auth/
+  recovery-codes.ts`) are what make it shippable: Supabase ships TOTP and no backup codes, so without
+  them a lost phone means a lost store.
+- **Step-up: a fresh factor within 15 minutes before anything that moves money or grants access.**
+  `requiresStepUp` sits beside `riskTier` in the registry and is enforced in `invokeAction`, so one
+  check covers UI, HTTP API, agents, and MCP — **an agent cannot route around it**, which is the
+  whole reason the registry exists. It reads the **AMR timestamp, not `aal2`**: a session that
+  cleared MFA this morning is still `aal2` tonight. Skipped on dry runs so a proposal renders before
+  the challenge. **Converting the integrations route to actions to hang this on found a live
+  privilege hole** — `PUT /api/integrations/:provider` had *no permission check at all*, so any
+  staff member including `viewer` could change the x402 wallet address, which is the payout
+  destination. Both holes existed because the route mutated outside the registry.
 - **Merchant-side AI writes go through propose → approve → execute**, with an audit entry and an
   undo path. Retrieved catalog/customer content is untrusted data, never instruction
   (`docs/AGENT-OPS.md` §3).

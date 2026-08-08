@@ -1255,6 +1255,46 @@ delivered when no mail service is wired.
 
 ## 16. Accounts, organizations, staff — partial (Phase A in progress)
 
+> ### ✅ MFA is LIVE and mandatory for merchants (D40, 2026-08-08)
+>
+> Every staff account enrols a TOTP factor and is challenged to `aal2` at every sign-in.
+> **Shoppers are never affected** — the check keys on `user_kind`, and guest checkout would make
+> shopper MFA bypassable anyway.
+>
+> | Route | |
+> |---|---|
+> | `GET /api/auth/mfa` | Status and gate. Reachable at `aal1` — otherwise there is no way *out* of the gate |
+> | `POST /api/auth/mfa/enroll` | Start. Returns the TOTP secret/URI **once** |
+> | `PUT /api/auth/mfa/enroll` | Confirm with a code. Issues 10 recovery codes, shown **once** |
+> | `POST /api/auth/mfa/challenge` | `aal1` → `aal2`. Also the **step-up** endpoint |
+> | `POST /api/auth/mfa/recover` | Spend a recovery code; removes the factor and forces re-enrolment |
+>
+> **Enforcement lives in `getSession()`**, not in the wrappers. `requireSession` (used by `/api/me`)
+> and `requireAuthContext` (used by every `orgHandler` route) are both real entry points, so a check
+> in one protects half the surface — the first version guarded only the second, and `/api/me` served
+> unenrolled merchants until the tests said so.
+>
+> **`403 MFA_REQUIRED`, never `401`.** The caller *is* authenticated; a 401 sends them to a sign-in
+> form that cannot fix it. `error.details.gate.status` is `enroll` or `challenge`.
+>
+> **API tokens are exempt.** A scoped token is its own credential, minted by an already-protected
+> session; refusing it breaks every server-to-server integration while protecting nothing its holder
+> could not already reach. A stolen *browser* session is what MFA answers.
+>
+> **Step-up** (`requiresStepUp` in the registry, §22) requires a factor presented within **15
+> minutes** before anything that moves money or grants access. It reads the AMR timestamp, not
+> `aal2` — a session that cleared MFA this morning is still `aal2` tonight, and treating that as
+> consent to move a payout address is the unattended-laptop gap it closes. Skipped on dry runs, so a
+> proposal can be rendered before the challenge. Tokens and `system` actors are exempt; **agents are
+> not** — they are challenged through the human they act for.
+>
+> **Recovery codes are the reason this is shippable.** Supabase provides TOTP and no backup codes,
+> so without them a lost phone means a lost store. Ten per account, salted scrypt, single-use,
+> constant-time comparison, destructive regeneration.
+>
+> ⚠️ **Not yet built:** the enrolment and challenge **screens**. The API is complete and tested; the
+> frontend work is described in `docs/FRONTEND.md`.
+
 > **Status (2026-07-31).** ✅ **LIVE:** `POST /api/auth/sign-up · sign-in · sign-out ·
 > reset-password · update-password`, `GET /api/auth/callback`, and `GET /api/me`. Sessions are
 > httpOnly/`sameSite=lax` cookies written server-side (D30, verified end to end); `proxy.ts`

@@ -21,7 +21,7 @@ when it's made, with the date — then update the doc it affects.
 | ~~D1~~ | ~~Price points, thresholds, fee rates~~ | ⚠️ **SUPERSEDED by D39** (2026-08-06). Was: accepted as proposed (owner, 2026-07-29) — $150k/$750k/$3M at 0.5%/0.4%/0.3% | — |
 | ~~D39~~ | ~~Split fee schedule: physical vs digital~~ | ✅ **Owner, 2026-08-06.** Thresholds $1k / $50k / $100k, **applied separately to each class**; above them 1.5%/0.5%/0.25% physical and 3%/1.5%/0.5% digital — §"Split fee schedule — D39" | Replaces D1's single rate |
 | ~~D2~~ | ~~Margin check~~ | ✅ **Costed 2026-07-29 — D1 holds.** ~92% margin at 1,000 merchants, ~83% at 100. Watch items: media usage (G5), support load (G4) — §"Unit economics — D2" | — |
-| ~~D40~~ | ~~MFA scope~~ | ✅ **Owner, 2026-08-07.** **Mandatory for every merchant** — at sign-up, at every sign-in, plus step-up before sensitive changes. **Shoppers excluded** (guest checkout makes it bypassable anyway). §"MFA scope — D40". Not built; recovery codes are ship-blocking | Phase A gap |
+| ~~D40~~ | ~~MFA scope~~ | ✅ **Owner, 2026-08-07 — ✅ BUILT 2026-08-08.** Mandatory for every merchant; **shoppers excluded**. TOTP + recovery codes + step-up, enforced in `getSession()` and `invokeAction`. §"MFA scope — D40". **Screens not built** | — |
 | ~~D28~~ | ~~POS / in-person retail~~ | ✅ **Deliberate no, not a deferral** (owner, 2026-07-29). Hardware, card-present certification, offline sync, and a retail support model make it a different company. Do not design for it | — |
 | ~~D3~~ | ~~Auth provider~~ | ✅ **Supabase Auth** (owner, 2026-07-29 — superseded Neon Auth when D6 chose Supabase). Same six verifications apply — §"Auth — D3" | — |
 | ~~D4~~ | ~~Stripe integration model~~ | ✅ **Connect Standard** (owner, 2026-07-29). Express optional later, never penalized. Direct API keys considered and dropped. **Markii does not negotiate rates on merchants' behalf** — see §D4 | — |
@@ -111,9 +111,34 @@ the whole reason the registry exists. Adding the check per-route would leave the
 - **Enforcement is `aal2`, not enrolment.** Supabase keeps a session at `aal1` until challenged;
   treating "has a factor enrolled" as protected is decoration.
 
-**Sequencing.** `lib/supabase/middleware.ts` is imported nowhere, so nothing guards `/dashboard` at
-all today (`docs/FRONTEND.md`). Close that first — a second factor on an unguarded route is the
-wrong order.
+**Built 2026-08-08**, except the enrolment and challenge screens. What shipped, and what building it
+turned up:
+
+- **Enforcement is in `getSession()`**, not in the wrappers. `requireSession` (`/api/me`) and
+  `requireAuthContext` (every `orgHandler` route) are both real entry points; the first version
+  guarded only the second, and `/api/me` served unenrolled merchants until the tests said so.
+- **`403 MFA_REQUIRED`, never `401`** — the caller is authenticated, and a 401 loops them.
+- **API tokens are exempt.** A scoped token is its own credential minted by an already-protected
+  session; refusing it breaks integrations while protecting nothing its holder could not reach.
+- **Step-up reads the AMR timestamp, not `aal2`**, with a 15-minute window. The first implementation
+  read the claim from the wrong property and always saw `undefined`, so it refused *every* marked
+  action — it failed closed, but the integration suite is what noticed, which is why the arithmetic
+  now has unit tests.
+- **The sequencing concern above was overstated.** Page routes are unguarded, but every screen reads
+  data through `/api/*`, all of which funnels through `getSession`. The middleware gap is a UX
+  problem (a shell that renders then errors), not data exposure.
+
+**It also uncovered a live privilege hole, which is the part worth remembering.** Converting
+`/api/integrations/:provider` into actions — so `requiresStepUp` had somewhere to attach — revealed
+the route ran under `orgHandler` with **no `permission` option at all**. Any authenticated staff
+member could change the x402 wallet address: the payout destination. That includes `analyst` and
+`viewer`, whose role definitions read "reporting only — deliberately no write anywhere".
+
+Both the missing permission and the missing step-up existed for the same reason: the route mutated
+outside the registry. That is an argument for §22 rule 1, not an exception to it. It is now
+`integrations.connect` / `integrations.disconnect` — `billing.write` (owner and administrator only),
+`riskTier: "high"`, `requiresStepUp`, and a diff carrying the old and new wallet address, so "who
+redirected the payout, and when" has an answer for the first time.
 
 ### Split fee schedule — D39 (owner, 2026-08-06)
 

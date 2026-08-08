@@ -59,6 +59,7 @@ API-independent work so you don't outrun the backend") no longer applies to A, B
 | Area | Contract | State | What it means for you |
 |---|---|---|---|
 | Auth, orgs, staff, roles | §16 | ✅ LIVE | Build it. Forms post to `/api/auth/*`, identity from `GET /api/me` |
+| **MFA (merchants)** | §16 | ✅ **API live, screens missing** | **Blocking: every merchant now hits a gate after sign-in.** See below |
 | Commerce core | §18.1–18.8 | ✅ LIVE | Variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping, order ops, digital delivery |
 | Membership gating | §18.9 | ✅ LIVE | Tiers gate products; buying a granting product confers one |
 | Readiness | §9 | ✅ LIVE | Score, issues, triage |
@@ -67,6 +68,51 @@ API-independent work so you don't outrun the backend") no longer applies to A, B
 | Add-on **purchase** | §17 | ⛔ Refuses `409` | Agent Ops / Chargeback Assist do not exist. Show them as unavailable — never as "coming soon with a buy button" |
 | Email delivery | §24 | 🟡 Plumbed, sends nothing | Every send records `not_configured`. Surfaces must say so, not imply mail went out |
 | Site builder, Channels, Test Lab, Agent Ops chat | §19–21 | ⛔ Deferred | Out of launch scope — do not start |
+
+### ⚠️ MFA is mandatory for merchants — and the screens do not exist yet (D40)
+
+**This is the most urgent frontend work in the repo.** The API is complete and tested; without the
+screens, a merchant can sign in and then cannot reach anything, because every authenticated request
+answers `403`. Nothing else in the dashboard is usable until this exists.
+
+The flow, in the order a merchant meets it:
+
+1. **Sign in** — unchanged, `POST /api/auth/sign-in` succeeds as before. MFA is a *second* step.
+2. **`GET /api/auth/mfa`** — always reachable, even before MFA is satisfied. That is deliberate: it
+   is the only way to find out what to do next. Read `gate.status`:
+   - `enroll` → show setup
+   - `challenge` → ask for the 6-digit code
+   - `ok` → carry on to the dashboard
+3. **Enrol**: `POST /api/auth/mfa/enroll` returns `secret`, `uri`, `qrCode` — **shown once, never
+   retrievable**. Render the QR from `uri`, and offer `secret` for manual entry (the person whose
+   camera does not work is exactly the person who needs a way in). Then
+   `PUT /api/auth/mfa/enroll { factorId, code }`.
+4. **Recovery codes** come back from that `PUT`, **once**. The screen must make the merchant save
+   them — there is no path that can show them again, and they are the only way back from a lost
+   phone. A "copy" and a "download" button, and do not let the user dismiss without acknowledging.
+5. **Challenge** on later sign-ins: `POST /api/auth/mfa/challenge { code }`.
+6. **Recovery**: `POST /api/auth/mfa/recover { code }`. It removes the factor and returns
+   `mustEnroll: true` — send them straight to enrolment, **not** the dashboard. Note the session may
+   also be invalidated, so handle a `401` here by sending them to sign-in.
+
+**Handling `403 MFA_REQUIRED` globally.** Any authenticated call can return it, including after an
+idle period. Treat it in the shared API client, not per screen: read `error.details.gate.status` and
+route to enrol or challenge. **Do not treat it as a session failure and sign the user out** — they
+are authenticated, and a sign-out loop is the failure mode this status code exists to prevent.
+
+**Step-up is a second, separate prompt.** Money-moving actions (`orders.refund`,
+`billing.changePlan`, `billing.invoiceAssessments`, `billing.setDefaultPaymentMethod`,
+`integrations.connect` / `disconnect`) return `403 MFA_REQUIRED` with
+`details.gate.status: "challenge"` when the last factor is older than **15 minutes**, even on a
+fully signed-in session. The right UX is a modal asking for the code, then retrying the original
+request — not a redirect that loses what the merchant was doing. `details.stepUpWindowMs` says how
+long a fresh challenge buys. `GET /api/actions` advertises `requiresStepUp`, so a button can warn
+before the click rather than surprising after it.
+
+**Warn before they run out.** `GET /api/auth/mfa` returns `recoveryCodesRemaining`. Someone on their
+last code with a broken phone is one bad day from a support ticket nobody can resolve.
+
+**Shoppers never see any of this.** Storefront customers are excluded entirely; `required: false`.
 
 ### §17 billing changed shape — screens built against the old refusals need revisiting
 
