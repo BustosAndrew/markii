@@ -333,6 +333,32 @@ export const PLAN_IDS = ["starter", "growth", "scale"] as const;
 export type PlanId = (typeof PLAN_IDS)[number];
 
 /**
+ * Stripe's subscription statuses, stored verbatim (§17).
+ *
+ * **Wider than the five §17 renders**, on purpose. The column is a mirror of
+ * Stripe, and collapsing `incomplete` into `canceled` at write time would lose
+ * the difference between a signup that stalled in Elements and a merchant who
+ * was paying and stopped — the first is worth an email, the second is churn.
+ *
+ * Which of these actually *grant* the plan is a separate question, answered in
+ * one place by `statusGrantsPlan` (`lib/billing/mirror.ts`), never by reading
+ * this column directly.
+ */
+export const SUBSCRIPTION_STATUSES = [
+  "trialing",
+  "active",
+  "past_due",
+  "canceled",
+  "unpaid",
+  "incomplete",
+  "incomplete_expired",
+  "paused",
+] as const;
+export type SubscriptionStatusValue = (typeof SUBSCRIPTION_STATUSES)[number];
+
+export const BILLING_INTERVALS = ["month", "year"] as const;
+
+/**
  * An org owns billing; stores are the existing `sites`. A user may belong to
  * several orgs (agencies build stores for clients), so membership lives in
  * `staff` rather than on the user.
@@ -363,10 +389,49 @@ export const organizations = pgTable(
     addOnAgentOps: boolean("add_on_agent_ops").notNull().default(false),
     addOnChargebackAssist: boolean("add_on_chargeback_assist").notNull().default(false),
     extraStorefronts: integer("extra_storefronts").notNull().default(0),
+    /**
+     * Markii's own subscription (§17) — a **mirror of Stripe**, never the
+     * authority. Stripe decides; these columns exist because every gate reads
+     * `plan_id` synchronously and cannot call Stripe on each request.
+     *
+     * All of it lives on **Markii's platform account**, not on the merchant's
+     * Connect account: this is Markii charging the merchant, the opposite
+     * direction from `lib/payments/`, which never takes a cut of a shopper's
+     * payment (D4).
+     *
+     * Written from exactly two places — the `billing.changePlan` action and the
+     * `customer.subscription.*` webhook — both through `lib/billing/mirror.ts`,
+     * so they cannot derive different entitlements from the same event.
+     */
+    stripeCustomerId: text("stripe_customer_id"),
+    stripeSubscriptionId: text("stripe_subscription_id"),
+    subscriptionStatus: text("subscription_status", { enum: SUBSCRIPTION_STATUSES }),
+    subscriptionInterval: text("subscription_interval", { enum: BILLING_INTERVALS }),
+    /**
+     * The **Stripe billing** period, which is not the metering period. Threshold
+     * fees are measured over calendar months (`fee_assessments`); these bounds
+     * are when the subscription renews. Conflating them would show a merchant a
+     * fee window that does not match their invoice.
+     */
+    currentPeriodStart: timestamp("current_period_start", { withTimezone: true }),
+    currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
+    trialEndsAt: timestamp("trial_ends_at", { withTimezone: true }),
+    cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex("organizations_slug_uq").on(t.slug), index("organizations_owner_idx").on(t.ownerId)],
+  (t) => [
+    uniqueIndex("organizations_slug_uq").on(t.slug),
+    index("organizations_owner_idx").on(t.ownerId),
+    /**
+     * Webhooks arrive knowing only Stripe's ids, so this is the lookup that
+     * resolves an event to a tenant. Unique because two orgs sharing a
+     * subscription would make that resolution ambiguous — and the wrong answer
+     * changes somebody's entitlements.
+     */
+    uniqueIndex("organizations_stripe_customer_uq").on(t.stripeCustomerId),
+    uniqueIndex("organizations_stripe_subscription_uq").on(t.stripeSubscriptionId),
+  ],
 );
 
 export const staff = pgTable(

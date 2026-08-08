@@ -10,6 +10,16 @@ export class ApiError extends Error {
       | "NOT_FOUND"
       | "CONFLICT"
       | "IMPORT_FAILED"
+      /**
+       * A capability this deployment has not been given the credentials for.
+       * Already the code every unbacked surface returns by hand
+       * (`lib/payments/`, `app/api/billing/`, `lib/email/`); listing it here is
+       * what lets an **action** refuse the same way, since an action can only
+       * signal by throwing.
+       */
+      | "CONFIGURATION_REQUIRED"
+      /** A third party answered, and the answer was no. Distinct from our own misconfiguration. */
+      | "UPSTREAM_ERROR"
       | "INTERNAL",
     public status: number,
     message: string,

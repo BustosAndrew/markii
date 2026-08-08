@@ -1397,7 +1397,7 @@ Never return an invitation as "delivered" unless a mail provider actually accept
 
 ---
 
-## 17. Billing, plans, metering, threshold fees — partial ✅/🟡 Phase B
+## 17. Billing, plans, metering, threshold fees — ✅ LIVE except threshold-fee invoicing · Phase B
 
 Full model in **`docs/PRICING.md`**. Processor: Stripe Billing (subscriptions) + Stripe Connect
 (merchant payouts). Markii never holds merchant funds.
@@ -1407,16 +1407,33 @@ because it cannot be derived later), the **threshold fee engine** (`lib/billing/
 **meter** (`GET /api/billing/usage`), the plan catalog, entitlements, and **period close** into an
 immutable `fee_assessments` ledger with a reconciliation check.
 
-**🟡 Blocked on `STRIPE_SECRET_KEY`.** Subscriptions, plan changes, proration, payment methods,
-invoices, and dunning. These **refuse with `503 CONFIGURATION_REQUIRED`** rather than
-returning stubs: a plan change that moved `organizations.planId` without a subscription behind it
-would grant a higher threshold and more storefronts for free with nothing sold, and a fake
-SetupIntent secret fails inside Stripe's own card element *after* the merchant types their card
-number.
+**✅ LIVE — subscription billing.** Subscriptions, plan changes with a Stripe-computed proration
+preview, payment methods, cancellation at period end, and invoice history. Built on **Markii's own
+platform account** — never a `Stripe-Account` header, because this is the opposite direction of
+money from §18.4 (D4).
 
-**Nothing is being charged, and every billing response says so.** `billingStatus.charging` is
-`false` and carries the reason; `fee_assessments.invoiced` is `false`. The figures are a
-measurement, not an invoice — the same framing §4.4 requires for trial orgs, for the same reason.
+Three rules this half is built around:
+
+- **Entitlements move only when Stripe says a subscription is paid.** `statusGrantsPlan`
+  (`lib/billing/mirror.ts`) grants on `active`, `trialing`, and `past_due` — the last because
+  Stripe's dunning retries for days and a first decline should not take a storefront offline. It
+  refuses on `incomplete`, which is the free-upgrade hole the old `503` existed to protect: a
+  subscription whose first invoice was never paid.
+- **A price is refused when Stripe disagrees with the plan table.** `resolvePrice` compares Stripe's
+  `unit_amount` against `lib/plans.ts` and fails the change rather than billing an amount the
+  merchant was never shown. Note that `annualPerMonthMinor` is a **per-month** figure, so a yearly
+  price is twelve of them.
+- **One derivation of "what Stripe says".** The action and the webhook both write through
+  `mirrorSubscription`, so they cannot disagree about what a status grants.
+
+**🟡 Still not billed: the threshold fee.** `fee_assessments.invoiced` is `false` on every row and
+no code turns an assessment into an invoice line, so `GET /api/billing/usage` still reports
+`billingStatus.charging: false` — deliberately, and separately from the subscription. Subscriptions
+working does not mean threshold fees are charged, and one flag standing for both would be the same
+false claim in a new place. The figures are a measurement, not an invoice — the framing §4.4
+requires for trial orgs, for the same reason.
+
+**Add-on toggles (`/api/billing/addons/:addon`) are still unbuilt.**
 
 ```ts
 interface Entitlements {           // gate features on THIS, never on plan name
@@ -1429,11 +1446,18 @@ interface Entitlements {           // gate features on THIS, never on plan name
 interface Subscription {
   planId: "starter" | "growth" | "scale";
   interval: "month" | "year";
-  status: "trialing" | "active" | "past_due" | "canceled" | "unpaid";
-  currentPeriodStart: string; currentPeriodEnd: string;
+  // Stored verbatim from Stripe, so wider than the five worth rendering:
+  // `incomplete` | `incomplete_expired` | `paused` also occur.
+  status: "trialing" | "active" | "past_due" | "canceled" | "unpaid" | string;
+  currentPeriodStart: string; currentPeriodEnd: string;   // Stripe's period, NOT the metering period
   trialEndsAt: string | null;
   cancelAtPeriodEnd: boolean;
   paymentMethod: { brand: string; last4: string; expMonth: number; expYear: number } | null;
+  // Whether this subscription actually grants the plan. Stated rather than
+  // inferred: a subscription can exist and grant nothing (`incomplete`), and a
+  // screen equating "has a subscription" with "is on the plan" would show a
+  // merchant a tier nobody is charging them for.
+  entitlesPlan: boolean;
 }
 
 interface UsageRecord {            // immutable; written at event time, never derived later
@@ -1448,23 +1472,24 @@ interface UsageRecord {            // immutable; written at event time, never de
 
 | Method | Route | Notes |
 |---|---|---|
-| `GET` | `/api/billing/plans` | Public plan catalog + prices. Competitor comparisons are **data with a `verifiedAt`**, never hardcoded copy |
-| `GET` | `/api/billing/subscription` | Current subscription + entitlements |
-| `POST` | `/api/billing/subscription` | Create/change plan. Returns proration preview before commit |
-| `DELETE` | `/api/billing/subscription` | Cancel at period end |
-| `GET` | `/api/billing/usage` | **The threshold meter** — see below |
-| `GET` | `/api/billing/invoices` · `/:id` | History + line-itemized detail |
-| `POST` | `/api/billing/payment-method` | Stripe SetupIntent client secret; card data never touches Markii |
-| `POST` | `/api/billing/addons/:addon` · `DELETE` | Toggle add-on entitlement |
-| `POST` | `/api/webhooks/stripe` | ✅ LIVE — signature-verified, idempotent, retry-safe. Handles Connect account state, `payment_intent.*`, and refunds; Markii's own billing handlers not built (see below) |
+| `GET` | `/api/billing/plans` | ✅ Public plan catalog + prices. Competitor comparisons are **data with a `verifiedAt`**, never hardcoded copy |
+| `GET` | `/api/billing/subscription` | ✅ Current subscription + entitlements. Reads the mirror, not Stripe — except the card, fetched live because a card removed in Stripe's portal emits no reliable event |
+| `POST` | `/api/billing/subscription` | ✅ Create/change plan. **Returns Stripe's proration preview and writes nothing unless `confirm: true`.** Delegates to `billing.changePlan` (§22) |
+| `DELETE` | `/api/billing/subscription` | ✅ Cancel at period end — never immediately; the merchant paid through the period. Delegates to `billing.setCancellation` |
+| `GET` | `/api/billing/usage` | ✅ **The threshold meter** — see below. Measured, still not invoiced |
+| `GET` | `/api/billing/invoices` | ✅ Stripe invoices **and** the assessment ledger, under separate keys. They are different things: one is a demand for payment, the other a measurement. `/:id` detail not built |
+| `POST` | `/api/billing/payment-method` | ✅ Stripe SetupIntent client secret; card data never touches Markii. Must be followed by `billing.setDefaultPaymentMethod` or the card is attached but not charged |
+| `POST` | `/api/billing/addons/:addon` · `DELETE` | 🟡 Toggle add-on entitlement — not built |
+| `POST` | `/api/webhooks/stripe` | ✅ LIVE — signature-verified, idempotent, retry-safe. Handles Connect account state, `payment_intent.*`, refunds, **and Markii's own `customer.subscription.*` / `invoice.*`** (see below) |
 
 ### `POST /api/webhooks/stripe` — ✅ LIVE (unauthenticated, signature-verified)
 
 Built **ahead of** the routes it will feed, because an event dropped while a handler was missing is
 never redelivered.
 
-**The merchant's money is handled; Markii's own billing is not.** Handlers exist for everything the
-card rail depends on:
+**Both directions of money are handled, and they are handled apart.** Handlers exist for the card
+rail (the merchant's money, on the merchant's account) and for Markii's own subscriptions (Markii's
+money, on the platform account):
 
 | Event | What it does |
 |---|---|
@@ -1474,11 +1499,23 @@ card rail depends on:
 | `payment_intent.payment_failed` · `payment_intent.canceled` | Releases the stock reservation. The expiry sweep is a backstop, not the mechanism |
 | `charge.refunded` | Detects a charge refunded **outside** Markii (from the merchant's own dashboard) and flags the gap on the order timeline. Deliberately writes no refund row — see §18.7 |
 | `charge.refund.updated` | A previously `pending` refund that failed. Flags it on the timeline; never silently reverses the refund record |
+| `customer.subscription.created` · `.updated` | **The authoritative signal for what a merchant is entitled to.** Mirrors Stripe onto the org through `mirrorSubscription` |
+| `customer.subscription.deleted` | Drops the org to the floor plan and clears the subscription id. **The only place a merchant loses access** — never when they click cancel |
+| `invoice.paid` · `invoice.payment_failed` | Re-reads the subscription and mirrors it. `paid` is what turns an `incomplete` signup into a paying customer |
 
-**Markii's own billing state is still untouched** — subscriptions, invoices, and payment methods
-refuse with `503`, so there is nothing downstream for those events to update. Their types are listed
-in `EXPECTED_TYPES`, so an operator can see in `stripe_webhook_events` which expected events are
-arriving and being parked rather than guessing from Stripe's dashboard.
+**The billing handlers refuse any event carrying a connected account** (`platformOnly`). A
+merchant's own customers subscribing to a merchant's own products emit the same event types, and
+acting on one would let a merchant rewrite their Markii entitlements from an account they control.
+The separate signing secrets are the transport-level lock; this is the semantic one.
+
+Two shapes moved in the pinned **2025-03-31** API version and are read accordingly: subscription
+period bounds now live on the **item**, not the subscription, and an invoice's subscription is under
+`parent.subscription_details`. Reading the old fields would silently store nulls and stop
+reconciling.
+
+Types not yet handled are listed in `EXPECTED_TYPES`, so an operator can see in
+`stripe_webhook_events` which expected events are arriving and being parked rather than guessing
+from Stripe's dashboard.
 
 - **Two endpoints point here.** Connect delivers events for *merchants'* accounts as well as
   Markii's own. An event carrying `account` is a connected merchant's; one without it is the

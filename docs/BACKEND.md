@@ -223,20 +223,45 @@ requires**: every auth mutation runs server-side in `/api/auth/*` (`docs/API.md`
 Delete `lib/supabase/client.ts` as part of this. A browser client in the tree is how this decision
 gets quietly reversed later.
 
-### 3. Phase B — billing and metering — partly done
+### 3. Phase B — billing and metering — subscriptions done, threshold-fee invoicing not
 
-> **Built, and it is everything that does not need Stripe.** `lib/billing/` —
-> `fees.ts` (the marginal engine, pure), `meter.ts` (T12 and period net sales over the ledger),
-> `close.ts` (period close into immutable `fee_assessments`, plus a reconciliation check).
-> Routes: `/api/billing/usage`, `plans`, `subscription`, `invoices`, `payment-method`.
+> **Built.** `lib/billing/` — `fees.ts` (the marginal engine, pure), `meter.ts` (T12 and period net
+> sales over the ledger), `close.ts` (period close into immutable `fee_assessments`, plus a
+> reconciliation check), plus **`stripe-billing.ts`** (the platform-account Stripe client) and
+> **`mirror.ts`** (the one derivation of Stripe state onto an org).
+> Routes: `/api/billing/usage`, `plans`, `subscription`, `invoices`, `payment-method` — all real.
 >
-> **The Stripe-dependent half refuses with `503 CONFIGURATION_REQUIRED` rather than stubbing.** A
-> plan change that moved `organizations.planId` with no subscription behind it would grant a higher
-> threshold and extra storefronts for free; a fake SetupIntent secret fails inside Stripe's own card
-> element after the merchant has typed their card number. Every billing response carries
-> `charging: false` with the reason.
+> **Markii now charges merchants for plans.** Subscriptions, plan changes with a Stripe-computed
+> proration preview, cancellation at period end, payment methods, invoice history, and the
+> `customer.subscription.*` / `invoice.*` webhook handlers. Mutations are actions
+> (`lib/actions/definitions/billing.ts`); the REST routes documented in §17 delegate to them rather
+> than mutating, so the registry stays the only mutation path (§22 rule 1).
 >
-> Two things worth knowing before extending it:
+> Four things worth knowing before extending it:
+>
+> - **This is the platform account, never `Stripe-Account`.** `lib/payments/` is the opposite
+>   direction of money and takes no cut (D4). A subscription created with a connected-account header
+>   would bill a merchant's own customers for Markii's software. There is no account parameter in
+>   `stripe-billing.ts` rather than an optional one, on purpose.
+> - **Stripe is called inside `run`, not through `ctx.effect`.** Effects flush after commit, which is
+>   right for an email and wrong here: what Stripe returns is an *input* to the database write. The
+>   window that buys — Stripe changed, transaction rolled back — is exactly why the webhook handlers
+>   exist and why both paths go through `mirrorSubscription`.
+> - **`resolvePrice` refuses when Stripe's amount disagrees with `lib/plans.ts`.** Nothing keeps the
+>   two in step automatically, and Markii must not bill an amount it does not display.
+>   `annualPerMonthMinor` is a **per-month** figure — a yearly price is twelve of them, and getting
+>   that wrong undercharges by 12×.
+> - **The API version is pinned** (`2025-03-31.basil`). `/invoices/create_preview` replaced
+>   `/invoices/upcoming`, period bounds moved onto the subscription *item*, and an invoice's
+>   subscription moved under `parent.subscription_details`. Inheriting the account default would make
+>   a plan change work on one deployment and 404 on another.
+>
+> **Still not built: threshold-fee invoicing.** `fee_assessments.invoiced` is `false` on every row,
+> and `GET /api/billing/usage` still reports `charging: false` — deliberately. Subscriptions working
+> does not mean threshold fees are charged, and letting one flag stand for both would repeat the
+> exact error `billingStatus()`'s docstring was written to warn about.
+>
+> Two things worth knowing before extending the meter:
 >
 > - **The §4.5 nightly `t12_net_sales` rollup is deliberately absent.** Nothing schedules jobs here
 >   yet, and a cache nobody refreshes is worse than the query it replaces. Add it when volume

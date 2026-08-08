@@ -279,34 +279,82 @@ describe("billing", () => {
     // A fabricated `active` subscription is the most consequential lie
     // available here — a merchant would think they were covered.
     expect(res.json.subscription).toBeNull();
-    expect(res.json.subscriptionState.code).toBe("configuration_required");
+    /**
+     * A fresh org has never subscribed, and that is a different state from
+     * "billing is not connected". Both are honest and both charge nothing; the
+     * distinction is what tells a merchant whether to add a card or wait for us.
+     */
+    expect(["not_subscribed", "configuration_required"]).toContain(
+      res.json.subscriptionState.code,
+    );
     expect(res.json.subscriptionState.charging).toBe(false);
   });
 
-  it("refuses a plan change rather than granting paid capability for free", async () => {
+  /**
+   * **The free-upgrade hole, and it stays shut.**
+   *
+   * Whatever the outcome, `plan_id` must not move on an unconfirmed request.
+   * Without `confirm: true` this returns a proration preview and writes nothing;
+   * with Stripe Prices absent it refuses outright. Both are correct — granting
+   * Scale's threshold and storefronts with nothing sold is not.
+   */
+  it("never moves the plan on an unconfirmed change", async () => {
     const res = await merchant.post("/api/billing/subscription", { planId: "scale" });
-    expect(res.status).toBe(503);
-    expect(res.json.error.code).toBe("CONFIGURATION_REQUIRED");
 
-    // And the plan really did not move.
+    if (res.status === 200) {
+      // Preview only: nothing confirmed, nothing charged.
+      expect(res.json.result.confirmed).toBe(false);
+      expect(res.json.result.charging).toBe(false);
+      expect(res.json.result.preview.amountDueMinor).toBeGreaterThan(0);
+    } else {
+      // Refused — a missing or mismatched Stripe Price says so by name.
+      expect(res.status).toBe(503);
+      expect(res.json.error.code).toBe("CONFIGURATION_REQUIRED");
+    }
+
+    // The plan really did not move, on either path.
     const after = await merchant.get("/api/billing/subscription");
     expect(after.json.planId).toBe("starter");
   });
 
-  it("refuses to collect card details rather than returning a stub secret", async () => {
+  /**
+   * A **real** SetupIntent secret or an explicit refusal — never a stub. A fake
+   * client secret fails inside Stripe's own card element, after the merchant has
+   * typed their card number.
+   */
+  it("returns a usable card-collection secret, or refuses", async () => {
     const res = await merchant.post("/api/billing/payment-method", {});
-    expect(res.status).toBe(503);
-    // A fake client secret fails inside Stripe's own card element, after the
-    // merchant has typed their card number.
-    expect(res.json.error.code).toBe("CONFIGURATION_REQUIRED");
+
+    if (res.status === 200) {
+      // Stripe's own format. A stub would not look like this.
+      expect(res.json.result.clientSecret).toMatch(/^seti_.+_secret_.+/);
+      /**
+       * And it must be mountable. A `pk_live_` key cannot confirm a secret
+       * issued by an `sk_test_` key, so the route refuses rather than handing
+       * the browser a pair that fails at the card form.
+       */
+      expect(res.json.result.publishableKey).toBeTruthy();
+    } else {
+      expect(res.status).toBe(503);
+      expect(res.json.error.code).toBe("CONFIGURATION_REQUIRED");
+    }
   });
 
-  it("lists assessments rather than pretending they are invoices", async () => {
+  /**
+   * Invoices and assessments are **different things** and stay under different
+   * keys. An assessment is what a period measured; an invoice is a demand for
+   * payment. Threshold fees are still only the former.
+   */
+  it("keeps assessments separate from invoices", async () => {
     const res = await merchant.get("/api/billing/invoices");
     expect(res.status).toBe(200);
-    expect(res.json.invoices).toEqual([]);
-    expect(res.json.invoicesState.code).toBe("configuration_required");
     expect(Array.isArray(res.json.assessments)).toBe(true);
+    expect(Array.isArray(res.json.invoices)).toBe(true);
+    // A fresh org has been billed nothing either way.
+    expect(res.json.invoices).toEqual([]);
+    expect(res.json.assessmentsState.code).toBe("measurement_only");
+    // No assessment claims to have been invoiced.
+    for (const a of res.json.assessments) expect(a.invoiced).toBe(false);
   });
 
   it("keeps another org's sales out of this meter", async () => {

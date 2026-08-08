@@ -356,8 +356,19 @@ export async function usageMeterFor(
  * forbids, and it was invisible until a real key existed.
  *
  * So `charging` is **false until the billing path is actually built**, not until
- * a key appears. When subscriptions land, this should read the org's real
- * subscription state — not an environment variable.
+ * a key appears.
+ *
+ * **Subscription billing has since landed, and this still returns `false`** —
+ * which is the same distinction one layer up. Markii now charges merchants for
+ * *plans*, but this meter is the **threshold fee**, and nothing invoices it:
+ * `fee_assessments.invoiced` is still hardcoded `false`, and no code turns an
+ * assessment into an invoice line. Flipping `charging` because subscriptions
+ * work would repeat the original error with a better excuse — a merchant reading
+ * "these fees are billed on your Markii invoice" would go looking for a line
+ * item that does not exist.
+ *
+ * The org's subscription state is deliberately **not** consulted here. It
+ * answers a different question, and `GET /api/billing/subscription` answers it.
  *
  * Saying so on every meter response is the difference between a merchant
  * understanding their bill and being surprised by one later. It is also the §4.4
@@ -368,9 +379,10 @@ function billingStatus(): UsageMeter["billingStatus"] {
   return {
     charging: false,
     reason: credentialed
-      ? "Stripe credentials are configured, but subscription billing is not implemented yet " +
-        "(docs/API.md §17), so nothing is being charged. These figures show what would be " +
-        "owed — they are a measurement, not an invoice."
+      ? "Threshold fees are measured but not invoiced, so nothing is being charged for them: no " +
+        "code turns an assessment into an invoice line, and fee_assessments.invoiced is false on " +
+        "every row. Markii's own subscription billing is separate and does work (docs/API.md " +
+        "§17). These figures are a measurement, not an invoice."
       : "Billing is not connected yet, so nothing is being charged. These figures show what " +
         "would be owed — they are a measurement, not an invoice.",
   };

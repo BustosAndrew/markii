@@ -6,10 +6,13 @@ import {
   integrations,
   orderEvents,
   orders,
+  organizations,
   refunds,
   stripeWebhookEvents,
 } from "@/lib/db";
 import { completeCheckout, failCheckout } from "@/lib/commerce/orders";
+import { mirrorCancellation, mirrorSubscription } from "@/lib/billing/mirror";
+import { retrieveSubscription, toSnapshot } from "@/lib/billing/stripe-billing";
 import { upsertIntegration } from "@/lib/integrations";
 import {
   parseStripeEvent,
@@ -27,18 +30,24 @@ import {
  * the platform's. Confusing the two would let a merchant's `invoice.paid` mark
  * Markii's own subscription current, or the reverse (`docs/BACKEND.md`).
  *
- * **The card rail is handled; Markii's own billing state is not, and that is
- * deliberate.** Connect account state (`account.updated`,
- * `account.application.deauthorized`), payment outcomes
- * (`payment_intent.*`), and refunds (`charge.refunded`,
- * `charge.refund.updated`) all have handlers, because those are the merchant's
- * money and it is already moving. Everything about *Markii charging the
- * merchant* — subscriptions, invoices, payment methods — still refuses with
- * `503 CONFIGURATION_REQUIRED` (§17), so there is nothing downstream for those
- * events to update yet. Handlers get added to `HANDLERS` as each capability is
- * built; until then every recognised type is recorded as `ignored` **with a
- * reason**, never silently swallowed, because an event dropped while its handler
- * was missing is not redelivered later.
+ * **Both directions of money are now handled, and they are handled apart.** The
+ * merchant's money — Connect account state (`account.updated`,
+ * `account.application.deauthorized`), payment outcomes (`payment_intent.*`),
+ * and refunds (`charge.refunded`, `charge.refund.updated`) — moves on the
+ * merchant's own account. Markii's money — `customer.subscription.*`,
+ * `invoice.paid`, `invoice.payment_failed` — moves on the platform account and
+ * decides what the merchant is entitled to.
+ *
+ * The billing handlers call `platformOnly` before doing anything, because the
+ * separation is semantic as well as cryptographic: a *merchant's* customers
+ * subscribing to a *merchant's* products emits the same event types, and acting
+ * on one would let a merchant rewrite their own Markii entitlements from an
+ * account they control.
+ *
+ * Handlers get added to `HANDLERS` as each capability is built; anything
+ * recognised but unhandled is recorded as `ignored` **with a reason**, never
+ * silently swallowed, because an event dropped while its handler was missing is
+ * not redelivered later.
  *
  * Not an action (§22): there is no actor and no organization on the request.
  * Stripe is an unauthenticated caller proving itself with a signature.
@@ -173,6 +182,73 @@ const HANDLERS: Record<string, (event: StripeEventEnvelope) => Promise<HandlerRe
    */
   "payment_intent.payment_failed": releaseIntent,
   "payment_intent.canceled": releaseIntent,
+
+  /**
+   * **Markii's own subscription changed.** Platform events only — a merchant's
+   * account never sends these, and `platformOnly` refuses one that claims to.
+   *
+   * This is the **authoritative** signal for what a merchant is entitled to, in
+   * exactly the way `payment_intent.succeeded` is authoritative for a shopper's
+   * order. The `billing.changePlan` action writes the same mirror optimistically
+   * from Stripe's API response, but its transaction can roll back after Stripe
+   * has already changed, and a merchant can also cancel or upgrade from Stripe's
+   * own billing portal where Markii is never in the loop. Both paths run through
+   * `mirrorSubscription`, so the reconciliation cannot reach a different answer
+   * than the action would have.
+   */
+  "customer.subscription.created": subscriptionChanged,
+  "customer.subscription.updated": subscriptionChanged,
+
+  /**
+   * The subscription is gone — the period ended after a cancellation, or Stripe
+   * gave up dunning it.
+   *
+   * Handled separately from an update because the object no longer exists:
+   * keeping its id would leave the org pointing at something Stripe 404s on, and
+   * the next plan change would try to modify it instead of creating a new one.
+   * Entitlements drop to the floor plan here, and this is the **only** place a
+   * merchant loses access — never at the moment they click cancel.
+   */
+  "customer.subscription.deleted": async (event) => {
+    const guard = platformOnly(event);
+    if (guard) return guard;
+
+    const sub = event.data.object as { id?: string; customer?: string };
+    if (!sub.id) return { changed: false, detail: "Event carried no subscription id." };
+
+    const orgId = await orgForSubscription(sub.id, sub.customer);
+    if (!orgId) return { changed: false, detail: `No organization for subscription ${sub.id}.` };
+
+    const result = await mirrorCancellation(db, orgId, sub.id);
+    if ("stale" in result) return { changed: false, detail: result.reason };
+    return {
+      detail: `Subscription ${sub.id} deleted; ${orgId} dropped to ${result.planId}.`,
+      changed: result.planChanged,
+    };
+  },
+
+  /**
+   * A subscription invoice was paid. **The moment an `incomplete` signup becomes
+   * a paying customer.**
+   *
+   * The subscription is re-read from Stripe rather than trusted from the invoice
+   * body: the invoice says money arrived, but what the org is *entitled* to comes
+   * from the subscription's price, and reading it back is what keeps one
+   * derivation of that instead of two.
+   */
+  "invoice.paid": invoiceSettled,
+
+  /**
+   * A subscription payment failed. Recorded, but **entitlements do not move
+   * here.**
+   *
+   * Stripe retries over days, and `customer.subscription.updated` reports the
+   * status change (`past_due`, then `unpaid` if it gives up) as it happens.
+   * Revoking on this event would take a working storefront offline over a card
+   * that is usually about to succeed, and would then disagree with the status
+   * the subscription itself carries.
+   */
+  "invoice.payment_failed": invoiceSettled,
 
   /**
    * A charge on the merchant's account was refunded — **by anyone**.
@@ -400,6 +476,143 @@ async function releaseIntent(event: StripeEventEnvelope): Promise<HandlerResult>
  * stored connections rather than trusted as an org identifier, so an event for
  * an unknown account resolves to nothing instead of to somebody.
  */
+/**
+ * Refuses a billing event that arrived carrying a connected account.
+ *
+ * Markii's own subscriptions live on the **platform** account. An event with
+ * `account` set is a *merchant's* — their own customers' subscriptions to their
+ * own products, which have nothing to do with what they owe Markii. Acting on
+ * one would let a merchant's billing activity rewrite their Markii entitlements,
+ * and a merchant controls their own Stripe account.
+ *
+ * The signing secrets already separate the two endpoints; this is the second
+ * lock, on the semantics rather than the transport.
+ */
+function platformOnly(event: StripeEventEnvelope): HandlerResult | null {
+  return event.account
+    ? {
+        changed: false,
+        detail:
+          `Billing event arrived on connected account ${event.account}. Markii's own ` +
+          "subscriptions live on the platform account; a merchant's own billing is theirs.",
+      }
+    : null;
+}
+
+/** Shared by `customer.subscription.created` and `.updated` — same mirror, same guard. */
+async function subscriptionChanged(event: StripeEventEnvelope): Promise<HandlerResult> {
+  const guard = platformOnly(event);
+  if (guard) return guard;
+
+  const snapshot = toSnapshot(event.data.object as Parameters<typeof toSnapshot>[0]);
+  if (!snapshot) return { changed: false, detail: "Event carried an unusable subscription." };
+
+  const orgId = await orgForSubscription(snapshot.subscriptionId, snapshot.customerId);
+  if (!orgId) {
+    /**
+     * Not an error. Stripe sends events for every subscription on the platform
+     * account, including ones created against a different environment sharing
+     * the same Stripe account, or an org since deleted.
+     */
+    return {
+      changed: false,
+      detail: `No organization for subscription ${snapshot.subscriptionId}.`,
+    };
+  }
+
+  const result = await mirrorSubscription(db, orgId, snapshot, { guardAgainstStale: true });
+  if ("stale" in result) return { changed: false, detail: result.reason };
+  return {
+    detail:
+      `Subscription ${snapshot.subscriptionId} is ${result.status}; ` +
+      `${orgId} on ${result.planId}${result.planChanged ? " (changed)" : ""}.`,
+  };
+}
+
+/**
+ * `invoice.paid` / `invoice.payment_failed` — re-read the subscription and
+ * mirror it.
+ *
+ * The invoice says what happened to the money; the subscription says what the
+ * merchant is entitled to. Deriving entitlements from the invoice would be a
+ * second derivation to keep in step with the first.
+ */
+async function invoiceSettled(event: StripeEventEnvelope): Promise<HandlerResult> {
+  const guard = platformOnly(event);
+  if (guard) return guard;
+
+  const invoice = event.data.object as {
+    id?: string;
+    customer?: string;
+    subscription?: string | { id?: string };
+    parent?: { subscription_details?: { subscription?: string | { id?: string } } };
+  };
+
+  /**
+   * `invoice.subscription` moved under `parent.subscription_details` in the
+   * 2025-03-31 API version this codebase pins. Reading only the old field would
+   * make every invoice look like a one-off and silently stop reconciling.
+   */
+  const raw =
+    invoice.parent?.subscription_details?.subscription ?? invoice.subscription ?? null;
+  const subscriptionId = typeof raw === "string" ? raw : (raw?.id ?? null);
+  if (!subscriptionId) {
+    return { changed: false, detail: `Invoice ${invoice.id ?? "?"} is not for a subscription.` };
+  }
+
+  const orgId = await orgForSubscription(subscriptionId, invoice.customer);
+  if (!orgId) {
+    return { changed: false, detail: `No organization for subscription ${subscriptionId}.` };
+  }
+
+  const fresh = await retrieveSubscription(subscriptionId);
+  if (!fresh.ok) {
+    /**
+     * Thrown, not swallowed: this is the event that flips a paid signup to
+     * active, and losing it leaves a merchant who has been charged sitting on
+     * the floor plan. A 500 puts it back in Stripe's three-day retry window.
+     */
+    throw new Error(`Could not read subscription ${subscriptionId}: ${fresh.message}`);
+  }
+
+  const result = await mirrorSubscription(db, orgId, fresh.snapshot, { guardAgainstStale: true });
+  if ("stale" in result) return { changed: false, detail: result.reason };
+  return {
+    detail: `${event.type} for ${subscriptionId}: ${orgId} is ${result.status} on ${result.planId}.`,
+    changed: result.planChanged || event.type === "invoice.paid",
+  };
+}
+
+/**
+ * Resolves a Stripe subscription to a tenant.
+ *
+ * By subscription id first, falling back to the customer — a
+ * `customer.subscription.created` arrives before the action has stored the
+ * subscription id, so the customer is the only link that exists yet. Both are
+ * unique columns, so neither lookup can resolve to more than one org.
+ */
+async function orgForSubscription(
+  subscriptionId: string,
+  customer?: string | { id?: string } | null,
+): Promise<string | null> {
+  const [bySub] = await db
+    .select({ id: organizations.id })
+    .from(organizations)
+    .where(eq(organizations.stripeSubscriptionId, subscriptionId))
+    .limit(1);
+  if (bySub) return bySub.id;
+
+  const customerId = typeof customer === "string" ? customer : (customer?.id ?? null);
+  if (!customerId) return null;
+
+  const [byCustomer] = await db
+    .select({ id: organizations.id })
+    .from(organizations)
+    .where(eq(organizations.stripeCustomerId, customerId))
+    .limit(1);
+  return byCustomer?.id ?? null;
+}
+
 async function integrationForAccount(accountId: string) {
   const [row] = await db
     .select()
@@ -422,17 +635,17 @@ async function integrationForAccount(accountId: string) {
 const EXPECTED_TYPES = new Set([
   "checkout.session.completed",
   "charge.dispute.created",
-  "customer.subscription.created",
-  "customer.subscription.updated",
-  "customer.subscription.deleted",
-  "invoice.paid",
-  "invoice.payment_failed",
   "invoice.created",
   "invoice.finalized",
   "customer.subscription.trial_will_end",
   "payment_method.attached",
   "payment_method.detached",
   /** Handled today — listed so the expected/unexpected split stays complete. */
+  "customer.subscription.created",
+  "customer.subscription.updated",
+  "customer.subscription.deleted",
+  "invoice.paid",
+  "invoice.payment_failed",
   "payment_intent.succeeded",
   "payment_intent.payment_failed",
   "payment_intent.canceled",
@@ -551,7 +764,7 @@ export const POST = async (req: Request) => {
   const handler = HANDLERS[event.type];
   if (!handler) {
     const detail = EXPECTED_TYPES.has(event.type)
-      ? "No handler yet — §17's Stripe half is not built (routes refuse with CONFIGURATION_REQUIRED)."
+      ? "Recognised, but no handler is wired for it yet (§17)."
       : "Unrecognised event type; nothing in this codebase subscribes to it.";
     await db
       .update(stripeWebhookEvents)
