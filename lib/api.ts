@@ -20,6 +20,13 @@ export class ApiError extends Error {
       | "CONFIGURATION_REQUIRED"
       /** A third party answered, and the answer was no. Distinct from our own misconfiguration. */
       | "UPSTREAM_ERROR"
+      /**
+       * Authenticated, but the second factor is missing or stale (D40). **Not**
+       * `UNAUTHORIZED`: the caller is who they say they are, and telling them to
+       * sign in again would send them round a loop that cannot fix it. The
+       * `details.gate` says whether to enrol, challenge, or step up.
+       */
+      | "MFA_REQUIRED"
       | "INTERNAL",
     public status: number,
     message: string,

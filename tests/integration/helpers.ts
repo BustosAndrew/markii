@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import postgres from "postgres";
 import "./env";
 import { BASE_URL } from "./setup";
@@ -160,6 +161,85 @@ async function createConfirmedStaffUser(email: string, password: string): Promis
  * The org is provisioned by `ensureFirstOrg`, which **sign-in** calls as well as
  * sign-up — so creating the user out of band loses nothing.
  */
+/**
+ * RFC 4648 base32 decode, for the TOTP secret Supabase hands back at enrolment.
+ *
+ * Written here rather than pulled in as a dependency: it is fifteen lines, and
+ * the suite should not gain a package to do what an authenticator app does.
+ */
+function base32Decode(input: string): Buffer {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  const clean = input.toUpperCase().replace(/=+$/, "").replace(/\s/g, "");
+  let bits = 0;
+  let value = 0;
+  const out: number[] = [];
+  for (const char of clean) {
+    const idx = alphabet.indexOf(char);
+    if (idx === -1) continue;
+    value = (value << 5) | idx;
+    bits += 5;
+    if (bits >= 8) {
+      out.push((value >>> (bits - 8)) & 0xff);
+      bits -= 8;
+    }
+  }
+  return Buffer.from(out);
+}
+
+/**
+ * A real TOTP code (RFC 6238), so the suite exercises the **actual** MFA path.
+ *
+ * D40 makes MFA mandatory for every merchant, which means every one of these
+ * test files now depends on it working. The tempting shortcut is an env flag
+ * that skips enforcement in tests — and that would leave the single control
+ * standing between an attacker and every merchant's store completely untested.
+ * Computing a code is thirty lines; not testing the login path is not worth it.
+ */
+export function totpCode(secret: string, at: Date = new Date()): string {
+  const counter = Math.floor(at.getTime() / 1000 / 30);
+  const buf = Buffer.alloc(8);
+  buf.writeUInt32BE(Math.floor(counter / 2 ** 32), 0);
+  buf.writeUInt32BE(counter >>> 0, 4);
+
+  const hmac = createHmac("sha1", base32Decode(secret)).update(buf).digest();
+  // Dynamic truncation, RFC 4226 §5.4.
+  const offset = hmac[hmac.length - 1] & 0x0f;
+  const code =
+    ((hmac[offset] & 0x7f) << 24) |
+    ((hmac[offset + 1] & 0xff) << 16) |
+    ((hmac[offset + 2] & 0xff) << 8) |
+    (hmac[offset + 3] & 0xff);
+  return String(code % 1_000_000).padStart(6, "0");
+}
+
+/**
+ * Enrols a factor and clears the challenge, leaving the session at `aal2`.
+ *
+ * Returns the recovery codes so a test can exercise the recovery path with real
+ * ones rather than fabricating a row.
+ */
+export async function enrollMfa(client: Client): Promise<{ secret: string; recoveryCodes: string[] }> {
+  const start = await client.post("/api/auth/mfa/enroll", {});
+  if (start.status >= 400) throw new Error(`mfa enroll failed: ${JSON.stringify(start.json)}`);
+
+  const secret: string = start.json.secret;
+  const done = await client.put("/api/auth/mfa/enroll", {
+    factorId: start.json.factorId,
+    code: totpCode(secret),
+  });
+  if (done.status >= 400) throw new Error(`mfa confirm failed: ${JSON.stringify(done.json)}`);
+
+  return { secret, recoveryCodes: done.json.recoveryCodes ?? [] };
+}
+
+/**
+ * A signed-in merchant whose session has **satisfied MFA** (D40).
+ *
+ * Enrolment happens here rather than in each test because every merchant account
+ * needs it now — a session that has not cleared `aal2` is refused by
+ * `requireAuthContext`, so without this every file in the suite would fail at
+ * its first authenticated request.
+ */
 export async function signUpMerchant(client: Client, label: string) {
   const stamp = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
   // Supabase rejects `.test` and `example.com`; markii.shop is a real domain.
@@ -172,7 +252,9 @@ export async function signUpMerchant(client: Client, label: string) {
   const inn = await client.post("/api/auth/sign-in", { email, password });
   if (inn.status >= 400) throw new Error(`sign-in failed: ${JSON.stringify(inn.json)}`);
 
-  return { email, password };
+  const { secret, recoveryCodes } = await enrollMfa(client);
+
+  return { email, password, totpSecret: secret, recoveryCodes };
 }
 
 /** Removes a merchant and everything cascading from their org. */

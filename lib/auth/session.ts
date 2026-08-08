@@ -15,6 +15,7 @@ import {
 } from "../db";
 import { getSupabaseServerClient } from "../supabase/server";
 import { bearerFrom, hashesMatch, hashToken } from "./tokens";
+import { assertMfaSatisfied } from "./mfa";
 import { isStaffUser } from "./user-kind";
 
 /**
@@ -93,6 +94,22 @@ export async function getSession(): Promise<Session | null> {
 
   const memberships = await listMemberships(user.id);
   if (memberships.length === 0) return null;
+
+  /**
+   * **MFA is enforced here, not in the wrappers** (D40).
+   *
+   * `requireSession` and `requireAuthContext` are both real entry points —
+   * `/api/me` uses the first, every `orgHandler` route the second — so a check
+   * placed in one of them protects exactly half the surface. That is not
+   * hypothetical: the first version of this guarded only `requireAuthContext`,
+   * and `/api/me` happily served an unenrolled merchant until the tests said so.
+   *
+   * **It throws rather than returning null**, which is the one thing this
+   * function otherwise never does. Null means "not signed in" and produces a
+   * 401; this caller *is* signed in, and a 401 would send them back to a form
+   * that signs them in successfully and returns them here forever.
+   */
+  await assertMfaSatisfied();
 
   const requested = (await cookies()).get(ACTIVE_ORG_COOKIE)?.value;
   const active =
@@ -185,7 +202,20 @@ async function contextFromToken(req: Request): Promise<AuthContext | null> {
   };
 }
 
-/** Resolves a token or a cookie session, or throws the 401. */
+/**
+ * Resolves a token or a cookie session, or throws.
+ *
+ * **MFA is enforced on the session path only** (D40). An API token is its own
+ * credential, minted by a session that had already satisfied MFA, and refusing
+ * it here would break every server-to-server integration without protecting
+ * anything its holder could not already reach. A stolen *browser* session is the
+ * threat MFA answers; a stolen token is answered by revoking it.
+ *
+ * The enforcement itself lives inside `getSession`, which is the only function
+ * both entry points share — so checking it here as well would be duplication
+ * that can drift, and checking it *only* here would leave `/api/me` open.
+ * Tokens skip it because they never reach `getSession`.
+ */
 export async function requireAuthContext(req: Request): Promise<AuthContext> {
   const viaToken = await contextFromToken(req);
   if (viaToken) return viaToken;
