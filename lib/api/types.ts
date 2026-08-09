@@ -22,7 +22,8 @@ export type ApiErrorBody = {
   error: {
     code: ApiErrorCode | string;
     message: string;
-    details?: unknown[];
+    /** Object for MFA gates; arrays for validation issues. */
+    details?: unknown;
   };
 };
 
@@ -170,13 +171,13 @@ export type OverviewResponse = {
 export class ApiClientError extends Error {
   status: number;
   code: string;
-  details?: unknown[];
+  details?: unknown;
 
   constructor(
     status: number,
     code: string,
     message: string,
-    details?: unknown[],
+    details?: unknown,
   ) {
     super(message);
     this.name = "ApiClientError";

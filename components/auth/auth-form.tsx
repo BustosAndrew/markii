@@ -27,19 +27,19 @@ const copy: Record<
 > = {
   "sign-in": {
     title: "Sign in",
-    description: "Use your merchant account once Phase A auth is configured.",
+    description: "Sign in to your Markii merchant account.",
     submitLabel: "Sign in",
     secondary: { href: "/sign-up", label: "Create account" },
   },
   "sign-up": {
     title: "Create account",
-    description: "Merchant sign-up opens when Phase A auth is live.",
+    description: "Create a merchant account to start selling.",
     submitLabel: "Create account",
     secondary: { href: "/sign-in", label: "Already have an account?" },
   },
   "reset-password": {
     title: "Reset password",
-    description: "Request a password reset email for your merchant account.",
+    description: "We will email a reset link if an account exists for that address.",
     submitLabel: "Send reset link",
     secondary: { href: "/sign-in", label: "Back to sign in" },
   },
@@ -67,13 +67,19 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
       // httpOnly session cookie (D30). No Supabase call from the browser.
       if (mode === "sign-in") {
         await signIn({ email, password });
-        router.replace("/dashboard");
+        // MFA is a second step — /mfa reads the gate and sends enroll or challenge.
+        router.replace("/mfa?next=/dashboard");
         router.refresh();
       } else if (mode === "sign-up") {
-        await signUp({ email, password });
-        setMessage(
-          "Account created. If email confirmation is enabled, check your inbox to finish.",
-        );
+        const result = await signUp({ email, password });
+        if (result.emailConfirmationRequired) {
+          setMessage(
+            "Account created. Check your inbox to confirm your email, then sign in.",
+          );
+        } else {
+          router.replace("/mfa?next=/dashboard");
+          router.refresh();
+        }
       } else {
         await requestPasswordReset({ email });
         setMessage(
@@ -111,10 +117,7 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
 
         {!live ? (
           <div className="mt-6 rounded-[var(--radius-control)] border border-border bg-surface-elevated p-4 text-sm leading-6 text-muted">
-            <p>
-              Merchant auth is planned, not live. Accounts, sessions, and password reset
-              arrive with Phase A.
-            </p>
+            <p>Merchant auth is not available on this deployment yet.</p>
             <span className="mt-3 inline-flex rounded-full bg-surface px-2.5 py-1 text-xs font-medium text-muted">
               API §16 · Accounts, organizations, staff
             </span>

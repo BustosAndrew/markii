@@ -1,4 +1,5 @@
 import { apiGet, apiPost, apiPut } from "./client";
+import type { MfaGate } from "./mfa-errors";
 
 /**
  * Merchant MFA (§16, D40).
@@ -11,10 +12,7 @@ import { apiGet, apiPost, apiPut } from "./client";
  * Shoppers are never subject to any of this.
  */
 
-export type MfaGate =
-  | { status: "ok" }
-  | { status: "enroll"; reason: string }
-  | { status: "challenge"; factorIds?: string[]; reason: string };
+export type { MfaGate };
 
 export type MfaStatus = {
   /** False for a storefront shopper — the same endpoint answers for both kinds. */
@@ -98,22 +96,9 @@ export function recoverMfa(body: { code: string }, init?: RequestInit) {
   return apiPost<MfaRecovery>("/api/auth/mfa/recover", body, init);
 }
 
-/**
- * True when a failed request is asking for a factor rather than a sign-in.
- *
- * **Handle this centrally, not per screen.** Any authenticated call can return
- * it, and treating it as a session failure would sign the merchant out — which
- * fixes nothing, because they would sign back in and land in the same place.
- * That loop is exactly why the API answers `403` here rather than `401`.
- */
-export function isMfaRequired(error: unknown): error is {
-  code: "MFA_REQUIRED";
-  message: string;
-  details: { gate: MfaGate; stepUpWindowMs?: number; action?: string };
-} {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    (error as { code?: string }).code === "MFA_REQUIRED"
-  );
-}
+export {
+  isMfaRequired,
+  mfaErrorDetails,
+  mfaPathForGate,
+  type MfaErrorDetails,
+} from "./mfa-errors";

@@ -23,7 +23,7 @@ export const POST = handler(async (req) => {
     email,
     password,
     options: {
-      emailRedirectTo: `${appUrl()}/api/auth/callback?next=/dashboard`,
+      emailRedirectTo: `${appUrl()}/api/auth/callback?next=/mfa`,
       /**
        * Marks the identity as staff (D32). Note this goes through `data`, which
        * lands in **`user_metadata`** — user-writable, so it is a label rather

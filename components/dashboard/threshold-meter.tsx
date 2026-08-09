@@ -23,8 +23,8 @@ export function ThresholdMeter({
   if (planned) {
     return (
       <ComingSoon
-        title="Threshold meter coming soon"
-        description="Billing and metering are planned. This page keeps the structure honest until API §17 is live."
+        title="Threshold meter unavailable"
+        description="Billing usage could not be loaded for this org yet."
         apiSection="API §17 · Billing, plans, metering, threshold fees"
       />
     );

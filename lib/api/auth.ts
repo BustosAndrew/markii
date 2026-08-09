@@ -29,7 +29,11 @@ export function signIn(body: Credentials, init?: RequestInit) {
 
 export function signUp(body: Credentials, init?: RequestInit) {
   return callWhenLive(AUTH_API_LIVE, AUTH_SECTION, () =>
-    apiPost<void>("/api/auth/sign-up", body, init),
+    apiPost<{ ok: true; emailConfirmationRequired: boolean }>(
+      "/api/auth/sign-up",
+      body,
+      init,
+    ),
   );
 }
 

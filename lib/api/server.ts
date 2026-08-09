@@ -2,6 +2,12 @@ import "server-only";
 import { GET as analyticsOverviewGET } from "@/app/api/analytics/overview/route";
 import { GET as analyticsSiteGET } from "@/app/api/analytics/sites/[idOrSlug]/route";
 import { GET as billingUsageGET } from "@/app/api/billing/usage/route";
+import { GET as billingPlansGET } from "@/app/api/billing/plans/route";
+import { GET as billingSubscriptionGET } from "@/app/api/billing/subscription/route";
+import { GET as billingInvoicesGET } from "@/app/api/billing/invoices/route";
+import { GET as billingInvoiceGET } from "@/app/api/billing/invoices/[id]/route";
+import { GET as billingAddonGET } from "@/app/api/billing/addons/[addon]/route";
+import { GET as mfaStatusGET } from "@/app/api/auth/mfa/route";
 import { GET as categoriesGET } from "@/app/api/categories/route";
 import { GET as categoryGET } from "@/app/api/categories/[idOrSlug]/route";
 import { GET as emailSettingsGET } from "@/app/api/settings/email/route";
@@ -28,7 +34,16 @@ import { GET as sitesGET } from "@/app/api/sites/route";
 import { GET as siteGET } from "@/app/api/sites/[idOrSlug]/route";
 import { GET as siteSummaryGET } from "@/app/api/sites/[idOrSlug]/summary/route";
 import { buildQuery, type QueryValue } from "./client";
-import type { UsageResponse } from "./billing";
+import type {
+  Addon,
+  AddonResponse,
+  InvoiceDetail,
+  InvoicesResponse,
+  PlansResponse,
+  SubscriptionResponse,
+  UsageResponse,
+} from "./billing";
+import type { MfaStatus } from "./mfa";
 import type { EmailSettings } from "./email";
 import type { CustomerMembership, MembershipTier } from "./memberships";
 import type { Collection, Customer, Discount } from "./commerce";
@@ -76,7 +91,7 @@ async function call<T>(
   if (!res.ok) {
     let code = "INTERNAL";
     let message = res.statusText || "Request failed";
-    let details: unknown[] | undefined;
+    let details: unknown | undefined;
     try {
       const body = await res.json();
       if (body?.error) {
@@ -181,6 +196,35 @@ export const getReadinessOverview = (query?: {
   );
 
 export const getBillingUsage = () => call<UsageResponse>(billingUsageGET, "/api/billing/usage");
+
+export const listBillingPlans = () =>
+  call<PlansResponse>(billingPlansGET, "/api/billing/plans");
+
+export const getBillingSubscription = () =>
+  call<SubscriptionResponse>(billingSubscriptionGET, "/api/billing/subscription");
+
+export const listBillingInvoices = (query?: { page?: number; limit?: number }) =>
+  call<InvoicesResponse>(
+    billingInvoicesGET,
+    "/api/billing/invoices",
+    query as Record<string, QueryValue>,
+  );
+
+export const getBillingInvoice = (id: string) =>
+  call<InvoiceDetail>(billingInvoiceGET, `/api/billing/invoices/${id}`, undefined, {
+    id,
+  });
+
+export const getBillingAddon = (addon: Addon) =>
+  call<AddonResponse>(billingAddonGET, `/api/billing/addons/${addon}`, undefined, {
+    addon,
+  });
+
+/**
+ * Reachable before MFA is satisfied — how the dashboard layout decides enroll
+ * vs challenge without treating MFA_REQUIRED as a generic load failure.
+ */
+export const getMfaStatus = () => call<MfaStatus>(mfaStatusGET, "/api/auth/mfa");
 
 export const getEmailSettings = () =>
   call<EmailSettings>(emailSettingsGET, "/api/settings/email");
