@@ -1,5 +1,6 @@
 import type { UsageResponse } from "@/lib/api/billing";
 import { ComingSoon } from "@/components/ui/coming-soon";
+import { LocalDateRange } from "@/components/ui/local-date";
 import { formatMinor } from "@/lib/api/money";
 import { cn } from "@/lib/utils";
 
@@ -189,7 +190,11 @@ export function ThresholdMeter({
         <div className="rounded-[var(--radius-control)] border border-border bg-surface-elevated p-4">
           <p className="text-sm font-medium text-foreground">Current period</p>
           <p className="mt-1 text-sm text-muted">
-            {usage.period.start} to {usage.period.end}
+            <LocalDateRange
+              start={usage.period.start}
+              end={usage.period.end}
+              withTime
+            />
           </p>
           {usage.processorFeesNote ? (
             <p className="mt-4 text-sm leading-6 text-muted">{usage.processorFeesNote}</p>
