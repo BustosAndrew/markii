@@ -30,6 +30,7 @@ import "./definitions/email";
 import "./definitions/memberships";
 import "./definitions/billing";
 import "./definitions/integrations";
+import "./definitions/payments";
 
 export { defineAction, getAction, allActions, describeAction } from "./registry";
 export {

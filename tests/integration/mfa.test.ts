@@ -312,7 +312,7 @@ describe("payout destination is privileged", () => {
      * redirected payout left no record of who redirected it.
      */
     const [audit] = await sql`select actor_id, action_id, diff from action_invocations
-      where org_id = ${orgId} and action_id = 'integrations.connect'
+      where org_id = ${orgId} and action_id = 'payments.connectRail'
       order by occurred_at desc limit 1`;
     expect(audit, "changing the payout address must be audited").toBeTruthy();
     expect(JSON.stringify(audit.diff)).toContain(WALLET);

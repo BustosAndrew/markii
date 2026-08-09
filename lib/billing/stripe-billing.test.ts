@@ -186,6 +186,51 @@ describe("billing action registration", () => {
   });
 
   /**
+   * Payment rails and catalog feeds were one action until 2026-08-08, which
+   * forced one permission and one risk tier to cover both — so connecting a
+   * Google product feed needed `billing.write` and a step-up MFA challenge,
+   * because the x402 wallet address shared the code path.
+   *
+   * This pins the split. Re-merging them would silently re-escalate the feed, or
+   * (worse) de-escalate the wallet address, and neither would fail any other
+   * test.
+   */
+  it("keeps payment rails and catalog feeds at different authority", () => {
+    const rail = allActions().find((a) => a.id === "payments.connectRail");
+    const feed = allActions().find((a) => a.id === "integrations.connect");
+
+    // Where the money goes: money authority, top risk tier, fresh factor.
+    expect(rail?.permission).toBe("billing.write");
+    expect(rail?.riskTier).toBe("high");
+    expect(rail?.requiresStepUp).toBe(true);
+
+    // A product feed: catalog authority, and no second factor.
+    expect(feed?.permission).toBe("catalog.write");
+    expect(feed?.requiresStepUp ?? false).toBe(false);
+  });
+
+  /**
+   * Step-up is only meaningful while it is rare. A prompt that fires on routine
+   * catalog work trains people to click it away, and the click-through habit
+   * carries straight over to the prompt guarding a payout address.
+   */
+  it("asks for a second factor only where money or access moves", () => {
+    const stepUp = allActions()
+      .filter((a) => a.requiresStepUp)
+      .map((a) => a.id)
+      .sort();
+    expect(stepUp).toEqual([
+      "billing.changePlan",
+      "billing.invoiceAssessments",
+      "billing.setDefaultPaymentMethod",
+      "email.addSendingDomain",
+      "orders.refund",
+      "payments.connectRail",
+      "payments.disconnectRail",
+    ]);
+  });
+
+  /**
    * §22 rule 3: pricing is `high`, which the registry reports as
    * `requiresHumanApproval` and which can never be configured to auto-run. An
    * agent may propose an upgrade; a person confirms it.

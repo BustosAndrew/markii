@@ -603,6 +603,29 @@ Columns: `id,date,product,quantity,amount,currency,provider,status,tx_hash,agent
 
 ## 8. Integrations
 
+> ### Payment rails split from catalog feeds (2026-08-08)
+>
+> `GET /api/payments` returns the rails a store can take money on. `GET /api/integrations` returns
+> the rest. They were one endpoint and one action until the split, which meant connecting a Google
+> product feed required `billing.write` **and** a step-up MFA challenge — rules sized for the x402
+> wallet address sharing the code path.
+>
+> | | Action | Permission | Risk | Step-up |
+> |---|---|---|---|---|
+> | Rails (`x402`, `stripe`) | `payments.connectRail` · `disconnectRail` | `billing.write` | `high` | **yes** |
+> | Feeds (`google`) | `integrations.connect` · `disconnect` | `catalog.write` | `medium` | no |
+>
+> `PUT`/`DELETE /api/integrations/:provider` still works and **dispatches by provider class**, so
+> existing callers are unaffected — but the authority applied now differs by what the provider can
+> cost. Step-up matters only while it stays rare: a prompt that fires on routine catalog work is one
+> people learn to click through, and that habit carries to the prompt guarding a payout address.
+>
+> **`GET /api/payments` reports no balance or payout figures, deliberately.** Markii never holds
+> merchant funds (D4) and uses Connect Standard, so the merchant's own Stripe dashboard is the source
+> of truth — restating it would publish a number Markii does not own and cannot keep in step. x402
+> has no balance concept at all. `balances` is `null` with a note; what Markii *is* authoritative for
+> (orders, net sales, refunds across every rail, the threshold meter) is §13 and §17.
+
 ### `GET /api/integrations`
 
 ```json

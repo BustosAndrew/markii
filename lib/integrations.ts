@@ -7,6 +7,30 @@ export type Provider = "x402" | "google" | "stripe";
 export const PROVIDERS: Provider[] = ["x402", "google", "stripe"];
 
 /**
+ * Providers split by **what they can cost a merchant if they go wrong**, and the
+ * split is an authority boundary rather than navigation.
+ *
+ * A payment rail decides where money is paid: changing the x402 wallet address
+ * redirects revenue, and turning a rail off stops it arriving. A catalog feed
+ * publishes products to a shopping surface — worth getting right, but nobody
+ * loses money if a `catalog_manager` reconnects it.
+ *
+ * They were one group until 2026-08-08, which meant connecting Google Merchant
+ * Center required `billing.write` **and** a fresh MFA challenge, because those
+ * were the right rules for the wallet address sitting next to it. Same table,
+ * same route, very different stakes.
+ */
+export const PAYMENT_RAILS = ["x402", "stripe"] as const;
+export const CATALOG_FEEDS = ["google"] as const;
+
+export type PaymentRail = (typeof PAYMENT_RAILS)[number];
+export type CatalogFeed = (typeof CATALOG_FEEDS)[number];
+
+export function isPaymentRail(provider: Provider): provider is PaymentRail {
+  return (PAYMENT_RAILS as readonly Provider[]).includes(provider);
+}
+
+/**
  * Integration credentials are **per organization**. `provider` used to be the
  * primary key, which made the table silently single-tenant: the second org to
  * connect Stripe would have overwritten the first one's secret key.

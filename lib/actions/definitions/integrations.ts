@@ -1,117 +1,100 @@
 import { z } from "zod";
 import { badRequest, notFound } from "../../api";
-import { getIntegration, integrationStatus, upsertIntegration, type Provider } from "../../integrations";
+import {
+  getIntegration,
+  integrationStatus,
+  upsertIntegration,
+  CATALOG_FEEDS,
+  type CatalogFeed,
+} from "../../integrations";
 import { defineAction } from "../registry";
 
 /**
- * Payment and service integrations (§8, §18.4).
+ * Catalog feeds — publishing products to an outside shopping surface (§8).
  *
- * **These were route handlers until D40, and moving them fixed two real holes.**
+ * **Payment rails moved out on 2026-08-08** (`definitions/payments.ts`). Until
+ * then one action covered both, so the rules had to be sized for the riskier
+ * member: connecting Google Merchant Center required `billing.write` and a fresh
+ * MFA step-up, because the x402 wallet address shared the same code path. That
+ * made a routine catalog task need the authority to move money.
  *
- * 1. **No permission was checked at all.** `PUT /api/integrations/:provider` ran
- *    under `orgHandler` with no `permission` option, so *any* authenticated
- *    staff member could change the x402 wallet address — including `analyst` and
- *    `viewer`, whose entire definition is "read-only, deliberately no write
- *    anywhere". That is the payout destination: a viewer could redirect the
- *    merchant's revenue.
- * 2. **No step-up.** §22 rule 1 says no route handler mutates outside the
- *    registry, and this one predated the rule, so `requiresStepUp` had nowhere
- *    to attach and the check had to be bolted onto the route by hand.
+ * These now sit at the authority a product feed actually warrants. Getting one
+ * wrong publishes bad listings, which is fixed by fixing them — nobody's revenue
+ * goes anywhere else.
  *
- * Both follow from being outside the registry, which is the argument for the
- * rule rather than an exception to it. As actions they also land in
- * `action_invocations`, so "who changed the payout address, and when" finally
- * has an answer — it did not before.
+ * The history is worth keeping because the original grouping was reasonable:
+ * they are all rows in `integrations`, all "connect an outside service". Storage
+ * shape is not authority, and that is the mistake worth not repeating.
  */
 
-const configSchemas: Record<Provider, z.ZodType<Record<string, string>>> = {
-  x402: z
-    .object({
-      walletAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/, "not a valid EVM address"),
-    })
-    .strict(),
-  google: z.object({ serviceAccountJson: z.string().min(2) }).strict(),
-  /** Present for exhaustiveness; the action refuses Stripe outright below. */
-  stripe: z.object({}).strict(),
-};
+const feedSchema = z.enum(CATALOG_FEEDS);
 
-const providerSchema = z.enum(["x402", "google", "stripe"]);
+const feedConfigSchemas: Record<CatalogFeed, z.ZodType<Record<string, string>>> = {
+  google: z
+    .object({
+      merchantId: z.string().min(1).max(64).optional(),
+      serviceAccountJson: z.string().min(2),
+    })
+    .strict()
+    .transform((v) => ({ ...v })) as z.ZodType<Record<string, string>>,
+};
 
 export const connectIntegration = defineAction({
   id: "integrations.connect",
   description:
-    "Connect or update an integration for this organization. For x402 this sets the wallet " +
-    "address that store revenue is paid to. Stripe is refused here — it connects through OAuth.",
+    "Connect or update a catalog feed, so products publish to an outside shopping surface. " +
+    "Payment rails are configured separately — see payments.connectRail.",
   input: z
     .object({
-      provider: providerSchema,
+      provider: feedSchema,
       config: z.record(z.string(), z.string()),
     })
     .strict(),
   /**
-   * **`billing.write`, which is owner and administrator only.** The wallet
-   * address decides where a merchant's money lands, so it belongs with the
-   * authority over money rather than with general org settings — and notably not
-   * with `developer`, whose role comment already says "no authority over money".
+   * **`catalog.write`, not `billing.write`.** A product feed is catalog work, so
+   * a `catalog_manager` — whose whole role is the catalog — can do it without
+   * being handed authority over the merchant's money.
    */
-  permission: "billing.write",
-  /** Changing where revenue is paid. Nothing in this codebase outranks it. */
-  riskTier: "high",
-  requiresStepUp: true,
+  permission: "catalog.write",
   /**
-   * The Google service-account JSON is a credential. The audit row is long-lived
-   * and widely readable, so it must never carry one.
+   * Medium, not high: a bad feed publishes wrong listings, which is corrected by
+   * correcting them. No step-up — demanding a second factor to reconnect a
+   * product feed trains people to treat the prompt as noise, which is how a
+   * step-up on something that *does* move money gets clicked through.
+   */
+  riskTier: "medium",
+  /**
+   * The service-account JSON is a credential, and the audit row is long-lived
+   * and widely readable.
    */
   redactInput: (input) => ({
     provider: input.provider,
-    config:
-      input.provider === "google"
-        ? { serviceAccountJson: "[redacted]" }
-        : input.config,
+    config: { ...input.config, serviceAccountJson: "[redacted]" },
   }),
   async run(input, ctx) {
     if (!ctx.actor.orgId) throw notFound("Organization");
     const orgId = ctx.actor.orgId;
 
-    if (input.provider === "stripe") {
-      throw badRequest(
-        "Stripe is connected through Connect Standard OAuth, not by supplying a key. Markii never " +
-          "stores a merchant secret key — you keep your own Stripe account, rates, dashboard, and " +
-          "payouts. Connect via Settings → Integrations.",
-      );
-    }
-
-    const config = configSchemas[input.provider].parse(input.config);
-    if (input.provider === "google") {
-      try {
-        JSON.parse(config.serviceAccountJson);
-      } catch {
-        throw badRequest("serviceAccountJson is not valid JSON");
-      }
+    const config = feedConfigSchemas[input.provider].parse(input.config);
+    try {
+      JSON.parse(config.serviceAccountJson);
+    } catch {
+      throw badRequest("serviceAccountJson is not valid JSON");
     }
 
     const existing = await getIntegration(orgId, input.provider);
-
-    /**
-     * Recorded because this is the diff anyone investigating a redirected payout
-     * will look for first. The **old and new wallet address**, on the invocation,
-     * with an actor attached.
-     */
-    if (input.provider === "x402") {
-      ctx.recordDiff({
-        entity: "integration",
-        entityId: `${orgId}:x402`,
-        path: "walletAddress",
-        before: existing?.config.walletAddress ?? null,
-        after: config.walletAddress,
-      });
-    }
+    ctx.recordDiff({
+      entity: "catalogFeed",
+      entityId: `${orgId}:${input.provider}`,
+      path: "status",
+      before: existing?.status ?? null,
+      after: "connected",
+    });
 
     const row = await upsertIntegration(orgId, input.provider, "connected", {
       ...existing?.config,
       ...config,
     });
-
     return integrationStatus(input.provider, row);
   },
 });
@@ -119,31 +102,25 @@ export const connectIntegration = defineAction({
 export const disconnectIntegration = defineAction({
   id: "integrations.disconnect",
   description:
-    "Disconnect an integration. For x402 this removes the wallet revenue is paid to, so the " +
-    "store can no longer take payment on that rail.",
-  input: z.object({ provider: providerSchema }).strict(),
-  permission: "billing.write",
-  /** Turning off a payment rail stops money arriving — the same decision reversed. */
-  riskTier: "high",
-  requiresStepUp: true,
+    "Disconnect a catalog feed. Products stop publishing to that surface; nothing about payments " +
+    "changes.",
+  input: z.object({ provider: feedSchema }).strict(),
+  permission: "catalog.write",
+  riskTier: "medium",
   async run(input, ctx) {
     if (!ctx.actor.orgId) throw notFound("Organization");
     const orgId = ctx.actor.orgId;
 
     const existing = await getIntegration(orgId, input.provider);
     ctx.recordDiff({
-      entity: "integration",
+      entity: "catalogFeed",
       entityId: `${orgId}:${input.provider}`,
       path: "status",
       before: existing?.status ?? null,
       after: "not_connected",
     });
 
-    /**
-     * Config is cleared rather than kept. A disconnected rail holding a stale
-     * wallet address would quietly resume paying an old destination if it were
-     * ever reconnected without one being supplied.
-     */
+    /** Clears the stored credential rather than leaving it dormant on the row. */
     const row = await upsertIntegration(orgId, input.provider, "not_connected", {});
     return integrationStatus(input.provider, row);
   },

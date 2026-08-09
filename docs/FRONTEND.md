@@ -114,6 +114,38 @@ last code with a broken phone is one bad day from a support ticket nobody can re
 
 **Shoppers never see any of this.** Storefront customers are excluded entirely; `required: false`.
 
+### Payments is its own screen now — and it must not show a balance
+
+Payment rails were split out of Integrations on 2026-08-08. They are different
+things and now carry different authority:
+
+| | Payments | Integrations |
+|---|---|---|
+| What | Stripe, x402 — **where money is paid** | Google Merchant Center — a product feed |
+| Endpoint | `GET /api/payments` | `GET /api/integrations` |
+| Service | `lib/api/payments.ts` | `lib/api/integrations.ts` |
+| Who can change it | owner / administrator (`billing.write`) | `catalog_manager` and up (`catalog.write`) |
+| Changing it | **step-up MFA**, expect `403 MFA_REQUIRED` | no second factor |
+
+**Gate the UI on `canAcceptPayments`, not `status`.** Connected is not the same as able to take
+money — Stripe enables charges only after verification, and a store told it accepts cards in that
+window fails the shopper at the moment they type their card. `requirementsDue` says what Stripe is
+still waiting for.
+
+**Two levels to show, or a merchant cannot debug their own store**: whether the *org* has a rail
+connected, and whether *this storefront* has it switched on (`stores[].enabled`). A live store
+refusing cards is usually the second one.
+
+**`balances` is always `null`, and that is the answer rather than a missing feature.** Render
+`balancesNote` and link out to Stripe. Markii never holds merchant funds and uses Connect Standard,
+so their own Stripe dashboard is the source of truth for balance, payouts, and processor fees;
+restating those here would publish numbers Markii does not own and cannot keep in step. x402 has no
+balance at all — it settles on-chain to their wallet, so a combined figure would have to invent one.
+
+**What Markii *is* the source of truth for, and should show:** orders, net sales, and refunds
+**across every rail** (Stripe cannot see x402 sales), plus the threshold meter. That lives under
+Orders → Settlements and `getBillingUsage()`. The short version: **volume yes, balance no.**
+
 ### §17 billing changed shape — screens built against the old refusals need revisiting
 
 Billing used to answer `503 CONFIGURATION_REQUIRED` for everything except reads. It no longer does,
