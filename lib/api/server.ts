@@ -17,6 +17,7 @@ import { GET as emailSettingsGET } from "@/app/api/settings/email/route";
 import { GET as financesOverviewGET } from "@/app/api/finances/overview/route";
 import { GET as financesSiteGET } from "@/app/api/finances/sites/[idOrSlug]/route";
 import { GET as integrationsGET } from "@/app/api/integrations/route";
+import { GET as paymentsGET } from "@/app/api/payments/route";
 import { GET as ordersGET } from "@/app/api/orders/route";
 import { GET as orderGET } from "@/app/api/orders/[id]/route";
 import { GET as overviewGET } from "@/app/api/overview/route";
@@ -59,6 +60,7 @@ import type { ReadinessReport } from "./readiness";
 import type { AnalyticsOverview, AnalyticsQuery, AnalyticsSiteDetail } from "./analytics";
 import type { FinancesOverview, FinancesQuery, FinancesSiteDetail } from "./finances";
 import type { IntegrationsResponse } from "./integrations";
+import type { PaymentsResponse } from "./payments";
 import type { CategoriesQuery } from "./categories";
 import type { ProductsQuery } from "./products";
 import type { SiteSummary, SitesQuery } from "./sites";
@@ -176,6 +178,8 @@ export const getSiteFinances = (idOrSlug: string, query?: FinancesQuery) =>
 
 export const getIntegrations = () =>
   call<IntegrationsResponse>(integrationsGET, "/api/integrations");
+
+export const getPayments = () => call<PaymentsResponse>(paymentsGET, "/api/payments");
 
 /**
  * Org-scoped sections (§9, §17, §24) must come through here, not the fetch

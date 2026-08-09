@@ -93,7 +93,7 @@ export function SiteControls({ site }: { site: Site }) {
         <div className="border-t border-border">
           <Toggle
             label="x402 payments"
-            description="Accept USDC payments via x402."
+            description="Offer USDC checkout on this storefront when a wallet is connected in Payments."
             checked={current.paymentProviders.x402}
             disabled={busy}
             onChange={(x402) =>
@@ -105,8 +105,8 @@ export function SiteControls({ site }: { site: Site }) {
         </div>
         <div className="border-t border-border">
           <Toggle
-            label="Stripe (optional)"
-            description="Enable fiat checkout when Stripe is connected."
+            label="Stripe"
+            description="Offer card checkout on this storefront when Stripe can accept payments."
             checked={current.paymentProviders.stripe}
             disabled={busy}
             onChange={(stripe) =>

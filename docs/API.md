@@ -684,7 +684,7 @@ Mints a one-time `state` stored against the org.
 Where Stripe returns. Exchanges the code for `stripe_user_id` (`acct_…`), reads the account once so
 the merchant sees a truthful state immediately, stores `accountId` / `chargesEnabled` /
 `payoutsEnabled` / `requirementsDue` / `connectedAt`, and redirects to
-`/dashboard/integrations?stripe=connected`.
+`/dashboard/payments?stripe=connected`.
 
 **The `state` check is the security of this endpoint.** Without it, anyone who gets a signed-in
 merchant to load this URL with their own `code` attaches *their* Stripe account to *that

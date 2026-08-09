@@ -26,7 +26,7 @@ export default async function SettlementsPage({
     <div>
       <PageHeader
         title="Settlements"
-        description="Balances across sites and payment rails."
+        description="Sales volume across sites and payment rails. Processor balances live in your Stripe dashboard."
       />
       <OrdersSubnav />
 
@@ -39,19 +39,19 @@ export default async function SettlementsPage({
       {!error && data ? (
         <>
           <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <Stat label="Total balance" value={<MoneyText cents={data.totalBalanceCents} />} />
+            <Stat label="Total sales" value={<MoneyText cents={data.totalBalanceCents} />} />
             <Stat
               label="x402"
               value={<MoneyText cents={data.x402BalanceCents} currency="USDC" />}
             />
-            <Stat label="Fiat" value={<MoneyText cents={data.fiatBalanceCents} />} />
+            <Stat label="Card / fiat" value={<MoneyText cents={data.fiatBalanceCents} />} />
             <Stat label="Orders" value={String(data.orderCount)} />
           </div>
 
           {data.sites.length === 0 ? (
             <EmptyState
               title="No settlement data"
-              description="Balances appear once sites have orders or seed data."
+              description="Sales volume appears once sites have orders."
               action={<ButtonLink href="/dashboard/websites/new">Create website</ButtonLink>}
             />
           ) : (
@@ -60,9 +60,9 @@ export default async function SettlementsPage({
                 <thead className="bg-surface-elevated text-muted">
                   <tr>
                     <th className="px-4 py-3 font-medium">Site</th>
-                    <th className="px-4 py-3 font-medium">Balance</th>
+                    <th className="px-4 py-3 font-medium">Sales</th>
                     <th className="px-4 py-3 font-medium">x402</th>
-                    <th className="px-4 py-3 font-medium">Fiat</th>
+                    <th className="px-4 py-3 font-medium">Card / fiat</th>
                     <th className="px-4 py-3 font-medium">Orders</th>
                   </tr>
                 </thead>

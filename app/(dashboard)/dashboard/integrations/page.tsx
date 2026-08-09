@@ -5,15 +5,13 @@ import { FetchError } from "@/components/dashboard/fetch-error";
 import { IntegrationsPanel } from "@/components/dashboard/integrations-panel";
 
 export default async function IntegrationsPage() {
-  const { data, error } = await loadOrError(() =>
-    getIntegrations(),
-  );
+  const { data, error } = await loadOrError(() => getIntegrations());
 
   return (
     <div>
       <PageHeader
         title="Integrations"
-        description="Connect the payment and catalog tools your store uses. Stripe, x402, and Google Merchant Center are peer options."
+        description="Catalog and product feeds. Payment rails live under Payments."
       />
 
       {error || !data ? (

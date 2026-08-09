@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import {
   BarChart3,
+  CreditCard,
   Globe,
   KeyRound,
   LayoutList,
@@ -31,6 +32,7 @@ export const nav = [
   { href: "/dashboard/websites", label: "Websites", icon: Globe },
   { href: "/dashboard/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/dashboard/settings", label: "Settings", icon: Settings },
+  { href: "/dashboard/payments", label: "Payments", icon: CreditCard },
   { href: "/dashboard/health", label: "Health", icon: ShieldCheck },
   { href: "/dashboard/integrations", label: "Integrations", icon: Plug },
 ] as const;

@@ -56,7 +56,7 @@ export default async function SettlementDetailPage({
     <div>
       <PageHeader
         title={data.site.name}
-        description="Transactions, balances, and CSV export."
+        description="Orders, sales volume by rail, and CSV export."
         actions={
           <ButtonLink href={exportHref} variant="secondary">
             Export CSV
@@ -66,12 +66,12 @@ export default async function SettlementDetailPage({
       <OrdersSubnav />
 
       <div className="mb-6 grid gap-4 sm:grid-cols-3">
-        <Stat label="Total" value={<MoneyText cents={data.balance.totalCents} />} />
+        <Stat label="Total sales" value={<MoneyText cents={data.balance.totalCents} />} />
         <Stat
           label="x402"
           value={<MoneyText cents={data.balance.x402Cents} currency="USDC" />}
         />
-        <Stat label="Fiat" value={<MoneyText cents={data.balance.fiatCents} />} />
+        <Stat label="Card / fiat" value={<MoneyText cents={data.balance.fiatCents} />} />
       </div>
 
       <Suspense fallback={null}>

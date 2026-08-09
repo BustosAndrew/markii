@@ -13,6 +13,11 @@ const sections = [
     description: "Plan, threshold meter, payment method, and invoices.",
   },
   {
+    href: "/dashboard/payments",
+    title: "Payments",
+    description: "Stripe and x402 rails — where storefront money is paid.",
+  },
+  {
     href: "/dashboard/settings/tax",
     title: "Tax",
     description: "Tax rates and how prices include tax at checkout.",

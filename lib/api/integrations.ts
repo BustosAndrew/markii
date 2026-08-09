@@ -70,11 +70,8 @@ export function syncGoogle(init?: RequestInit) {
 }
 
 /**
- * Connect Standard OAuth (D4). Returns the URL to send the merchant to.
- *
- * There is deliberately no `putStripe`. Markii never accepts a merchant secret
- * key — a live `sk_` is full control of their account, and the route that used
- * to take one now refuses.
+ * @deprecated Prefer `startStripeConnect` from `lib/api/payments` — Stripe is a
+ * payment rail, not a catalog integration.
  */
 export function startStripeConnect(init?: RequestInit) {
   return apiGet<{ url: string; mode: "connect_standard"; note: string }>(
@@ -84,8 +81,9 @@ export function startStripeConnect(init?: RequestInit) {
   );
 }
 
+/** Catalog feeds only. Payment rails use `disconnectRail` in `lib/api/payments`. */
 export function disconnectIntegration(
-  provider: IntegrationProvider,
+  provider: "google",
   init?: RequestInit,
 ) {
   return apiDelete<{ status: "not_connected" }>(

@@ -30,7 +30,7 @@ export const GET = orgHandler(
      * nothing to explain why. The request URL is the one origin guaranteed to
      * match where they actually are.
      */
-    const settings = new URL("/dashboard/integrations", req.url).toString();
+    const settings = new URL("/dashboard/payments", req.url).toString();
     const fail = (reason: string) =>
       NextResponse.redirect(`${settings}?stripe=error&reason=${encodeURIComponent(reason)}`);
 

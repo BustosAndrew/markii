@@ -15,6 +15,15 @@ import { apiDelete, apiGet, apiPut } from "./client";
  * `lib/api/mfa-errors.ts`.
  */
 
+/** Stripe Connect OAuth kickoff — lives with Payments, not catalog integrations. */
+export function startStripeConnect(init?: RequestInit) {
+  return apiGet<{ url: string; mode: "connect_standard"; note: string }>(
+    "/api/integrations/stripe/connect",
+    undefined,
+    init,
+  );
+}
+
 export type PaymentRail = "x402" | "stripe";
 
 export type RailStatus = {

@@ -1,36 +1,20 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
-import { CreditCard, ShoppingBag, Wallet, type LucideIcon } from "lucide-react";
+import { ShoppingBag } from "lucide-react";
 import {
   disconnectIntegration,
-  startStripeConnect,
   putGoogle,
-  putX402,
   syncGoogle,
-  type GoogleIntegration,
   type IntegrationsResponse,
-  type StripeIntegration,
-  type X402Integration,
 } from "@/lib/api/integrations";
-import { ApiClientError } from "@/lib/api/types";
+import { publicErrorMessage } from "@/lib/api/public-copy";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { FieldError, Input, Label, Textarea } from "@/components/ui/field";
-
-function statusBadge(status: string) {
-  if (status === "connected") return "success" as const;
-  if (status === "error") return "error" as const;
-  return "neutral" as const;
-}
-
-function statusLabel(status: string) {
-  if (status === "connected") return "Connected";
-  if (status === "error") return "Error";
-  return "Not connected";
-}
 
 export function IntegrationsPanel({
   initial,
@@ -38,14 +22,10 @@ export function IntegrationsPanel({
   initial: IntegrationsResponse;
 }) {
   const router = useRouter();
-  const [x402, setX402] = useState(initial.x402);
   const [google, setGoogle] = useState(initial.google);
-  const [stripe, setStripe] = useState(initial.stripe);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [disconnectTarget, setDisconnectTarget] = useState<
-    "x402" | "google" | "stripe" | null
-  >(null);
+  const [disconnectOpen, setDisconnectOpen] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
   const googleJsonRef = useRef<HTMLTextAreaElement>(null);
@@ -54,57 +34,59 @@ export function IntegrationsPanel({
     router.refresh();
   }
 
+  const connected = google.status === "connected";
+
   return (
     <div className="space-y-6">
-      <ProviderCard
-        title="x402 wallet"
-        description="Receiving wallet for USDC checkout on Base. Network is shown after you connect."
-        status={x402}
-        icon={Wallet}
-      >
-        {x402.status === "connected" && x402.walletAddress ? (
-          <p className="mb-3 break-all font-mono text-xs text-muted">
-            {x402.walletAddress}
-            {x402.network ? ` · ${x402.network}` : ""}
-          </p>
-        ) : null}
-        <X402Form
-          busy={busy}
-          onSave={async (walletAddress) => {
-            setBusy(true);
-            setError(null);
-            try {
-              const next = await putX402({ walletAddress });
-              setX402(next);
-              await refresh();
-            } catch (err) {
-              setError(
-                err instanceof ApiClientError ? err.message : "Save failed.",
-              );
-            } finally {
-              setBusy(false);
-            }
-          }}
-        />
-        {x402.status === "connected" ? (
-          <Button
-            type="button"
-            variant="ghost"
-            className="mt-3 text-error-text"
-            disabled={busy}
-            onClick={() => setDisconnectTarget("x402")}
-          >
-            Disconnect
-          </Button>
-        ) : null}
-      </ProviderCard>
+      <p className="text-sm leading-6 text-muted">
+        Catalog and product feeds. Payment rails (Stripe, x402) are under{" "}
+        <Link href="/dashboard/payments" className="font-medium text-brand hover:text-brand-hover">
+          Payments
+        </Link>
+        .
+      </p>
 
-      <ProviderCard
-        title="Google Merchant Center"
-        description="Optional product sync. Service account JSON is never stored in the browser after submit."
-        status={google}
-        icon={ShoppingBag}
-      >
+      <section className="rounded-[var(--radius-card)] border border-border bg-surface p-5 shadow-[var(--shadow-sm)]">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div className="flex min-w-0 gap-3">
+            <span
+              aria-hidden
+              className={`flex size-10 shrink-0 items-center justify-center rounded-[var(--radius-control)] ${
+                connected ? "bg-brand/10 text-brand" : "bg-hover text-muted"
+              }`}
+            >
+              <ShoppingBag className="size-5" strokeWidth={1.75} />
+            </span>
+            <div className="min-w-0">
+              <h2 className="text-base font-semibold tracking-tight text-foreground">
+                Google Merchant Center
+              </h2>
+              <p className="mt-1 text-sm text-muted">
+                Optional product sync. Service account JSON is never stored in the browser after
+                submit.
+              </p>
+              {google.status === "error" && google.message ? (
+                <p className="mt-2 text-sm text-error-text">{google.message}</p>
+              ) : null}
+            </div>
+          </div>
+          <Badge
+            variant={
+              google.status === "connected"
+                ? "success"
+                : google.status === "error"
+                  ? "error"
+                  : "neutral"
+            }
+          >
+            {google.status === "connected"
+              ? "Connected"
+              : google.status === "error"
+                ? "Error"
+                : "Not connected"}
+          </Badge>
+        </div>
+
         {google.status === "connected" && google.merchantId ? (
           <p className="mb-3 text-sm text-muted">
             Merchant ID {google.merchantId}
@@ -113,6 +95,7 @@ export function IntegrationsPanel({
               : ""}
           </p>
         ) : null}
+
         <GoogleForm
           jsonRef={googleJsonRef}
           busy={busy}
@@ -125,15 +108,14 @@ export function IntegrationsPanel({
               setGoogle(next);
               await refresh();
             } catch (err) {
-              setError(
-                err instanceof ApiClientError ? err.message : "Save failed.",
-              );
+              setError(publicErrorMessage(err, "Save failed."));
             } finally {
               if (googleJsonRef.current) googleJsonRef.current.value = "";
               setBusy(false);
             }
           }}
         />
+
         <div className="mt-3 flex flex-wrap gap-2">
           {google.status === "connected" ? (
             <>
@@ -152,11 +134,7 @@ export function IntegrationsPanel({
                     );
                     await refresh();
                   } catch (err) {
-                    setError(
-                      err instanceof ApiClientError
-                        ? err.message
-                        : "Sync failed.",
-                    );
+                    setError(publicErrorMessage(err, "Sync failed."));
                   } finally {
                     setBusy(false);
                   }
@@ -169,7 +147,7 @@ export function IntegrationsPanel({
                 variant="ghost"
                 className="text-error-text"
                 disabled={busy}
-                onClick={() => setDisconnectTarget("google")}
+                onClick={() => setDisconnectOpen(true)}
               >
                 Disconnect
               </Button>
@@ -179,202 +157,38 @@ export function IntegrationsPanel({
         {syncMessage ? (
           <p className="mt-2 text-sm text-muted">{syncMessage}</p>
         ) : null}
-      </ProviderCard>
-
-      <ProviderCard
-        title="Stripe"
-        description="Card payments through Connect Standard. You keep your own Stripe account, rates, dashboard, and payouts — Markii never sees your secret key, never holds your funds, and takes no cut of your payments."
-        status={stripe}
-        icon={CreditCard}
-      >
-        {stripe.status === "connected" && stripe.accountId ? (
-          <>
-            <p className="mb-1 text-sm text-muted">Account {stripe.accountId}</p>
-            {/*
-              Connected is not the same as able to take money. Stripe enables
-              charges only after verification, and a store told it can accept
-              cards in that window fails the shopper at card entry.
-            */}
-            <p className="mb-3 text-sm text-muted">
-              {stripe.chargesEnabled
-                ? "Card payments are enabled on your account."
-                : "Stripe has not enabled charges yet — card checkout stays off until it does." +
-                  (stripe.requirementsDue?.length
-                    ? ` Outstanding: ${stripe.requirementsDue.join(", ")}.`
-                    : "")}
-            </p>
-          </>
-        ) : (
-          <p className="mb-3 text-sm text-muted">
-            You will be sent to Stripe to authorise. Markii never asks for your secret key.
-          </p>
-        )}
-
-        <Button
-          type="button"
-          disabled={busy}
-          onClick={async () => {
-            setBusy(true);
-            setError(null);
-            try {
-              const { url } = await startStripeConnect();
-              // Full navigation, not a router push: the destination is Stripe.
-              window.location.href = url;
-            } catch (err) {
-              setError(
-                err instanceof ApiClientError ? err.message : "Could not start the Stripe connection.",
-              );
-              setBusy(false);
-            }
-          }}
-        >
-          {stripe.status === "connected" ? "Reconnect Stripe" : "Connect with Stripe"}
-        </Button>
-
-        {stripe.status === "connected" ? (
-          <Button
-            type="button"
-            variant="ghost"
-            className="mt-3 text-error-text"
-            disabled={busy}
-            onClick={() => setDisconnectTarget("stripe")}
-          >
-            Disconnect
-          </Button>
-        ) : null}
-      </ProviderCard>
+      </section>
 
       <FieldError>{error}</FieldError>
 
       <ConfirmDialog
-        open={disconnectTarget !== null}
-        title="Disconnect integration?"
-        description="You can reconnect later. Existing site toggles may need updating."
+        open={disconnectOpen}
+        title="Disconnect Google Merchant Center?"
+        description="Product sync stops until you reconnect. Existing catalog data in Markii is unchanged."
         confirmLabel="Disconnect"
         danger
         busy={busy}
-        onClose={() => setDisconnectTarget(null)}
+        onClose={() => setDisconnectOpen(false)}
         onConfirm={async () => {
-          if (!disconnectTarget) return;
           setBusy(true);
           setError(null);
           try {
-            await disconnectIntegration(disconnectTarget);
-            if (disconnectTarget === "x402") {
-              setX402({ status: "not_connected", walletAddress: null });
-            } else if (disconnectTarget === "google") {
-              setGoogle({
-                status: "not_connected",
-                merchantId: null,
-                lastSyncAt: null,
-              });
-            } else {
-              setStripe({
-                status: "not_connected",
-                mode: "connect_standard",
-                accountId: null,
-                chargesEnabled: false,
-                payoutsEnabled: false,
-                connectedAt: null,
-                requirementsDue: [],
-              });
-            }
-            setDisconnectTarget(null);
+            await disconnectIntegration("google");
+            setGoogle({
+              status: "not_connected",
+              merchantId: null,
+              lastSyncAt: null,
+            });
+            setDisconnectOpen(false);
             await refresh();
           } catch (err) {
-            setError(
-              err instanceof ApiClientError
-                ? err.message
-                : "Disconnect failed.",
-            );
+            setError(publicErrorMessage(err, "Disconnect failed."));
           } finally {
             setBusy(false);
           }
         }}
       />
     </div>
-  );
-}
-
-function ProviderCard({
-  title,
-  description,
-  status,
-  icon: Icon,
-  children,
-}: {
-  title: string;
-  description: string;
-  status: X402Integration | GoogleIntegration | StripeIntegration;
-  icon: LucideIcon;
-  children: React.ReactNode;
-}) {
-  const connected = status.status === "connected";
-  return (
-    <section className="rounded-[var(--radius-card)] border border-border bg-surface p-5 shadow-[var(--shadow-sm)]">
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <div className="flex min-w-0 gap-3">
-          <span
-            aria-hidden
-            className={`flex size-10 shrink-0 items-center justify-center rounded-[var(--radius-control)] ${
-              connected ? "bg-brand/10 text-brand" : "bg-hover text-muted"
-            }`}
-          >
-            <Icon className="size-5" strokeWidth={1.75} />
-          </span>
-          <div className="min-w-0">
-            <h2 className="text-base font-semibold tracking-tight text-foreground">
-              {title}
-            </h2>
-            <p className="mt-1 text-sm text-muted">{description}</p>
-            {status.status === "error" && status.message ? (
-              <p className="mt-2 text-sm text-error-text">{status.message}</p>
-            ) : null}
-          </div>
-        </div>
-        <Badge variant={statusBadge(status.status)}>
-          {statusLabel(status.status)}
-        </Badge>
-      </div>
-      {children}
-    </section>
-  );
-}
-
-function X402Form({
-  busy,
-  onSave,
-}: {
-  busy: boolean;
-  onSave: (walletAddress: string) => Promise<void>;
-}) {
-  const [wallet, setWallet] = useState("");
-  return (
-    <form
-      className="flex flex-col gap-2 sm:flex-row"
-      onSubmit={(e) => {
-        e.preventDefault();
-        void onSave(wallet.trim());
-      }}
-    >
-      <div className="min-w-0 flex-1">
-        <Label htmlFor="wallet" className="sr-only">
-          Wallet address
-        </Label>
-        <Input
-          id="wallet"
-          value={wallet}
-          onChange={(e) => setWallet(e.target.value)}
-          placeholder="0x…"
-          autoComplete="off"
-          spellCheck={false}
-          required
-        />
-      </div>
-      <Button type="submit" disabled={busy || !wallet.trim()}>
-        Save wallet
-      </Button>
-    </form>
   );
 }
 
@@ -428,4 +242,3 @@ function GoogleForm({
     </form>
   );
 }
-
