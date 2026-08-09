@@ -1,0 +1,97 @@
+/* Sanctioned cart / checkout islands (kept out of globals.css) */
+.sf-cart-island {
+  margin: 1.5rem 0;
+  display: grid;
+  gap: 0.85rem;
+}
+.sf-cart-layout {
+  grid-template-columns: 1fr;
+  gap: 2rem;
+}
+@media (min-width: 860px) {
+  .sf-cart-layout {
+    grid-template-columns: 1.1fr 0.9fr;
+    align-items: start;
+  }
+}
+.sf-field {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+}
+.sf-field input,
+.sf-field select,
+.sf-field-row input {
+  width: 100%;
+  border: 1px solid var(--sf-border);
+  background: var(--sf-surface);
+  color: inherit;
+  border-radius: var(--sf-radius);
+  padding: 0.55rem 0.7rem;
+  font: inherit;
+}
+.sf-field-row {
+  display: flex;
+  gap: 0.5rem;
+}
+.sf-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+.sf-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+}
+.sf-error {
+  color: #b42318;
+  font-size: 0.9rem;
+}
+.sf-ok {
+  color: #027a48;
+  font-size: 0.9rem;
+}
+.sf-totals {
+  margin: 1rem 0 0;
+  display: grid;
+  gap: 0.4rem;
+  font-size: 0.95rem;
+}
+.sf-totals > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.sf-total {
+  font-weight: 600;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--sf-border);
+}
+.sf-fieldset {
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  padding: 0.85rem;
+  display: grid;
+  gap: 0.65rem;
+}
+.sf-radio {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  font-size: 0.9rem;
+}
+.sf-checkout-pay {
+  display: grid;
+  gap: 0.85rem;
+  margin-top: 0.5rem;
+}
+.sf-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

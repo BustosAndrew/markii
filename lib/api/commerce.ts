@@ -194,6 +194,26 @@ export function listDiscounts(
   );
 }
 
+export type DiscountRedemption = {
+  id: number;
+  discountId: number;
+  orderId: number;
+  amountMinor: number;
+  createdAt: string;
+};
+
+/** What `GET /api/discounts/:id` returns — the discount plus redemption history. */
+export type DiscountDetail = Discount & {
+  totalDiscountedMinor: number;
+  redemptions: DiscountRedemption[];
+};
+
+export function getDiscount(id: number, init?: RequestInit) {
+  return callWhenLive(DISCOUNTS_API_LIVE, COMMERCE_SECTION, () =>
+    apiGet<DiscountDetail>(`/api/discounts/${id}`, undefined, init),
+  );
+}
+
 export type Location = {
   id: string;
   siteId: number;
@@ -217,11 +237,22 @@ export function listLocations(query?: { siteId?: number }, init?: RequestInit) {
  * There is deliberately no "create one variant" call: a variant that does not
  * correspond to an option combination has no coherent identity.
  */
+export type SetProductOptionsResult = {
+  productId: number;
+  created: number;
+  kept: number;
+  orphaned: { id: number; title: string }[];
+};
+
 export function setProductOptions(
-  body: { productId: number; options: ProductOption[] },
+  body: {
+    productId: number;
+    options: ProductOption[];
+    defaultPriceMinor?: number;
+  },
   init?: RequestInit,
 ) {
-  return invokeAction<VariantMatrix>("catalog.setProductOptions", body, init);
+  return invokeAction<SetProductOptionsResult>("catalog.setProductOptions", body, init);
 }
 
 export function updateVariant(
@@ -305,14 +336,14 @@ export function updateCustomer(
 }
 
 export function createDiscount(
-  body: { siteId: number } & Record<string, unknown>,
+  body: { siteId: number } & DiscountInput,
   init?: RequestInit,
 ) {
   return invokeAction<Discount>("discounts.create", body, init);
 }
 
 export function updateDiscount(
-  body: { discountId: number } & Record<string, unknown>,
+  body: { discountId: number } & Partial<DiscountInput>,
   init?: RequestInit,
 ) {
   return invokeAction<Discount>("discounts.update", body, init);
@@ -321,6 +352,46 @@ export function updateDiscount(
 export function deleteDiscount(body: { discountId: number }, init?: RequestInit) {
   return invokeAction<{ deleted: true }>("discounts.delete", body, init);
 }
+
+export function setCollectionProducts(
+  body: { collectionId: number; productIds: number[] },
+  init?: RequestInit,
+) {
+  return invokeAction("catalog.setCollectionProducts", body, init);
+}
+
+export function adjustInventory(
+  body: {
+    variantId: number;
+    locationId: string;
+    delta: number;
+    reason?: string;
+  },
+  init?: RequestInit,
+) {
+  return invokeAction("inventory.adjust", body, init);
+}
+
+export type DiscountInput = {
+  code?: string | null;
+  title: string;
+  type: Discount["type"];
+  percentageBps?: number | null;
+  valueMinor?: number | null;
+  appliesToScope?: Discount["appliesToScope"];
+  appliesToIds?: number[];
+  minimumSubtotalMinor?: number | null;
+  customerEligibility?: Discount["customerEligibility"];
+  eligibleCustomerIds?: number[];
+  usageLimit?: number | null;
+  usageLimitPerCustomer?: number | null;
+  combinesWithProduct?: boolean;
+  combinesWithOrder?: boolean;
+  combinesWithShipping?: boolean;
+  startsAt?: string | null;
+  endsAt?: string | null;
+  enabled?: boolean;
+};
 
 /**
  * **There is no dashboard cart service, and that is not an omission.** Carts are

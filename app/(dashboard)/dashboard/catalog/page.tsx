@@ -115,6 +115,8 @@ export default async function CatalogPage({
             <InventoryActions sites={sites} />
           ) : tab === "categories" ? (
             <ButtonLink href="/dashboard/categories/new">New category</ButtonLink>
+          ) : tab === "collections" ? (
+            <ButtonLink href="/dashboard/collections/new">Create collection</ButtonLink>
           ) : undefined
         }
       />
@@ -399,7 +401,10 @@ export default async function CatalogPage({
         ) : collectionsResult.data.items.length === 0 ? (
           <EmptyState
             title="No collections yet"
-            description="Collections are merchandising, distinct from categories: a product sits in one category but can appear in many collections. Create them through the action registry (§22)."
+            description="Collections are merchandising, distinct from categories: a product sits in one category but can appear in many collections."
+            action={
+              <ButtonLink href="/dashboard/collections/new">Create collection</ButtonLink>
+            }
           />
         ) : (
           <>

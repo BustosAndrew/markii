@@ -13,7 +13,7 @@ export default async function IntegrationsPage() {
     <div>
       <PageHeader
         title="Integrations"
-        description="x402 wallet, Google Merchant Center, and optional Stripe."
+        description="Connect the payment and catalog tools your store uses. Stripe, x402, and Google Merchant Center are peer options."
       />
 
       {error || !data ? (

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { FetchError } from "@/components/dashboard/fetch-error";
+import { OrderActions } from "@/components/dashboard/order-actions";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
@@ -25,10 +26,7 @@ import { getOrder } from "@/lib/api/server";
  * both. Fetching them separately would let this page show a total that
  * disagrees with the refunds beside it.
  *
- * **There are no action buttons.** Refund, cancel, fulfill, note, and resend are
- * registry actions invoked through `POST /api/actions/:id` (§22 rule 1); a
- * button here calling a route directly is the bolt-on that architecture exists
- * to prevent. Until the invoke-from-UI path is built, this page is a record.
+ * **Actions** invoke registry mutations through `lib/api/actions` (§22).
  *
  * Money uses **the order's own currency** throughout (D31) — never the org's,
  * and never a hardcoded `/100`.
@@ -534,16 +532,9 @@ export default async function OrderDetailPage({
             </Card>
           </Section>
 
-          {/*
-            Named rather than hidden: the operations exist and are reachable, but
-            not from a button here. Every mutation is a registry action (§22).
-          */}
           <Section title="Actions">
             <Card>
-              <p className="text-sm text-muted">
-                Refunds, cancellation, fulfillment, and notes run through the action registry
-                (§22), not this screen. Invoking them from the dashboard is not built yet.
-              </p>
+              <OrderActions order={o} />
             </Card>
           </Section>
         </aside>

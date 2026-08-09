@@ -75,6 +75,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
       <SiteHeader
         siteName={site.name}
         homeHref={`${baseUrl}/`}
+        cartHref={`${baseUrl}/cart`}
         nav={topCategories.map((c) => ({ name: c.name, href: `${baseUrl}/c/${c.slug}` }))}
       />
       <main className="sf-main">

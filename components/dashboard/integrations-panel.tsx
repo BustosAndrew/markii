@@ -56,14 +56,9 @@ export function IntegrationsPanel({
 
   return (
     <div className="space-y-6">
-      <div className="rounded-[var(--radius-card)] border border-warning-text/30 bg-warning-bg px-4 py-3 text-sm text-warning-text">
-        Demo: unauthenticated admin. Do not paste production secrets — use test
-        keys and non-prod service accounts only.
-      </div>
-
       <ProviderCard
         title="x402 wallet"
-        description="Default receiving wallet for new sites (Base Sepolia)."
+        description="Receiving wallet for USDC checkout on Base. Network is shown after you connect."
         status={x402}
         icon={Wallet}
       >

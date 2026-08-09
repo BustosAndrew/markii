@@ -1,9 +1,11 @@
+import Link from "next/link";
 import { getMe, listDiscounts, listSites } from "@/lib/api/server";
 import { firstParam, loadOrError, parseLimit, parsePage } from "@/lib/api/load";
 import { formatMinor } from "@/lib/api/money";
 import type { Discount } from "@/lib/api/commerce";
 import { FetchError } from "@/components/dashboard/fetch-error";
 import { Badge } from "@/components/ui/badge";
+import { ButtonLink } from "@/components/ui/button";
 import { ComingSoon } from "@/components/ui/coming-soon";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ListFilters } from "@/components/ui/list-filters";
@@ -69,6 +71,7 @@ export default async function DiscountsPage({
       <PageHeader
         title="Discounts"
         description="Codes and automatic promotions. Status is computed from the schedule and the on/off switch, so it is always current."
+        actions={<ButtonLink href="/dashboard/discounts/new">Create discount</ButtonLink>}
       />
 
       <ListFilters
@@ -104,7 +107,8 @@ export default async function DiscountsPage({
       ) : discounts.data.items.length === 0 ? (
         <EmptyState
           title={status ? `No ${status} discounts` : "No discounts yet"}
-          description="Discounts are created through the action registry (§22); a builder screen for them is not built yet."
+          description="Create a percentage, fixed, or free-shipping discount for a site."
+          action={<ButtonLink href="/dashboard/discounts/new">Create discount</ButtonLink>}
         />
       ) : (
         <>
@@ -124,7 +128,12 @@ export default async function DiscountsPage({
                 {discounts.data.items.map((d) => (
                   <tr key={d.id} className="border-b border-border last:border-0">
                     <td className="px-4 py-3">
-                      <div className="font-medium text-foreground">{d.title}</div>
+                      <Link
+                        href={`/dashboard/discounts/${d.id}`}
+                        className="font-medium text-foreground hover:text-brand"
+                      >
+                        {d.title}
+                      </Link>
                       <div className="text-xs text-muted">
                         {/*
                           A null code means automatic — it applies with nothing

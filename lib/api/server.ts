@@ -2,6 +2,9 @@ import "server-only";
 import { GET as analyticsOverviewGET } from "@/app/api/analytics/overview/route";
 import { GET as analyticsSiteGET } from "@/app/api/analytics/sites/[idOrSlug]/route";
 import { GET as billingUsageGET } from "@/app/api/billing/usage/route";
+import { GET as taxSettingsGET } from "@/app/api/settings/tax/route";
+import { GET as shippingZonesGET } from "@/app/api/shipping/zones/route";
+import { GET as productVariantsGET } from "@/app/api/products/[idOrSlug]/variants/route";
 import { GET as billingPlansGET } from "@/app/api/billing/plans/route";
 import { GET as billingSubscriptionGET } from "@/app/api/billing/subscription/route";
 import { GET as billingInvoicesGET } from "@/app/api/billing/invoices/route";
@@ -20,6 +23,7 @@ import { GET as overviewGET } from "@/app/api/overview/route";
 import { GET as collectionsGET } from "@/app/api/collections/route";
 import { GET as customersGET } from "@/app/api/customers/route";
 import { GET as discountsGET } from "@/app/api/discounts/route";
+import { GET as discountGET } from "@/app/api/discounts/[id]/route";
 import { GET as customerGET } from "@/app/api/customers/[id]/route";
 import { GET as customerOrdersGET } from "@/app/api/customers/[id]/orders/route";
 import { GET as customerMembershipsGET } from "@/app/api/customers/[id]/memberships/route";
@@ -44,9 +48,11 @@ import type {
   UsageResponse,
 } from "./billing";
 import type { MfaStatus } from "./mfa";
+import type { TaxSettings, ShippingZone } from "./tax-shipping";
+import type { VariantMatrix } from "./commerce";
 import type { EmailSettings } from "./email";
 import type { CustomerMembership, MembershipTier } from "./memberships";
-import type { Collection, Customer, Discount } from "./commerce";
+import type { Collection, Customer, Discount, DiscountDetail } from "./commerce";
 import type { MeResponse, ScopedToken, StaffMember } from "./org";
 import type { OrderDetail, OrdersQuery, OrdersResponse } from "./orders";
 import type { ReadinessReport } from "./readiness";
@@ -197,6 +203,22 @@ export const getReadinessOverview = (query?: {
 
 export const getBillingUsage = () => call<UsageResponse>(billingUsageGET, "/api/billing/usage");
 
+export const getTaxSettings = (siteId: number) =>
+  call<TaxSettings>(taxSettingsGET, "/api/settings/tax", { siteId });
+
+export const listShippingZones = (siteId: number) =>
+  call<{ items: ShippingZone[]; total: number }>(shippingZonesGET, "/api/shipping/zones", {
+    siteId,
+  });
+
+export const getVariantMatrix = (idOrSlug: string, query?: { siteId?: number }) =>
+  call<VariantMatrix>(
+    productVariantsGET,
+    `/api/products/${idOrSlug}/variants`,
+    query as Record<string, QueryValue>,
+    { idOrSlug },
+  );
+
 export const listBillingPlans = () =>
   call<PlansResponse>(billingPlansGET, "/api/billing/plans");
 
@@ -262,6 +284,9 @@ export const listDiscounts = (query?: {
   limit?: number;
 }) =>
   call<Paginated<Discount>>(discountsGET, "/api/discounts", query as Record<string, QueryValue>);
+
+export const getDiscount = (id: number) =>
+  call<DiscountDetail>(discountGET, `/api/discounts/${id}`, undefined, { id: String(id) });
 
 /**
  * §13. `totals` is grouped by currency and must be rendered that way — see

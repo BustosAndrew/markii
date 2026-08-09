@@ -4,10 +4,12 @@ export function SiteHeader({
   siteName,
   homeHref,
   nav,
+  cartHref,
 }: {
   siteName: string;
   homeHref: string;
   nav: NavItem[];
+  cartHref?: string;
 }) {
   return (
     <header className="sf-header">
@@ -23,6 +25,11 @@ export function SiteHeader({
               </a>
             ))}
           </nav>
+        ) : null}
+        {cartHref ? (
+          <a className="sf-cart-link" href={cartHref}>
+            Cart
+          </a>
         ) : null}
       </div>
     </header>
