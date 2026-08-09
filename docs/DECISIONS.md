@@ -128,6 +128,18 @@ turned up:
   data through `/api/*`, all of which funnels through `getSession`. The middleware gap is a UX
   problem (a shell that renders then errors), not data exposure.
 
+**Known: recovery codes do not cascade.** `mfa_recovery_codes.user_id` points at `auth.users` with
+deliberately no foreign key — that schema belongs to `supabase_auth_admin`, and coupling the
+migration chain to it is the trade `staff.user_id` already declined. So deleting a user leaves ten
+rows behind, and nothing sweeps them.
+
+They are **inert**, not exposed: spending a code requires an authenticated session, and there is no
+account left to authenticate as. So this is unbounded growth rather than a hole. It showed up first
+in the test suite, which was accumulating ten rows per fixture per run (2,390 orphans before it was
+noticed) — `removeMerchant` now clears them. In production there is no user-deletion path in Markii
+at all today; if one is ever added, it must clear these in the same transaction, because there will
+be no scheduler to sweep them afterwards.
+
 **It also uncovered a live privilege hole, which is the part worth remembering.** Converting
 `/api/integrations/:provider` into actions — so `requiresStepUp` had somewhere to attach — revealed
 the route ran under `orgHandler` with **no `permission` option at all**. Any authenticated staff

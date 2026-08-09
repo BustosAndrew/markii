@@ -262,6 +262,20 @@ export async function removeMerchant(email: string) {
   const users = await sql`select id from auth.users where email = ${email}`;
   for (const u of users) {
     await sql`delete from organizations where owner_id = ${u.id}`;
+    /**
+     * **Recovery codes do not cascade** (D40). `mfa_recovery_codes.user_id`
+     * points at `auth.users` with deliberately no foreign key — that schema is
+     * owned by `supabase_auth_admin`, and coupling the migration chain to it is
+     * a bad trade. The consequence is that deleting a user leaves ten rows
+     * behind, and since D40 enrols every merchant, the suite was accumulating
+     * ten per fixture per run.
+     *
+     * They are inert once the user is gone — spending a code requires an
+     * authenticated session, and there is no longer an account to authenticate
+     * as — so this is unbounded growth rather than exposure. Cleaned up here
+     * because the suite creates them by the hundred.
+     */
+    await sql`delete from mfa_recovery_codes where user_id = ${u.id}`;
     await sql`delete from auth.users where id = ${u.id}`;
   }
 }
