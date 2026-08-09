@@ -32,8 +32,7 @@ export const GET = orgHandler(
             message: "Stripe Connect is not configured on this deployment.",
             details: {
               resolution:
-                "Set STRIPE_CONNECT_CLIENT_ID (Stripe Dashboard → Connect → Settings) and " +
-                "STRIPE_SECRET_KEY. Merchants cannot connect until both exist.",
+                "Stripe Connect is not configured on this deployment. Contact your Markii admin.",
             },
           },
         },

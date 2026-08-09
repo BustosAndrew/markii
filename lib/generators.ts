@@ -89,20 +89,42 @@ const strip = (s: string | null | undefined) =>
 
 // ---------- llms.txt ----------
 
-export function generateLlmsTxt(bundle: Bundle, baseUrl: string): string {
+export type AgentDiscoveryOpts = {
+  payTo?: string | null;
+  /** Which purchase rails this store actually offers. */
+  rails?: { x402?: boolean; stripe?: boolean };
+  purchasesEnabled?: boolean;
+};
+
+function discoveryBlurb(opts: AgentDiscoveryOpts): string {
+  const rails: string[] = [];
+  if (opts.rails?.x402) rails.push("x402 (USDC)");
+  if (opts.rails?.stripe) rails.push("card via Stripe");
+  if (rails.length === 0) {
+    return "Every product page is plain HTML with Schema.org JSON-LD for agents and crawlers.";
+  }
+  return `Every product page is plain HTML with Schema.org JSON-LD. Purchases settle over ${rails.join(" or ")}.`;
+}
+
+export function generateLlmsTxt(
+  bundle: Bundle,
+  baseUrl: string,
+  opts: AgentDiscoveryOpts = {},
+): string {
   const { site, products, categories } = bundle;
   const lines: string[] = [
     `# ${site.name}`,
     "",
-    site.description?.trim() ||
-      `${site.name} is an agent-friendly store. Every page is plain HTML with JSON-LD; purchases settle over the x402 protocol (USDC on Base Sepolia).`,
+    site.description?.trim() || `${site.name} is an agent-readable store. ${discoveryBlurb(opts)}`,
     "",
     `- Store: ${baseUrl}/`,
     `- Agent protocol: ${baseUrl}/agent.md`,
     `- Sitemap: ${baseUrl}/sitemap.xml`,
-    `- Checkout API: POST ${baseUrl}/api/checkout`,
-    "",
   ];
+  if (opts.purchasesEnabled !== false && opts.rails?.x402) {
+    lines.push(`- Checkout API: POST ${baseUrl}/api/checkout`);
+  }
+  lines.push("");
   if (categories.length) {
     lines.push("## Categories", "");
     for (const c of categories) {
@@ -127,20 +149,12 @@ export function generateLlmsTxt(bundle: Bundle, baseUrl: string): string {
 export function generateAgentMd(
   bundle: Bundle,
   baseUrl: string,
-  opts: { payTo?: string | null } = {},
+  opts: AgentDiscoveryOpts = {},
 ): string {
   const { site, products } = bundle;
-  return `# ${site.name} — agent protocol
-
-This store is machine-readable and agent-purchasable.
-
-## Discover
-
-- \`GET ${baseUrl}/llms.txt\` — catalog summary
-- \`GET ${baseUrl}/sitemap.xml\` — all URLs
-- Every product page (\`${baseUrl}/p/{slug}\`) embeds Schema.org Product JSON-LD.
-
-## Purchase (x402)
+  const x402On = opts.purchasesEnabled !== false && opts.rails?.x402;
+  const purchaseSection = x402On
+    ? `## Purchase (x402 / USDC)
 
 1. \`POST ${baseUrl}/api/checkout\` with JSON body \`{ "productSlug": "...", "quantity": 1 }\`.
 2. Without payment you receive \`402 Payment Required\` with an \`accepts\` array:
@@ -151,7 +165,23 @@ This store is machine-readable and agent-purchasable.
 4. Retry the same request with header
    \`X-PAYMENT: base64({"txHash":"0x...","from":"0x..."})\`.
 5. On verification you receive \`200\` with a fulfillment receipt and the order id.
+`
+    : `## Purchase
 
+Agent checkout is not enabled for this store right now. Catalog pages remain readable.
+`;
+
+  return `# ${site.name} — agent protocol
+
+This store is machine-readable. ${discoveryBlurb(opts)}
+
+## Discover
+
+- \`GET ${baseUrl}/llms.txt\` — catalog summary
+- \`GET ${baseUrl}/sitemap.xml\` — all URLs
+- Every product page (\`${baseUrl}/p/{slug}\`) embeds Schema.org Product JSON-LD.
+
+${purchaseSection}
 ## Catalog
 
 ${products

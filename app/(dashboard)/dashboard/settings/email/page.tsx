@@ -43,9 +43,8 @@ export default async function SettingsEmailPage() {
       <SettingsShell title="Email" description={DESCRIPTION}>
         {planned ? (
           <ComingSoon
-            title="Email settings are planned"
-            description="Sending domains, deliverability, and the suppression list appear here when API §24 is live."
-            apiSection="API §24 · Email"
+            title="Email settings aren’t available yet"
+            description="Sending domains, deliverability, and the suppression list will appear here when email is connected."
           />
         ) : (
           <section className="rounded-[var(--radius-card)] border border-border bg-surface p-5 shadow-[var(--shadow-sm)]">

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
+import { sanitizePublicCopy, sanitizePublicValue } from "@/lib/api/public-copy";
 
 export class ApiError extends Error {
   constructor(
@@ -52,20 +53,26 @@ export function errorResponse(e: unknown): NextResponse {
     );
   }
   if (e instanceof ApiError) {
+    const message =
+      sanitizePublicCopy(e.message) ||
+      (e.code === "CONFIGURATION_REQUIRED"
+        ? "This feature needs additional platform configuration."
+        : "Request failed");
     return NextResponse.json(
       {
         error: {
           code: e.code,
-          message: e.message,
-          ...(e.details !== undefined ? { details: e.details } : {}),
+          message,
+          ...(e.details !== undefined ? { details: sanitizePublicValue(e.details) } : {}),
         },
       },
       { status: e.status },
     );
   }
   console.error(e);
+  // Never echo raw exception text — stacks and driver errors are for logs only.
   return NextResponse.json(
-    { error: { code: "INTERNAL", message: e instanceof Error ? e.message : "Internal error" } },
+    { error: { code: "INTERNAL", message: "Something went wrong." } },
     { status: 500 },
   );
 }

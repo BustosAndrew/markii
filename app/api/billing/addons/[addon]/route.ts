@@ -32,13 +32,13 @@ const ADDONS = {
     label: "Agent Ops",
     monthlyPriceMinor: 29_00,
     phase: "F",
-    why: "The chat ops product is not built (docs/AGENT-OPS.md; chat ships last).",
+    why: "Agent Ops chat is not available to purchase yet.",
   },
   chargebackAssist: {
     label: "Chargeback Assist",
     monthlyPriceMinor: 19_00,
     phase: "F",
-    why: "Chargeback Assist is not built (docs/PLAN.md Phase F).",
+    why: "Chargeback Assist is not available to purchase yet.",
   },
 } as const;
 
@@ -108,20 +108,7 @@ const refuseToSell = async (raw: string) => {
         message: `${spec.label} is not for sale — the product does not exist yet.`,
         details: {
           reason: spec.why,
-          phase: spec.phase,
-          resolution:
-            "Nothing to configure. Build the add-on first; the billing path for it is the same " +
-            "one plan changes already use (billing.changePlan, lib/billing/stripe-billing.ts).",
-          /**
-           * Stated because the tempting shortcut is to flip
-           * `organizations.add_on_*` directly and move on. That grants the
-           * entitlement with nothing sold — the same hole the plan-change route
-           * refuses — and it would grant access to a feature that does not
-           * exist, so the merchant gets nothing either way.
-           */
-          note:
-            "Do not set organizations.add_on_agent_ops / add_on_chargeback_assist by hand to work " +
-            "around this. Entitlements must follow something actually sold.",
+          resolution: "Nothing to configure — this add-on is not for sale yet.",
         },
       },
     },

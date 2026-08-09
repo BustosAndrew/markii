@@ -26,7 +26,6 @@ export function ThresholdMeter({
       <ComingSoon
         title="Threshold meter unavailable"
         description="Billing usage could not be loaded for this org yet."
-        apiSection="API §17 · Billing, plans, metering, threshold fees"
       />
     );
   }

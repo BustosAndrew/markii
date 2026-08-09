@@ -66,7 +66,7 @@ const missingCredentials: StripeFailure = {
   ok: false,
   code: "configuration_required",
   message: "Stripe Billing is not connected on this deployment.",
-  resolution: "Set STRIPE_SECRET_KEY (docs/API.md §17).",
+  resolution: "This deployment needs additional platform configuration. Contact your Markii admin.",
 };
 
 /**
@@ -192,7 +192,7 @@ export async function resolvePrice(
       resolution:
         `Create a recurring Price on Markii's own Stripe account with lookup_key "${lookupKey}", ` +
         `interval "${interval}", and unit_amount ${expectedUnitAmountMinor(planId, interval)} ` +
-        `(minor units, USD). Prices in docs/PRICING.md §3 are still marked PROPOSED.`,
+        `(minor units, USD). Plan prices are still proposed.`,
     };
   }
   if (found.length > 1) {

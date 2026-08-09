@@ -87,7 +87,7 @@ async function startStripe(
       resolution:
         "Connect your Stripe account in Settings → Payments. You keep your own account, rates, " +
         "dashboard, and payouts — Markii never holds funds, never marks up processor fees, and " +
-        "takes no cut of your payments (docs/DECISIONS.md D4).",
+        "takes no cut of your payments.",
     };
   }
 
@@ -145,9 +145,8 @@ async function startStripe(
       code: "configuration_required",
       message: "Card payments are not fully configured on this platform.",
       resolution:
-        "Set NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY so Stripe Elements can load, and make sure it is " +
-        "in the same mode as STRIPE_SECRET_KEY — a pk_live_ key cannot confirm a PaymentIntent " +
-        "opened by an sk_test_ key.",
+        "Card payments need additional platform configuration (publishable key and secret key " +
+        "must be in the same mode). Contact your Markii admin.",
     };
   }
 

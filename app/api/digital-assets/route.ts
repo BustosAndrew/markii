@@ -76,7 +76,7 @@ export const POST = orgHandler(
     if (file.size > MAX_BYTES) {
       throw badRequest(
         `file exceeds the ${Math.round(MAX_BYTES / 1024 ** 3)} GB limit. Markii does not host ` +
-          "video (docs/DECISIONS.md G5) — use a Mux, Vimeo, or YouTube embed instead.",
+          "video — use a Mux, Vimeo, or YouTube embed instead.",
       );
     }
 
@@ -101,8 +101,7 @@ export const POST = orgHandler(
             message: "File storage is not configured, so this file cannot be stored.",
             details: {
               resolution:
-                "Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (server-only). " +
-                "See .env.example.",
+                "File storage is not configured on this deployment. Contact your Markii admin.",
             },
           },
         },

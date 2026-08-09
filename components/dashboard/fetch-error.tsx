@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { sanitizePublicCopy } from "@/lib/api/public-copy";
 import { ErrorState } from "@/components/ui/error-state";
 
 export function FetchError({
@@ -14,7 +15,7 @@ export function FetchError({
   return (
     <ErrorState
       title={title}
-      message={message}
+      message={sanitizePublicCopy(message) || "Something went wrong."}
       onRetry={() => router.refresh()}
     />
   );

@@ -6,7 +6,6 @@ import type { Discount } from "@/lib/api/commerce";
 import { FetchError } from "@/components/dashboard/fetch-error";
 import { Badge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
-import { ComingSoon } from "@/components/ui/coming-soon";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ListFilters } from "@/components/ui/list-filters";
 import { PageHeader } from "@/components/ui/page-header";
@@ -186,13 +185,6 @@ export default async function DiscountsPage({
           />
         </>
       )}
-
-      <ComingSoon
-        className="mt-6"
-        title="Gift cards are not planned right now"
-        description="Gift cards were deferred until further notice (docs/DECISIONS.md D33). They are a stored-value tender rather than a discount, so they will not appear on this screen when they do arrive."
-        apiSection="Deferred · D33"
-      />
     </div>
   );
 }

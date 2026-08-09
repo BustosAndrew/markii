@@ -163,7 +163,8 @@ export async function createFeeInvoiceItem(input: {
       ok: false,
       code: "configuration_required",
       message: "Stripe Billing is not connected.",
-      resolution: "Set STRIPE_SECRET_KEY (docs/API.md §17).",
+      resolution:
+        "This deployment needs additional platform configuration. Contact your Markii admin.",
     };
   }
 

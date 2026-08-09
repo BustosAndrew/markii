@@ -77,8 +77,7 @@ export const connectIntegration = defineAction({
       throw badRequest(
         "Stripe is connected through Connect Standard OAuth, not by supplying a key. Markii never " +
           "stores a merchant secret key — you keep your own Stripe account, rates, dashboard, and " +
-          "payouts (docs/DECISIONS.md D4). The connection is established by the OAuth flow and kept " +
-          "current by account.updated webhooks.",
+          "payouts. Connect via Settings → Integrations.",
       );
     }
 

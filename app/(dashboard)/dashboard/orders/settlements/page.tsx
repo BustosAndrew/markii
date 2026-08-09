@@ -26,7 +26,7 @@ export default async function SettlementsPage({
     <div>
       <PageHeader
         title="Settlements"
-        description="Balances across sites and payment rails while the expanded orders API is still planned."
+        description="Balances across sites and payment rails."
       />
       <OrdersSubnav />
 

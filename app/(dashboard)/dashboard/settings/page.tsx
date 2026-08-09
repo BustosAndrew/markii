@@ -5,22 +5,22 @@ const sections = [
   {
     href: "/dashboard/settings/team",
     title: "Team",
-    description: "Staff, invites, and org structure for the upcoming multi-org launch.",
+    description: "Staff, invites, roles, and API tokens.",
   },
   {
     href: "/dashboard/settings/billing",
     title: "Billing",
-    description: "Plan structure, threshold metering, and invoice history.",
+    description: "Plan, threshold meter, payment method, and invoices.",
   },
   {
     href: "/dashboard/settings/tax",
     title: "Tax",
-    description: "Tax provider configuration and nexus settings when commerce core lands.",
+    description: "Tax rates and how prices include tax at checkout.",
   },
   {
     href: "/dashboard/settings/shipping",
     title: "Shipping",
-    description: "Shipping zones and rates for human checkout after Phase C.",
+    description: "Shipping zones and rates for checkout.",
   },
   {
     href: "/dashboard/settings/email",
@@ -31,7 +31,7 @@ const sections = [
   {
     href: "/dashboard/settings/domains",
     title: "Domains",
-    description: "Custom domain setup lives here once org-scoped settings are expanded.",
+    description: "Custom domain setup for your storefronts.",
   },
 ] as const;
 
@@ -39,20 +39,21 @@ export default function SettingsIndexPage() {
   return (
     <SettingsShell
       title="Settings"
-      description="Launch settings structure for team, billing, tax, shipping, email, and domains."
+      description="Account, billing, and store configuration."
     >
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <ul className="grid gap-3 sm:grid-cols-2">
         {sections.map((section) => (
-          <Link
-            key={section.href}
-            href={section.href}
-            className="rounded-[var(--radius-card)] border border-border bg-surface p-5 shadow-[var(--shadow-sm)] transition-colors hover:bg-hover-soft"
-          >
-            <h2 className="text-base font-medium text-foreground">{section.title}</h2>
-            <p className="mt-2 text-sm leading-6 text-muted">{section.description}</p>
-          </Link>
+          <li key={section.href}>
+            <Link
+              href={section.href}
+              className="block rounded-[var(--radius-card)] border border-border bg-surface p-5 shadow-[var(--shadow-sm)] transition-colors hover:border-brand/40"
+            >
+              <p className="font-medium text-foreground">{section.title}</p>
+              <p className="mt-1 text-sm leading-6 text-muted">{section.description}</p>
+            </Link>
+          </li>
         ))}
-      </div>
+      </ul>
     </SettingsShell>
   );
 }

@@ -12,7 +12,11 @@ export async function GET(req: Request, { params }: { params: Promise<{ site: st
     path: "/llms.txt",
     userAgent: req.headers.get("user-agent"),
   });
-  return new Response(generateLlmsTxt(data.bundle, data.baseUrl), {
+  const body = generateLlmsTxt(data.bundle, data.baseUrl, {
+    rails: data.site.paymentProviders,
+    purchasesEnabled: data.site.purchasesEnabled,
+  });
+  return new Response(body, {
     headers: {
       "content-type": "text/plain; charset=utf-8",
       "cache-control": "public, max-age=3600",

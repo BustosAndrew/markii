@@ -88,9 +88,7 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
       }
     } catch (caught) {
       if (isPlannedError(caught)) {
-        setError(
-          "Merchant auth is not live yet (API §16, Phase A). Nothing was submitted.",
-        );
+        setError("Merchant sign-in isn’t available on this deployment yet. Nothing was submitted.");
       } else if (caught instanceof Error) {
         setError(caught.message);
       } else {
@@ -117,10 +115,7 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
 
         {!live ? (
           <div className="mt-6 rounded-[var(--radius-control)] border border-border bg-surface-elevated p-4 text-sm leading-6 text-muted">
-            <p>Merchant auth is not available on this deployment yet.</p>
-            <span className="mt-3 inline-flex rounded-full bg-surface px-2.5 py-1 text-xs font-medium text-muted">
-              API §16 · Accounts, organizations, staff
-            </span>
+            <p>Merchant auth isn’t available on this deployment yet.</p>
           </div>
         ) : null}
 

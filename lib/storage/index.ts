@@ -44,8 +44,7 @@ function unavailable(): StorageUnavailable {
     code: "configuration_required",
     message: "File storage is not configured.",
     resolution:
-      "Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (server-only — never a " +
-      "NEXT_PUBLIC_ variable). See .env.example.",
+      "File storage is not configured on this deployment. Contact your Markii admin.",
   };
 }
 

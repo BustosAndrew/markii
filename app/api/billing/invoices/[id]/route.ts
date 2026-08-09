@@ -40,7 +40,10 @@ export const GET = orgHandler(
           error: {
             code: "CONFIGURATION_REQUIRED",
             message: "Stripe Billing is not connected, so no invoice exists.",
-            details: { resolution: "Set STRIPE_SECRET_KEY (docs/API.md §17)." },
+            details: {
+              resolution:
+                "This deployment needs additional platform configuration. Contact your Markii admin.",
+            },
           },
         },
         { status: 503 },

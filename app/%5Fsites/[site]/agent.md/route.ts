@@ -14,7 +14,12 @@ export async function GET(req: Request, { params }: { params: Promise<{ site: st
     userAgent: req.headers.get("user-agent"),
   });
   const payTo = data.site.walletAddress ?? (await defaultWallet(data.site.orgId));
-  return new Response(generateAgentMd(data.bundle, data.baseUrl, { payTo }), {
+  const body = generateAgentMd(data.bundle, data.baseUrl, {
+    payTo,
+    rails: data.site.paymentProviders,
+    purchasesEnabled: data.site.purchasesEnabled,
+  });
+  return new Response(body, {
     headers: {
       "content-type": "text/markdown; charset=utf-8",
       "cache-control": "public, max-age=3600",

@@ -110,8 +110,8 @@ export async function calculateTax(input: {
       state: "not_configured",
       included: settings.pricesIncludeTax,
       note: stripeConfigured()
-        ? "Stripe Tax is selected but not yet implemented (docs/API.md §18.6)."
-        : "Stripe Tax is selected but this environment has no Stripe credentials.",
+        ? "Stripe Tax is selected but not yet available on this store."
+        : "Stripe Tax is selected but card payments are not fully configured.",
     };
   }
 

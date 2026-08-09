@@ -6,6 +6,7 @@
  * Do not call platform `/api/*` from these helpers.
  */
 
+import { sanitizePublicCopy, sanitizePublicValue } from "./public-copy";
 import { ApiClientError, type ApiErrorBody } from "./types";
 
 const CART_COOKIE = "markii_cart";
@@ -79,8 +80,11 @@ async function parseError(res: Response): Promise<ApiClientError> {
     const body = (await res.json()) as ApiErrorBody;
     if (body?.error) {
       code = body.error.code || code;
-      message = body.error.message || message;
-      details = body.error.details;
+      message = sanitizePublicCopy(body.error.message || message) || message;
+      details =
+        body.error.details !== undefined
+          ? sanitizePublicValue(body.error.details)
+          : undefined;
     }
   } catch {
     // non-JSON

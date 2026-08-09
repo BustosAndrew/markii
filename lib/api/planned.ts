@@ -1,9 +1,13 @@
 import { ApiClientError } from "./types";
 
 export class PlannedError extends Error {
+  /** Internal label for logs only — never show `section` to merchants. */
   section: string;
 
-  constructor(section: string, message = `${section} is not available yet`) {
+  constructor(
+    section: string,
+    message = "This feature isn’t available yet.",
+  ) {
     super(message);
     this.name = "PlannedError";
     this.section = section;

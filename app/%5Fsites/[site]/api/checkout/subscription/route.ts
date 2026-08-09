@@ -175,7 +175,7 @@ export const POST = handler(async (req, { params }) => {
           message: "Card payments are not fully configured on this platform.",
           details: {
             resolution:
-              "Set NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY in the same Stripe mode as STRIPE_SECRET_KEY.",
+              "Card payments need additional platform configuration. Contact the store owner.",
           },
         },
       },

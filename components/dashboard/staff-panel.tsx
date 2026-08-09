@@ -78,8 +78,7 @@ export function StaffPanel({
         <div>
           <h2 className="text-base font-medium text-foreground">Staff</h2>
           <p className="mt-1 text-sm leading-6 text-muted">
-            Roles are enforced server-side on every call, and identically for people, agents, and
-            API tokens (§22 rule 4).
+            Roles are enforced on every call the same way for people, agents, and API tokens.
           </p>
         </div>
         <span className="text-sm text-muted">

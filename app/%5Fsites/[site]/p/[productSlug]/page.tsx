@@ -164,17 +164,20 @@ export default async function ProductPage({ params }: Props) {
           }))}
         />
 
-        {locked ? null : (
+        {!locked &&
+        site.agentDiscovery &&
+        site.purchasesEnabled &&
+        site.paymentProviders?.x402 ? (
           <>
             <h2>Buy via agent</h2>
             <pre className="sf-buy">{`POST ${baseUrl}/api/checkout
 {"productSlug": "${product.slug}", "quantity": 1}`}</pre>
             <p className="sf-muted">
               Payment protocol: <a href={`${baseUrl}/agent.md`}>agent.md</a>{" "}
-              (x402, USDC on Base Sepolia)
+              (x402 / USDC)
             </p>
           </>
-        )}
+        ) : null}
         {suggested.length > 0 ? (
           <>
             <h2>You might also like</h2>

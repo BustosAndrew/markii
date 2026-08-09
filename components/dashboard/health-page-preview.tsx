@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Drawer } from "@/components/ui/drawer";
 import { Button } from "@/components/ui/button";
 import { ComingSoon } from "@/components/ui/coming-soon";
+import { sanitizePublicCopy } from "@/lib/api/public-copy";
 import type { ReadinessReport } from "@/lib/api/readiness";
 
 export function HealthPagePreview({
@@ -21,9 +22,8 @@ export function HealthPagePreview({
     return (
       <>
         <ComingSoon
-          title="Health issues are planned"
-          description="Issue detection, severity counts, and resolution actions will appear here when readiness APIs are live."
-          apiSection="API §9 · Readiness issues and history"
+          title="Health issues aren’t available yet"
+          description="Issue detection, severity counts, and resolution actions will appear here when catalog health is ready."
           action={
             <Button variant="secondary" onClick={() => setDrawerOpen(true)}>
               Preview issue drawer
@@ -39,7 +39,9 @@ export function HealthPagePreview({
     return (
       <section className="rounded-[var(--radius-card)] border border-border bg-surface p-5 shadow-[var(--shadow-sm)]">
         <h2 className="text-base font-medium text-foreground">Health issues</h2>
-        <p className="mt-2 text-sm leading-6 text-muted">{error}</p>
+        <p className="mt-2 text-sm leading-6 text-muted">
+          {sanitizePublicCopy(error) || "Health issues are unavailable right now."}
+        </p>
       </section>
     );
   }
@@ -87,7 +89,7 @@ function PreviewDrawer({
       open={open}
       onClose={onClose}
       title="Issue drawer preview"
-      description="This drawer is wired now so the health table can open rich issue detail when API §9 lands."
+      description="Preview of the issue detail panel. Live issue actions will appear here when ready."
       footer={
         <div className="flex justify-end">
           <Button variant="secondary" onClick={onClose}>

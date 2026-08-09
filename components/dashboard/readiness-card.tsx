@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { ReadinessReport } from "@/lib/api/readiness";
+import { sanitizePublicCopy } from "@/lib/api/public-copy";
 import { ComingSoon } from "@/components/ui/coming-soon";
 import { cn } from "@/lib/utils";
 
@@ -15,9 +16,8 @@ export function ReadinessCard({
   if (planned) {
     return (
       <ComingSoon
-        title="Readiness score coming soon"
-        description="Catalog health and readiness scoring are planned. The health route is in place so the workflow stays visible before API §9 ships."
-        apiSection="API §9 · Readiness and catalog health"
+        title="Readiness score isn’t available yet"
+        description="Catalog health scoring will appear here when this store is ready to measure it."
         action={
           <Link
             href="/dashboard/health"
@@ -34,7 +34,9 @@ export function ReadinessCard({
     return (
       <section className="rounded-[var(--radius-card)] border border-border bg-surface p-5 shadow-[var(--shadow-sm)]">
         <h2 className="text-base font-medium text-foreground">Readiness</h2>
-        <p className="mt-2 text-sm leading-6 text-muted">{error}</p>
+        <p className="mt-2 text-sm leading-6 text-muted">
+          {sanitizePublicCopy(error) || "Readiness is unavailable right now."}
+        </p>
       </section>
     );
   }

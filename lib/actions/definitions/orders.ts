@@ -813,8 +813,8 @@ export const fulfillOrder = defineAction({
     const lines = await linesOf(ctx, order.id);
     if (lines.length === 0) {
       throw conflict(
-        "This order has no line detail, so there is nothing to mark fulfilled. Orders placed " +
-          "before §18.7 were not itemised.",
+        "This order has no line detail, so there is nothing to mark fulfilled. Older orders " +
+          "were not itemised.",
       );
     }
 

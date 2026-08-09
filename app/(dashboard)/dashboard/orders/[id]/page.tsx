@@ -100,9 +100,8 @@ function Lines({ order }: { order: OrderDetail }) {
     return (
       <Card>
         <p className="text-sm text-muted">
-          This order was never itemised. It predates line-level records (§18.7), and rebuilding
-          lines from today&rsquo;s catalog would show prices nobody paid. The totals below are the
-          amounts actually charged.
+          This order was never itemised. Rebuilding lines from today&rsquo;s catalog would show
+          prices nobody paid. The totals below are the amounts actually charged.
         </p>
       </Card>
     );

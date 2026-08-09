@@ -15,7 +15,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (!data) return {};
   return {
     title: data.site.name,
-    description: `${data.site.name} — agent-friendly store`,
+    description: data.site.agentDiscovery
+      ? `${data.site.name} — agent-readable store`
+      : data.site.name,
     robots: data.site.indexed ? undefined : { index: false },
     other: data.site.googleSiteVerification
       ? { "google-site-verification": data.site.googleSiteVerification }
@@ -54,11 +56,15 @@ export default async function StorePage({ params }: Props) {
       />
       <main className="sf-main">
         <h1 className="sf-title">{site.name}</h1>
-        <p className="sf-lede">
-          Agent-readable store — see{" "}
-          <a href={`${baseUrl}/llms.txt`}>llms.txt</a> and{" "}
-          <a href={`${baseUrl}/agent.md`}>agent.md</a>.
-        </p>
+        {site.agentDiscovery ? (
+          <p className="sf-lede">
+            Agent-readable store — see{" "}
+            <a href={`${baseUrl}/llms.txt`}>llms.txt</a> and{" "}
+            <a href={`${baseUrl}/agent.md`}>agent.md</a>.
+          </p>
+        ) : (
+          <p className="sf-lede">Welcome to {site.name}.</p>
+        )}
         <ul className="sf-grid">
           {bundle.products.map((p) => (
             <ProductCard

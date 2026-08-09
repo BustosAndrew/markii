@@ -29,11 +29,11 @@ export const GET = handler(async () => {
     })),
     status: "proposed" as const,
     note:
-      "Prices are proposed (docs/PRICING.md §3) and not yet finalised. Markii charges no " +
-      "transaction fee below the plan threshold, on any payment provider, including digital goods.",
+      "Prices are proposed and not yet finalised. Markii charges no transaction fee below the " +
+      "plan threshold, on any payment provider, including digital goods.",
     comparisons: [],
     comparisonsNote:
       "Competitor comparisons are omitted rather than hardcoded. They are factual claims and must " +
-      "carry a verification date sourced from docs/COMPETITORS.md.",
+      "carry a verification date from Markii’s competitor research.",
   });
 });

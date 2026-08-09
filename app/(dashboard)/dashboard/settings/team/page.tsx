@@ -51,9 +51,8 @@ export default async function SettingsTeamPage() {
         )}
 
         <ComingSoon
-          title="Audit log and active sessions are not built yet"
-          description="Every action is already recorded (§22 rule 5) — what is missing is the screen and the route to read it back, along with per-device session revocation."
-          apiSection="API §16 · audit, sessions, MFA"
+          title="Audit log and sessions aren’t ready yet"
+          description="Staff actions are already recorded. A searchable audit history and per-device session management will appear here when ready."
         />
       </div>
     </SettingsShell>

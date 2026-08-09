@@ -6,6 +6,7 @@ import {
   listBillingPlans,
 } from "@/lib/api/server";
 import { isConfigurationRequired, isPlannedError } from "@/lib/api/planned";
+import { sanitizePublicCopy } from "@/lib/api/public-copy";
 import type {
   AddonResponse,
   InvoicesResponse,
@@ -77,11 +78,16 @@ export default async function SettingsBillingPage() {
           <BillingPlanPicker
             plans={plans.data.items}
             currency={plans.data.currency}
-            pricingNote={plans.data.note}
+            pricingNote={
+              sanitizePublicCopy(plans.data.note) ||
+              "Prices are proposed and not final. Markii charges no transaction fee below your plan threshold, on any payment provider."
+            }
             subscription={subscription.data}
           />
         ) : plans.error && !plans.configurationRequired ? (
-          <p className="text-sm text-error-text">{plans.error}</p>
+          <p className="text-sm text-error-text">
+            {sanitizePublicCopy(plans.error)}
+          </p>
         ) : null}
 
         <ThresholdMeter
@@ -104,7 +110,7 @@ export default async function SettingsBillingPage() {
           <section className="rounded-[var(--radius-card)] border border-border bg-surface p-5 shadow-[var(--shadow-sm)]">
             <h2 className="text-base font-medium text-foreground">Add-ons</h2>
             <p className="mt-1 text-sm leading-6 text-muted">
-              Shown for awareness. Purchase is unavailable until the products exist.
+              Shown for awareness. These add-ons are not available to purchase yet.
             </p>
             <ul className="mt-4 space-y-4">
               {addons.map((addon) => (
@@ -115,13 +121,9 @@ export default async function SettingsBillingPage() {
                       ? "Included in your plan."
                       : addon.purchased
                         ? "Purchased."
-                        : addon.availability.message}
+                        : sanitizePublicCopy(addon.availability.message) ||
+                          "Not available to purchase yet."}
                   </p>
-                  {!addon.includedInPlan && !addon.purchased ? (
-                    <p className="mt-1 text-xs text-muted-soft">
-                      {addon.availability.detail}
-                    </p>
-                  ) : null}
                 </li>
               ))}
             </ul>

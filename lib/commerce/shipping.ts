@@ -176,7 +176,7 @@ export async function quoteShipping(input: {
       state: "not_configured",
       rates: [],
       reason:
-        "This store has not configured any shipping zones yet (docs/API.md §18.6). " +
+        "This store has not configured any shipping zones yet. " +
         "No rate is quoted because none exists — this is not a free-shipping offer.",
     };
   }

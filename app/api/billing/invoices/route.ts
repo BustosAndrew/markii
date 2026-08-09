@@ -122,7 +122,8 @@ async function fetchInvoices(customerId: string | null, limit: number) {
       state: {
         code: "configuration_required" as const,
         message: "No invoices — Stripe Billing is not connected, so nothing has been billed.",
-        resolution: "Set STRIPE_SECRET_KEY (docs/API.md §17).",
+        resolution:
+          "This deployment needs additional platform configuration. Contact your Markii admin.",
       },
     };
   }

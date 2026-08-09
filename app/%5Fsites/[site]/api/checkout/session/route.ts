@@ -143,9 +143,9 @@ export const POST = handler(async (req, { params }) => {
             missing: ["shipping"],
             note: priced.shipping.note,
             resolution:
-              "Configure shipping zones and rates (docs/API.md §18.6). Until then this store " +
-              "cannot quote a total it is able to honour, and charging zero shipping would " +
-              "leave the merchant paying the cost.",
+              "Configure shipping zones and rates in the dashboard. Until then this store " +
+              "cannot quote a total it can honour, and charging zero shipping would leave the " +
+              "merchant paying the cost.",
           },
         },
       },

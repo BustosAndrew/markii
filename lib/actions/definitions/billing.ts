@@ -120,7 +120,10 @@ export const changePlan = defineAction({
         "CONFIGURATION_REQUIRED",
         503,
         "Stripe Billing is not connected on this deployment.",
-        { resolution: "Set STRIPE_SECRET_KEY (docs/API.md §17)." },
+        {
+          resolution:
+            "This deployment needs additional platform configuration. Contact your Markii admin.",
+        },
       );
     }
     const orgId = ctx.actor.orgId;
@@ -393,7 +396,10 @@ export const startPaymentMethodSetup = defineAction({
         "CONFIGURATION_REQUIRED",
         503,
         "Card details cannot be collected — Stripe Billing is not connected.",
-        { resolution: "Set STRIPE_SECRET_KEY (docs/API.md §17)." },
+        {
+          resolution:
+            "This deployment needs additional platform configuration. Contact your Markii admin.",
+        },
       );
     }
     const orgId = ctx.actor.orgId;
@@ -429,8 +435,7 @@ export const startPaymentMethodSetup = defineAction({
         "Card details cannot be collected — Stripe Elements cannot load.",
         {
           resolution:
-            "Set NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY, and make sure it is in the same mode as " +
-            "STRIPE_SECRET_KEY. A pk_live_ key cannot confirm a secret issued by an sk_test_ key.",
+            "Card collection needs additional platform configuration. Contact your Markii admin.",
         },
       );
     }

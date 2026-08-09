@@ -426,14 +426,14 @@ export const NOT_MEASURED_GROUPS = [
     label: "Agent data",
     fields: ["useCases", "faqs", "machineSummary"],
     reason:
-      "The product agent-data extension (docs/API.md §11) is not built, so there is nowhere to " +
-      "enter these. Scoring them would mark every merchant down for a field Markii does not offer.",
+      "Agent-data fields are not available to edit yet, so they are not scored. Scoring them " +
+      "would mark every merchant down for something Markii does not offer.",
   },
   {
     group: "compatibility",
     label: "Compatibility",
     fields: ["compatibleWith"],
-    reason: "Not built (docs/API.md §11).",
+    reason: "Compatibility fields are not available yet, so they are not scored.",
   },
 ] as const;
 
