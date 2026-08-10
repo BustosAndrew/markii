@@ -10,6 +10,7 @@ import {
   KeyRound,
   LayoutList,
   LayoutGrid,
+  LogOut,
   Percent,
   Plug,
   Settings,
@@ -18,7 +19,9 @@ import {
   Users,
 } from "lucide-react";
 import { Logo } from "@/components/logo";
+import { signOut } from "@/lib/api/auth";
 import { switchOrg, type MeResponse } from "@/lib/api/org";
+import { publicErrorMessage } from "@/lib/api/public-copy";
 import { ApiClientError } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
@@ -129,6 +132,7 @@ export function SidebarNav({
 export function SidebarOrgCard({ me }: { me: MeResponse | null }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   if (!me) {
@@ -138,11 +142,18 @@ export function SidebarOrgCard({ me }: { me: MeResponse | null }) {
           Organization
         </p>
         <p className="mt-2 text-sm leading-6 text-muted">Not signed in.</p>
+        <Link
+          href="/sign-in"
+          className="mt-3 inline-flex text-sm font-medium text-brand hover:text-brand-hover"
+        >
+          Sign in
+        </Link>
       </div>
     );
   }
 
   const others = me.organizations.filter((o) => !o.active);
+  const accountLabel = me.user.email ?? me.user.name ?? "Signed in";
 
   return (
     <div className="rounded-[var(--radius-card)] border border-border bg-surface-elevated p-3">
@@ -153,13 +164,16 @@ export function SidebarOrgCard({ me }: { me: MeResponse | null }) {
         {me.org.name}
       </p>
       <p className="mt-0.5 text-xs capitalize text-muted">{me.role.replace(/_/g, " ")}</p>
+      <p className="mt-1 truncate text-xs text-muted" title={accountLabel}>
+        {accountLabel}
+      </p>
 
       {others.length > 0 ? (
         <select
           aria-label="Switch organization"
           className="mt-2 w-full cursor-pointer rounded-[var(--radius-control)] border border-border bg-surface px-2 py-1.5 text-sm text-foreground disabled:cursor-not-allowed"
           value={me.org.id}
-          disabled={busy}
+          disabled={busy || signingOut}
           onChange={async (e) => {
             const orgId = e.target.value;
             if (orgId === me.org.id) return;
@@ -182,6 +196,27 @@ export function SidebarOrgCard({ me }: { me: MeResponse | null }) {
           ))}
         </select>
       ) : null}
+
+      <button
+        type="button"
+        disabled={signingOut || busy}
+        onClick={async () => {
+          setSigningOut(true);
+          setError(null);
+          try {
+            await signOut();
+            // Full navigation clears any client cache tied to the old session.
+            window.location.href = "/sign-in";
+          } catch (err) {
+            setError(publicErrorMessage(err, "Could not sign out."));
+            setSigningOut(false);
+          }
+        }}
+        className="mt-3 flex w-full cursor-pointer items-center justify-center gap-2 rounded-[var(--radius-control)] border border-border bg-surface px-2 py-2 text-sm font-medium text-foreground transition-colors hover:bg-hover-soft disabled:cursor-not-allowed disabled:opacity-60 max-lg:min-h-11"
+      >
+        <LogOut className="size-3.5 shrink-0" strokeWidth={1.75} aria-hidden />
+        {signingOut ? "Signing out…" : "Sign out"}
+      </button>
 
       {error ? <p className="mt-2 text-xs text-error-text">{error}</p> : null}
     </div>

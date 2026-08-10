@@ -1,5 +1,9 @@
 import type { CSSProperties, ReactNode } from "react";
-import { getTheme, type ThemeId } from "@/lib/storefront/themes";
+import {
+  getTheme,
+  themeStylesheet,
+  type ThemeId,
+} from "@/lib/storefront/themes";
 
 function themeStyle(themeId?: string | null): CSSProperties {
   const t = getTheme(themeId);
@@ -17,6 +21,8 @@ function themeStyle(themeId?: string | null): CSSProperties {
     ["--sf-max" as string]: t.maxWidth,
     ["--sf-card-pad" as string]: t.cardPad,
     ["--sf-grid-min" as string]: t.gridMin,
+    ["--sf-image-aspect" as string]: t.imageAspect,
+    ["--sf-grid-gap" as string]: t.gridGap,
     background: t.background,
     color: t.foreground,
     fontFamily: t.fontBody,
@@ -33,12 +39,18 @@ export function ThemeRoot({
 }) {
   const theme = getTheme(themeId);
   return (
-    <div
-      className="sf-shell"
-      data-theme={theme.id as ThemeId}
-      style={themeStyle(themeId)}
-    >
-      {children}
-    </div>
+    <>
+      <link rel="preconnect" href="https://fonts.googleapis.com" />
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+      <link rel="stylesheet" href={theme.fontHref} />
+      <style dangerouslySetInnerHTML={{ __html: themeStylesheet(theme) }} />
+      <div
+        className="sf-shell"
+        data-theme={theme.id as ThemeId}
+        style={themeStyle(themeId)}
+      >
+        {children}
+      </div>
+    </>
   );
 }

@@ -105,79 +105,83 @@ export default async function ProductPage({ params }: Props) {
             </>
           ) : null}
         </p>
-        <h1 className="sf-title">{product.name}</h1>
-        <div className="sf-product-media">
-          {product.images.map((src) => (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img key={src} src={src} alt={product.name} loading="lazy" />
-          ))}
-        </div>
-        <p>
-          <strong className="sf-price">
-            {formatPrice(product.priceCents, product.currency)}
-          </strong>
-          <span className="sf-muted">
-            {" — "}
-            {product.stock > 0 ? `${product.stock} in stock` : "out of stock"}
-            {product.sku ? ` — SKU ${product.sku}` : ""}
-          </span>
-        </p>
-        {description ? <p>{description}</p> : null}
-
-        {gate ? (
-          <p className={locked ? "sf-gate sf-gate-locked" : "sf-gate"}>
-            {locked ? (
-              <>
-                <strong>Members only.</strong> This product is available to{" "}
-                {gate.tierName} members.{" "}
-                <a href={`${baseUrl}/account`}>Sign in or create an account</a>{" "}
-                to check whether your membership covers it.
-              </>
-            ) : (
-              <>
-                <strong>Included with your {gate.tierName} membership.</strong>
-              </>
-            )}
-          </p>
-        ) : null}
-
-        <AddToCart
-          productId={dbProduct.id}
-          currency={product.currency}
-          basePriceMinor={product.priceCents}
-          cartHref={`${baseUrl}/cart`}
-          locked={locked}
-          options={options.map((o) => ({
-            name: o.name,
-            position: o.position,
-            values: o.values,
-          }))}
-          variants={variantRows.map((v) => ({
-            id: v.id,
-            title: v.title,
-            optionValues: v.optionValues,
-            priceMinor: v.priceMinor,
-            available: (levels.get(v.id) ?? []).reduce(
-              (sum, row) => sum + row.available,
-              0,
-            ),
-          }))}
-        />
-
-        {!locked &&
-        site.agentDiscovery &&
-        site.purchasesEnabled &&
-        site.paymentProviders?.x402 ? (
-          <>
-            <h2>Buy via agent</h2>
-            <pre className="sf-buy">{`POST ${baseUrl}/api/checkout
-{"productSlug": "${product.slug}", "quantity": 1}`}</pre>
-            <p className="sf-muted">
-              Payment protocol: <a href={`${baseUrl}/agent.md`}>agent.md</a>{" "}
-              (x402 / USDC)
+        <div className="sf-product">
+          <div className="sf-product-media">
+            {product.images.map((src) => (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img key={src} src={src} alt={product.name} loading="lazy" />
+            ))}
+          </div>
+          <div className="sf-product-body">
+            <h1 className="sf-title">{product.name}</h1>
+            <p>
+              <strong className="sf-price">
+                {formatPrice(product.priceCents, product.currency)}
+              </strong>
+              <span className="sf-muted">
+                {" — "}
+                {product.stock > 0 ? `${product.stock} in stock` : "out of stock"}
+                {product.sku ? ` — SKU ${product.sku}` : ""}
+              </span>
             </p>
-          </>
-        ) : null}
+            {description ? <p>{description}</p> : null}
+
+            {gate ? (
+              <p className={locked ? "sf-gate sf-gate-locked" : "sf-gate"}>
+                {locked ? (
+                  <>
+                    <strong>Members only.</strong> This product is available to{" "}
+                    {gate.tierName} members.{" "}
+                    <a href={`${baseUrl}/account`}>Sign in or create an account</a>{" "}
+                    to check whether your membership covers it.
+                  </>
+                ) : (
+                  <>
+                    <strong>Included with your {gate.tierName} membership.</strong>
+                  </>
+                )}
+              </p>
+            ) : null}
+
+            <AddToCart
+              productId={dbProduct.id}
+              currency={product.currency}
+              basePriceMinor={product.priceCents}
+              cartHref={`${baseUrl}/cart`}
+              locked={locked}
+              options={options.map((o) => ({
+                name: o.name,
+                position: o.position,
+                values: o.values,
+              }))}
+              variants={variantRows.map((v) => ({
+                id: v.id,
+                title: v.title,
+                optionValues: v.optionValues,
+                priceMinor: v.priceMinor,
+                available: (levels.get(v.id) ?? []).reduce(
+                  (sum, row) => sum + row.available,
+                  0,
+                ),
+              }))}
+            />
+
+            {!locked &&
+            site.agentDiscovery &&
+            site.purchasesEnabled &&
+            site.paymentProviders?.x402 ? (
+              <>
+                <h2>Buy via agent</h2>
+                <pre className="sf-buy">{`POST ${baseUrl}/api/checkout
+{"productSlug": "${product.slug}", "quantity": 1}`}</pre>
+                <p className="sf-muted">
+                  Payment protocol: <a href={`${baseUrl}/agent.md`}>agent.md</a>{" "}
+                  (x402 / USDC)
+                </p>
+              </>
+            ) : null}
+          </div>
+        </div>
         {suggested.length > 0 ? (
           <>
             <h2>You might also like</h2>

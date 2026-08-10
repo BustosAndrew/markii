@@ -1,7 +1,7 @@
 import type { Product as SchemaProduct, WithContext } from "schema-dts";
 import { slugify, tenantBaseUrl } from "@/lib/api";
 import type { Category, Product, Site } from "@/lib/db";
-import { getTheme, themeStylesheet } from "@/lib/storefront/themes";
+import { getTheme, themeDocumentStylesheet } from "@/lib/storefront/themes";
 
 /**
  * A site + catalog snapshot every generator works from. Built either from the DB
@@ -288,7 +288,10 @@ ${p.images[0] ? `<img src="${escapeHtml(p.images[0])}" alt="${escapeHtml(p.name)
 ${site.indexed === false ? `<meta name="robots" content="noindex">` : ""}
 ${site.googleSiteVerification ? `<meta name="google-site-verification" content="${escapeHtml(site.googleSiteVerification)}">` : ""}
 <meta name="description" content="${escapeHtml(strip(site.description) || `${site.name} — agent-friendly store`)}">
-<style>${themeStylesheet(theme)}</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="${escapeHtml(theme.fontHref)}">
+<style>${themeDocumentStylesheet(theme)}</style>
 </head>
 <body>
 <div class="sf-shell" data-theme="${theme.id}">
@@ -297,8 +300,10 @@ ${site.googleSiteVerification ? `<meta name="google-site-verification" content="
 <nav class="sf-nav">${nav}</nav>
 </div></header>
 <main class="sf-main">
+<header class="sf-hero">
 <h1 class="sf-title">${escapeHtml(site.name)}</h1>
 <p class="sf-lede">Agent-readable store — see <a href="${baseUrl}/llms.txt">llms.txt</a> and <a href="${baseUrl}/agent.md">agent.md</a>.</p>
+</header>
 <ul class="sf-grid">
 ${cards}
 </ul>

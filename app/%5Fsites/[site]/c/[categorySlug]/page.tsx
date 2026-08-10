@@ -57,10 +57,12 @@ export default async function CategoryPage({ params }: Props) {
         <p className="sf-crumb">
           <a href={`${baseUrl}/`}>{site.name}</a> / {category.name}
         </p>
-        <h1 className="sf-title">{category.name}</h1>
-        {category.description ? (
-          <p className="sf-lede">{category.description}</p>
-        ) : null}
+        <header className="sf-hero">
+          <h1 className="sf-title">{category.name}</h1>
+          {category.description ? (
+            <p className="sf-lede">{category.description}</p>
+          ) : null}
+        </header>
         {children.length > 0 ? (
           <nav className="sf-nav" aria-label="Subcategories">
             {children.map((c) => (

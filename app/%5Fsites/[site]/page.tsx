@@ -55,16 +55,18 @@ export default async function StorePage({ params }: Props) {
         }))}
       />
       <main className="sf-main">
-        <h1 className="sf-title">{site.name}</h1>
-        {site.agentDiscovery ? (
-          <p className="sf-lede">
-            Agent-readable store — see{" "}
-            <a href={`${baseUrl}/llms.txt`}>llms.txt</a> and{" "}
-            <a href={`${baseUrl}/agent.md`}>agent.md</a>.
-          </p>
-        ) : (
-          <p className="sf-lede">Welcome to {site.name}.</p>
-        )}
+        <header className="sf-hero">
+          <h1 className="sf-title">{site.name}</h1>
+          {site.agentDiscovery ? (
+            <p className="sf-lede">
+              Agent-readable store — see{" "}
+              <a href={`${baseUrl}/llms.txt`}>llms.txt</a> and{" "}
+              <a href={`${baseUrl}/agent.md`}>agent.md</a>.
+            </p>
+          ) : (
+            <p className="sf-lede">Welcome to {site.name}.</p>
+          )}
+        </header>
         <ul className="sf-grid">
           {bundle.products.map((p) => (
             <ProductCard
