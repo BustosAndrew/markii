@@ -91,25 +91,46 @@ export default async function CustomerDetailPage({
             <p className="mt-3 text-sm text-muted">This customer holds no memberships.</p>
           ) : (
             <ul className="mt-3 divide-y divide-border">
-              {memberships.data.items.map((m) => (
-                <li key={m.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-foreground">{m.tier.name}</p>
-                    <p className="mt-0.5 text-xs text-muted">
-                      {m.source === "purchase" ? "Bought" : "Granted by staff"}
-                      {m.endsAt
-                        ? ` · ${m.status === "expired" ? "ended" : "ends"} ${new Date(
-                            m.endsAt,
-                          ).toLocaleDateString()}`
-                        : " · no expiry"}
-                      {m.revokedAt
-                        ? ` · revoked ${new Date(m.revokedAt).toLocaleDateString()}`
-                        : ""}
-                    </p>
-                  </div>
-                  <Badge variant={STATUS_VARIANT[m.status]}>{m.status}</Badge>
-                </li>
-              ))}
+              {memberships.data.items.map((m) => {
+                const accessEnds = m.accessEndsAt ?? m.endsAt;
+                const billingLabel = m.renews
+                  ? "renews"
+                  : m.renewalCanceledAt
+                    ? "will not renew"
+                    : "one-off — does not renew";
+                return (
+                  <li
+                    key={m.id}
+                    className="flex flex-wrap items-center justify-between gap-3 py-3"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground">{m.tier.name}</p>
+                      <p className="mt-0.5 text-xs text-muted">
+                        Access: {m.status}
+                        {accessEnds
+                          ? ` · ${m.status === "expired" ? "ended" : "through"} ${new Date(
+                              accessEnds,
+                            ).toLocaleDateString()}`
+                          : " · no expiry"}
+                        {m.revokedAt
+                          ? ` · revoked ${new Date(m.revokedAt).toLocaleDateString()}`
+                          : ""}
+                      </p>
+                      <p className="mt-0.5 text-xs text-muted">
+                        Billing: {billingLabel}
+                        {" · "}
+                        {m.source === "purchase" ? "Bought" : "Granted by staff"}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant={STATUS_VARIANT[m.status]}>{m.status}</Badge>
+                      <Badge variant={m.renews ? "info" : "neutral"}>
+                        {m.renews ? "renews" : "no renewal"}
+                      </Badge>
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </section>

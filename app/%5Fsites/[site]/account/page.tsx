@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { and, desc, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { SiteHeader } from "@/components/storefront/site-header";
 import { ThemeRoot } from "@/components/storefront/theme-root";
@@ -6,7 +7,6 @@ import { currentCustomer } from "@/lib/auth/shopper";
 import { membershipStatus } from "@/lib/commerce/memberships";
 import { customerMemberships, db, membershipTiers } from "@/lib/db";
 import { loadSite } from "@/lib/storefront";
-import { and, eq } from "drizzle-orm";
 
 type Props = {
   params: Promise<{ site: string }>;
@@ -23,20 +23,19 @@ export async function generateMetadata({
   if (!data) return {};
   return {
     title: `Account — ${data.site.name}`,
-    // Never index a page whose whole content is one shopper's own records.
     robots: { index: false, follow: false },
   };
 }
 
 /**
- * `/account` on a storefront host (§18.3, §18.9) — sign in, and see which
- * memberships you hold.
+ * `/account` on a storefront host (§18.3, §18.9) — sign in, see memberships,
+ * cancel renewal.
  *
- * **No JavaScript at all — plain `<form method="post">`.** `CLAUDE.md` sanctions
- * exactly three storefront islands (cart, variant picker, checkout) and an
- * account page is not one of them, so the auth routes accept a form-encoded body
- * and answer with a 303 rather than JSON. Errors come back as a query parameter
- * because there is no client to hold them.
+ * **No JavaScript — plain `<form method="post">`.** Cart / variant / checkout
+ * are the only sanctioned storefront islands.
+ *
+ * **`status` and `renews` are shown apart.** Access and billing are different
+ * questions — a cancelled membership stays active until `accessEndsAt`.
  */
 export default async function AccountPage({ params, searchParams }: Props) {
   const { site: siteSlug } = await params;
@@ -51,11 +50,14 @@ export default async function AccountPage({ params, searchParams }: Props) {
   const rows = customer
     ? await db
         .select({
+          id: customerMemberships.id,
           tierId: customerMemberships.tierId,
           name: membershipTiers.name,
           startsAt: customerMemberships.startsAt,
           endsAt: customerMemberships.endsAt,
           revokedAt: customerMemberships.revokedAt,
+          stripeSubscriptionId: customerMemberships.stripeSubscriptionId,
+          renewalCanceledAt: customerMemberships.renewalCanceledAt,
         })
         .from(customerMemberships)
         .innerJoin(membershipTiers, eq(membershipTiers.id, customerMemberships.tierId))
@@ -65,6 +67,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
             eq(membershipTiers.siteId, site.id),
           ),
         )
+        .orderBy(desc(customerMemberships.startsAt))
     : [];
 
   const now = new Date();
@@ -76,6 +79,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
         siteName={site.name}
         homeHref={`${baseUrl}/`}
         cartHref={`${baseUrl}/cart`}
+        accountHref={`${baseUrl}/account`}
         nav={topCategories.map((c) => ({ name: c.name, href: `${baseUrl}/c/${c.slug}` }))}
       />
       <main className="sf-main">
@@ -96,25 +100,47 @@ export default async function AccountPage({ params, searchParams }: Props) {
             {rows.length === 0 ? (
               <p>You do not hold a membership at this store yet.</p>
             ) : (
-              <ul>
+              <ul className="sf-list">
                 {rows.map((m) => {
                   const status = membershipStatus(m, now);
+                  const renews =
+                    Boolean(m.stripeSubscriptionId) && m.renewalCanceledAt === null;
+                  const accessEnds = m.endsAt
+                    ? m.endsAt.toISOString().slice(0, 10)
+                    : null;
                   return (
-                    <li key={m.tierId}>
-                      <strong>{m.name}</strong> — {status}
-                      {/*
-                        Expiry is shown for an active membership and for one that
-                        has lapsed, because "when does this run out" and "when
-                        did it" are the two questions this page exists to answer.
-                      */}
-                      {m.endsAt ? (
-                        <span className="sf-muted">
-                          {status === "expired" ? " · ended " : " · renews or ends "}
-                          {m.endsAt.toISOString().slice(0, 10)}
-                        </span>
-                      ) : (
-                        <span className="sf-muted"> · no expiry</span>
-                      )}
+                    <li key={m.id}>
+                      <div>
+                        <strong>{m.name}</strong>
+                        <p className="sf-muted">
+                          Access: {status}
+                          {accessEnds
+                            ? status === "expired"
+                              ? ` · ended ${accessEnds}`
+                              : ` · access through ${accessEnds}`
+                            : " · no expiry"}
+                        </p>
+                        <p className="sf-muted">
+                          Billing:{" "}
+                          {renews
+                            ? "renews automatically"
+                            : m.stripeSubscriptionId
+                              ? "will not renew"
+                              : "one-off — does not renew"}
+                        </p>
+                        {renews ? (
+                          <form
+                            className="sf-form"
+                            method="post"
+                            action={`${baseUrl}/api/account/memberships/${m.id}/renewal`}
+                          >
+                            <button type="submit">
+                              Cancel renewal
+                              {accessEnds ? ` (keep access until ${accessEnds})` : ""}
+                            </button>
+                          </form>
+                        ) : null}
+                      </div>
                     </li>
                   );
                 })}
@@ -127,7 +153,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
           </>
         ) : (
           <>
-            <p>Sign in to see your memberships and any members-only products.</p>
+            <p>Sign in to see your memberships and manage renewals.</p>
 
             <h2>Sign in</h2>
             <form className="sf-form" method="post" action={`${baseUrl}/api/auth/sign-in`}>

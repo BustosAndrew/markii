@@ -196,6 +196,45 @@ export function createCheckoutSession(body: {
   });
 }
 
+/** Recurring membership checkout — separate from one-off PaymentIntent sessions. */
+export type SubscriptionCheckout = {
+  subscriptionId: string;
+  status: string;
+  clientSecret: string;
+  publishableKey: string;
+  stripeAccount: string;
+  tier: { id: number; productId: number; name: string };
+  interval: "month" | "year";
+  amountMinor: number;
+  currency: string;
+  membershipGranted: false;
+  note: string;
+};
+
+export function createSubscriptionCheckout(body: {
+  cartToken: string;
+  email?: string;
+}) {
+  return sfFetch<SubscriptionCheckout>("/api/checkout/subscription", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export type CheckoutConflictDetails = {
+  useEndpoint?: string;
+  productId?: number;
+  interval?: string;
+  resolution?: string;
+};
+
+/** True when one-off checkout refused because the cart is a recurring membership. */
+export function isSubscriptionCheckoutRequired(error: unknown): error is ApiClientError {
+  if (!(error instanceof ApiClientError) || error.status !== 409) return false;
+  const details = error.details as CheckoutConflictDetails | undefined;
+  return typeof details?.useEndpoint === "string" && details.useEndpoint.includes("subscription");
+}
+
 export function completeCheckoutSession(
   sessionId: string,
   body: { paymentReference: string; payerReference?: string },

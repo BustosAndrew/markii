@@ -48,6 +48,7 @@ export default async function CategoryPage({ params }: Props) {
         siteName={site.name}
         homeHref={`${baseUrl}/`}
         cartHref={`${baseUrl}/cart`}
+        accountHref={`${baseUrl}/account`}
         nav={topCategories.map((c) => ({
           name: c.name,
           href: `${baseUrl}/c/${c.slug}`,

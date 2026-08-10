@@ -264,10 +264,22 @@ export const grantMembership = defineAction({
       after: endsAt?.toISOString() ?? null,
     });
 
+    const renews =
+      Boolean(row.stripeSubscriptionId) && row.renewalCanceledAt === null;
     return {
-      ...row,
-      status: membershipStatus(row, now),
+      id: row.id,
       tier: { id: tier.id, name: tier.name, handle: tier.handle },
+      status: membershipStatus(row, now),
+      startsAt: row.startsAt.toISOString(),
+      endsAt: row.endsAt?.toISOString() ?? null,
+      revokedAt: row.revokedAt?.toISOString() ?? null,
+      source: row.source,
+      orderId: row.orderId,
+      createdAt: row.createdAt.toISOString(),
+      renews,
+      renewalCanceledAt: row.renewalCanceledAt?.toISOString() ?? null,
+      accessEndsAt: row.endsAt?.toISOString() ?? null,
+      cancellable: renews,
     };
   },
 });
@@ -307,10 +319,34 @@ export const revokeMembership = defineAction({
     if (!current) throw notFound("Membership");
 
     const now = new Date();
+    const serialize = (
+      row: typeof current,
+      alreadyRevoked: boolean,
+    ) => {
+      const renews =
+        Boolean(row.stripeSubscriptionId) && row.renewalCanceledAt === null;
+      return {
+        id: row.id,
+        tier: { id: tier.id, name: tier.name, handle: tier.handle },
+        status: membershipStatus(row, now),
+        startsAt: row.startsAt.toISOString(),
+        endsAt: row.endsAt?.toISOString() ?? null,
+        revokedAt: row.revokedAt?.toISOString() ?? null,
+        source: row.source,
+        orderId: row.orderId,
+        createdAt: row.createdAt.toISOString(),
+        renews,
+        renewalCanceledAt: row.renewalCanceledAt?.toISOString() ?? null,
+        accessEndsAt: row.endsAt?.toISOString() ?? null,
+        cancellable: renews,
+        alreadyRevoked,
+      };
+    };
+
     if (membershipStatus(current, now) === "revoked") {
       // Already revoked: re-stamping would move the date and misreport when
       // access actually ended.
-      return { ...current, status: "revoked" as const, alreadyRevoked: true };
+      return serialize(current, true);
     }
 
     const [row] = await ctx.db
@@ -327,6 +363,6 @@ export const revokeMembership = defineAction({
       after: now.toISOString(),
     });
 
-    return { ...row, status: membershipStatus(row, now), alreadyRevoked: false };
+    return serialize(row, false);
   },
 });

@@ -9,13 +9,16 @@ import {
 } from "@stripe/react-stripe-js";
 import { loadStripe, type Stripe } from "@stripe/stripe-js";
 import { formatMinor } from "@/lib/api/money";
+import { ApiClientError } from "@/lib/api/types";
 import {
   applyDiscount,
   clearCartToken,
   completeCheckoutSession,
   createCheckoutSession,
+  createSubscriptionCheckout,
   ensureCart,
   getCart,
+  isSubscriptionCheckoutRequired,
   patchCart,
   quoteShippingRates,
   readCartToken,
@@ -40,11 +43,15 @@ function stripeFor(publishableKey: string, accountId?: string) {
 }
 
 function StripePay({
+  mode,
   sessionId,
-  onDone,
+  onOrderDone,
+  onSubscriptionDone,
 }: {
-  sessionId: string;
-  onDone: (orderId: number) => void;
+  mode: "order" | "subscription";
+  sessionId: string | null;
+  onOrderDone: (orderId: number) => void;
+  onSubscriptionDone: () => void;
 }) {
   const stripe = useStripe();
   const elements = useElements();
@@ -65,11 +72,17 @@ function StripePay({
         setError(result.error.message ?? "Payment failed.");
         return;
       }
+      if (mode === "subscription") {
+        // Membership is granted by invoice.paid — never claim access here.
+        clearCartToken();
+        onSubscriptionDone();
+        return;
+      }
       const pi =
         typeof result.paymentIntent?.id === "string"
           ? result.paymentIntent.id
           : null;
-      if (!pi) {
+      if (!pi || !sessionId) {
         setError("Stripe did not return a payment id.");
         return;
       }
@@ -77,7 +90,7 @@ function StripePay({
         paymentReference: pi,
       });
       clearCartToken();
-      onDone(done.orderId);
+      onOrderDone(done.orderId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Payment failed.");
     } finally {
@@ -90,7 +103,7 @@ function StripePay({
       <PaymentElement />
       {error ? <p className="sf-error">{error}</p> : null}
       <button type="submit" className="sf-btn" disabled={!stripe || busy}>
-        {busy ? "Paying…" : "Pay now"}
+        {busy ? "Paying…" : mode === "subscription" ? "Subscribe" : "Pay now"}
       </button>
     </form>
   );
@@ -98,9 +111,11 @@ function StripePay({
 
 export function CartCheckout({
   homeHref,
+  accountHref,
   rails,
 }: {
   homeHref: string;
+  accountHref: string;
   rails: { stripe: boolean; x402: boolean };
 }) {
   const [cart, setCart] = useState<StorefrontCart | null>(null);
@@ -117,10 +132,12 @@ export function CartCheckout({
     rails.stripe ? "stripe" : "x402",
   );
   const [stripePay, setStripePay] = useState<{
-    sessionId: string;
+    mode: "order" | "subscription";
+    sessionId: string | null;
     clientSecret: string;
     publishableKey: string;
     accountId?: string;
+    note?: string;
   } | null>(null);
   const [x402Pay, setX402Pay] = useState<{
     sessionId: string;
@@ -130,6 +147,7 @@ export function CartCheckout({
   } | null>(null);
   const [txHash, setTxHash] = useState("");
   const [orderId, setOrderId] = useState<number | null>(null);
+  const [subscriptionStarted, setSubscriptionStarted] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -177,6 +195,25 @@ export function CartCheckout({
 
   if (loading) {
     return <p className="sf-muted">Loading cart…</p>;
+  }
+
+  if (subscriptionStarted) {
+    return (
+      <div className="sf-cart-island">
+        <h1 className="sf-title">Subscription started</h1>
+        <p>
+          Your payment is confirming. Membership access begins once the first invoice
+          is paid — it may take a moment.
+        </p>
+        <p className="sf-muted">
+          Manage renewals from your{" "}
+          <a href={accountHref}>account</a>.
+        </p>
+        <a className="sf-btn" href={homeHref}>
+          Back to store
+        </a>
+      </div>
+    );
   }
 
   if (orderId != null) {
@@ -436,11 +473,48 @@ export function CartCheckout({
                 try {
                   await ensureCart();
                   await patchCart(cart.token, { email });
-                  const session = await createCheckoutSession({
-                    cartToken: cart.token,
-                    rail,
-                    email,
-                  });
+
+                  let session;
+                  try {
+                    session = await createCheckoutSession({
+                      cartToken: cart.token,
+                      rail,
+                      email,
+                    });
+                  } catch (err) {
+                    if (isSubscriptionCheckoutRequired(err)) {
+                      if (!rails.stripe) {
+                        throw new Error(
+                          "Memberships renew by card. Enable Stripe on this store to continue.",
+                        );
+                      }
+                      const sub = await createSubscriptionCheckout({
+                        cartToken: cart.token,
+                        email,
+                      });
+                      setStripePay({
+                        mode: "subscription",
+                        sessionId: null,
+                        clientSecret: sub.clientSecret,
+                        publishableKey: sub.publishableKey,
+                        accountId: sub.stripeAccount,
+                        note: sub.note,
+                      });
+                      setRail("stripe");
+                      return;
+                    }
+                    if (
+                      err instanceof ApiClientError &&
+                      err.message.toLowerCase().includes("sign in")
+                    ) {
+                      setError(
+                        `${err.message} Open your account to sign in, then return here.`,
+                      );
+                      return;
+                    }
+                    throw err;
+                  }
+
                   if (rail === "stripe") {
                     if (
                       !session.payment.clientSecret ||
@@ -449,6 +523,7 @@ export function CartCheckout({
                       throw new Error("Card checkout is not ready for this store.");
                     }
                     setStripePay({
+                      mode: "order",
                       sessionId: session.id,
                       clientSecret: session.payment.clientSecret,
                       publishableKey: session.payment.publishableKey,
@@ -479,15 +554,29 @@ export function CartCheckout({
         ) : null}
 
         {stripePay ? (
-          <Elements
-            stripe={stripeFor(stripePay.publishableKey, stripePay.accountId)}
-            options={{ clientSecret: stripePay.clientSecret }}
-          >
-            <StripePay
-              sessionId={stripePay.sessionId}
-              onDone={(id) => setOrderId(id)}
-            />
-          </Elements>
+          <div className="sf-checkout-pay">
+            {stripePay.mode === "subscription" && stripePay.note ? (
+              <p className="sf-muted">{stripePay.note}</p>
+            ) : null}
+            <Elements
+              stripe={stripeFor(stripePay.publishableKey, stripePay.accountId)}
+              options={{ clientSecret: stripePay.clientSecret }}
+            >
+              <StripePay
+                mode={stripePay.mode}
+                sessionId={stripePay.sessionId}
+                onOrderDone={(id) => setOrderId(id)}
+                onSubscriptionDone={() => setSubscriptionStarted(true)}
+              />
+            </Elements>
+            {stripePay.mode === "subscription" ? (
+              <p className="sf-muted">
+                Need an account?{" "}
+                <a href={accountHref}>Sign in or create one</a> before
+                subscribing.
+              </p>
+            ) : null}
+          </div>
         ) : null}
 
         {x402Pay ? (

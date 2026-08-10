@@ -33,7 +33,7 @@ export default async function MembershipsPage({
     <div>
       <PageHeader
         title="Memberships"
-        description="Tiers that gate products, and who currently holds them. Memberships are bought for a fixed term and do not renew automatically."
+        description="Tiers that gate products, and who currently holds them. A membership can stay active after renewal is cancelled — access and billing are separate."
       />
 
       {tiers.data ? (

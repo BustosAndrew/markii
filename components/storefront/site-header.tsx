@@ -5,11 +5,13 @@ export function SiteHeader({
   homeHref,
   nav,
   cartHref,
+  accountHref,
 }: {
   siteName: string;
   homeHref: string;
   nav: NavItem[];
   cartHref?: string;
+  accountHref?: string;
 }) {
   return (
     <header className="sf-header">
@@ -26,10 +28,19 @@ export function SiteHeader({
             ))}
           </nav>
         ) : null}
-        {cartHref ? (
-          <a className="sf-cart-link" href={cartHref}>
-            Cart
-          </a>
+        {accountHref || cartHref ? (
+          <div className="sf-header-actions">
+            {accountHref ? (
+              <a className="sf-cart-link" href={accountHref}>
+                Account
+              </a>
+            ) : null}
+            {cartHref ? (
+              <a className="sf-cart-link" href={cartHref}>
+                Cart
+              </a>
+            ) : null}
+          </div>
         ) : null}
       </div>
     </header>

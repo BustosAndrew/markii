@@ -166,7 +166,8 @@ export function themeStylesheet(theme: ThemeTokens): string {
 .sf-nav{display:flex;flex-wrap:wrap;gap:.75rem 1rem;font-size:.9rem;color:var(--sf-muted);flex:1}
 .sf-nav a{text-decoration:none}
 .sf-nav a:hover{color:var(--sf-fg)}
-.sf-cart-link{margin-left:auto;font-size:.9rem;font-weight:600;text-decoration:none;color:var(--sf-fg)}
+.sf-header-actions{margin-left:auto;display:flex;flex-wrap:wrap;align-items:center;gap:.75rem 1rem}
+.sf-cart-link{font-size:.9rem;font-weight:600;text-decoration:none;color:var(--sf-fg)}
 .sf-cart-link:hover{color:var(--sf-accent)}
 .sf-main{max-width:var(--sf-max);margin:0 auto;padding:2rem 1.25rem 4rem}
 .sf-hero{margin:0 0 2rem}

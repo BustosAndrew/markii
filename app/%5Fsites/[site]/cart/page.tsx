@@ -29,6 +29,7 @@ export default async function CartPage({ params }: Props) {
         siteName={site.name}
         homeHref={`${baseUrl}/`}
         cartHref={`${baseUrl}/cart`}
+        accountHref={`${baseUrl}/account`}
         nav={topCategories.map((c) => ({
           name: c.name,
           href: `${baseUrl}/c/${c.slug}`,
@@ -37,6 +38,7 @@ export default async function CartPage({ params }: Props) {
       <main className="sf-main">
         <CartCheckout
           homeHref={`${baseUrl}/`}
+          accountHref={`${baseUrl}/account`}
           rails={{
             stripe: Boolean(site.paymentProviders?.stripe),
             x402: Boolean(site.paymentProviders?.x402),

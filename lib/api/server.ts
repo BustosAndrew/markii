@@ -35,6 +35,7 @@ import { GET as membershipTiersGET } from "@/app/api/memberships/tiers/route";
 import { GET as productsGET } from "@/app/api/products/route";
 import { GET as productGET } from "@/app/api/products/[idOrSlug]/route";
 import { GET as readinessOverviewGET } from "@/app/api/readiness/overview/route";
+import { GET as readinessIssuesGET } from "@/app/api/readiness/issues/route";
 import { GET as sitesGET } from "@/app/api/sites/route";
 import { GET as siteGET } from "@/app/api/sites/[idOrSlug]/route";
 import { GET as siteSummaryGET } from "@/app/api/sites/[idOrSlug]/summary/route";
@@ -56,7 +57,7 @@ import type { CustomerMembership, MembershipTier } from "./memberships";
 import type { Collection, Customer, Discount, DiscountDetail } from "./commerce";
 import type { MeResponse, ScopedToken, StaffMember } from "./org";
 import type { OrderDetail, OrdersQuery, OrdersResponse } from "./orders";
-import type { ReadinessReport } from "./readiness";
+import type { ReadinessIssue, ReadinessReport } from "./readiness";
 import type { AnalyticsOverview, AnalyticsQuery, AnalyticsSiteDetail } from "./analytics";
 import type { FinancesOverview, FinancesQuery, FinancesSiteDetail } from "./finances";
 import type { IntegrationsResponse } from "./integrations";
@@ -204,6 +205,27 @@ export const getReadinessOverview = (query?: {
     "/api/readiness/overview",
     query as Record<string, QueryValue>,
   );
+
+export const listReadinessIssues = (query?: {
+  severity?: ReadinessIssue["severity"];
+  status?: ReadinessIssue["status"];
+  siteId?: number;
+  productId?: number;
+  categoryId?: number;
+  channelId?: string;
+  component?: ReadinessIssue["component"];
+  q?: string;
+  sort?: "-severity" | "detectedAt";
+  page?: number;
+  limit?: number;
+}) =>
+  call<{
+    items: ReadinessIssue[];
+    total: number;
+    page: number;
+    limit: number;
+    counts: { critical: number; warning: number; opportunity: number };
+  }>(readinessIssuesGET, "/api/readiness/issues", query as Record<string, QueryValue>);
 
 export const getBillingUsage = () => call<UsageResponse>(billingUsageGET, "/api/billing/usage");
 

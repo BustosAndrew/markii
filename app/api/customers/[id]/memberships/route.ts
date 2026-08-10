@@ -41,6 +41,8 @@ export const GET = orgHandler(
         source: customerMemberships.source,
         orderId: customerMemberships.orderId,
         createdAt: customerMemberships.createdAt,
+        stripeSubscriptionId: customerMemberships.stripeSubscriptionId,
+        renewalCanceledAt: customerMemberships.renewalCanceledAt,
       })
       .from(customerMemberships)
       .innerJoin(membershipTiers, eq(membershipTiers.id, customerMemberships.tierId))
@@ -49,17 +51,29 @@ export const GET = orgHandler(
     const now = new Date();
 
     return NextResponse.json({
-      items: rows.map((r) => ({
-        id: r.id,
-        tier: { id: r.tierId, name: r.tierName, handle: r.tierHandle },
-        status: membershipStatus(r, now),
-        startsAt: r.startsAt.toISOString(),
-        endsAt: r.endsAt?.toISOString() ?? null,
-        revokedAt: r.revokedAt?.toISOString() ?? null,
-        source: r.source,
-        orderId: r.orderId,
-        createdAt: r.createdAt.toISOString(),
-      })),
+      items: rows.map((r) => {
+        const renews =
+          Boolean(r.stripeSubscriptionId) && r.renewalCanceledAt === null;
+        return {
+          id: r.id,
+          tier: { id: r.tierId, name: r.tierName, handle: r.tierHandle },
+          status: membershipStatus(r, now),
+          startsAt: r.startsAt.toISOString(),
+          endsAt: r.endsAt?.toISOString() ?? null,
+          revokedAt: r.revokedAt?.toISOString() ?? null,
+          source: r.source,
+          orderId: r.orderId,
+          createdAt: r.createdAt.toISOString(),
+          /**
+           * Access (`status`) and billing (`renews`) are different questions —
+           * a cancelled subscription stays active until `endsAt`.
+           */
+          renews,
+          renewalCanceledAt: r.renewalCanceledAt?.toISOString() ?? null,
+          accessEndsAt: r.endsAt?.toISOString() ?? null,
+          cancellable: renews,
+        };
+      }),
     });
   },
   { permission: "commerce.read" },

@@ -11,23 +11,11 @@ import { getIntegration } from "@/lib/integrations";
  * `DELETE /_sites/{slug}/api/account/memberships/{id}/renewal` (§18.9) — the
  * member stops their own subscription.
  *
- * **A recurring charge a shopper cannot stop themselves is not acceptable**, and
- * until this existed that was the state: `cancelMembershipRenewal` sat in
- * `lib/` with nothing calling it, so a member's only route out was emailing the
- * merchant.
- *
- * **It cancels the renewal, not the membership.** Access runs to `endsAt` —
- * they paid for the period, and ending it early would delete time they bought.
- * That is the same rule Markii's own subscription cancellation follows, and it
- * is why nothing here touches `revokedAt`: *"I cancelled"* and *"the merchant
- * removed me"* are different facts, kept in different columns.
- *
- * The membership id comes from the URL, so it is checked against the signed-in
- * shopper **and** against this store before anything happens. A membership that
- * is not theirs answers `404`, not `403` — "forbidden" would confirm it exists.
+ * **POST** accepts the same action for plain HTML forms (no JS on `/account`).
+ * Form posts redirect with 303; JSON clients keep using DELETE.
  */
-export const DELETE = handler(async (_req, { params }) => {
-  const { site: slug, id } = await params;
+
+async function cancelRenewal(slug: string, id: string) {
   const site = await loadStore(slug);
 
   const membershipId = Number.parseInt(id, 10);
@@ -38,12 +26,6 @@ export const DELETE = handler(async (_req, { params }) => {
   const customerId = await currentCustomerId(site.id);
   if (customerId === null) throw unauthorized("Sign in to manage your membership");
 
-  /**
-   * Scoped on **both** the customer and the site. The customer check alone would
-   * be enough today, since a customer belongs to one store — but relying on that
-   * leaves the boundary resting on an invariant enforced somewhere else, and
-   * this is a route that stops a payment.
-   */
   const [membership] = await db
     .select({
       id: customerMemberships.id,
@@ -73,28 +55,18 @@ export const DELETE = handler(async (_req, { params }) => {
     );
   }
 
-  /**
-   * Already cancelled. Reported as success rather than an error: the member
-   * asked for this to stop renewing and it is not renewing. A second click, or
-   * a retried request, must not read as a failure.
-   */
   if (membership.renewalCanceledAt) {
-    return NextResponse.json({
-      canceled: true,
-      alreadyCanceled: true,
+    return {
+      canceled: true as const,
+      alreadyCanceled: true as const,
       accessEndsAt: membership.endsAt?.toISOString() ?? null,
       message: "This membership was already set to stop renewing.",
-    });
+      tierName: membership.tierName,
+    };
   }
 
   const connection = await getIntegration(site.orgId, "stripe");
   if (connection?.status !== "connected" || !connection.config.accountId) {
-    /**
-     * The subscription lives on the merchant's account, so without the
-     * connection there is no way to stop it. **Refused rather than marked
-     * cancelled locally** — writing `renewalCanceledAt` here would tell the
-     * member they had stopped a charge that Stripe would keep taking.
-     */
     return NextResponse.json(
       {
         error: {
@@ -114,11 +86,6 @@ export const DELETE = handler(async (_req, { params }) => {
     membership.subscriptionId,
   );
   if (!stopped.ok) {
-    /**
-     * Stripe refused, so the subscription is still live. The local row is left
-     * untouched for the same reason as above: the member must not be told a
-     * charge has stopped while it has not.
-     */
     return NextResponse.json(
       {
         error: {
@@ -132,12 +99,6 @@ export const DELETE = handler(async (_req, { params }) => {
   }
 
   const now = new Date();
-  /**
-   * Written **after** Stripe confirms, so the column only ever records a
-   * cancellation that really happened. `endsAt` is left alone — Stripe's period
-   * end is what the member already paid for, and the existing value is what the
-   * last `invoice.paid` set it to.
-   */
   await db
     .update(customerMemberships)
     .set({ renewalCanceledAt: now, updatedAt: now })
@@ -145,14 +106,54 @@ export const DELETE = handler(async (_req, { params }) => {
 
   const accessEndsAt = stopped.currentPeriodEnd ?? membership.endsAt;
 
-  return NextResponse.json({
-    canceled: true,
-    alreadyCanceled: false,
-    /** Stated plainly, because "when do I lose access?" is the only question here. */
+  return {
+    canceled: true as const,
+    alreadyCanceled: false as const,
     accessEndsAt: accessEndsAt?.toISOString() ?? null,
     message: accessEndsAt
       ? `"${membership.tierName}" will not renew. Access continues until ` +
         `${accessEndsAt.toISOString().slice(0, 10)}.`
       : `"${membership.tierName}" will not renew.`,
-  });
+    tierName: membership.tierName,
+  };
+}
+
+export const DELETE = handler(async (_req, { params }) => {
+  const { site: slug, id } = await params;
+  const result = await cancelRenewal(slug, id);
+  if (result instanceof NextResponse) return result;
+  return NextResponse.json(result);
+});
+
+/** Form-friendly cancel for the SSR account page (no client island). */
+export const POST = handler(async (req, { params }) => {
+  const { site: slug, id } = await params;
+  const accept = req.headers.get("accept") ?? "";
+  const isForm =
+    (req.headers.get("content-type") ?? "").includes(
+      "application/x-www-form-urlencoded",
+    ) || !accept.includes("application/json");
+
+  const result = await cancelRenewal(slug, id);
+
+  if (result instanceof NextResponse) {
+    if (!isForm) return result;
+    const body = await result.json().catch(() => null);
+    const message =
+      typeof body?.error?.message === "string"
+        ? body.error.message
+        : "Could not cancel renewal.";
+    return NextResponse.redirect(
+      new URL(`/account?error=${encodeURIComponent(message)}`, req.url),
+      303,
+    );
+  }
+
+  if (isForm) {
+    return NextResponse.redirect(
+      new URL(`/account?notice=${encodeURIComponent(result.message)}`, req.url),
+      303,
+    );
+  }
+  return NextResponse.json(result);
 });

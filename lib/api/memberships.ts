@@ -43,6 +43,16 @@ export type CustomerMembership = {
   source: "purchase" | "manual";
   orderId: number | null;
   createdAt: string;
+  /**
+   * Whether Stripe will charge again. Independent of `status` — a membership
+   * can be active and not renew (cancelled at period end, or a one-off).
+   */
+  renews: boolean;
+  renewalCanceledAt: string | null;
+  /** When access stops if nothing renews it. Same as `endsAt`; named for clarity. */
+  accessEndsAt: string | null;
+  /** Shopper cancel-renewal would apply; merchants revoke via `memberships.revoke`. */
+  cancellable: boolean;
 };
 
 export function listMembershipTiers(query?: { siteId?: number }, init?: RequestInit) {
