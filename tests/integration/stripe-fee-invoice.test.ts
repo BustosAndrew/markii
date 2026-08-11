@@ -248,21 +248,42 @@ describe.skipIf(!ENABLED || !IS_TEST_KEY)("threshold fee → real Stripe invoice
     expect(res.json.result.billed).toEqual([]);
 
     /**
-     * **The assertion that matters**, and it is made against Stripe rather than
-     * against the response that would be reporting on itself: exactly one fee
-     * line exists, not two.
-     *
-     * Note `skipped` is empty rather than carrying "already invoiced". The
-     * action pre-filters to `invoiced = false`, so an already-billed row never
-     * reaches `assessmentBillable` and its refusal for that case is defence in
-     * depth for other callers. The money behaviour is right; the reporting is
-     * quieter than `fee-invoice.ts` intends, and that is noted rather than
-     * asserted as correct.
+     * **It says so, rather than returning silence.** This originally came back
+     * with empty `billed` *and* empty `skipped`: the action pre-filters to
+     * `invoiced = false`, so an already-billed id vanished before anything could
+     * refuse it. That is precisely the silent no-op `fee-invoice.ts` is written
+     * against — a caller naming an id could not tell "already billed" from
+     * "does not exist".
+     */
+    expect(res.json.result.skipped).toHaveLength(1);
+    expect(res.json.result.skipped[0].id).toBe(assessmentId);
+    expect(res.json.result.skipped[0].reason).toMatch(/already invoiced/i);
+
+    /**
+     * **The assertion that matters**, made against Stripe rather than against
+     * the response reporting on itself: exactly one fee line exists, not two.
      */
     const items = await stripe<{ data: { id: string }[] }>(
       `/invoiceitems?customer=${customerId}&limit=100`,
     );
     expect(items.data).toHaveLength(1);
+  });
+
+  /**
+   * An id from another merchant, or one that never existed, must read the same
+   * way — "no such assessment". Confirming that an id exists elsewhere would
+   * leak across tenants, which is why `/api/billing/invoices/:id` answers 404
+   * rather than 403 for the same situation.
+   */
+  it("answers for an id it does not own instead of ignoring it", async () => {
+    const res = await merchant.post("/api/actions/billing.invoiceAssessments", {
+      assessmentIds: ["fee_definitely_not_a_real_assessment"],
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.json.result.billed).toEqual([]);
+    expect(res.json.result.skipped).toHaveLength(1);
+    expect(res.json.result.skipped[0].reason).toMatch(/no such assessment/i);
   });
 });
 

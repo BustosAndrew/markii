@@ -117,6 +117,13 @@ for one payment, which `stripe_webhook_events` does **not** protect against, sin
 invoice must always extend and a redelivery never must. A renewal **meters** as a `usage_record`
 with a null `orderId`, classed `digital` (`docs/PRICING.md` §4.1).
 
+**Verified end to end 2026-08-10** — `tests/integration/membership-renewal.test.ts`, 9 tests driven
+by synthetic *signed* Connect events, including a redelivery arriving under a **new event id**,
+which is precisely the case `stripe_webhook_events` cannot catch. All passed first run; the renewal
+machinery had no bugs. What they do **not** prove is that real Stripe deliveries verify — the route
+HMACs with whatever secret is configured and cannot know which endpoint issued it, so a mode-matched
+`STRIPE_CONNECT_WEBHOOK_SECRET` is still required and still unset in this deployment.
+
 **The purchase flow is `/_sites/{slug}/api/checkout/subscription`**, separate from
 `/checkout/session` because a subscription opens no PaymentIntent and reserves no stock; the one-off
 route points a subscription cart at it with a `409` carrying `useEndpoint`. It requires a signed-in
@@ -139,8 +146,15 @@ Agent Ops and Chargeback Assist are Phase F and do not exist, and selling a $29/
 a product nobody can use is the fabricated-success rule with a card behind it. The billing path for
 them is already there the day they ship.
 
-**Still planned:** Stripe Tax, recurring membership billing, shopper auth mail via Supabase's Send
-Email Hook, and abandoned-cart mail. Everything in §10–15 and §19–21 is untouched.
+**Still planned:** Stripe Tax, shopper auth mail via Supabase's Send Email Hook, and abandoned-cart
+mail — all three confirmed absent 2026-08-10, not merely unlisted. Everything in §10–15 and §19–21
+is untouched.
+
+**Recurring membership billing came off this list** on 2026-08-10: it was listed as planned while
+being built and passing, which is the same staleness that had MFA's screens listed as missing after
+they shipped. **Before trusting any "not built" claim in these docs, check.** The failure mode is
+one-directional and consistent — work lands and the doc does not move — so a "planned" item may be
+finished, while a "built" item has generally earned it.
 
 **Deferred until further notice — do not build, and do not let schema anticipate it:** **gift
 cards** (D33, 2026-08-03). The metering exclusion in `docs/PRICING.md` §4.1 is asserted but
@@ -284,7 +298,9 @@ campaigns. Rationale in `docs/DECISIONS.md` §G10.
   cookies — never `domain=.markii.shop`** (a parent-domain cookie reaches every storefront, where
   merchant custom code runs), and an explicit **`user_kind`** checked on every path.
 - **MFA is mandatory for merchants and never for shoppers** (D40, ✅ **built** 2026-08-08; the
-  screens are not). Every staff account enrols TOTP and is challenged to `aal2` at every sign-in.
+  screens too, verified 2026-08-10 — `/mfa` routes to enrol/challenge/recover from the live gate,
+  and `MfaStepUpProvider` in the dashboard layout turns a `403 MFA_REQUIRED` into a modal rather
+  than a lost page). Every staff account enrols TOTP and is challenged to `aal2` at every sign-in.
   **Enforcement lives in `getSession()`**, not in `requireSession` or `requireAuthContext` — both are
   real entry points, and guarding only the second left `/api/me` serving unenrolled merchants until
   the tests caught it. It answers **`403 MFA_REQUIRED`, never `401`**: the caller is authenticated,

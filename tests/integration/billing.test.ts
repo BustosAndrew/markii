@@ -258,15 +258,32 @@ describe("billing", () => {
     expect(row?.status).not.toBe("connected");
   });
 
-  it("returns the plan catalog, marked proposed", async () => {
+  it("returns the plan catalog, marked final", async () => {
     const res = await merchant.get("/api/billing/plans");
     expect(res.status).toBe(200);
     expect(res.json.items.map((p: any) => p.planId)).toEqual(["starter", "growth", "scale"]);
-    // Prices are proposals in docs/PRICING.md §3 and must not ship as settled.
-    expect(res.json.status).toBe("proposed");
+    /**
+     * `"final"` since the owner signed off the §3 schedule on 2026-08-10 (D42).
+     * This asserted `"proposed"` until then, and the caveat it protected has
+     * been removed from the screens — a settled price presented as tentative
+     * undersells it, which is the same honesty rule as the reverse.
+     */
+    expect(res.json.status).toBe("final");
+    expect(res.json.note).not.toMatch(/proposed|not final/i);
     // Competitor comparisons are factual claims needing a verifiedAt — omitted
     // rather than hardcoded from memory.
     expect(res.json.comparisons).toEqual([]);
+  });
+
+  /**
+   * Add-on prices were **not** part of that sign-off. Agent Ops and Chargeback
+   * Assist do not exist, so quoting a settled price for them would be selling a
+   * commitment nobody made.
+   */
+  it("still marks add-on prices proposed", async () => {
+    const res = await merchant.get("/api/billing/addons/agentOps");
+    expect(res.status).toBe(200);
+    expect(res.json.pricing.status).toBe("proposed");
   });
 
   it("returns entitlements, and no invented subscription", async () => {

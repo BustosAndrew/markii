@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { badRequest, notFound, ApiError } from "../../api";
 import { feeAssessments, organizations, PLAN_IDS } from "../../db";
@@ -607,6 +607,47 @@ export const invoiceAssessments = defineAction({
       : rows;
 
     /**
+     * **Requested ids that this run will not touch, accounted for by name.**
+     *
+     * `rows` is filtered to `invoiced = false`, so an id that is already billed
+     * — or belongs to another org, or does not exist — simply vanished from
+     * `wanted` and the caller got back empty `billed` *and* empty `skipped`.
+     * That is the silent no-op `lib/billing/fee-invoice.ts` is explicitly
+     * written against: "a silent no-op is indistinguishable from a success",
+     * and a caller naming an id deserves to know which of those happened.
+     *
+     * Only for an explicit list. The default run means "everything outstanding",
+     * where an already-billed period is not an unanswered request.
+     */
+    const unaccounted: { id: string; reason: string }[] = [];
+    if (input.assessmentIds?.length) {
+      const found = new Set(rows.map((r) => r.id));
+      const missing = input.assessmentIds.filter((id) => !found.has(id));
+      if (missing.length > 0) {
+        /**
+         * Scoped to this org, so an id belonging to another merchant reads as
+         * "no such assessment" rather than confirming it exists elsewhere —
+         * the same reason `/api/billing/invoices/:id` answers 404 over 403.
+         */
+        const known = await ctx.db
+          .select({ id: feeAssessments.id, invoicedAt: feeAssessments.invoicedAt })
+          .from(feeAssessments)
+          .where(and(eq(feeAssessments.orgId, orgId), inArray(feeAssessments.id, missing)));
+        const byId = new Map(known.map((k) => [k.id, k]));
+
+        for (const id of missing) {
+          const row = byId.get(id);
+          unaccounted.push({
+            id,
+            reason: row
+              ? `Already invoiced${row.invoicedAt ? ` on ${row.invoicedAt.toISOString().slice(0, 10)}` : ""}. A closed period bills once.`
+              : "No such assessment for this organization.",
+          });
+        }
+      }
+    }
+
+    /**
      * Read once, from the org's own mirror. A subscription that does not grant
      * a plan does not get billed a usage fee either — an `incomplete` signup has
      * no invoice for the item to ride on, which is the failure mode
@@ -619,7 +660,8 @@ export const invoiceAssessments = defineAction({
     };
 
     const billed: { id: string; feeMinor: number; invoiceItemId: string | null }[] = [];
-    const skipped: { id: string; reason: string }[] = [];
+    /** Seeded with requested ids this run cannot act on, so none goes unanswered. */
+    const skipped: { id: string; reason: string }[] = [...unaccounted];
 
     for (const row of wanted) {
       const assessment: BillableAssessment = {

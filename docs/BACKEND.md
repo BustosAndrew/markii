@@ -281,6 +281,21 @@ gets quietly reversed later.
 >   would understate a merchant's threshold, and inventing a rate would corrupt what they are
 >   charged.
 
+> **Recurring membership renewals are verified end to end**
+> (`tests/integration/membership-renewal.test.ts`, 9 tests). Driven by **synthetic signed Connect
+> events** rather than `stripe listen`, deliberately: the property most worth proving is that
+> Stripe's three-day retry cannot grant three periods for one payment, and asserting that needs
+> exact control over which invoice id arrives when. Covered: extension by Stripe's *actual* billed
+> period; redelivery under a **new event id carrying the same invoice** (the case
+> `stripe_webhook_events` structurally cannot catch); a genuinely new invoice still extending;
+> reinstatement of a revoked membership; and metering as `digital` with a null `orderId`, net of
+> tax, deduped on `renewal:{invoiceId}`.
+>
+> **What it does not prove:** that real Stripe deliveries verify. These sign with whatever
+> `STRIPE_CONNECT_WEBHOOK_SECRET` holds, and the route only HMACs — it cannot know which endpoint a
+> secret came from. Everything *after* the signature check is genuine; the signature layer itself
+> still needs a mode-matched secret (below).
+
 > **Webhook secrets are per-endpoint AND per-mode, and nothing can check that for you.**
 > `lib/stripe-mode.ts` compares `sk_`/`pk_` prefixes, but every signing secret is a `whsec_…` in
 > both modes — so a live-mode secret against a test-mode key is undetectable at startup. The

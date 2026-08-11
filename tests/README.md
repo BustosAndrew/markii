@@ -163,6 +163,24 @@ create** — that is the shared state this suite deliberately removed.
 arrive either as an HTTP 4xx or as an `ok: false` outcome depending on where the
 failure happened, and callers care only that it was refused.
 
+## Tests that post synthetic Stripe webhooks
+
+`membership-renewal.test.ts` and `stripe-webhook-mode.test.ts` sign their own events with the
+configured `STRIPE_WEBHOOK_SECRET` / `STRIPE_CONNECT_WEBHOOK_SECRET` and post them to the real
+route. They need no Stripe network access and no `stripe listen`, so they run as part of the normal
+suite — they skip only when the relevant secret is unset.
+
+**Synthetic rather than live, on purpose.** The renewal guarantee worth testing is that Stripe's
+three-day retry cannot grant three periods for one payment, which needs exact control over which
+invoice id arrives when. A live delivery cannot provide that.
+
+**The limit to keep in mind:** the route HMACs with whatever secret is configured and cannot know
+which endpoint it came from, so these prove the *handler* is right, not that real Stripe deliveries
+would verify. That still depends on a mode-matched secret (`docs/BACKEND.md`).
+
+Events use `livemode: false` to match a test-mode key. A live-mode event is turned away by the mode
+gate before any handler runs — which is itself what `stripe-webhook-mode.test.ts` asserts.
+
 ## Tests that call Stripe — opt-in again
 
 `stripe-fee-invoice.test.ts` is the one file that talks to **Stripe's real API**.
