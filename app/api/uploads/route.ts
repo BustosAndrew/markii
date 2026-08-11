@@ -73,4 +73,4 @@ export const POST = orgHandler(async (req, { orgId }) => {
   }
 
   return NextResponse.json({ url: result.url, path: result.path }, { status: 201 });
-});
+}, { permission: "catalog.write" });

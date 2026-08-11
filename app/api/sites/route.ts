@@ -6,7 +6,7 @@ import { db, sites } from "@/lib/db";
 import { invalidateCustomDomain } from "@/lib/domains";
 import { serializeSite, serializeSites } from "@/lib/queries";
 import { ownSitesForStaff } from "@/lib/tenancy";
-import { siteCreateSchema } from "@/lib/validation";
+import { assertNoRedirectedSiteFields, siteCreateSchema } from "@/lib/validation";
 
 export const GET = orgHandler(async (req, { session, orgId }) => {
   const sp = new URL(req.url).searchParams;
@@ -50,7 +50,11 @@ export const GET = orgHandler(async (req, { session, orgId }) => {
 
 export const POST = orgHandler(
   async (req, { orgId }) => {
-    const input = siteCreateSchema.parse(await req.json());
+    const body = await req.json();
+    // Same refusal as PATCH: a payout address is set through the action that
+    // demands billing permission and a fresh factor, never as a site field.
+    assertNoRedirectedSiteFields(body);
+    const input = siteCreateSchema.parse(body);
     const slug = input.slug ?? slugify(input.name);
     // Site slugs are globally unique (they are subdomains), so this check stays
     // deliberately unscoped — another org holding the slug is still a conflict.

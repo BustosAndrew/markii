@@ -83,7 +83,7 @@ export const PATCH = orgHandler(async (req, { params, orgId }) => {
     .where(eq(products.id, product.id))
     .returning();
   return NextResponse.json(await serializeProductDetail(row));
-});
+}, { permission: "catalog.write" });
 
 export const DELETE = orgHandler(async (req, { params, orgId }) => {
   const { idOrSlug } = await params;
@@ -106,4 +106,4 @@ export const DELETE = orgHandler(async (req, { params, orgId }) => {
 
   await db.delete(products).where(eq(products.id, product.id));
   return NextResponse.json({ deleted: true, id: product.id });
-});
+}, { permission: "catalog.write" });

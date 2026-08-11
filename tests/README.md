@@ -163,6 +163,29 @@ create** — that is the shared state this suite deliberately removed.
 arrive either as an HTTP 4xx or as an `ok: false` outcome depending on where the
 failure happened, and callers care only that it was refused.
 
+### ⚠️ `refused()` is not enough for a permission test
+
+`refused()` accepts **any** 4xx, including `401`. So a test that signs in, does
+something to weaken the session by accident, and then asserts a refusal will pass
+while proving nothing — an unauthenticated caller is refused everything.
+
+That is not hypothetical. `Client` used to *replace* its cookie jar on every
+`Set-Cookie`, so `POST /api/org/switch` (which sets only the active-org
+preference) discarded the auth cookies and every later request 401'd. The
+"a read-only role cannot change the payout address" test passed in that state and
+would have passed with the permission check deleted. The jar merges now.
+
+**When asserting a refusal that depends on identity or role:**
+
+1. Assert the session is live first — `GET /api/me` is 200, with the org and role
+   you expect.
+2. Pin the **specific** status (`403` for a role refusal), not `refused()`.
+3. Confirm the write did not land, by reading the database rather than the
+   response.
+
+`tests/integration/mfa.test.ts` → "read-only roles cannot write through the v1
+REST routes" is the worked example.
+
 ## Tests that post synthetic Stripe webhooks
 
 `membership-renewal.test.ts` and `stripe-webhook-mode.test.ts` sign their own events with the

@@ -351,6 +351,113 @@ describe("payout destination is privileged", () => {
       "0x2222222222222222222222222222222222222222",
     );
   }, 180_000);
+
+  /**
+   * **The same hole, reopened through a second route and closed 2026-08-11.**
+   *
+   * `PUT /api/integrations/x402` was converted to an action so it would demand
+   * `billing.write` and a fresh factor. Nobody looked at `PATCH /api/sites/:id`,
+   * which wrote the very same payout field through `{ ...input }` and carried
+   * **no permission option at all** — so `orgHandler` skipped the role check
+   * entirely and every role, `viewer` included, could redirect a store's crypto
+   * revenue. `sites.walletAddress` is `payTo` at checkout, so this was the live
+   * destination, not a copy of it.
+   *
+   * Two things had to change: the field is refused by name on the site routes,
+   * and those routes now require `cms.write` like every other site mutation.
+   */
+  it("cannot be set through the site routes at all, whatever the role", async () => {
+    const ownerClient = new Client();
+    const owner = await signUpMerchant(ownerClient, "walletsite");
+    cleanup.merchantEmails.push(owner.email);
+
+    const site = await ownerClient.post("/api/sites", {
+      name: `Wallet Site ${Date.now()}`,
+      slug: `wallet-site-${Date.now()}`,
+    });
+    const siteId = site.json.id ?? site.json.site?.id;
+
+    // Refused for the OWNER too — this is not about role, it is about the field
+    // only ever moving through the action that demands a fresh factor.
+    const patched = await ownerClient.patch(`/api/sites/${siteId}`, {
+      walletAddress: "0x3333333333333333333333333333333333333333",
+    });
+    expect(refused(patched), "the payout address must not be a site field").toBe(true);
+
+    const [row] = await sql`select wallet_address from sites where id = ${siteId}`;
+    expect(row?.wallet_address).not.toBe("0x3333333333333333333333333333333333333333");
+  }, 180_000);
+
+  /**
+   * The broader half of the same bug: every §1–8 REST write route predates roles
+   * and carried no permission, so a read-only member could edit the catalog and
+   * delete storefronts. Spot-checked across the three shapes — site, product,
+   * category — rather than every route, since they share one mechanism.
+   */
+  it("read-only roles cannot write through the v1 REST routes", async () => {
+    const ownerClient = new Client();
+    const owner = await signUpMerchant(ownerClient, "v1owner");
+    cleanup.merchantEmails.push(owner.email);
+    const orgId = (await ownerClient.get("/api/me")).json.org.id;
+
+    const site = await ownerClient.post("/api/sites", {
+      name: `V1 Guard ${Date.now()}`,
+      slug: `v1-guard-${Date.now()}`,
+    });
+    const siteId = site.json.id ?? site.json.site?.id;
+
+    const viewerClient = new Client();
+    const viewer = await signUpMerchant(viewerClient, "v1viewer");
+    cleanup.merchantEmails.push(viewer.email);
+    const [viewerUser] = await sql`select id from auth.users where email = ${viewer.email}`;
+    await sql`insert into staff (id, org_id, user_id, email, role, status)
+      values (${`stf_v1_${Date.now()}`}, ${orgId}, ${viewerUser.id}, ${viewer.email},
+              'viewer', 'active')`;
+    const switched = await viewerClient.post("/api/org/switch", { orgId });
+    expect(switched.status, "org switch must succeed").toBe(200);
+
+    /**
+     * **Preconditions, asserted before the refusals mean anything.** Without
+     * these the test greens on a broken session: an unauthenticated client is
+     * refused everything, and `refused()` cannot tell that apart from a role
+     * check doing its job.
+     */
+    const me = await viewerClient.get("/api/me");
+    expect(me.status, "viewer session must be live").toBe(200);
+    expect(me.json.org.id, "viewer must be scoped to the owner's org").toBe(orgId);
+    expect(me.json.role ?? me.json.org?.role, "viewer must hold the viewer role").toBe("viewer");
+
+    const attempts = [
+      ["edit a storefront", await viewerClient.patch(`/api/sites/${siteId}`, { name: "seized" })],
+      [
+        "create a product",
+        await viewerClient.post("/api/products", {
+          siteId,
+          name: "Viewer product",
+          priceCents: 100,
+        }),
+      ],
+      [
+        "create a category",
+        await viewerClient.post("/api/categories", { siteId, name: "Viewer category" }),
+      ],
+      ["delete a storefront", await viewerClient.del(`/api/sites/${siteId}`)],
+    ] as const;
+
+    /**
+     * **403 specifically, not merely "refused".** A `refused()` check passes on
+     * a 404 too, and a 404 is what a *failed org switch* produces — so the
+     * looser assertion would go green with the hole wide open. Pinning the role
+     * refusal is what makes this test mean anything.
+     */
+    for (const [what, res] of attempts) {
+      expect(res.status, `a viewer must be forbidden from: ${what}`).toBe(403);
+    }
+
+    // Asserted against the database: the store is still there, still named.
+    const [after] = await sql`select name from sites where id = ${siteId}`;
+    expect(after?.name).not.toBe("seized");
+  }, 180_000);
 });
 
 describe("totpCode", () => {

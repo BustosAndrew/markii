@@ -114,7 +114,7 @@ export const PATCH = orgHandler(async (req, { params, orgId }) => {
     .where(eq(categories.id, category.id))
     .returning();
   return NextResponse.json(await serializeCategoryDetail(row));
-});
+}, { permission: "catalog.write" });
 
 export const DELETE = orgHandler(async (req, { params, orgId }) => {
   const { idOrSlug } = await params;
@@ -123,4 +123,4 @@ export const DELETE = orgHandler(async (req, { params, orgId }) => {
   // FK rules: products.categoryId → null, children.parentId → null (promoted)
   await db.delete(categories).where(eq(categories.id, category.id));
   return NextResponse.json({ deleted: true, id: category.id });
-});
+}, { permission: "catalog.write" });

@@ -296,6 +296,17 @@ gets quietly reversed later.
 > secret came from. Everything *after* the signature check is genuine; the signature layer itself
 > still needs a mode-matched secret (below).
 
+> **`orgHandler` without a `permission` authorizes every role, including `viewer`.** There is no
+> default. Every mutating REST route was gated on 2026-08-11 after a sweep found the whole §1–8
+> surface open — it predates roles, and nothing added them. The worst case was
+> `PATCH /api/sites/:id` accepting `walletAddress`, the x402 `payTo`, which reopened through a
+> second route the exact hole `PUT /api/integrations/:provider` was converted to actions to close.
+>
+> **Only `actions/[id]` and `integrations/[provider]` may omit it** — they hand off to
+> `invokeAction`, which authorizes against the action's own permission. Anywhere else, a mutating
+> handler with no `permission` is a bug. The payout address is now refused by name on the site
+> routes and moves only through `payments.connectRail`.
+
 > **Webhook secrets are per-endpoint AND per-mode, and nothing can check that for you.**
 > `lib/stripe-mode.ts` compares `sk_`/`pk_` prefixes, but every signing secret is a `whsec_…` in
 > both modes — so a live-mode secret against a test-mode key is undetectable at startup. The

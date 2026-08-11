@@ -20,6 +20,34 @@ export type ApiResult<T = any> = { status: number; json: T };
 export class Client {
   private cookie = "";
 
+  /**
+   * Merges `Set-Cookie` into the jar instead of replacing it.
+   *
+   * **This used to overwrite the whole jar with whatever the last response
+   * set**, which quietly broke any flow where a route sets one cookie and the
+   * session lives in others. `POST /api/org/switch` sets only the active-org
+   * preference, so every request after a switch went out with the Supabase auth
+   * cookies discarded and came back `401`.
+   *
+   * That did not fail loudly, because `refused()` treats any 4xx as a refusal —
+   * so a role-permission test could pass while proving nothing but that an
+   * unauthenticated caller is turned away. The "read-only role cannot change the
+   * payout address" test was in exactly that state: it would have passed with
+   * the permission check deleted. Tests asserting a *refusal* must assert the
+   * session was live first (see `mfa.test.ts`).
+   */
+  private absorb(setCookie: string[]) {
+    if (!setCookie.length) return;
+    const jar = new Map<string, string>();
+    const put = (pair: string) => {
+      const i = pair.indexOf("=");
+      if (i > 0) jar.set(pair.slice(0, i), pair.slice(i + 1));
+    };
+    if (this.cookie) for (const c of this.cookie.split("; ")) put(c);
+    for (const c of setCookie) put(c.split(";")[0]);
+    this.cookie = [...jar].map(([k, v]) => `${k}=${v}`).join("; ");
+  }
+
   async call<T = any>(method: string, path: string, body?: unknown): Promise<ApiResult<T>> {
     const res = await fetch(`${BASE_URL}${path}`, {
       method,
@@ -30,10 +58,7 @@ export class Client {
       body: body === undefined ? undefined : JSON.stringify(body),
     });
 
-    const setCookie = res.headers.getSetCookie?.() ?? [];
-    if (setCookie.length) {
-      this.cookie = setCookie.map((c) => c.split(";")[0]).join("; ");
-    }
+    this.absorb(res.headers.getSetCookie?.() ?? []);
 
     const text = await res.text();
     let json: any;

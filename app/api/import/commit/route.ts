@@ -164,4 +164,4 @@ export const POST = orgHandler(async (req, { orgId }) => {
     },
     { status: 201 },
   );
-});
+}, { permission: "catalog.write" });

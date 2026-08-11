@@ -150,6 +150,21 @@ them is already there the day they ship.
 mail — all three confirmed absent 2026-08-10, not merely unlisted. Everything in §10–15 and §19–21
 is untouched.
 
+**Authorization on the v1 REST surface was closed 2026-08-11.** `orgHandler` authorizes **every
+role** when `permission` is omitted — there is no default — and the §1–8 write routes predate roles,
+so `viewer` could edit the catalog, delete storefronts, and change the **x402 payout address**
+(`PATCH /api/sites/:id` wrote `walletAddress`, which is `payTo` at checkout). That reopened through
+a second route the same hole `PUT /api/integrations/:provider` had been converted to actions to
+close. Every mutating route now passes a permission; only `actions/[id]` and
+`integrations/[provider]` may omit one, because they delegate to `invokeAction`. `walletAddress` is
+refused **by name** on the site routes and moves only through `payments.connectRail` (D-entry in
+`docs/DECISIONS.md`).
+
+**The test that should have caught it was passing for the wrong reason**, which is the more useful
+lesson: the integration `Client` replaced its whole cookie jar on every `Set-Cookie`, so after
+`POST /api/org/switch` the auth cookies were dropped and everything 401'd — and `refused()` accepts
+any 4xx. **A refusal test must assert the session is live first and pin the exact status.**
+
 **A route-vs-service sweep on 2026-08-10 found four live endpoints with no typed client** — digital
 delivery in full (`/api/digital-assets` plus every `delivery.*` action), and the discount, tax, and
 inventory-level previews. Services now exist (`lib/api/delivery.ts`, plus additions to `commerce.ts`

@@ -31,4 +31,4 @@ export const POST = orgHandler(async (req) => {
     );
   }
   return NextResponse.json(result);
-});
+}, { permission: "catalog.write" });

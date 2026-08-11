@@ -27,6 +27,22 @@ export type OrgRouteCtx = RouteCtx & {
  *
  * Permission checks are identical for humans, agents, and tokens (§22 rule 4).
  */
+/**
+ * **Omitting `permission` authorizes every role, including `viewer`.** There is
+ * no default and there deliberately is not one — a default that guessed would
+ * be wrong for the read routes, and a default that denied would break them.
+ *
+ * That made it a silent hole for the whole §1–8 REST surface, which predates
+ * roles: `PATCH /api/sites/:id` accepted `walletAddress` — the x402 payout
+ * destination — with no check at all, reopening through a second route the
+ * exact hole `PUT /api/integrations/:provider` had been converted to actions to
+ * close. Every write route was gated on 2026-08-11.
+ *
+ * **Only two write routes may legitimately omit it**: `actions/[id]` and
+ * `integrations/[provider]`, which pass their work to `invokeAction` and are
+ * authorized there against the action's own permission (§22 rule 4). Anywhere
+ * else, a missing `permission` on a mutating handler is a bug.
+ */
 export function orgHandler(
   fn: (req: Request, ctx: OrgRouteCtx) => Promise<Response>,
   options: { permission?: string } = {},

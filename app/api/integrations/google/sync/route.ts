@@ -70,4 +70,4 @@ export const POST = orgHandler(async (_req, { orgId }) => {
   );
 
   return NextResponse.json({ synced, failed });
-});
+}, { permission: "catalog.write" });

@@ -17,4 +17,4 @@ export const POST = orgHandler(async (req) => {
     products: input.products.map((p) => ({ ...p, slug: p.slug ?? slugify(p.name) })),
   };
   return NextResponse.json(generatePreview(bundle));
-});
+}, { permission: "cms.read" });

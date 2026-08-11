@@ -69,4 +69,4 @@ export const POST = orgHandler(async (req, { params, orgId }) => {
   }
 
   return NextResponse.json(await serializeCategoryDetail(copy), { status: 201 });
-});
+}, { permission: "catalog.write" });

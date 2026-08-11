@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { badRequest } from "@/lib/api";
 
 // ---------- auth (§16) ----------
 
@@ -48,9 +49,44 @@ export const siteCreateSchema = z.object({
   agentDiscovery: z.boolean().optional(),
   purchasesEnabled: z.boolean().optional(),
   paymentProviders: paymentProvidersSchema.optional(),
-  walletAddress: z.string().max(100).nullish(),
+  /**
+   * **`walletAddress` is deliberately absent.** It is the x402 payout
+   * destination — `payTo` at checkout — and it moves only through
+   * `payments.connectRail`, which requires `billing.write` **and** a fresh MFA
+   * factor (D40 step-up).
+   *
+   * It used to live here, and because these routes write `{ ...input }` and
+   * carried no permission option at all, any staff member — `viewer` included —
+   * could redirect a store's crypto payouts. That is the same hole
+   * `PUT /api/integrations/:provider` had before it was converted to actions;
+   * this route was simply never looked at. The routes now refuse the field by
+   * name rather than letting zod strip it silently, because a payout change
+   * that quietly does nothing is its own kind of dangerous.
+   */
   googleSiteVerification: z.string().max(200).nullish(),
 });
+
+/**
+ * Fields the site routes must never write, with where they belong instead.
+ *
+ * Refused explicitly rather than stripped: a caller who thinks they changed a
+ * payout destination and did not is worse off than one who got an error.
+ */
+export const SITE_FIELDS_ELSEWHERE: Record<string, string> = {
+  walletAddress:
+    "The x402 payout address is set with the payments.connectRail action, which requires " +
+    "billing permission and a fresh MFA challenge.",
+};
+
+/** Throws when a request body carries a field this route refuses to write. */
+export function assertNoRedirectedSiteFields(body: unknown) {
+  if (typeof body !== "object" || body === null) return;
+  for (const [field, where] of Object.entries(SITE_FIELDS_ELSEWHERE)) {
+    if (field in (body as Record<string, unknown>)) {
+      throw badRequest(`"${field}" cannot be set here. ${where}`);
+    }
+  }
+}
 
 export const siteUpdateSchema = siteCreateSchema.partial();
 

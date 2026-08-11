@@ -33,6 +33,43 @@ when it's made, with the date — then update the doc it affects.
 | ~~D26~~ | ~~Distribution model~~ | ✅ **Both — open/public source *and* hosted cloud** (owner, 2026-07-29). **Licence still unchosen — see §"Distribution — D26"** | Licence choice blocks any external contribution |
 
 
+### Authorization on the v1 REST surface — closed 2026-08-11
+
+**`orgHandler` authorizes every role when `permission` is omitted**, and there is no default. That
+is defensible for read routes and was silently catastrophic for the §1–8 write routes, which were
+written before roles existed and never had one added. Every one of them was reachable by `viewer`.
+
+The sharpest case was **the x402 payout destination, reopened through a second route**.
+`PUT /api/integrations/:provider` had been converted to actions precisely so changing the wallet
+would need `billing.write` plus a fresh MFA factor. Nobody looked at `PATCH /api/sites/:id`, which
+wrote the same field through `{ ...input }` with no check at all — and `sites.wallet_address` is
+`payTo` at checkout, so it was the live destination. Verified: a `viewer` editing a storefront
+returned **200**.
+
+Two changes:
+
+- **`walletAddress` is gone from `siteCreateSchema`** and refused *by name* on both site routes
+  (`assertNoRedirectedSiteFields`). Refused rather than stripped, because a caller who believes
+  they changed a payout address and did not is worse off than one who got an error. Refused for the
+  **owner** too — this is about the field only ever moving through the step-up path, not about role.
+- **Every mutating REST route now passes a `permission`**: `cms.write` for sites, `catalog.write`
+  for products, categories, import, uploads, and the Google feed sync; `cms.read` for `preview`,
+  which writes nothing. Only `actions/[id]` and `integrations/[provider]` may omit it — they
+  delegate to `invokeAction`, which authorizes against the action's own permission (§22 rule 4).
+
+**The test that should have caught this was passing for the wrong reason**, and that is the more
+durable lesson. `Client` in the integration helpers *replaced* its whole cookie jar on every
+`Set-Cookie`, so after `POST /api/org/switch` — which sets only the active-org preference — the
+Supabase auth cookies were discarded and every later request 401'd. Since `refused()` accepts any
+4xx, the existing "a viewer cannot change the payout address" test passed while proving only that
+an unauthenticated caller is turned away; it would have passed with the permission check deleted.
+
+The jar now merges. **A test asserting a refusal must first assert the session was live** — the new
+tests check `/api/me` returns 200 with the expected org and role before trusting any 403, and pin
+`403` specifically rather than "any 4xx".
+
+---
+
 ### Cross-tenant tier hole — found and closed 2026-08-11
 
 **Adding membership fields to the product form opened a cross-tenant write.**
