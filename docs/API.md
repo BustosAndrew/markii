@@ -2666,7 +2666,13 @@ rather than a pricing *model*.
 
 | Method | Path | Status |
 |---|---|---|
-| `GET` | `/api/cron/billing` | ✅ Close every finished period, then bill what it measured. `?dryRun=1` to preview; `?period=YYYY-MM-DD` to catch up a missed month |
+| `GET` | `/api/cron/billing` | ✅ Close every finished period, then bill what it measured |
+
+| Query | Effect |
+|---|---|
+| `?dryRun=1` | Report what would happen and write nothing |
+| `?period=YYYY-MM-DD` | Close the period *containing* that date — the catch-up path for a run that was missed. Still refuses anything unfinished |
+| `?orgId=…` | Restrict the whole run to one merchant. For retrying a single org after a failure without re-walking everyone else — and what lets the integration suite exercise this against a shared database. The response echoes `scopedToOrgId`, because `orgsConsidered: 1` from a scoped run and from a full run that found one merchant are very different facts |
 
 **Schedule:** `0 3 1 * *` (`vercel.json`) — 03:00 UTC on the 1st. On the 1st because a period may
 only be closed once it can no longer receive sales; at 03:00 rather than 00:00 to give in-flight
@@ -2721,6 +2727,12 @@ across the run would add JPY yen to USD cents (D31).
 **Dry run caveat, stated in the response rather than left to be found:** a dry run rolls back the
 close, so the billing step sees only assessments that *already* existed — not ones the same run would
 have created.
+
+**Tested end to end** — `tests/integration/cron-billing.test.ts`, 14 tests. Every run there is
+scoped with `?orgId=`, since an unscoped sweep would close periods for every org in the database.
+The assertion the design rests on is that a `system` actor clears `assertStepUp` **over a real HTTP
+request**: the sweep invokes `billing.invoiceAssessments`, which is `requiresStepUp`, so if that
+waiver did not hold every run would 403 and nobody would ever be billed.
 
 **Frontend:** none, and none planned. This is operator surface; no `*_API_LIVE` constant and no
 `lib/api/*` service, because no screen calls it. The new **`billing.closePeriod` action** is

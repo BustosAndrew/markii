@@ -85,7 +85,11 @@ export type SweepResult = {
  * close do it — test orders never count (§4.1), and an org whose only activity
  * was a test order must not be dragged into a billing run.
  */
-async function orgsWithUsage(periodStart: Date, periodEnd: Date): Promise<string[]> {
+async function orgsWithUsage(
+  periodStart: Date,
+  periodEnd: Date,
+  onlyOrgId?: string,
+): Promise<string[]> {
   const rows = await db
     .selectDistinct({ orgId: usageRecords.orgId })
     .from(usageRecords)
@@ -94,6 +98,7 @@ async function orgsWithUsage(periodStart: Date, periodEnd: Date): Promise<string
         eq(usageRecords.environment, "production"),
         gte(usageRecords.occurredAt, periodStart),
         lt(usageRecords.occurredAt, periodEnd),
+        ...(onlyOrgId ? [eq(usageRecords.orgId, onlyOrgId)] : []),
       ),
     );
   return rows.map((r) => r.orgId);
@@ -109,11 +114,15 @@ async function orgsWithUsage(periodStart: Date, periodEnd: Date): Promise<string
  * permanently, which is precisely the "sits pending forever" failure
  * `lib/billing/fee-invoice.ts` is written to avoid.
  */
-async function orgsWithUnbilledAssessments(): Promise<string[]> {
+async function orgsWithUnbilledAssessments(onlyOrgId?: string): Promise<string[]> {
   const rows = await db
     .selectDistinct({ orgId: feeAssessments.orgId })
     .from(feeAssessments)
-    .where(eq(feeAssessments.invoiced, false));
+    .where(
+      onlyOrgId
+        ? and(eq(feeAssessments.invoiced, false), eq(feeAssessments.orgId, onlyOrgId))
+        : eq(feeAssessments.invoiced, false),
+    );
   return rows.map((r) => r.orgId);
 }
 
@@ -153,6 +162,17 @@ export async function runBillingSweep(input: {
   periodEnd: Date;
   actor: Actor;
   dryRun?: boolean;
+  /**
+   * Restricts the whole sweep to one organization.
+   *
+   * The operator case is retrying a single merchant after a failure, without
+   * re-walking every other org's assessments to do it. It is also what makes
+   * this route testable against a shared database: an unscoped run closes
+   * periods for **every** org present and can raise real Stripe items for any
+   * with a live subscription, which is not something a test may do to data it
+   * does not own.
+   */
+  orgId?: string;
 }): Promise<SweepResult> {
   const dryRun = input.dryRun ?? false;
   const outcomes = new Map<string, OrgSweepOutcome>();
@@ -166,7 +186,7 @@ export async function runBillingSweep(input: {
   };
 
   // ---- Step 1: close ------------------------------------------------------
-  const toClose = await orgsWithUsage(input.periodStart, input.periodEnd);
+  const toClose = await orgsWithUsage(input.periodStart, input.periodEnd, input.orgId);
 
   for (const orgId of toClose) {
     const outcome = outcomeFor(orgId);
@@ -213,7 +233,7 @@ export async function runBillingSweep(input: {
    * pass. The route says so in its response rather than leaving it to be
    * discovered.
    */
-  const toBill = await orgsWithUnbilledAssessments();
+  const toBill = await orgsWithUnbilledAssessments(input.orgId);
 
   for (const orgId of toBill) {
     const outcome = outcomeFor(orgId);

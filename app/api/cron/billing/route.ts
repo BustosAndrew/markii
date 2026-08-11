@@ -103,12 +103,21 @@ export const GET = handler(async (req) => {
     );
   }
 
+  /**
+   * Restricts the run to one merchant. The operator case is retrying a single
+   * org after a failure without re-walking everyone else's assessments — and it
+   * is what lets the integration suite exercise this route against a shared
+   * database without touching orgs it does not own.
+   */
+  const orgId = url.searchParams.get("orgId") ?? undefined;
+
   const started = Date.now();
   const result = await runBillingSweep({
     periodStart: period.start,
     periodEnd: period.end,
     actor: auth.actor,
     dryRun,
+    orgId,
   });
 
   /**
@@ -121,6 +130,13 @@ export const GET = handler(async (req) => {
   return NextResponse.json({
     ok: true,
     ...result,
+    /**
+     * Stated rather than implied. `orgsConsidered: 1` from a scoped run and from
+     * a full run that found one merchant are very different facts, and an
+     * operator reading a scoped run as a full one would conclude billing had
+     * gone quiet.
+     */
+    scopedToOrgId: orgId ?? null,
     durationMs: Date.now() - started,
     note: dryRun
       ? "Dry run — nothing was closed and nothing was billed. Assessments that this run would " +
