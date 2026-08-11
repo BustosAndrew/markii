@@ -212,9 +212,12 @@ export function diagnoseSignatureFailure(input: {
       `Mode mismatch. The payload claims to be a ${eventMode}-mode event, but ` +
       `STRIPE_SECRET_KEY is a ${keyMode}-mode key. Signing secrets are per-endpoint AND ` +
       `per-mode, and both modes produce a "whsec_…" value, so ${which} cannot be checked at ` +
-      `startup — set it from the ${keyMode}-mode endpoint. Locally: ` +
-      `\`stripe listen --forward-to localhost:3000/api/webhooks/stripe\` prints a test secret ` +
-      `(Connect events need a second listener and their own).`
+      `startup — set it from the ${keyMode}-mode endpoint. Locally, one command covers both ` +
+      `streams: \`stripe listen --forward-to localhost:3000/api/webhooks/stripe ` +
+      `--forward-connect-to localhost:3000/api/webhooks/stripe\`. It prints ONE secret and both ` +
+      `variables take that same value — the CLI reuses a single endpoint secret per account, so ` +
+      `running listen twice does not produce two. Identical values are correct locally; in ` +
+      `production the two endpoints are separate and their secrets genuinely differ.`
     );
   }
 

@@ -325,9 +325,26 @@ gets quietly reversed later.
 >   `200`. A live event reaching a test-keyed deployment is a real misconfiguration, but retrying
 >   for three days cannot fix it.
 >
-> Locally: `stripe listen --forward-to localhost:3000/api/webhooks/stripe` prints a test secret.
-> **Connect events need a second listener and their own secret** — `secretFor()` refuses to fall
-> back between them, so sharing one value would make an unverifiable event look verified.
+> **Locally, one command covers both streams** (verified working 2026-08-11):
+>
+> ```bash
+> stripe listen --forward-to localhost:3000/api/webhooks/stripe \
+>               --forward-connect-to localhost:3000/api/webhooks/stripe
+> ```
+>
+> **It prints one secret, and both env vars get that same value.** The Stripe CLI registers a single
+> ephemeral endpoint per account and reuses its signing secret, so running `listen` twice does *not*
+> yield two secrets — there is no way to get distinct ones locally. Identical values are correct
+> here and verify both streams.
+>
+> That is safe because `secretFor()` chooses which **variable** to read; equality between them is
+> not the hazard. The hazard is *falling back* when one is unset, which it refuses to do — sharing a
+> value by accident when only one endpoint is configured would make an unverifiable event look
+> verified.
+>
+> **In production the two are genuinely different**: two endpoints created in the Stripe dashboard,
+> one with "Listen to events on Connected accounts" checked, each with its own secret. That is the
+> configuration the two variables exist for.
 
 > **The billing sweep is what finally calls all of this** (`docs/API.md` §25, D41).
 > `GET /api/cron/billing` runs `0 3 1 * *` and does two steps per org: `billing.closePeriod`, then
