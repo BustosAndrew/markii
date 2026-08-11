@@ -47,6 +47,41 @@ export function currentPeriod(now = new Date()): { start: Date; end: Date } {
 }
 
 /**
+ * The most recently *finished* period — the only one a scheduler may close.
+ *
+ * Closing freezes a number a merchant is charged for, so it may only ever run
+ * against a window that can no longer receive sales. Closing the *current*
+ * period would freeze a partial month, and because close is idempotent on
+ * `(orgId, periodStart)` the rest of that month would then never be assessed at
+ * all — the merchant is undercharged and nothing in the system looks wrong.
+ *
+ * Derived from `currentPeriod` rather than computed separately so the two can
+ * never disagree about where a month begins.
+ */
+/**
+ * The calendar period *containing* an instant.
+ *
+ * Normalising to the containing month rather than demanding an exact month
+ * boundary means a caller who passes `2026-07-15` closes July — the period that
+ * instant belongs to, not a different one. Rejecting it instead would only push
+ * every caller into duplicating this arithmetic, and the copies would drift from
+ * `currentPeriod`.
+ */
+export function periodStartingAt(within: Date): { start: Date; end: Date } {
+  const start = new Date(Date.UTC(within.getUTCFullYear(), within.getUTCMonth(), 1));
+  const end = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1));
+  return { start, end };
+}
+
+export function previousPeriod(now = new Date()): { start: Date; end: Date } {
+  const { start: currentStart } = currentPeriod(now);
+  const start = new Date(
+    Date.UTC(currentStart.getUTCFullYear(), currentStart.getUTCMonth() - 1, 1),
+  );
+  return { start, end: currentStart };
+}
+
+/**
  * Net sales over a window, in the org's billing currency.
  *
  * **Records with no conversion are excluded and counted separately.** No FX

@@ -22,6 +22,7 @@ when it's made, with the date — then update the doc it affects.
 | ~~D39~~ | ~~Split fee schedule: physical vs digital~~ | ✅ **Owner, 2026-08-06.** Thresholds $1k / $50k / $100k, **applied separately to each class**; above them 1.5%/0.5%/0.25% physical and 3%/1.5%/0.5% digital — §"Split fee schedule — D39" | Replaces D1's single rate |
 | ~~D2~~ | ~~Margin check~~ | ✅ **Costed 2026-07-29 — D1 holds.** ~92% margin at 1,000 merchants, ~83% at 100. Watch items: media usage (G5), support load (G4) — §"Unit economics — D2" | — |
 | ~~D40~~ | ~~MFA scope~~ | ✅ **Owner, 2026-08-07 — ✅ BUILT 2026-08-08.** Mandatory for every merchant; **shoppers excluded**. TOTP + recovery codes + step-up, enforced in `getSession()` and `invokeAction`. §"MFA scope — D40". **Screens not built** | — |
+| ~~D41~~ | ~~Scheduled billing & the `system` actor over HTTP~~ | ✅ **Assistant call, 2026-08-10 — ✅ BUILT.** Vercel Cron → `GET /api/cron/billing`, monthly. Runs the `high`-risk `billing.invoiceAssessments` unattended as a `system` actor; `CRON_SECRET` replaces the "never reachable over HTTP" guarantee — §"Scheduled billing — D41" | Owner may override the §22 rule 3 exception |
 | ~~D28~~ | ~~POS / in-person retail~~ | ✅ **Deliberate no, not a deferral** (owner, 2026-07-29). Hardware, card-present certification, offline sync, and a retail support model make it a different company. Do not design for it | — |
 | ~~D3~~ | ~~Auth provider~~ | ✅ **Supabase Auth** (owner, 2026-07-29 — superseded Neon Auth when D6 chose Supabase). Same six verifications apply — §"Auth — D3" | — |
 | ~~D4~~ | ~~Stripe integration model~~ | ✅ **Connect Standard** (owner, 2026-07-29). Express optional later, never penalized. Direct API keys considered and dropped. **Markii does not negotiate rates on merchants' behalf** — see §D4 | — |
@@ -30,6 +31,59 @@ when it's made, with the date — then update the doc it affects.
 | ~~D6~~ | ~~Data architecture~~ | ✅ **Supabase** (owner, 2026-07-29) — replaces Neon for database, auth, and file storage. Latency still solved by **caching, not a distributed DB**. Migration plan in §"Data architecture" | — |
 | ~~D26~~ | ~~Distribution model~~ | ✅ **Both — open/public source *and* hosted cloud** (owner, 2026-07-29). **Licence still unchosen — see §"Distribution — D26"** | Licence choice blocks any external contribution |
 
+
+### Scheduled billing — D41 (assistant call, 2026-08-10)
+
+**The problem was an absence.** The threshold fee engine, the meter, period close, and fee
+invoicing were all built and all correct, and nothing called them on a schedule. A merchant could
+cross their GMV threshold by any margin and never be charged. Threshold pricing is the
+differentiator in `docs/PRICING.md`, so this was the gap between a pricing model and a pricing page.
+
+`GET /api/cron/billing`, `0 3 1 * *` via `vercel.json`. Two decisions inside it are worth recording
+because both trade against rules stated elsewhere.
+
+**1. A `system` actor is now mintable over HTTP.**
+
+`authorize()` grants a `system` actor every permission without consulting a role, and
+`assertStepUp()` waives its second factor. Both were justified by the same comment — system actors
+are "migrations, seeds, cron… never reachable over HTTP". A cron job on Vercel *is* an HTTPS request
+and nothing else, so shipping one makes that sentence false and converts both bypasses into a hole.
+
+**`CRON_SECRET` is what replaces it.** `lib/cron/auth.ts` is the only code permitted to mint a system
+actor from a request, and three properties are load-bearing:
+
+- **A missing secret refuses (503).** Not "allows in development" — an unset variable making the
+  endpoint public would hand any caller on the internet an actor that authorizes everything and
+  skips MFA. That is the worst default available, and a `?? ""` produces it silently.
+- **Constant-time comparison.** The endpoint is unauthenticated by definition and can be probed
+  freely, which is exactly the condition a `===` leaks a secret under.
+- **A secret under 32 characters refuses.** A guessable secret protecting a permission bypass is not
+  protection, and this is the last point anyone would notice.
+
+*Alternatives considered.* Vercel's own `x-vercel-cron` header — rejected, it is not a secret and can
+be sent by anyone. A dedicated API token with `billing.write` — rejected: it would need step-up
+exemption anyway, and it would put a standing money-moving credential in the token table where a
+merchant-facing screen lists it.
+
+**2. The scheduler runs a `high`-risk action unattended, which §22 rule 3 says must not happen.**
+
+Rule 3 states that `high` actions "always require human approval and cannot be configured to
+auto-run", and `billing.invoiceAssessments` is `high`. This is a deliberate, narrow exception, and
+the reasoning is that rule 3 is aimed at an **agent** proposing a charge on a merchant's behalf. The
+cron is the same trust domain as the Stripe webhook that already extends memberships unattended: the
+platform operating its own billing cycle on its own timetable. It is bounded by properties the
+action already had — each assessment bills at most once, every unsafe case is refused individually
+by `assessmentBillable`, and every invocation writes an audit row.
+
+`billing.closePeriod` was deliberately **not** made `high` for this reason: it measures and bills
+nothing, so the scheduler needs only one exception rather than two. Keeping close and invoice as
+separate steps is what makes that split possible at all.
+
+**Open for the owner to override:** if the rule-3 exception is unacceptable, the fallback is a cron
+that closes periods only and leaves invoicing to a human — merchants would then be billed when
+someone remembers, which is the status quo this decision exists to end.
+
+---
 
 ### MFA scope — D40 (owner, 2026-08-07)
 

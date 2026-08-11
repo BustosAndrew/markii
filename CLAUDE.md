@@ -77,8 +77,21 @@ to create an item for an org with no subscription (a pending item with nothing t
 billed and later attaches to whatever invoice appears). `charging` on the meter is now **per
 merchant, not per deployment** — the same rule that kept it false when only a credential existed.
 
-**Nothing here is scheduled.** Period close and fee invoicing run when invoked; there is no job
-runner, and a billing step that assumed one would quietly never charge anyone.
+**Billing is scheduled now** (`docs/API.md` §25). `GET /api/cron/billing` (`0 3 1 * *`,
+`vercel.json`) closes every finished period via the new **`billing.closePeriod`** action, then runs
+`billing.invoiceAssessments` for every org holding an unbilled assessment — including ones stranded
+by an earlier failure. Two steps, never merged: close measures, invoicing charges, so Stripe being
+down cannot corrupt a measurement. Per-org failures are recorded and stepped over, and the run
+answers `200` with `orgsFailed` rather than making Vercel retry the whole sweep.
+
+**The cron is the one place a `system` actor is minted from an HTTP request**, and that matters
+because a system actor is granted every permission and has MFA step-up waived. Both bypasses used to
+rest on system actors being "never reachable over HTTP"; `CRON_SECRET` now carries that weight
+alone (`lib/cron/auth.ts` — refuses when unset, refuses under 32 chars, constant-time compare).
+Unset, nothing is billed at all: **it refuses rather than running open** (D41).
+
+**Still nothing else is scheduled** — no T12 rollup, no abandoned-cart timer, no dunning sweep of
+Markii's own. Membership status stays derived per request for exactly this reason.
 
 **Email plumbing is built; no mail is sent.** `lib/email/` has the SES v2 transport (hand-rolled
 SigV4 over `fetch`), per-merchant sending identities, the suppression list, a signature-verified

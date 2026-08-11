@@ -273,16 +273,35 @@ gets quietly reversed later.
 >
 > Two things worth knowing before extending the meter:
 >
-> - **The §4.5 nightly `t12_net_sales` rollup is deliberately absent.** Nothing schedules jobs here
->   yet, and a cache nobody refreshes is worse than the query it replaces. Add it when volume
->   demands it, not before there is a scheduler.
+> - **The §4.5 nightly `t12_net_sales` rollup is still deliberately absent.** A scheduler now exists
+>   (§25) but a cache nobody reads is still worse than the query it replaces. Add it when volume
+>   demands it — the sweep gives you somewhere to hang it when that day comes.
 > - **Records with no FX conversion are excluded *and counted*** (`unconvertedRecordCount`). No FX
 >   provider is wired, so cross-currency sales store `convertedMinor: null`; summing them as zero
 >   would understate a merchant's threshold, and inventing a rate would corrupt what they are
 >   charged.
 
-Contract `docs/API.md` §17; the fee engine is specified in `docs/PRICING.md` §4. Stripe Billing for
-subscriptions, **Connect Standard** for merchant payments (D4).
+> **The billing sweep is what finally calls all of this** (`docs/API.md` §25, D41).
+> `GET /api/cron/billing` runs `0 3 1 * *` and does two steps per org: `billing.closePeriod`, then
+> `billing.invoiceAssessments` for anyone holding an unbilled assessment — including rows stranded by
+> an earlier failure, since `assessmentBillable` re-checks every reason each attempt. Before it,
+> both were reachable only by a human invoking them on the right day, which meant crossing a
+> threshold did not reliably produce a charge.
+>
+> **Two traps if you touch it:**
+>
+> - **It mints a `system` actor over HTTP, and that is a permission bypass with a secret in front of
+>   it.** `authorize()` grants a system actor everything and `assertStepUp()` waives its factor —
+>   both written when system actors were unreachable from a request. `lib/cron/auth.ts` is now the
+>   only thing standing there. Never add a second minting path, and never let `CRON_SECRET` default
+>   to empty.
+> - **Never close the current period.** `previousPeriod()` is the only safe input and
+>   `billing.closePeriod` refuses anything unfinished. Closing a live month freezes a partial one,
+>   and because close is idempotent on `(orgId, periodStart)` the remainder is then never assessed —
+>   the merchant is undercharged and every surface still reads as settled.
+
+Contract `docs/API.md` §17 and §25; the fee engine is specified in `docs/PRICING.md` §4. Stripe
+Billing for subscriptions, **Connect Standard** for merchant payments (D4).
 
 **Build the metering ledger before commerce launches, not after.** Retrofitting a fee ledger over
 historical orders is lossy and painful.

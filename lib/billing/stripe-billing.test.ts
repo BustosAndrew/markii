@@ -174,11 +174,27 @@ describe("billing action registration", () => {
   it("registers every billing action", () => {
     expect(billing().map((a) => a.id).sort()).toEqual([
       "billing.changePlan",
+      "billing.closePeriod",
       "billing.invoiceAssessments",
       "billing.setCancellation",
       "billing.setDefaultPaymentMethod",
       "billing.startPaymentMethodSetup",
     ]);
+  });
+
+  /**
+   * Close measures; invoicing charges. Keeping them at different authority is
+   * what lets the scheduler close a period every month without that being a
+   * standing licence to move money, and it is why the sweep runs them as two
+   * steps rather than one.
+   */
+  it("separates measuring a period from billing it", () => {
+    const close = billing().find((a) => a.id === "billing.closePeriod");
+
+    expect(close?.riskTier).toBe("medium");
+    // No fresh factor: closing raises no charge. The step-up boundary sits on
+    // invoiceAssessments, asserted below.
+    expect(close?.requiresStepUp ?? false).toBe(false);
   });
 
   it("gates all of them behind billing.write", () => {

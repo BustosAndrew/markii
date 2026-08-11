@@ -1504,8 +1504,12 @@ invoice eventually appears.
 true only for an org whose subscription can actually carry the line. That is the same rule that made
 it `false` when only a credential existed — it reports the capability, never the environment.
 
-**Nothing here is scheduled.** Period close and invoicing both run when invoked; there is no job
-runner in this codebase, and a billing step that assumed one would quietly never charge anyone.
+**This is now scheduled — see §25.** Period close and invoicing run monthly via
+`GET /api/cron/billing` (`0 3 1 * *`, `vercel.json`), which invokes `billing.closePeriod` and then
+`billing.invoiceAssessments` per org. Both remain individually invocable; the sweep adds a caller,
+not a second code path. **It runs only where `CRON_SECRET` is set** — unset, the endpoint answers
+503 and nothing is ever billed, which is the honest failure rather than an endpoint that hands out
+`system` actors to anyone who finds it.
 
 **⛔ Add-ons refuse to be sold, and the reason is the product, not the plumbing.** Agent Ops and
 Chargeback Assist are Phase F (`docs/DECISIONS.md` §G10) and neither exists. Every piece the sale
@@ -1558,6 +1562,7 @@ interface UsageRecord {            // immutable; written at event time, never de
 | `GET` | `/api/billing/usage` | ✅ **The threshold meter** — see below. Measured, still not invoiced |
 | `GET` | `/api/billing/invoices` | ✅ Stripe invoices **and** the assessment ledger, under separate keys. Each assessment carries `invoiced`, `invoicedAt`, and `stripeInvoiceItemId` — a null item id on an invoiced row means *settled, nothing owed*, which `invoiced` alone cannot express |
 | `GET` | `/api/billing/invoices/:id` | ✅ One invoice, line-itemized. **The id is caller-supplied and `in_…` is a shared namespace**, so the invoice's customer is checked against the org's own and a mismatch answers `404`, not `403` — "forbidden" would confirm it exists. Threshold-fee lines carry the assessment that produced them |
+| `POST` | `/api/actions/billing.closePeriod` | ✅ Freeze a **finished** period into an assessment. Measures only. Refuses a period that has not ended — closing a live month freezes a partial one, and idempotency then means the rest is never assessed |
 | `POST` | `/api/actions/billing.invoiceAssessments` | ✅ Bill closed assessments onto the next subscription invoice. `?dryRun=1` shows what would be charged and why |
 | `POST` | `/api/billing/payment-method` | ✅ Stripe SetupIntent client secret; card data never touches Markii. Must be followed by `billing.setDefaultPaymentMethod` or the card is attached but not charged |
 | `GET` | `/api/billing/addons/:addon` | ✅ What the org actually has. Reports `includedInPlan` apart from `purchased`, so a Scale merchant is never asked to buy Chargeback Assist their plan already includes |
@@ -2647,6 +2652,79 @@ would reject after the merchant filled it in.
 
 **Not built:** shopper auth mail via Supabase's Send Email Hook, Secure Email Change's two-message
 flow, abandoned-cart mail, and broadcast/campaign sending.
+
+---
+
+## 25. Scheduled work — the billing sweep ✅ LIVE
+
+**The job runner. Nothing in this codebase ran on a schedule before it**, and every billing surface
+said so. The consequence was concrete rather than theoretical: a merchant could cross their GMV
+threshold by any margin and never be charged, because the only route to `closePeriod` or
+`billing.invoiceAssessments` was a human invoking them by hand on the right day. The threshold fee
+is the product's pricing differentiator, so an unscheduled billing step made it a pricing *page*
+rather than a pricing *model*.
+
+| Method | Path | Status |
+|---|---|---|
+| `GET` | `/api/cron/billing` | ✅ Close every finished period, then bill what it measured. `?dryRun=1` to preview; `?period=YYYY-MM-DD` to catch up a missed month |
+
+**Schedule:** `0 3 1 * *` (`vercel.json`) — 03:00 UTC on the 1st. On the 1st because a period may
+only be closed once it can no longer receive sales; at 03:00 rather than 00:00 to give in-flight
+webhooks a few hours to land, since a record arriving after close becomes a §4.4 credit on the next
+period rather than a correction to this one.
+
+### Two steps, in order, never merged
+
+1. **Close** — `billing.closePeriod` per org with production usage in the window. Freezes
+   `fee_assessments`. Measures only; bills nothing.
+2. **Bill** — `billing.invoiceAssessments` per org holding *any* unbilled assessment, not just this
+   period's. An assessment that could not be billed last month (no subscription yet, Stripe down)
+   is still owed, and every refusal reason is re-checked on each attempt.
+
+Separating them is what lets billing fail without corrupting the measurement. The assessment is
+already durable, `invoiced` stays `false`, and the next sweep picks it up.
+
+### Authentication — read this before touching the route
+
+`CRON_SECRET`, sent as `Authorization: Bearer …`. It is **not an ordinary API credential**: the
+endpoint mints a `system` actor, and a system actor is granted every permission by `authorize()` and
+has its MFA step-up waived by `assertStepUp()`. Both bypasses were originally justified by system
+actors being "never reachable over HTTP" — this endpoint makes that false, and `CRON_SECRET` is what
+replaces the guarantee.
+
+`lib/cron/auth.ts` is the **only** code permitted to mint a system actor from a request. It refuses
+when the secret is unset (503, never open), refuses a secret under 32 characters, and compares in
+constant time. Adding a second minting path means re-arguing both bypasses — see D41.
+
+### Responses
+
+**200 even when individual orgs failed.** A non-2xx makes Vercel retry the whole sweep and re-attempt
+every org that already succeeded; both steps are idempotent so that would not double bill, but it
+would bury the real failure. `orgsFailed > 0` in the body is the alerting signal.
+
+`chargedByCurrency` is a map, never a single total — billing currency is merchant-set, and one number
+across the run would add JPY yen to USD cents (D31).
+
+```jsonc
+{
+  "ok": true,
+  "periodStart": "2026-07-01T00:00:00.000Z",
+  "periodEnd": "2026-08-01T00:00:00.000Z",
+  "dryRun": false,
+  "orgsConsidered": 12, "orgsClosed": 11, "orgsBilled": 3, "orgsFailed": 1,
+  "chargedByCurrency": { "USD": 41800 },
+  "outcomes": [ /* per-org close + invoice detail, including skip reasons */ ],
+  "durationMs": 4120
+}
+```
+
+**Dry run caveat, stated in the response rather than left to be found:** a dry run rolls back the
+close, so the billing step sees only assessments that *already* existed — not ones the same run would
+have created.
+
+**Frontend:** none, and none planned. This is operator surface; no `*_API_LIVE` constant and no
+`lib/api/*` service, because no screen calls it. The new **`billing.closePeriod` action** is
+registry-visible and invocable at `POST /api/actions/billing.closePeriod` like any other.
 
 ---
 

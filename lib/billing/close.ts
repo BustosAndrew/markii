@@ -41,7 +41,11 @@ export type CloseResult = {
   recordCount: number;
   /** True when this period was already closed and the existing row was returned. */
   alreadyClosed: boolean;
-  /** False while Stripe is unwired — an assessment is a measurement, not an invoice. */
+  /**
+   * Always false from a fresh close — an assessment is a measurement, not an
+   * invoice. `billing.invoiceAssessments` is what flips it, as a second step the
+   * sweep runs after this one so a Stripe failure cannot corrupt the number.
+   */
   invoiced: boolean;
   /**
    * One entry per fee class assessed. `feeMinor` above is their **sum**, never a
@@ -65,8 +69,15 @@ export type CloseResult = {
  *
  * Idempotent by construction: the unique key on `(orgId, periodStart)` means a
  * retried close returns the existing assessment rather than writing a second
- * one. Double-assessing is a billing dispute with a merchant, and close will be
- * driven by a scheduler that retries.
+ * one. Double-assessing is a billing dispute with a merchant, and close **is**
+ * driven by a scheduler that retries — `GET /api/cron/billing` (§25), via the
+ * `billing.closePeriod` action.
+ *
+ * That same idempotency is why the caller must never hand this a period that has
+ * not ended: a partial month would be frozen, and every later attempt would
+ * return the frozen row rather than assessing the rest. `billing.closePeriod`
+ * refuses that case; nothing here can detect it, since a period is just a pair
+ * of dates by the time it arrives.
  */
 export async function closePeriod(input: {
   orgId: string;
@@ -185,8 +196,8 @@ export async function closePeriod(input: {
           excessAtStartMinor: fee.excessAtStartMinor,
           productClass: cls,
         },
-        // Nothing is billed while Stripe is unconnected, and the row says so
-        // rather than implying an invoice was raised.
+        // Closing bills nothing. The row says so rather than implying an
+        // invoice was raised; the sweep's second step is what charges it.
         invoiced: false,
         recordCount: periodByClass[cls].count,
       })

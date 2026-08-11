@@ -17,8 +17,15 @@ import type { Actor } from "./types";
  * Import for side effect once, at the boundary that invokes actions.
  */
 async function resolve(actor: Actor, permission: string): Promise<boolean> {
-  // Migrations, seeds, cron. Never reachable over HTTP, so it is not a hole an
-  // external caller can climb through.
+  /**
+   * Migrations, seeds, and the billing sweep.
+   *
+   * This used to be justified by "never reachable over HTTP". That stopped being
+   * true when `/api/cron/billing` shipped, so the guarantee now rests on
+   * `CRON_SECRET` instead: `lib/cron/auth.ts` is the only path from a request to
+   * a system actor, and it refuses rather than defaulting open when the secret
+   * is missing. Anything else that mints one is a full authorization bypass.
+   */
   if (actor.type === "system") return true;
 
   if (!actor.orgId) return false;

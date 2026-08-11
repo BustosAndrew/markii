@@ -188,10 +188,17 @@ export async function assertMfaSatisfied(): Promise<void> {
  *
  * **Only human sessions are challenged.** A `token` actor never had a factor to
  * present and never will — it is a credential in its own right, revoked rather
- * than re-authenticated. A `system` actor is a migration or a seed with no
- * browser at all. Demanding a factor from either would not make them safer; it
- * would make them impossible, and the pressure would then be to drop the
- * requirement from the action instead.
+ * than re-authenticated. A `system` actor is a migration, a seed, or the
+ * scheduled billing sweep, none of which have a browser to be challenged in.
+ * Demanding a factor from either would not make them safer; it would make them
+ * impossible, and the pressure would then be to drop the requirement from the
+ * action instead.
+ *
+ * **The sweep is why this waiver is now load-bearing rather than theoretical.**
+ * `/api/cron/billing` invokes `billing.invoiceAssessments`, which requires
+ * step-up, over HTTP — so the protection that used to come from system actors
+ * being unreachable now comes entirely from `CRON_SECRET` in `lib/cron/auth.ts`.
+ * Anything else minting a system actor from a request silently disables D40.
  *
  * An `agent` actor **is** challenged, through the human it acts for: §22 exists
  * so an agent gets no privileged path, and "the assistant did it" is not a

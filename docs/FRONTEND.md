@@ -198,6 +198,23 @@ What moved:
   an org whose subscription can carry a fee line. Render the `reason` string; it is written to be
   shown.
 
+**Threshold fees are now billed on a schedule (2026-08-10, `docs/API.md` §25).** Nothing in
+`lib/api/*` changes and no screen needs editing — but the copy on billing screens does, because one
+thing that used to be true no longer is. Period close and fee invoicing ran only when a human
+invoked them; they now run monthly (`0 3 1 * *`) via `GET /api/cron/billing`. **So do not write copy
+implying a merchant must do anything to be assessed, and do not describe an assessment as
+provisional.** An unbilled assessment is now genuinely pending a scheduled charge rather than
+pending someone's attention.
+
+Two knock-on details worth having:
+
+- `GET /api/actions` gains **`billing.closePeriod`** (risk `medium`, **no step-up**). It is operator
+  surface — there is no reason to put it behind a merchant-facing button, and the step-up list below
+  is unchanged because closing a period charges nothing.
+- The cron endpoint itself has **no `lib/api/*` service and no `*_API_LIVE` constant**, deliberately:
+  no screen calls it. If a billing-ops screen is ever wanted, ask first — it needs the platform
+  secret, not a merchant session.
+
 ### The threshold meter is still the screen most easily made dishonest
 
 `docs/PRICING.md` §6 is required reading before you write it. The three rules that matter:

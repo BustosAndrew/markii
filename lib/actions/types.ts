@@ -22,7 +22,16 @@ export type Actor =
   | { type: "user"; id: string; orgId: string | null }
   | { type: "agent"; id: string; orgId: string | null; onBehalfOfUserId: string }
   | { type: "token"; id: string; orgId: string | null }
-  /** Migrations, seeds, cron. Never reachable over HTTP. */
+  /**
+   * Migrations, seeds, and the scheduled billing sweep.
+   *
+   * **Authorizes everything and waives step-up**, so what may mint one is the
+   * whole security question. Migrations and seeds run from a shell and are out
+   * of reach by construction. The cron is not: `/api/cron/billing` is an HTTPS
+   * endpoint, and `lib/cron/auth.ts` — holding `CRON_SECRET`, refusing when it
+   * is unset — is the *only* code permitted to mint a system actor from a
+   * request. Adding a second such caller means re-arguing both bypasses below.
+   */
   | { type: "system"; id: string; orgId: string | null };
 
 /**

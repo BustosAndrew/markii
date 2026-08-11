@@ -270,6 +270,13 @@ that month, every month, with no threshold at all. That contrast is the product.
 - Never compute fees from a live join over the orders table — orders mutate, ledgers must not.
 - Nightly rollup job maintains `t12_net_sales` per org for the meter; period close recomputes from
   records (authoritative), and reconciles against the rollup with an alert on drift.
+  **Status (2026-08-10):** period close is implemented and now **runs monthly** —
+  `GET /api/cron/billing`, `0 3 1 * *`, which closes each finished period and then bills what it
+  measured (`docs/API.md` §25, D41). The **rollup remains unbuilt on purpose**: the meter recomputes
+  from records on every request, and a cache nobody reads is worse than the query it replaces.
+  `reconcileAssessment()` therefore reconciles a closed period against the *records*, and it
+  **reports drift without correcting it** — a settled number that silently changes is worse than a
+  wrong one somebody can see.
 - Every invoice line links to the records that produced it. A merchant asking "why this number"
   gets an exact answer.
 - Idempotency keys on every write — Stripe webhooks retry.

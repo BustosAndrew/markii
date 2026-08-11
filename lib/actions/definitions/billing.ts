@@ -10,6 +10,8 @@ import {
   type BillableAssessment,
 } from "../../billing/fee-invoice";
 import { statusGrantsPlan } from "../../billing/mirror";
+import { closePeriod } from "../../billing/close";
+import { periodStartingAt, previousPeriod } from "../../billing/meter";
 import {
   billingConfigured,
   cancelAtPeriodEnd,
@@ -449,6 +451,104 @@ export const startPaymentMethodSetup = defineAction({
 });
 
 /**
+ * Freezes a finished period into `fee_assessments` (`docs/PRICING.md` §4.5).
+ *
+ * **Period close had no caller at all before this** — `closePeriod()` was
+ * written, tested, and reachable from nothing, which meant the live meter was
+ * the only number a merchant ever saw and no period was ever settled. An engine
+ * with no entry point is indistinguishable from an engine that does not work.
+ *
+ * It is an action rather than a bare function call from the scheduler because
+ * §22 rule 1 admits no exceptions: closing writes the row that decides what a
+ * merchant is billed, so it gets the same validation, the same permission check,
+ * and — the reason that matters here — the same audit record whether a human, an
+ * agent, or the cron ran it. When a merchant disputes a fee, "who closed this
+ * period, when, and what did it write" has an answer.
+ *
+ * **No step-up.** Closing raises no charge; it records what already happened.
+ * The step-up boundary sits on `billing.invoiceAssessments`, which is where the
+ * measurement becomes money (D40).
+ */
+export const closeBillingPeriod = defineAction({
+  id: "billing.closePeriod",
+  description:
+    "Freeze a finished billing period into a threshold-fee assessment. Measures only — it bills " +
+    "nothing; billing.invoiceAssessments does that. Idempotent: re-closing a period returns the " +
+    "existing assessment rather than assessing twice. Defaults to the period that just ended.",
+  permission: "billing.write",
+  /**
+   * Not `high`. It moves no money and cannot overwrite a settled number — the
+   * unique key on `(orgId, periodStart)` makes a second close a read. The
+   * irreversibility that would argue for `high` is the same property that makes
+   * it safe to re-run.
+   */
+  riskTier: "medium",
+  input: z
+    .object({
+      /**
+       * The period's first instant, ISO-8601. Optional: the scheduler passes it
+       * explicitly so every org in one sweep closes the *same* window even if
+       * the run straddles midnight, and a human omits it to close the month
+       * that just ended.
+       */
+      periodStart: z.string().datetime().optional(),
+    })
+    .strict(),
+  async run(input, ctx) {
+    if (!ctx.actor.orgId) throw notFound("Organization");
+
+    const period = input.periodStart
+      ? periodStartingAt(new Date(input.periodStart))
+      : previousPeriod();
+
+    /**
+     * **The one refusal that protects the number.** Closing a period that can
+     * still receive sales freezes a partial month, and because close is
+     * idempotent the remainder is then never assessed — the merchant is
+     * undercharged and every surface still reads as settled. A caller passing a
+     * future or current period is asking for that, so it is refused rather than
+     * clamped: silently closing a different period than the one requested is its
+     * own billing surprise.
+     */
+    if (period.end.getTime() > Date.now()) {
+      throw badRequest(
+        `Period ${period.start.toISOString().slice(0, 10)} has not ended yet (it runs to ` +
+          `${period.end.toISOString().slice(0, 10)}). A period is closed after it ends, never during.`,
+      );
+    }
+
+    const result = await closePeriod({
+      orgId: ctx.actor.orgId,
+      periodStart: period.start,
+      periodEnd: period.end,
+      handle: ctx.db,
+    });
+
+    if (!result.alreadyClosed && result.assessmentId) {
+      ctx.recordDiff({
+        entity: "feeAssessment",
+        entityId: result.assessmentId,
+        path: "closed",
+        before: null,
+        after: result.feeMinor,
+      });
+    }
+
+    return {
+      ...result,
+      /**
+       * Stated rather than left to be inferred from `invoiced: false`. Close and
+       * bill are separate steps on purpose, and a caller who reads a fee here
+       * has not yet charged anybody.
+       */
+      note: result.alreadyClosed
+        ? "Already closed; the existing assessment was returned unchanged."
+        : "Measured and frozen. Nothing is billed until billing.invoiceAssessments runs.",
+    };
+  },
+});
+
+/**
  * Bills closed threshold-fee assessments (§17, `docs/PRICING.md` §4).
  *
  * **This is the action that turns a measurement into a charge**, and it is the
@@ -461,9 +561,14 @@ export const startPaymentMethodSetup = defineAction({
  * Nothing is finalised or captured here: Stripe bills it with the plan on the
  * normal cycle, so a merchant gets one invoice for one relationship.
  *
- * **Nothing is scheduled.** Like period close and the absent T12 rollup, this
- * runs when it is invoked — there is no job runner in this codebase, and a
- * billing step that silently depended on one would quietly never charge anyone.
+ * **This is scheduled now** (§25). `GET /api/cron/billing` runs it monthly after
+ * `billing.closePeriod`, so crossing a threshold results in a charge without
+ * anyone remembering to press anything. It stays fully invocable by hand — the
+ * sweep is a caller, not a second implementation.
+ *
+ * The scheduler reaches it as a `system` actor, which waives the step-up below.
+ * That waiver rests entirely on `CRON_SECRET` (`lib/cron/auth.ts`, D41); nothing
+ * else may mint a system actor from a request.
  */
 export const invoiceAssessments = defineAction({
   id: "billing.invoiceAssessments",
