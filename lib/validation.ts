@@ -89,6 +89,10 @@ export const productCreateSchema = z.object({
   enabled: z.boolean().optional(),
   suggestedProductIds: z.array(z.number().int().positive()).max(20).optional(),
   addOns: z.array(addOnSchema).max(20).optional(),
+  requiresTierId: z.number().int().positive().nullish(),
+  grantsTierId: z.number().int().positive().nullish(),
+  grantsDurationDays: z.number().int().positive().max(3650).nullish(),
+  grantsRenewalInterval: z.enum(["none", "month", "year"]).optional(),
 });
 
 export const productUpdateSchema = productCreateSchema.partial();

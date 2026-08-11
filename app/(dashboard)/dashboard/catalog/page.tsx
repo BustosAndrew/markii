@@ -1,13 +1,20 @@
 import Link from "next/link";
 import { Suspense } from "react";
 import { ImageIcon } from "lucide-react";
-import { listCategories, listCollections, listProducts, listSites } from "@/lib/api/server";
+import {
+  listCategories,
+  listCollections,
+  listInventoryLevels,
+  listProducts,
+  listSites,
+} from "@/lib/api/server";
 import { firstParam, loadOrError, parseLimit, parsePage } from "@/lib/api/load";
 import { formatCents } from "@/lib/api/money";
 import type { Category } from "@/lib/api/types";
 import { InventoryActions } from "@/components/dashboard/inventory-actions";
 import { RouteTabs } from "@/components/dashboard/route-tabs";
 import { FetchError } from "@/components/dashboard/fetch-error";
+import { StockLevelsPanel } from "@/components/dashboard/stock-levels-panel";
 import { Badge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -56,6 +63,8 @@ export default async function CatalogPage({
   const inStockRaw = firstParam(sp.inStock);
   const categoryIdRaw = firstParam(sp.categoryId);
   const categoryId = categoryIdRaw ? Number(categoryIdRaw) : undefined;
+  const lowStockRaw = firstParam(sp.lowStock);
+  const lowStock = lowStockRaw ? Number(lowStockRaw) : 5;
   const page = parsePage(sp.page);
   const limit = parseLimit(sp.limit);
 
@@ -101,6 +110,17 @@ export default async function CatalogPage({
             siteId: Number.isFinite(siteId) ? siteId : undefined,
             page,
             limit,
+          }),
+        )
+      : { data: null, error: null as string | null };
+
+  const stockLevelsResult =
+    tab === "products"
+      ? await loadOrError(() =>
+          listInventoryLevels({
+            siteId: Number.isFinite(siteId) ? siteId : undefined,
+            lowStock: Number.isFinite(lowStock) ? lowStock : 5,
+            limit: 25,
           }),
         )
       : { data: null, error: null as string | null };
@@ -266,6 +286,12 @@ export default async function CatalogPage({
                   total={productsResult.data.total}
                 />
               </Suspense>
+
+              <StockLevelsPanel
+                items={stockLevelsResult.data?.items ?? null}
+                lowStock={Number.isFinite(lowStock) ? lowStock : 5}
+                error={stockLevelsResult.error}
+              />
             </>
           ) : null}
         </>

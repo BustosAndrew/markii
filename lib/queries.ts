@@ -1,10 +1,12 @@
-import { and, count, eq, gte, ilike, lte, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, eq, gte, ilike, lte, or, sql, type SQL } from "drizzle-orm";
 import { badRequest, dateRange, enumParam, intParam, notFound, tenantBaseUrl } from "@/lib/api";
 import {
   agentTraffic,
   categories,
   db,
+  digitalAssets,
   orders,
+  productDigitalAssets,
   products,
   sites,
   type Category,
@@ -172,8 +174,24 @@ export async function serializeProductDetail(p: Product) {
   const [base] = await serializeProducts([p]);
   const relatedIds = uniq([...p.suggestedProductIds, ...p.addOns.map((a) => a.productId)]);
   const related = await productsById(relatedIds);
+  const attachments = await db
+    .select({
+      attachmentId: productDigitalAssets.id,
+      assetId: digitalAssets.id,
+      fileName: digitalAssets.fileName,
+      contentType: digitalAssets.contentType,
+      sizeBytes: digitalAssets.sizeBytes,
+      label: digitalAssets.label,
+      variantId: productDigitalAssets.variantId,
+      position: productDigitalAssets.position,
+    })
+    .from(productDigitalAssets)
+    .innerJoin(digitalAssets, eq(digitalAssets.id, productDigitalAssets.assetId))
+    .where(eq(productDigitalAssets.productId, p.id))
+    .orderBy(asc(productDigitalAssets.position), asc(productDigitalAssets.id));
   return {
     ...base,
+    digitalAssets: attachments,
     suggestedProducts: p.suggestedProductIds
       .map((id) => related.get(id))
       .filter((x): x is Product => !!x)

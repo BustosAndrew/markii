@@ -82,10 +82,26 @@ export type Product = {
   currency: string;
   sku: string | null;
   stock: number;
+  downloadLimit: number | null;
+  downloadExpiryDays: number | null;
+  requiresTierId: number | null;
+  grantsTierId: number | null;
+  grantsDurationDays: number | null;
+  grantsRenewalInterval: "none" | "month" | "year";
   images: string[];
   enabled: boolean;
   suggestedProductIds: number[];
   addOns: { productId: number; mandatory: boolean }[];
+  digitalAssets?: {
+    attachmentId: number;
+    assetId: number;
+    fileName: string;
+    contentType: string;
+    sizeBytes: number;
+    label: string | null;
+    variantId: number | null;
+    position: number;
+  }[];
   site?: { id: number; name: string; slug: string };
   category?: {
     id: number;

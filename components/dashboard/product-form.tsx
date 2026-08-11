@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
+import type { MembershipTier } from "@/lib/api/memberships";
 import {
   createProduct,
   deleteProduct,
@@ -25,16 +26,21 @@ function centsToDollars(cents: number) {
   return (cents / 100).toFixed(2);
 }
 
+type TierOption = Pick<MembershipTier, "id" | "name" | "siteId">;
+
 export function ProductForm({
   mode,
   product,
   sites,
   categories,
+  tiers,
 }: {
   mode: "create" | "edit";
   product?: Product;
   sites: Site[];
   categories: Category[];
+  /** Loaded in the page RSC — never fetch tiers from the browser. */
+  tiers: TierOption[];
 }) {
   const router = useRouter();
   const [siteId, setSiteId] = useState(String(product?.siteId ?? sites[0]?.id ?? ""));
@@ -52,6 +58,18 @@ export function ProductForm({
   const [images, setImages] = useState<string[]>(product?.images ?? []);
   const [imageUrl, setImageUrl] = useState("");
   const [enabled, setEnabled] = useState(product?.enabled ?? true);
+  const [requiresTierId, setRequiresTierId] = useState(
+    product?.requiresTierId != null ? String(product.requiresTierId) : "",
+  );
+  const [grantsTierId, setGrantsTierId] = useState(
+    product?.grantsTierId != null ? String(product.grantsTierId) : "",
+  );
+  const [grantsDurationDays, setGrantsDurationDays] = useState(
+    product?.grantsDurationDays != null ? String(product.grantsDurationDays) : "",
+  );
+  const [grantsRenewalInterval, setGrantsRenewalInterval] = useState<
+    Product["grantsRenewalInterval"]
+  >(product?.grantsRenewalInterval ?? "none");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -60,6 +78,20 @@ export function ProductForm({
     () => categories.filter((c) => String(c.siteId) === siteId),
     [categories, siteId],
   );
+  const siteTiers = useMemo(
+    () => tiers.filter((tier) => String(tier.siteId) === siteId),
+    [siteId, tiers],
+  );
+  const tierIds = useMemo(
+    () => new Set(siteTiers.map((tier) => String(tier.id))),
+    [siteTiers],
+  );
+  /** Drop stale selections when the storefront changes — derived, no effect. */
+  const effectiveRequiresTierId = tierIds.has(requiresTierId) ? requiresTierId : "";
+  const effectiveGrantsTierId = tierIds.has(grantsTierId) ? grantsTierId : "";
+  const effectiveRenewalInterval = effectiveGrantsTierId
+    ? grantsRenewalInterval
+    : ("none" as const);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -67,6 +99,20 @@ export function ProductForm({
     const priceCents = dollarsToCents(price);
     if (!siteId || !name.trim() || priceCents === null) {
       setError("Site, name, and a valid price are required.");
+      return;
+    }
+    const parsedDuration = grantsDurationDays.trim()
+      ? Number(grantsDurationDays.trim())
+      : null;
+    if (
+      parsedDuration != null &&
+      (!Number.isInteger(parsedDuration) || parsedDuration <= 0 || parsedDuration > 3650)
+    ) {
+      setError("Grant duration must be between 1 and 3650 days.");
+      return;
+    }
+    if (effectiveRenewalInterval !== "none" && !effectiveGrantsTierId) {
+      setError("A renewal interval requires a granting tier.");
       return;
     }
 
@@ -83,6 +129,17 @@ export function ProductForm({
         categoryId: categoryId ? Number(categoryId) : null,
         images,
         enabled,
+        requiresTierId: effectiveRequiresTierId
+          ? Number(effectiveRequiresTierId)
+          : null,
+        grantsTierId: effectiveGrantsTierId ? Number(effectiveGrantsTierId) : null,
+        grantsDurationDays:
+          effectiveGrantsTierId && effectiveRenewalInterval === "none"
+            ? parsedDuration
+            : null,
+        grantsRenewalInterval: effectiveGrantsTierId
+          ? effectiveRenewalInterval
+          : "none",
       };
 
       if (mode === "create") {
@@ -206,6 +263,101 @@ export function ProductForm({
           ))}
         </Select>
       </div>
+
+      <section className="rounded-[var(--radius-card)] border border-border bg-surface p-5 shadow-[var(--shadow-sm)]">
+        <div>
+          <h2 className="text-base font-medium text-foreground">Membership access</h2>
+          <p className="mt-1 text-sm leading-6 text-muted">
+            A product can require a tier to buy it, grant a tier after purchase, or do both.
+          </p>
+        </div>
+
+        <div className="mt-5 grid gap-4 sm:grid-cols-2">
+          <div>
+            <Label htmlFor="requires-tier">Requires tier</Label>
+            <Select
+              id="requires-tier"
+              value={effectiveRequiresTierId}
+              disabled={busy}
+              onChange={(e) => setRequiresTierId(e.target.value)}
+            >
+              <option value="">No membership gate</option>
+              {siteTiers.map((tier) => (
+                <option key={tier.id} value={tier.id}>
+                  {tier.name}
+                </option>
+              ))}
+            </Select>
+          </div>
+
+          <div>
+            <Label htmlFor="grants-tier">Grants tier</Label>
+            <Select
+              id="grants-tier"
+              value={effectiveGrantsTierId}
+              disabled={busy}
+              onChange={(e) => {
+                const nextTierId = e.target.value;
+                setGrantsTierId(nextTierId);
+                if (!nextTierId) setGrantsRenewalInterval("none");
+              }}
+            >
+              <option value="">Does not grant membership</option>
+              {siteTiers.map((tier) => (
+                <option key={tier.id} value={tier.id}>
+                  {tier.name}
+                </option>
+              ))}
+            </Select>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <div>
+            <Label htmlFor="grants-renewal">Renewal interval</Label>
+            <Select
+              id="grants-renewal"
+              value={effectiveRenewalInterval}
+              disabled={busy || !effectiveGrantsTierId}
+              onChange={(e) =>
+                setGrantsRenewalInterval(
+                  e.target.value as Product["grantsRenewalInterval"],
+                )
+              }
+            >
+              <option value="none">One-time membership purchase</option>
+              <option value="month">Monthly renewal</option>
+              <option value="year">Yearly renewal</option>
+            </Select>
+            <p className="mt-1.5 text-xs leading-5 text-muted">
+              Renewal interval requires a granting tier. Recurring purchases use the
+              storefront subscription checkout.
+            </p>
+          </div>
+
+          {effectiveRenewalInterval === "none" ? (
+            <div>
+              <Label htmlFor="grants-duration">Grant duration (days)</Label>
+              <Input
+                id="grants-duration"
+                inputMode="numeric"
+                value={grantsDurationDays}
+                disabled={busy || !effectiveGrantsTierId}
+                placeholder="Blank = no expiry"
+                onChange={(e) => setGrantsDurationDays(e.target.value)}
+              />
+              <p className="mt-1.5 text-xs leading-5 text-muted">
+                Leave blank for lifetime access.
+              </p>
+            </div>
+          ) : (
+            <div className="rounded-[var(--radius-control)] border border-border bg-surface-elevated px-3 py-3 text-sm text-muted">
+              Recurring memberships renew through Stripe on the merchant&apos;s account, so
+              access length follows the billing interval rather than a fixed day count.
+            </div>
+          )}
+        </div>
+      </section>
 
       <div>
         <Label>Images</Label>

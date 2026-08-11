@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getMe, listDiscounts, listSites } from "@/lib/api/server";
+import { DiscountPreviewPanel } from "@/components/dashboard/discount-preview";
 import { firstParam, loadOrError, parseLimit, parsePage } from "@/lib/api/load";
 import { formatMinor } from "@/lib/api/money";
 import type { Discount } from "@/lib/api/commerce";
@@ -185,6 +186,14 @@ export default async function DiscountsPage({
           />
         </>
       )}
+
+      <div className="mt-8">
+        <DiscountPreviewPanel
+          sites={(sites.data?.items ?? []).map((site) => ({ id: site.id, name: site.name }))}
+          selectedSiteId={Number.isFinite(siteId) ? (siteId ?? null) : null}
+          currency={currency}
+        />
+      </div>
     </div>
   );
 }

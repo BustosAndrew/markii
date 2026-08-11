@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { FetchError } from "@/components/dashboard/fetch-error";
 import { OrderActions } from "@/components/dashboard/order-actions";
+import { OrderDownloads } from "@/components/dashboard/order-downloads";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
@@ -288,44 +289,6 @@ function Fulfillments({ fulfillments }: { fulfillments: OrderFulfillment[] }) {
   );
 }
 
-function Downloads({ downloads }: { downloads: OrderDownload[] }) {
-  return (
-    <div className="space-y-3">
-      {downloads.map((d) => (
-        <Card key={d.id}>
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <span className="font-medium text-foreground">{d.fileName}</span>
-            {d.redeemable ? (
-              <Badge variant="success">Redeemable</Badge>
-            ) : (
-              <Badge variant="error">Revoked</Badge>
-            )}
-          </div>
-          <p className="mt-2 text-sm text-muted">
-            {d.downloadsUsed} of {d.downloadLimit ?? "unlimited"} downloads used
-            {d.expiresAt ? ` · expires ${new Date(d.expiresAt).toLocaleDateString()}` : ""}
-            {d.lastDownloadedAt
-              ? ` · last ${new Date(d.lastDownloadedAt).toLocaleString()}`
-              : " · never downloaded"}
-          </p>
-          {d.revokedReason ? (
-            <p className="mt-1 text-sm text-muted">Revoked: {d.revokedReason}</p>
-          ) : null}
-        </Card>
-      ))}
-      {/*
-        The grant token is the buyer's credential and is not returned by the API.
-        Saying so is better than leaving a merchant hunting for a link that is
-        deliberately absent.
-      */}
-      <p className="text-xs text-muted">
-        Download links are not shown here. The token is the buyer&rsquo;s credential — a support
-        screenshot of this page must not be enough to take the file.
-      </p>
-    </div>
-  );
-}
-
 function LicenceKeys({ keys }: { keys: OrderLicenceKey[] }) {
   return (
     <Card>
@@ -428,7 +391,7 @@ export default async function OrderDetailPage({
 
           {o.downloads.length > 0 ? (
             <Section title="Digital delivery">
-              <Downloads downloads={o.downloads} />
+              <OrderDownloads downloads={o.downloads} />
             </Section>
           ) : null}
 

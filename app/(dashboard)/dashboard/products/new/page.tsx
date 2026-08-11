@@ -1,4 +1,5 @@
 import { listCategories } from "@/lib/api/server";
+import { listMembershipTiers } from "@/lib/api/server";
 import { listSites } from "@/lib/api/server";
 import { loadOrError } from "@/lib/api/load";
 import { PageHeader } from "@/components/ui/page-header";
@@ -6,13 +7,14 @@ import { FetchError } from "@/components/dashboard/fetch-error";
 import { ProductForm } from "@/components/dashboard/product-form";
 
 export default async function NewProductPage() {
-  const [sitesResult, categoriesResult] = await Promise.all([
+  const [sitesResult, categoriesResult, tiersResult] = await Promise.all([
     loadOrError(() =>
       listSites({ limit: 100, sort: "name" }),
     ),
     loadOrError(() =>
       listCategories({ limit: 100 }),
     ),
+    loadOrError(() => listMembershipTiers()),
   ]);
 
   if (sitesResult.error || !sitesResult.data) {
@@ -40,6 +42,11 @@ export default async function NewProductPage() {
         mode="create"
         sites={sitesResult.data.items}
         categories={categoriesResult.data?.items ?? []}
+        tiers={(tiersResult.data?.items ?? []).map((tier) => ({
+          id: tier.id,
+          name: tier.name,
+          siteId: tier.siteId,
+        }))}
       />
     </div>
   );

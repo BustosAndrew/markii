@@ -1,4 +1,4 @@
-import { getTaxSettings, listSites } from "@/lib/api/server";
+import { getMe, getTaxSettings, listSites } from "@/lib/api/server";
 import { firstParam, loadOrError } from "@/lib/api/load";
 import { FetchError } from "@/components/dashboard/fetch-error";
 import { SettingsShell } from "@/components/dashboard/settings-shell";
@@ -28,7 +28,10 @@ export default async function SettingsTaxPage({
   const parsedSiteId = siteIdRaw ? Number(siteIdRaw) : sites[0]!.id;
   const siteId = sites.some((s) => s.id === parsedSiteId) ? parsedSiteId : sites[0]!.id;
 
-  const taxResult = await loadOrError(() => getTaxSettings(siteId));
+  const [taxResult, meResult] = await Promise.all([
+    loadOrError(() => getTaxSettings(siteId)),
+    loadOrError(() => getMe()),
+  ]);
 
   return (
     <SettingsShell title="Tax" description={DESCRIPTION}>
@@ -38,6 +41,7 @@ export default async function SettingsTaxPage({
           sites={sites}
           siteId={siteId}
           settings={taxResult.data}
+          currency={meResult.data?.org.currency ?? "USD"}
         />
       ) : (
         <FetchError message={taxResult.error ?? "Tax settings could not be loaded."} />

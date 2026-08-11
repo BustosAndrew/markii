@@ -8,6 +8,7 @@ import {
   type TaxSettings,
 } from "@/lib/api/tax-shipping";
 import { ApiClientError } from "@/lib/api/types";
+import { TaxPreviewPanel } from "@/components/dashboard/tax-preview";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { FieldError, Input, Label, Select } from "@/components/ui/field";
@@ -55,10 +56,12 @@ export function TaxSettingsForm({
   sites,
   siteId,
   settings,
+  currency,
 }: {
   sites: SiteOption[];
   siteId: number;
   settings: TaxSettings;
+  currency: string;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -275,6 +278,8 @@ export function TaxSettingsForm({
           {error ? <FieldError>{error}</FieldError> : null}
         </div>
       </form>
+
+      <TaxPreviewPanel siteId={siteId} currency={currency} />
     </div>
   );
 }

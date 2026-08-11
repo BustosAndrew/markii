@@ -55,8 +55,16 @@ const included = [
 ];
 
 const addOns = [
-  { name: "Agent Ops", price: "$29/mo", note: "+ metered usage above allowance" },
-  { name: "Chargeback Assist", price: "$19/mo", note: "Included on Scale" },
+  {
+    name: "Agent Ops",
+    price: "Unavailable",
+    note: "Not for purchase — the product does not exist yet.",
+  },
+  {
+    name: "Chargeback Assist",
+    price: "Unavailable",
+    note: "Included on Scale when it ships; purchase is refused until then.",
+  },
   { name: "Extra storefront", price: "$9/mo", note: "Beyond plan limit" },
 ];
 
@@ -75,8 +83,7 @@ export default function PricingPage() {
         each against its own threshold.
       </p>
       <p className="mt-3 text-xs text-muted-soft">
-        Figures from Markii&apos;s pricing proposal (verified competitor sources
-        2026-07-29). Subject to final launch confirmation.
+        Current Markii pricing. Competitor sources last verified 2026-07-29.
       </p>
 
       <div className="mt-12 grid gap-4 lg:grid-cols-3">

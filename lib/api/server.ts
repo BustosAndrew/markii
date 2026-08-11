@@ -2,7 +2,9 @@ import "server-only";
 import { GET as analyticsOverviewGET } from "@/app/api/analytics/overview/route";
 import { GET as analyticsSiteGET } from "@/app/api/analytics/sites/[idOrSlug]/route";
 import { GET as billingUsageGET } from "@/app/api/billing/usage/route";
+import { GET as digitalAssetsGET } from "@/app/api/digital-assets/route";
 import { GET as taxSettingsGET } from "@/app/api/settings/tax/route";
+import { GET as inventoryLevelsGET } from "@/app/api/inventory/levels/route";
 import { GET as shippingZonesGET } from "@/app/api/shipping/zones/route";
 import { GET as productVariantsGET } from "@/app/api/products/[idOrSlug]/variants/route";
 import { GET as billingPlansGET } from "@/app/api/billing/plans/route";
@@ -51,7 +53,8 @@ import type {
 } from "./billing";
 import type { MfaStatus } from "./mfa";
 import type { TaxSettings, ShippingZone } from "./tax-shipping";
-import type { VariantMatrix } from "./commerce";
+import type { DigitalAssetList } from "./delivery";
+import type { InventoryLevelRow, VariantMatrix } from "./commerce";
 import type { EmailSettings } from "./email";
 import type { CustomerMembership, MembershipTier } from "./memberships";
 import type { Collection, Customer, Discount, DiscountDetail } from "./commerce";
@@ -232,10 +235,31 @@ export const getBillingUsage = () => call<UsageResponse>(billingUsageGET, "/api/
 export const getTaxSettings = (siteId: number) =>
   call<TaxSettings>(taxSettingsGET, "/api/settings/tax", { siteId });
 
+export const listDigitalAssets = (query?: { siteId?: number; page?: number; limit?: number }) =>
+  call<DigitalAssetList>(
+    digitalAssetsGET,
+    "/api/digital-assets",
+    query as Record<string, QueryValue>,
+  );
+
 export const listShippingZones = (siteId: number) =>
   call<{ items: ShippingZone[]; total: number }>(shippingZonesGET, "/api/shipping/zones", {
     siteId,
   });
+
+export const listInventoryLevels = (query?: {
+  siteId?: number;
+  productId?: number;
+  locationId?: number;
+  lowStock?: number;
+  page?: number;
+  limit?: number;
+}) =>
+  call<{ items: InventoryLevelRow[]; page: number; limit: number }>(
+    inventoryLevelsGET,
+    "/api/inventory/levels",
+    query as Record<string, QueryValue>,
+  );
 
 export const getVariantMatrix = (idOrSlug: string, query?: { siteId?: number }) =>
   call<VariantMatrix>(

@@ -6,6 +6,7 @@ import { useState } from "react";
 import {
   BarChart3,
   CreditCard,
+  Download,
   Globe,
   KeyRound,
   LayoutList,
@@ -28,6 +29,7 @@ import { cn } from "@/lib/utils";
 export const nav = [
   { href: "/dashboard", label: "Overview", icon: LayoutGrid },
   { href: "/dashboard/catalog", label: "Catalog", icon: ShoppingBag },
+  { href: "/dashboard/delivery", label: "Delivery", icon: Download },
   { href: "/dashboard/orders", label: "Orders", icon: LayoutList },
   { href: "/dashboard/customers", label: "Customers", icon: Users },
   { href: "/dashboard/discounts", label: "Discounts", icon: Percent },

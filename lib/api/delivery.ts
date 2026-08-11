@@ -48,12 +48,19 @@ export type DigitalAsset = {
   updatedAt: string;
 };
 
-/** Advisory only — G5's quotas are proposed and nothing blocks on them. */
+/**
+ * Advisory only — G5 quotas are unsigned-off and nothing blocks on them.
+ * Shape matches `mediaUsageFor` (`lib/commerce/media-usage.ts`), not a guessed
+ * rename: delivery is metered as authorised bytes in the current calendar month.
+ */
 export type MediaUsage = {
   storageBytes: number;
-  storageLimitBytes: number | null;
-  egressBytes: number;
-  egressLimitBytes: number | null;
+  deliveryBytes: number;
+  periodStart: string;
+  quota: { storageBytes: number; deliveryBytes: number } | null;
+  storageRatio: number | null;
+  deliveryRatio: number | null;
+  advisoryOnly: true;
 };
 
 export type DigitalAssetList = {

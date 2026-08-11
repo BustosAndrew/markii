@@ -42,7 +42,7 @@ function AssessmentRow({ row }: { row: FeeAssessment }) {
           ? row.stripeInvoiceItemId
             ? "Invoiced"
             : "Settled · nothing owed"
-          : "Not invoiced"}
+          : "Pending next scheduled invoice"}
       </td>
     </tr>
   );
@@ -88,7 +88,8 @@ export function BillingInvoices({ data }: { data: InvoicesResponse }) {
           Threshold fee assessments
         </h2>
         <p className="mt-1 text-sm leading-6 text-muted">
-          What each metering period measured. Not the same as an invoice.
+          What each metering period measured. Assessments are measured automatically on a monthly
+          schedule; they are not provisional and do not need a merchant to trigger them.
         </p>
         {data.assessmentsState ? (
           <p className="mt-4 text-sm text-muted">{data.assessmentsState.message}</p>
