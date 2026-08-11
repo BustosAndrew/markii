@@ -281,6 +281,28 @@ gets quietly reversed later.
 >   would understate a merchant's threshold, and inventing a rate would corrupt what they are
 >   charged.
 
+> **Webhook secrets are per-endpoint AND per-mode, and nothing can check that for you.**
+> `lib/stripe-mode.ts` compares `sk_`/`pk_` prefixes, but every signing secret is a `whsec_…` in
+> both modes — so a live-mode secret against a test-mode key is undetectable at startup. The
+> symptom is total and silent: every event 400s, **nothing is written to `stripe_webhook_events`**
+> (an unverified payload is not evidence of anything), and the only trace is a log line.
+> Subscriptions stop mirroring, membership renewals stop extending, refunds stop reconciling —
+> while the app looks healthy, because the paths that call Stripe directly still work.
+>
+> Two things now make it findable rather than invisible:
+>
+> - **A diagnosis on the log line** (`diagnoseSignatureFailure`) naming the likely cause and the
+>   fix. It reads the *unverified* payload's `livemode` — deliberately, and only to phrase a hint,
+>   never to decide anything. It fires the mode explanation **only** on a genuine signature
+>   mismatch; an unsigned scanner request gets told it is an unsigned scanner request.
+> - **A mode check on the verified event**, which records `ignored` with a reason and answers
+>   `200`. A live event reaching a test-keyed deployment is a real misconfiguration, but retrying
+>   for three days cannot fix it.
+>
+> Locally: `stripe listen --forward-to localhost:3000/api/webhooks/stripe` prints a test secret.
+> **Connect events need a second listener and their own secret** — `secretFor()` refuses to fall
+> back between them, so sharing one value would make an unverifiable event look verified.
+
 > **The billing sweep is what finally calls all of this** (`docs/API.md` §25, D41).
 > `GET /api/cron/billing` runs `0 3 1 * *` and does two steps per org: `billing.closePeriod`, then
 > `billing.invoiceAssessments` for anyone holding an unbilled assessment — including rows stranded by

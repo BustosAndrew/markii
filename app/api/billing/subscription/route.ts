@@ -61,7 +61,8 @@ export const GET = orgHandler(
         monthlyPriceMinor: pricing.monthlyPriceMinor,
         annualPerMonthMinor: pricing.annualPerMonthMinor,
         currency: "USD",
-        status: "proposed" as const,
+        /** Signed off 2026-08-10 (D39) — plan prices, not add-on prices. */
+        status: "final" as const,
       },
       /**
        * The metering period the threshold fee is computed over. It is **not** the

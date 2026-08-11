@@ -139,3 +139,88 @@ export function parseStripeEvent(payload: string): StripeEventEnvelope | null {
     return null;
   }
 }
+
+/**
+ * Why a signature probably failed — for the **server log only**.
+ *
+ * `verifyStripeSignature` answers "signature does not match", which is true and
+ * useless. The overwhelmingly common cause is not an attacker: it is a signing
+ * secret from the wrong endpoint, and specifically **the wrong mode**. Stripe
+ * issues a separate secret per endpoint, endpoints are per-mode, and every one
+ * of them looks like `whsec_…` — so a live-mode secret paired with a test-mode
+ * key is invisible to any startup check. `lib/stripe-mode.ts` compares
+ * `sk_`/`pk_` prefixes and cannot see this at all.
+ *
+ * The symptom is total and silent: every event 400s, nothing is written to
+ * `stripe_webhook_events` (an unverified payload is not evidence of anything),
+ * and the only trace is a log line. Subscriptions stop mirroring, membership
+ * renewals stop extending, refunds stop reconciling — while the app looks fine,
+ * because the paths that call Stripe directly still work.
+ *
+ * **Reads the unverified payload, deliberately, and only for a hint.** An
+ * attacker can put anything in `livemode`, which is exactly why this feeds a log
+ * message and never a decision. The alternative — refusing to look — means the
+ * one field that identifies this misconfiguration goes unread precisely when it
+ * would help.
+ */
+export function diagnoseSignatureFailure(input: {
+  reason: string;
+  /** From the unverified payload. Untrusted; used only to phrase the hint. */
+  claimedLivemode: boolean | undefined;
+  /** True when the event named a connected account, so the Connect secret was used. */
+  isConnectEvent: boolean;
+  /** Mode of `STRIPE_SECRET_KEY`, which *is* trustworthy. */
+  keyIsLive: boolean;
+}): string {
+  const which = input.isConnectEvent
+    ? "STRIPE_CONNECT_WEBHOOK_SECRET"
+    : "STRIPE_WEBHOOK_SECRET";
+
+  if (input.reason === "timestamp outside tolerance") {
+    return (
+      `${which} verified the payload but the timestamp is stale. This is clock skew on the ` +
+      `server, or a replayed request — not a wrong secret.`
+    );
+  }
+  if (input.reason === "no signing secret configured") {
+    return `${which} is empty. Nothing from that endpoint can be verified.`;
+  }
+
+  /**
+   * **A malformed or absent header is not a secret problem**, and must not be
+   * given the mode-mismatch explanation below.
+   *
+   * The first draft of this returned the mode hint for *every* failure, so a
+   * request with no `Stripe-Signature` at all — a health check, a scanner, a
+   * hand-rolled curl — produced a confident paragraph about live-versus-test
+   * secrets. That is worse than the bare reason it replaced: it sends someone
+   * to rotate a secret that was never involved. The mode hint is only ever
+   * reachable when a real signature was present and genuinely did not match.
+   */
+  if (input.reason !== "signature does not match") {
+    return (
+      `The request carried no usable Stripe signature (${input.reason}). Stripe always sends ` +
+      `one — this is more likely a scanner, a health check, or a proxy stripping headers than ` +
+      `a configuration problem.`
+    );
+  }
+
+  if (input.claimedLivemode !== undefined && input.claimedLivemode !== input.keyIsLive) {
+    const eventMode = input.claimedLivemode ? "live" : "test";
+    const keyMode = input.keyIsLive ? "live" : "test";
+    return (
+      `Mode mismatch. The payload claims to be a ${eventMode}-mode event, but ` +
+      `STRIPE_SECRET_KEY is a ${keyMode}-mode key. Signing secrets are per-endpoint AND ` +
+      `per-mode, and both modes produce a "whsec_…" value, so ${which} cannot be checked at ` +
+      `startup — set it from the ${keyMode}-mode endpoint. Locally: ` +
+      `\`stripe listen --forward-to localhost:3000/api/webhooks/stripe\` prints a test secret ` +
+      `(Connect events need a second listener and their own).`
+    );
+  }
+
+  return (
+    `${which} does not match the endpoint Stripe signed with. Stripe issues one secret per ` +
+    `endpoint — confirm you copied it from the endpoint pointing at this deployment, in the ` +
+    `same mode as STRIPE_SECRET_KEY.`
+  );
+}

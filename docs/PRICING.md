@@ -1,8 +1,15 @@
 # Markii — Pricing & Billing Spec
 
-Status: **PROPOSED**. Every number in this document is a starting proposal requiring owner
-sign-off before it is built, quoted, or published. The *structure* is the recommendation; the
-*values* are placeholders.
+Status: **partly settled.**
+
+- **§3 plan prices — ✅ SIGNED OFF (owner, 2026-08-10).** The three plan prices and both billing
+  intervals are final and may be quoted and published. `lib/plans.ts` is their only source; the
+  Stripe Prices are provisioned from it by `pnpm stripe:prices`, and `resolvePrice` refuses to bill
+  an amount that disagrees with it.
+- **§3 threshold schedule — ✅ SIGNED OFF (D39, 2026-08-06).** Thresholds and overage rates.
+- **Everything else remains PROPOSED**, including add-on prices (§3), the 14-day trial (§6), and
+  any number not in the plan table. Requires owner sign-off before it is built, quoted, or
+  published.
 
 ---
 
@@ -68,7 +75,7 @@ without a cut, and never get force-upgraded when you grow.* That attacks where S
 BigCommerce actually extract money and where Squarespace actually hurts creators — rather than
 fighting anyone on headline subscription price alone.
 
-## 3. Plan structure (PROPOSED)
+## 3. Plan structure — ✅ plan prices SIGNED OFF (owner, 2026-08-10)
 
 Priced against the verified table. The market clusters at $29 annual / $39 monthly for entry
 commerce and $79–105 for mid-tier; Markii undercuts both, hardest in the middle.

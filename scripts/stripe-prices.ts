@@ -12,10 +12,13 @@
  * *month* — and that mistake underbills by a factor of twelve while looking
  * entirely reasonable in the Stripe dashboard.
  *
- * **Refuses to touch a live account.** Plan prices are still marked PROPOSED,
- * and a live Price is a public commitment that is awkward to walk back. Test
- * Prices can be archived freely, so the guard is a hard exit rather than a
- * prompt (`--allow-live` exists for the day the numbers are signed off).
+ * **Refuses a live account unless asked twice.** The numbers were signed off on
+ * 2026-08-10, so `--allow-live` is now a legitimate thing to pass — but the
+ * guard stays, because creating a live Price is a different act from creating a
+ * test one. A test Price archives freely; a live Price is what real merchants
+ * are charged against, and a mistake there is a refund conversation. The flag
+ * exists so that step is deliberate rather than a consequence of which key
+ * happened to be in `.env.local`.
  *
  * Idempotent, and re-running is the normal way to verify: an existing Price with
  * the right amount and interval is reported and left alone. One that disagrees
@@ -179,10 +182,11 @@ async function main() {
   const isLive = !secret.startsWith("sk_test") && !secret.startsWith("rk_test");
   if (isLive && !allowLive) {
     console.error(
-      "✖ STRIPE_SECRET_KEY is a LIVE key. Refusing.\n" +
-        "  Plan prices are still marked PROPOSED in docs/PRICING.md, and a live Price is a\n" +
-        "  public commitment that is awkward to withdraw. Test prices archive freely.\n" +
-        "  Re-run with --allow-live once the numbers are signed off.",
+      "✖ STRIPE_SECRET_KEY is a LIVE key. Refusing without --allow-live.\n" +
+        "  The plan prices are signed off (docs/PRICING.md §3, 2026-08-10), so this is a\n" +
+        "  legitimate thing to do — but a live Price is what real merchants get charged\n" +
+        "  against, and Stripe amounts cannot be edited afterwards. Re-run with --allow-live\n" +
+        "  when you mean it.",
     );
     process.exit(1);
   }

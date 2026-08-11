@@ -1,6 +1,10 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { parseStripeEvent, verifyStripeSignature } from "./stripe-webhook";
+import {
+  diagnoseSignatureFailure,
+  parseStripeEvent,
+  verifyStripeSignature,
+} from "./stripe-webhook";
 
 /**
  * The signature is the **only** authentication this endpoint has, so these
@@ -148,5 +152,103 @@ describe("parseStripeEvent", () => {
     expect(parseStripeEvent("null")).toBeNull();
     expect(parseStripeEvent(JSON.stringify({ id: 1, type: "x" }))).toBeNull();
     expect(parseStripeEvent(JSON.stringify({ type: "x" }))).toBeNull();
+  });
+});
+
+/**
+ * The diagnosis exists because "signature does not match" is true and useless.
+ * A signing secret from the wrong *mode* is the common cause and the one no
+ * startup check can catch — every secret is a `whsec_…` in both modes, so
+ * `lib/stripe-mode.ts`, which compares `sk_`/`pk_` prefixes, is blind to it.
+ *
+ * These assert the message actually distinguishes the cases. A diagnostic that
+ * says the same thing every time is the bare reason with extra words.
+ */
+describe("diagnoseSignatureFailure", () => {
+  const base = {
+    reason: "signature does not match",
+    claimedLivemode: false,
+    isConnectEvent: false,
+    keyIsLive: false,
+  };
+
+  it("names the mode mismatch when the payload disagrees with the key", () => {
+    const msg = diagnoseSignatureFailure({ ...base, claimedLivemode: true, keyIsLive: false });
+
+    expect(msg).toMatch(/mode mismatch/i);
+    expect(msg).toMatch(/live-mode event/);
+    expect(msg).toMatch(/test-mode key/);
+    // The actionable part: how to get a correct secret locally.
+    expect(msg).toMatch(/stripe listen/);
+  });
+
+  it("catches the mismatch in the other direction too", () => {
+    const msg = diagnoseSignatureFailure({ ...base, claimedLivemode: false, keyIsLive: true });
+
+    expect(msg).toMatch(/test-mode event/);
+    expect(msg).toMatch(/live-mode key/);
+  });
+
+  it("names the Connect variable for a connected-account event", () => {
+    const msg = diagnoseSignatureFailure({ ...base, isConnectEvent: true, claimedLivemode: true });
+
+    expect(msg).toMatch(/STRIPE_CONNECT_WEBHOOK_SECRET/);
+    expect(msg).not.toMatch(/STRIPE_WEBHOOK_SECRET\b(?!.*CONNECT)/);
+  });
+
+  it("does not blame the mode when the modes agree", () => {
+    const msg = diagnoseSignatureFailure(base);
+
+    expect(msg).not.toMatch(/mode mismatch/i);
+    expect(msg).toMatch(/one secret per endpoint/i);
+  });
+
+  it("distinguishes clock skew from a wrong secret", () => {
+    const msg = diagnoseSignatureFailure({ ...base, reason: "timestamp outside tolerance" });
+
+    // The signature was fine. Saying "wrong secret" here sends someone to
+    // rotate a secret that was never the problem.
+    expect(msg).toMatch(/clock skew|replayed/i);
+    expect(msg).toMatch(/not a wrong secret/i);
+  });
+
+  it("says so plainly when the secret is simply absent", () => {
+    const msg = diagnoseSignatureFailure({ ...base, reason: "no signing secret configured" });
+
+    expect(msg).toMatch(/is empty/);
+  });
+
+  /**
+   * Regression: the first version returned the mode-mismatch paragraph for
+   * *every* failure, so an unsigned scanner request produced a confident
+   * explanation about live-versus-test secrets and sent the reader to rotate a
+   * secret that was never involved.
+   */
+  it.each([
+    "missing Stripe-Signature header",
+    "signature header has no timestamp",
+    "signature header has no v1 signature",
+  ])("does not blame the secret when the header is unusable (%s)", (reason) => {
+    const msg = diagnoseSignatureFailure({
+      ...base,
+      reason,
+      // Deliberately mismatched: the mode hint must still not fire, because no
+      // signature was presented for a secret to be wrong about.
+      claimedLivemode: true,
+      keyIsLive: false,
+    });
+
+    expect(msg).not.toMatch(/mode mismatch/i);
+    expect(msg).not.toMatch(/stripe listen/);
+    expect(msg).toMatch(/no usable Stripe signature/i);
+  });
+
+  it("falls back to the endpoint explanation when livemode is unreadable", () => {
+    // A malformed payload may carry no usable `livemode`; the hint must still
+    // be useful rather than asserting a mismatch it cannot know about.
+    const msg = diagnoseSignatureFailure({ ...base, claimedLivemode: undefined });
+
+    expect(msg).not.toMatch(/mode mismatch/i);
+    expect(msg).toMatch(/STRIPE_WEBHOOK_SECRET/);
   });
 });

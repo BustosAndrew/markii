@@ -49,14 +49,29 @@ export type PlanCatalogItem = {
   billing: { monthly: number; annualPerMonth: number };
 };
 
+/**
+ * Whether a displayed price is a settled commitment.
+ *
+ * `"proposed"` meant "do not present this as final" and every price surface
+ * carried a caveat because of it. The §3 plan schedule was signed off on
+ * 2026-08-10, so plan prices are `"final"`. Add-on prices are **still
+ * `"proposed"`** — Agent Ops and Chargeback Assist do not exist and their
+ * pricing was never part of that sign-off.
+ */
+export type PriceStatus = "proposed" | "final";
+
 export type PlansResponse = {
   currency: string;
   items: PlanCatalogItem[];
   /**
-   * `"proposed"` — prices are not finalised (`docs/PRICING.md` §3). A screen
-   * must not present them as settled.
+   * `"final"` since 2026-08-10 — the owner signed off the §3 plan schedule, so
+   * screens may present these as settled prices.
+   *
+   * **Kept as a union rather than swapped to a bare `"final"` literal.** Pinning
+   * it to one value is what made this a breaking change to flip, and prices can
+   * move again. Read it; do not assume it.
    */
-  status: "proposed";
+  status: PriceStatus;
   note: string;
   /**
    * Deliberately empty. Competitor comparisons are factual claims and must
@@ -132,7 +147,7 @@ export type SubscriptionResponse = {
     monthlyPriceMinor: number;
     annualPerMonthMinor: number;
     currency: string;
-    status: "proposed";
+    status: PriceStatus;
   };
   /** The metering window the threshold fee is computed over — **not** a Stripe billing period. */
   meteringPeriod: { start: string; end: string; basis: "calendar_month" };
@@ -407,7 +422,12 @@ export type AddonResponse = {
   entitled: boolean;
   includedInPlan: boolean;
   purchased: boolean;
-  pricing: { monthlyPriceMinor: number; currency: string; status: "proposed" };
+  /**
+   * Add-on prices stay `"proposed"`. The 2026-08-10 sign-off covered the §3
+   * plan schedule; Agent Ops and Chargeback Assist do not exist and their
+   * prices were never part of it.
+   */
+  pricing: { monthlyPriceMinor: number; currency: string; status: PriceStatus };
   /** Always `not_built` today — the products do not exist. */
   availability: { code: "not_built"; message: string; detail: string };
 };

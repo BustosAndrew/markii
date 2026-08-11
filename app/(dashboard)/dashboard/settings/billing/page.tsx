@@ -78,9 +78,15 @@ export default async function SettingsBillingPage() {
           <BillingPlanPicker
             plans={plans.data.items}
             currency={plans.data.currency}
+            /**
+             * The fallback is only reached when the API's own note is empty or
+             * sanitized away. It used to say prices were "proposed and not
+             * final", which stopped being true when the §3 schedule was signed
+             * off (D42) — a stale caveat undersells a settled price.
+             */
             pricingNote={
               sanitizePublicCopy(plans.data.note) ||
-              "Prices are proposed and not final. Markii charges no transaction fee below your plan threshold, on any payment provider."
+              "Markii charges no transaction fee below your plan threshold, on any payment provider."
             }
             subscription={subscription.data}
           />

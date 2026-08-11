@@ -47,7 +47,7 @@ type PlanSpec = Omit<Entitlements, "addOns"> & {
   /** Add-ons this plan includes outright, before anything the org has purchased. */
   includedAddOns: Partial<Entitlements["addOns"]>;
   /**
-   * Prices in USD minor units (`docs/PRICING.md` §3, marked **PROPOSED**).
+   * Prices in USD minor units (`docs/PRICING.md` §3, signed off 2026-08-10).
    *
    * `annualPerMonthMinor` is the per-month figure when billed yearly, which is
    * how the table states it — not the yearly total. Annual is materially
@@ -107,9 +107,14 @@ export type PlanCatalogEntry = {
 /**
  * The public plan catalog (§17 `GET /api/billing/plans`).
  *
- * Prices are **PROPOSED** in `docs/PRICING.md` §3 and marked as such wherever
- * they surface — they have not been signed off, and shipping them as settled
- * would be a commitment nobody made.
+ * Prices were signed off on **2026-08-10** (D39) and surface as `status:
+ * "final"`. Add-on prices are a separate question and remain proposed — Agent
+ * Ops and Chargeback Assist do not exist, and their pricing was never part of
+ * that decision.
+ *
+ * This file stays the **only** source of the numbers. A Stripe Price that
+ * disagrees with it is refused rather than charged (`resolvePrice`), and
+ * `pnpm stripe:prices` provisions from here so the two cannot drift.
  */
 export function planCatalog(): PlanCatalogEntry[] {
   return (Object.keys(PLANS) as PlanId[]).map((planId) => {

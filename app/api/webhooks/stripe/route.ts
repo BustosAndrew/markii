@@ -20,6 +20,7 @@ import { mirrorCancellation, mirrorSubscription } from "@/lib/billing/mirror";
 import { retrieveSubscription, toSnapshot } from "@/lib/billing/stripe-billing";
 import { upsertIntegration } from "@/lib/integrations";
 import {
+  diagnoseSignatureFailure,
   parseStripeEvent,
   verifyStripeSignature,
   type StripeEventEnvelope,
@@ -891,9 +892,28 @@ export const POST = async (req: Request) => {
     secret,
   });
   if (!verified.ok) {
-    // 400, and nothing is recorded: an unverified payload is not evidence of
-    // anything, and writing it would let anyone fill this table.
-    console.warn("[stripe-webhook] rejected unverified event", verified.reason);
+    /**
+     * 400, and nothing is recorded: an unverified payload is not evidence of
+     * anything, and writing it would let anyone fill this table.
+     *
+     * **The diagnosis goes to the log, never the response.** A rejected caller
+     * learns only that it was rejected — telling it which secret is configured,
+     * or what mode this deployment runs in, would be handing an attacker the
+     * map. But the operator needs exactly that, and without it the most common
+     * cause of this failure (a signing secret from the wrong *mode*, which no
+     * startup check can detect because every secret looks like `whsec_…`)
+     * presents as a bare "signature does not match" forever.
+     */
+    const key = process.env.STRIPE_SECRET_KEY ?? "";
+    console.warn(
+      `[stripe-webhook] rejected unverified event (${verified.reason}) — ` +
+        diagnoseSignatureFailure({
+          reason: verified.reason,
+          claimedLivemode: typeof event.livemode === "boolean" ? event.livemode : undefined,
+          isConnectEvent: Boolean(event.account),
+          keyIsLive: !key.startsWith("sk_test") && !key.startsWith("rk_test"),
+        }),
+    );
     return NextResponse.json({ error: verified.reason }, { status: 400 });
   }
 
@@ -943,6 +963,44 @@ export const POST = async (req: Request) => {
     if (seen?.status !== "failed") {
       return NextResponse.json({ ok: true, duplicate: true });
     }
+  }
+
+  /**
+   * **Mode agreement, checked on a verified event** — here `livemode` is
+   * Stripe's own claim rather than the payload's, because the signature covered
+   * it.
+   *
+   * A verified event whose mode disagrees with `STRIPE_SECRET_KEY` means a real
+   * endpoint is pointed at the wrong deployment: live events arriving somewhere
+   * holding test keys, or the reverse. Acting on it would resolve ids against
+   * the other mode's data — every lookup missing, or worse, coincidentally
+   * matching an unrelated row.
+   *
+   * Recorded as `ignored` **with a reason** rather than dropped, which is the
+   * same treatment a recognised-but-unhandled type gets. `stripe_webhook_events`
+   * exists to answer "what did Stripe send and what did we do about it", and
+   * this is a case where the answer needs to be findable — unlike a signature
+   * failure, nothing else about it looks wrong.
+   */
+  const secretKey = process.env.STRIPE_SECRET_KEY ?? "";
+  const keyIsLive = !secretKey.startsWith("sk_test") && !secretKey.startsWith("rk_test");
+  if (Boolean(event.livemode) !== keyIsLive) {
+    const detail =
+      `Mode mismatch: a ${event.livemode ? "live" : "test"}-mode event reached a deployment ` +
+      `configured with a ${keyIsLive ? "live" : "test"}-mode STRIPE_SECRET_KEY. Nothing was ` +
+      `acted on — ids from one mode do not resolve in the other. Point this endpoint at the ` +
+      `matching deployment, or fix the key.`;
+    await db
+      .update(stripeWebhookEvents)
+      .set({ status: "ignored", detail, processedAt: new Date() })
+      .where(eq(stripeWebhookEvents.id, event.id));
+    console.warn(`[stripe-webhook] ${detail}`);
+    /**
+     * 200, not an error. The event was verified and understood; this deployment
+     * is simply not its audience. A 5xx would make Stripe retry for three days
+     * against a mismatch that retrying cannot fix.
+     */
+    return NextResponse.json({ ok: true, handled: false, reason: detail });
   }
 
   const handler = HANDLERS[event.type];

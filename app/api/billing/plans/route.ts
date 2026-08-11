@@ -27,10 +27,11 @@ export const GET = handler(async () => {
       /** Both figures are per month; `annualPerMonthMinor` applies when billed yearly. */
       billing: { monthly: p.monthlyPriceMinor, annualPerMonth: p.annualPerMonthMinor },
     })),
-    status: "proposed" as const,
+    /** Signed off 2026-08-10 (D39). Screens may present these as settled. */
+    status: "final" as const,
     note:
-      "Prices are proposed and not yet finalised. Markii charges no transaction fee below the " +
-      "plan threshold, on any payment provider, including digital goods.",
+      "Markii charges no transaction fee below the plan threshold, on any payment provider, " +
+      "including digital goods.",
     comparisons: [],
     comparisonsNote:
       "Competitor comparisons are omitted rather than hardcoded. They are factual claims and must " +

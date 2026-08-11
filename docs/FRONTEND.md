@@ -198,6 +198,20 @@ What moved:
   an org whose subscription can carry a fee line. Render the `reason` string; it is written to be
   shown.
 
+**Plan prices are FINAL as of 2026-08-10 (D42) — and this one changes a type.** `GET
+/api/billing/plans` and `GET /api/billing/subscription` now return `status: "final"` where they
+returned `"proposed"`. In `lib/api/billing.ts` the field was pinned to the literal `"proposed"`;
+it is now `PriceStatus = "proposed" | "final"`, **widened deliberately rather than swapped to a
+`"final"` literal** — pinning it is what made this breaking, and prices can move again. Read the
+field; do not assume its value.
+
+What to change on screens: **drop the "prices are not final" caveat** from pricing and billing
+surfaces. It was correct and is now false, and a stale caveat undersells a settled price.
+
+**Add-on prices are still `"proposed"`** and `GET /api/billing/addons/:addon` still says so. The
+sign-off covered the §3 plan table only — Agent Ops and Chargeback Assist do not exist, so keep
+presenting those as unavailable, never as buyable.
+
 **Threshold fees are now billed on a schedule (2026-08-10, `docs/API.md` §25).** Nothing in
 `lib/api/*` changes and no screen needs editing — but the copy on billing screens does, because one
 thing that used to be true no longer is. Period close and fee invoicing ran only when a human
