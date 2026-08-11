@@ -198,6 +198,43 @@ What moved:
   an org whose subscription can carry a fee line. Render the `reason` string; it is written to be
   shown.
 
+### 🔴 Four live endpoints had no typed service — found 2026-08-10, services now exist
+
+A sweep reconciling every route against `lib/api/*` found four endpoints that were **built, live, and
+reachable from no screen**. This is the failure CLAUDE.md records as having happened once before,
+recurring where nobody had looked: `docs/API.md` marked them live and the badge was telling the truth
+about the *backend*. **No screens exist for any of these — the services are the unblock, not the
+feature.**
+
+**1. Digital delivery (§18.8) — the serious one, and it is launch scope.** `lib/api/delivery.ts` is
+new. There was **no client for any of it**: a merchant could not upload a file they sell, attach one
+to a product, or set a download limit. D5 names creators and digital-goods sellers as the
+**beachhead segment**, so this was the launch feature for the launch audience with no way in.
+
+- `uploadDigitalAsset(file, { siteId, label })` — `FormData`, **not** an action. Bytes do not belong
+  in an audit row. Deliberately no client-side type allowlist: a merchant may sell any file type.
+- `listDigitalAssets()` — carries advisory `usage`. **There is no `url` field and that is not an
+  oversight** — the bucket is private, and a durable address for a paid file is one leak away from
+  being the product. Never render or construct one.
+- `attachAsset` · `detachAsset` · `deleteAsset` · `setDownloadPolicy` · `reissueDownload` ·
+  `revokeDownload` — all actions. **Detach ≠ delete**: detach removes the attachment, delete removes
+  the file that buyers already hold grants against. Worth different confirmation copy.
+- On `setDownloadPolicy`, `null` means **unlimited**, not unset. Render it as unlimited or a merchant
+  reads a blank box as something they still need to fill in.
+
+**2–4. Three merchant-facing previews**, each of which writes nothing and charges nothing:
+
+| Service | Endpoint | Belongs on |
+|---|---|---|
+| `previewDiscounts()` (`commerce.ts`) | `POST /api/discounts/validate` | `/dashboard/discounts` |
+| `previewTax()` (`tax-shipping.ts`) | `POST /api/tax/calculate` | `/dashboard/settings/tax` |
+| `listInventoryLevels()` (`commerce.ts`) | `GET /api/inventory/levels` | `/dashboard/inventory` |
+
+`previewDiscounts` redeems nothing and consumes no usage allowance, so testing a single-use code does
+not burn it. `previewTax` is never the source of a number anyone is billed — checkout recalculates
+from the cart. `listInventoryLevels` answers "what is low across the catalog", which per-product
+reads cannot assemble without fetching everything.
+
 **Plan prices are FINAL as of 2026-08-10 (D42) — and this one changes a type.** `GET
 /api/billing/plans` and `GET /api/billing/subscription` now return `status: "final"` where they
 returned `"proposed"`. In `lib/api/billing.ts` the field was pinned to the literal `"proposed"`;

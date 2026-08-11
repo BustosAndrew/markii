@@ -1,5 +1,5 @@
 import { invokeAction } from "./actions";
-import { apiGet } from "./client";
+import { apiGet, apiPost } from "./client";
 import { callWhenLive } from "./planned";
 import type { Paginated } from "./types";
 
@@ -402,3 +402,97 @@ export type DiscountInput = {
  * If a merchant-side draft order is ever specced it gets its own action, not a
  * dashboard call into a storefront endpoint.
  */
+
+/**
+ * `POST /api/discounts/validate` — would this code apply, and for how much?
+ *
+ * **A preview.** It writes nothing, redeems nothing, and consumes no usage
+ * allowance, so a merchant can test a code without burning a single-use one or
+ * inflating its redemption count. It runs the *same* `evaluateDiscounts` the
+ * cart and checkout use — a second implementation here could disagree with the
+ * one that actually charges money.
+ *
+ * Added 2026-08-10: the route had shipped with no typed caller, so no screen
+ * could reach it. `/dashboard/discounts` is where it belongs.
+ */
+export type DiscountPreview = {
+  applied: {
+    discountId: number;
+    code: string | null;
+    title: string;
+    type: string;
+    /** Zero for `free_shipping`, which acts on shipping rather than the subtotal. */
+    amountMinor: number;
+    freeShipping: boolean;
+  }[];
+  /** Every code that did **not** apply, each with a reason worth showing. */
+  rejected: { code: string; reason: string }[];
+  totalDiscountMinor: number;
+  subtotalMinor: number;
+  subtotalAfterDiscountMinor: number;
+  preview: true;
+};
+
+export function previewDiscounts(
+  body: {
+    siteId: number;
+    codes: string[];
+    subtotalMinor: number;
+    /** Optional — omit for an order-scoped check that ignores per-product rules. */
+    lines?: { productId: number; lineTotalMinor: number }[];
+    customerId?: number | null;
+  },
+  init?: RequestInit,
+) {
+  return callWhenLive(DISCOUNTS_API_LIVE, COMMERCE_SECTION, () =>
+    apiPost<DiscountPreview>("/api/discounts/validate", body, init),
+  );
+}
+
+/**
+ * `GET /api/inventory/levels` — stock across products, filterable (§18.1).
+ *
+ * Distinct from the `inventoryLevels` field on a {@link Variant}, which answers
+ * "what is the stock for *this* product". This answers "what is low across the
+ * whole catalog", which is the question the inventory screen exists for and
+ * cannot be assembled from per-product reads without fetching everything.
+ *
+ * **Levels are summed from the ledger, never read from a column**, so this
+ * always agrees with the entry history. If a total ever disagrees with the
+ * ledger, the ledger is right.
+ *
+ * Added 2026-08-10: the route had shipped with no typed caller.
+ */
+export type InventoryLevelRow = {
+  variantId: number;
+  productId: number;
+  productName: string;
+  title: string;
+  sku: string | null;
+  inventoryPolicy: "deny" | "continue";
+  levels: { locationId: number; available: number; committed: number }[];
+  /** Summed across locations, or across the one location when filtered. */
+  totalAvailable: number;
+  totalCommitted: number;
+};
+
+export function listInventoryLevels(
+  params: {
+    siteId?: number;
+    productId?: number;
+    locationId?: number;
+    /** Returns only rows at or below this total. Applied **after** summing. */
+    lowStock?: number;
+    page?: number;
+    limit?: number;
+  } = {},
+  init?: RequestInit,
+) {
+  return callWhenLive(CATALOG_READ_API_LIVE, COMMERCE_SECTION, () =>
+    apiGet<{ items: InventoryLevelRow[]; page: number; limit: number }>(
+      "/api/inventory/levels",
+      params,
+      init,
+    ),
+  );
+}

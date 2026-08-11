@@ -1276,7 +1276,7 @@ delivered when no mail service is wired.
 
 ---
 
-## 16. Accounts, organizations, staff — partial (Phase A in progress)
+## 16. Accounts, organizations, staff — ✅ LIVE (Phase A complete; audit + sessions still planned)
 
 > ### ✅ MFA is LIVE and mandatory for merchants (D40, 2026-08-08)
 >
@@ -2160,7 +2160,12 @@ action returns `customerNotified: false` / `queued: true`, and the outcome lands
 `email_sent` or `email_failed`. SES is not wired yet, so `email_failed` is currently the normal
 result and is reported as such.
 
-### 18.8 Digital delivery ✅ LIVE
+### 18.8 Digital delivery ✅ LIVE (backend); **no screens yet**
+
+> **The client was missing until 2026-08-10.** Every endpoint here was live and reachable from no
+> screen — a merchant could not upload a file they sell, attach one, or set a download limit.
+> `lib/api/delivery.ts` now exists; the screens do not. Given D5 names digital-goods sellers as the
+> beachhead, this is the highest-priority frontend gap. See `docs/FRONTEND.md`.
 
 The **D5 beachhead**. Everything here exists because a merchant selling files never needs the
 fulfillment logistics `docs/PLAN.md` §3 permanently excludes — the platform's most conspicuous gap

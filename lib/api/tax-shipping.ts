@@ -1,5 +1,5 @@
 import { invokeAction } from "./actions";
-import { apiGet } from "./client";
+import { apiGet, apiPost } from "./client";
 import { callWhenLive } from "./planned";
 
 const SECTION = "API §18.6";
@@ -153,4 +153,50 @@ export function updateShippingRate(
 
 export function deleteShippingRate(body: { rateId: number }, init?: RequestInit) {
   return invokeAction("shipping.deleteRate", body, init);
+}
+
+/**
+ * `POST /api/tax/calculate` — what tax an amount and destination would attract.
+ *
+ * **A preview, never a charge.** It writes nothing and creates no obligation;
+ * checkout does its own calculation from the cart, and this is never the source
+ * of a number anyone is billed. It exists so a merchant can confirm their rates
+ * behave as expected before a shopper is the one who finds out.
+ *
+ * Added 2026-08-10: the route had shipped with no typed caller, so no screen
+ * could reach it. `/dashboard/settings/tax` is where it belongs.
+ */
+export type TaxPreview = {
+  /** Zero when prices are tax-inclusive — the tax is already inside the base. */
+  amountMinor: number;
+  state: "calculated" | "not_configured" | "address_required";
+  /** True when the tax sits *inside* `taxableBaseMinor` rather than on top. */
+  included: boolean;
+  breakdown: { name: string | null; rateBps: number; amountMinor: number }[];
+  note?: string;
+  reason?: string;
+  taxableBaseMinor: number;
+  /** Does not move when `included` — reported separately so that stays legible. */
+  totalMinor: number;
+  preview: true;
+};
+
+export function previewTax(
+  body: {
+    siteId: number;
+    amountMinor: number;
+    address: {
+      line1?: string;
+      city?: string;
+      province?: string | null;
+      postalCode?: string | null;
+      /** ISO 3166-1 alpha-2. */
+      country: string;
+    };
+  },
+  init?: RequestInit,
+) {
+  return callWhenLive(LIVE, SECTION, () =>
+    apiPost<TaxPreview>("/api/tax/calculate", body, init),
+  );
 }
