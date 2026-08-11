@@ -162,3 +162,28 @@ create** — that is the shared state this suite deliberately removed.
 `refused(r)` is the way to assert a registry action was rejected — refusals
 arrive either as an HTTP 4xx or as an `ok: false` outcome depending on where the
 failure happened, and callers care only that it was refused.
+
+## Tests that call Stripe — opt-in again
+
+`stripe-fee-invoice.test.ts` is the one file that talks to **Stripe's real API**.
+It creates a customer, attaches a test card, opens a subscription, and proves a
+threshold fee lands on a real invoice as a correct line — the last money path in
+the codebase that had never actually executed.
+
+It is gated separately from the rest of the suite, because depending on a third
+party's network and creating objects in someone's Stripe account is not what
+`pnpm test:integration` should quietly start meaning:
+
+```bash
+MARKII_STRIPE_TESTS=1 pnpm exec cross-env MARKII_ALLOW_INTEGRATION_TESTS=1 \
+  vitest run --project integration stripe-fee-invoice
+```
+
+Two further guards: it **refuses a live key** (`sk_live_` would charge a real
+card), and when it skips it says so out loud rather than reporting a silent pass.
+It needs the plan Prices to exist — run `pnpm stripe:prices --apply` first.
+
+Everything it creates is torn down in `afterAll`: the subscription is cancelled
+and the customer deleted, which discards the pending invoice item with it.
+Stripe keeps *canceled* subscription records permanently — those cannot be
+deleted by anyone and are expected residue, not a leak.

@@ -25,6 +25,7 @@ pnpm db:push          # push Drizzle schema (dev only — see docs/DECISIONS.md 
 pnpm db:migrate       # apply generated migrations (needs session-mode DIRECT_URL)
 pnpm db:seed          # seed demo data (3 sites, ~30 products, orders, traffic)
 pnpm storage:init     # create the two Storage buckets — NOT in the migration chain
+pnpm stripe:prices    # report the plan Prices on Stripe; --apply creates the missing ones
 ```
 
 **Run `pnpm test` freely — it is a second and touches nothing.** `pnpm
@@ -150,10 +151,21 @@ without their own tender term, that stops being a wrong *measurement* and become
 on a real invoice. Implement the exclusion in the same change as gift cards, not after.
 
 **What remains is gated by work, not by credentials.** `STRIPE_SECRET_KEY` exists and both the card
-rail and subscription billing are written on top of it. Subscription billing needs one piece of
-**Stripe-side setup** rather than code: a recurring Price per plan and interval, carrying the lookup
-key `markii_{plan}_{month|year}` and the `unit_amount` in `lib/plans.ts`. A missing or mismatched
-price refuses by name and says what it should be. AWS SES is the same shape: the code is finished, so
+rail and subscription billing are written on top of it. The plan Prices are **provisioned by
+`pnpm stripe:prices --apply`** rather than by hand: it derives every amount from `lib/plans.ts`
+through `lib/billing/price-catalog.ts` — the same module `resolvePrice` verifies against — so the
+creator and the verifier cannot disagree. It refuses a live key (plan prices are still PROPOSED),
+reports a mismatched Price instead of editing it (Stripe amounts are immutable, so a "fix" would
+change what existing subscribers pay), and is idempotent. **The six test-mode Prices exist as of
+2026-08-10.** The trap it removes: `docs/PRICING.md` quotes annual plans *per month*, so a
+hand-created `markii_starter_year` at `1500` instead of `18000` underbills by 12× and looks right in
+the dashboard.
+
+**The threshold fee has now reached a real Stripe invoice** —
+`tests/integration/stripe-fee-invoice.test.ts` (opt-in, `MARKII_STRIPE_TESTS=1`) creates a real
+subscription and asserts the fee line's amount, currency, and description **against Stripe**, not
+against the response that raised it. Until then every test org lacked a subscription, so
+`assessmentBillable` refused before Stripe was ever called and the boundary itself was unproven. AWS SES is the same shape: the code is finished, so
 credentials plus sandbox escape plus a merchant's verified domain are all that stand between here and
 real mail. Everything refuses rather than stubs — see the `configuration_required` pattern in
 `lib/payments/`, `app/api/billing/`, and `lib/email/`.

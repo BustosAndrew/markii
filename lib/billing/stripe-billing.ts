@@ -128,32 +128,26 @@ async function call<T>(
 // Prices
 // ---------------------------------------------------------------------------
 
-export type BillingInterval = "month" | "year";
-
 /**
- * The `lookup_key` Markii expects on each Stripe Price.
+ * The price catalog — what a Price *should* be — lives in `./price-catalog`,
+ * which is deliberately not `server-only` so `scripts/stripe-prices.ts` can
+ * create exactly what `resolvePrice` below verifies. Re-exported here so every
+ * existing caller keeps importing from one place.
  *
- * Lookup keys rather than six `STRIPE_PRICE_*` environment variables: the key
- * is derivable from the plan and interval, so adding a plan needs no
- * redeployment of configuration, and a missing one names itself in the error.
+ * Lookup keys rather than six `STRIPE_PRICE_*` environment variables: the key is
+ * derivable from the plan and interval, so adding a plan needs no configuration
+ * redeploy, and a missing one names itself in the error.
  */
-export function priceLookupKey(planId: PlanId, interval: BillingInterval): string {
-  return `markii_${planId}_${interval}`;
-}
-
-/**
- * What the Stripe Price *should* charge, derived from `lib/plans.ts`.
- *
- * `annualPerMonthMinor` is the per-month figure when billed yearly — it is how
- * `docs/PRICING.md` §3 states the table, and it is **not** the amount Stripe
- * charges. A yearly Price bills twelve of them at once, so anything that reads
- * the plan table and passes the number straight to Stripe would undercharge by
- * a factor of twelve.
- */
-export function expectedUnitAmountMinor(planId: PlanId, interval: BillingInterval): number {
-  const p = planPricing(planId);
-  return interval === "year" ? p.annualPerMonthMinor * 12 : p.monthlyPriceMinor;
-}
+export {
+  priceLookupKey,
+  expectedUnitAmountMinor,
+  type BillingInterval,
+} from "./price-catalog";
+import {
+  expectedUnitAmountMinor,
+  priceLookupKey,
+  type BillingInterval,
+} from "./price-catalog";
 
 export type ResolvedPrice = { id: string; unitAmountMinor: number; currency: string; interval: BillingInterval };
 
