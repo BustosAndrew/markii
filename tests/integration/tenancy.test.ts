@@ -192,6 +192,50 @@ describe("tenancy and merchant configuration", () => {
       expect(r.status).toBe(400);
     });
 
+    /**
+     * **A cross-tenant write that opened on 2026-08-10 and was closed the same
+     * day.** `requiresTierId` and `grantsTierId` became settable through
+     * `productCreateSchema` when the membership fields were added to the product
+     * form; before that zod stripped them silently, so nothing validated them.
+     * The columns carry a foreign key to `membership_tiers`, which proves a tier
+     * *exists* and says nothing about who owns it.
+     *
+     * `grantsTierId` is the sharp end: `grantMembershipsForOrder` joins the tier
+     * with no site scope of its own, so a sale would write a membership row
+     * pointing at another merchant's tier and hand that tier's **name** back to
+     * the buying shopper.
+     */
+    it("cannot point a product at A's membership tier", async () => {
+      const tier = await a.invoke("memberships.createTier", {
+        siteId: siteA,
+        name: "Tenancy A Members",
+        handle: `tenancy-a-${Date.now()}`,
+      });
+      const tierA = tier.json.result.id;
+
+      const site = await b.post("/api/sites", {
+        name: `Tenancy B ${Date.now()}`,
+        slug: `tenancy-b-${Date.now()}`,
+      });
+      const siteB = site.json.id ?? site.json.site?.id;
+
+      const created = await b.post("/api/products", {
+        siteId: siteB,
+        name: "Cross-tenant grant attempt",
+        priceCents: 1000,
+        grantsTierId: tierA,
+      });
+
+      // Refused, and "not found" rather than "not yours" — confirming the tier
+      // exists on someone else's store is itself a leak.
+      expect(created.status).toBe(404);
+
+      // And nothing was written.
+      const rows = await sql`select count(*)::int c from products
+        where grants_tier_id = ${tierA}`;
+      expect(rows[0].c).toBe(0);
+    });
+
     it("cannot WRITE to A's shipping rate", async () => {
       const r = await b.invoke("shipping.updateRate", { rateId: rateA, priceMinor: 1 });
       expect(refused(r)).toBe(true);

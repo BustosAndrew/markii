@@ -4,7 +4,12 @@ import { badRequest, conflict, intParam, notFound } from "@/lib/api";
 import { orgHandler } from "@/lib/auth/handler";
 import { ownSites, siteScope } from "@/lib/tenancy";
 import { categories, db, products, sites } from "@/lib/db";
-import { resolveProduct, serializeProductDetail, uniqueProductSlug } from "@/lib/queries";
+import {
+  assertTiersOnSite,
+  resolveProduct,
+  serializeProductDetail,
+  uniqueProductSlug,
+} from "@/lib/queries";
 import { productUpdateSchema } from "@/lib/validation";
 
 export const GET = orgHandler(async (req, { params, orgId }) => {
@@ -48,6 +53,15 @@ export const PATCH = orgHandler(async (req, { params, orgId }) => {
     if (!cat) throw notFound("Category");
     if (cat.siteId !== targetSiteId) throw badRequest("category belongs to a different site");
   }
+
+  /**
+   * Checked against the **target** site, so moving a product between stores
+   * cannot smuggle a tier from the old one along with it.
+   */
+  await assertTiersOnSite(orgId, targetSiteId, [
+    input.requiresTierId !== undefined ? input.requiresTierId : product.requiresTierId,
+    input.grantsTierId !== undefined ? input.grantsTierId : product.grantsTierId,
+  ]);
 
   let slug = input.slug ?? product.slug;
   if (input.slug && (input.slug !== product.slug || siteChanged)) {

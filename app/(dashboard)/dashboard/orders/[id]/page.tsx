@@ -11,7 +11,6 @@ import { loadOrError } from "@/lib/api/load";
 import { formatMinor } from "@/lib/api/money";
 import type {
   OrderDetail,
-  OrderDownload,
   OrderEvent,
   OrderFulfillment,
   OrderLicenceKey,

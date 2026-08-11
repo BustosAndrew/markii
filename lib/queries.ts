@@ -1,10 +1,11 @@
-import { and, asc, count, eq, gte, ilike, lte, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, eq, gte, ilike, inArray, lte, or, sql, type SQL } from "drizzle-orm";
 import { badRequest, dateRange, enumParam, intParam, notFound, tenantBaseUrl } from "@/lib/api";
 import {
   agentTraffic,
   categories,
   db,
   digitalAssets,
+  membershipTiers,
   orders,
   productDigitalAssets,
   products,
@@ -530,4 +531,48 @@ export async function pendingCountsBySite(orgId: OrgId): Promise<Map<number, num
   const map = new Map<number, number>();
   for (const r of rows) if (r.siteId != null) map.set(r.siteId, Number(r.c));
   return map;
+}
+
+/**
+ * Rejects a product's membership tier ids unless they belong to the target site.
+ *
+ * **This closes a cross-tenant write.** `requiresTierId` and `grantsTierId`
+ * became settable through `productCreateSchema` on 2026-08-10; before that zod
+ * stripped them, so nothing validated them and nothing needed to. Both columns
+ * carry a foreign key to `membership_tiers`, which proves the tier *exists* and
+ * says nothing about who owns it — so any merchant could name any tier id in
+ * the database.
+ *
+ * `grantsTierId` is the sharp end: `grantMembershipsForOrder` joins the tier
+ * with no site scope of its own, so a purchase would write a membership row
+ * pointing at another merchant's tier and hand that tier's **name** back to the
+ * buying merchant's shopper. `requiresTierId` is milder — a product gated on a
+ * tier your customers can never hold — but it is the same mistake.
+ *
+ * Validated here at the write rather than patched at the read, because the read
+ * paths are many and the write paths are two.
+ */
+export async function assertTiersOnSite(
+  orgId: OrgId,
+  siteId: number,
+  tierIds: (number | null | undefined)[],
+) {
+  const wanted = [...new Set(tierIds.filter((id): id is number => id != null))];
+  if (wanted.length === 0) return;
+
+  const rows = await db
+    .select({ id: membershipTiers.id, siteId: membershipTiers.siteId })
+    .from(membershipTiers)
+    .where(
+      and(inArray(membershipTiers.id, wanted), siteScope(orgId, membershipTiers.siteId)),
+    );
+
+  const found = new Map(rows.map((r) => [r.id, r.siteId]));
+  for (const id of wanted) {
+    const owned = found.get(id);
+    // Not found and not-yours are the same answer on purpose: confirming a tier
+    // exists on someone else's store is itself a leak.
+    if (owned == null) throw notFound(`Membership tier ${id}`);
+    if (owned !== siteId) throw badRequest(`membership tier ${id} belongs to a different site`);
+  }
 }

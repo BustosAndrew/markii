@@ -1,6 +1,5 @@
 import "server-only";
 import type { PlanId } from "../db";
-import { planPricing } from "../plans";
 import { matchedPublishableKey } from "../stripe-mode";
 
 /**

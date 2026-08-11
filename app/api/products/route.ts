@@ -4,7 +4,7 @@ import { boolParam, conflict, intParam, notFound, pagination, slugify } from "@/
 import { orgHandler } from "@/lib/auth/handler";
 import { ownSites, siteScope, siteScopeForStaff } from "@/lib/tenancy";
 import { categories, db, products, sites } from "@/lib/db";
-import { serializeProductDetail, serializeProducts } from "@/lib/queries";
+import { assertTiersOnSite, serializeProductDetail, serializeProducts } from "@/lib/queries";
 import { productCreateSchema } from "@/lib/validation";
 
 export const GET = orgHandler(async (req, { session, orgId }) => {
@@ -72,6 +72,9 @@ export const POST = orgHandler(async (req, { orgId }) => {
     if (!cat) throw notFound("Category");
     if (cat.siteId !== input.siteId) throw conflict("category belongs to a different site");
   }
+
+  // Cross-tenant guard: the FK proves a tier exists, not that it is yours.
+  await assertTiersOnSite(orgId, input.siteId, [input.requiresTierId, input.grantsTierId]);
 
   const slug = input.slug ?? slugify(input.name);
   const [taken] = await db

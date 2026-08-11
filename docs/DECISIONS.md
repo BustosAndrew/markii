@@ -33,6 +33,31 @@ when it's made, with the date — then update the doc it affects.
 | ~~D26~~ | ~~Distribution model~~ | ✅ **Both — open/public source *and* hosted cloud** (owner, 2026-07-29). **Licence still unchosen — see §"Distribution — D26"** | Licence choice blocks any external contribution |
 
 
+### Cross-tenant tier hole — found and closed 2026-08-11
+
+**Adding membership fields to the product form opened a cross-tenant write.**
+`requiresTierId` and `grantsTierId` were added to `productCreateSchema` so the new product form
+could set them. Before that, zod stripped them silently, so nothing validated them and nothing
+needed to — the moment they were accepted, `POST /api/products` and `PATCH /api/products/:id`
+wrote them straight through `{ ...input }` with no ownership check.
+
+The FK to `membership_tiers` proves a tier **exists**, not who owns it. Verified exploitable:
+org B creating a product with org A's `grantsTierId` returned **201**. `grantMembershipsForOrder`
+joins the tier with no site scope of its own, so a sale would write a membership row pointing at
+another merchant's tier and return that tier's **name** to the buying shopper.
+
+Closed by `assertTiersOnSite` (`lib/queries.ts`), called from both write paths — validated at the
+write, because the read paths are many and the write paths are two. Answers `404` rather than
+`403`: confirming a tier exists on someone else's store is itself a leak. Regression test in
+`tests/integration/tenancy.test.ts`, **confirmed to fail without the guard**.
+
+**The pattern is what to remember.** This is the third instance of the same shape: the integrations
+route mutating outside the registry with no permission check, `PUT /api/integrations/:provider`
+letting a viewer change the payout address, and now this. Each time, a field became reachable and
+the ownership check did not come with it. **Widening an input schema is a tenancy change.**
+
+---
+
 ### Scheduled billing — D41 (assistant call, 2026-08-10)
 
 **The problem was an absence.** The threshold fee engine, the meter, period close, and fee

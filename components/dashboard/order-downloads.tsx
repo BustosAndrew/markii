@@ -94,9 +94,17 @@ export function OrderDownloads({ downloads }: { downloads: OrderDownload[] }) {
                     }))
                   }
                 />
+                {/*
+                  A revoked grant needs `unrevoke`, and saying so is the point.
+                  Resetting the count on a revoked grant changes nothing the
+                  buyer can see — `revokedAt` is what the download gate checks
+                  — so a plain "Reissue" here would report success while the
+                  buyer stayed locked out.
+                */}
                 <p className="mt-2 text-xs leading-5 text-muted">
-                  Reissue resets the download count. It can also extend the expiry window without
-                  exposing a link or token here.
+                  {download.redeemable
+                    ? "Reissue resets the download count. It can also extend the expiry window without exposing a link or token here."
+                    : "This download is revoked, so resetting the count alone would change nothing. Restoring lifts the revocation and resets the count."}
                 </p>
                 <Button
                   className="mt-3"
@@ -108,7 +116,7 @@ export function OrderDownloads({ downloads }: { downloads: OrderDownload[] }) {
                     setReissueTarget(download);
                   }}
                 >
-                  Reissue download
+                  {download.redeemable ? "Reissue download" : "Restore access"}
                 </Button>
               </div>
 
@@ -160,9 +168,19 @@ export function OrderDownloads({ downloads }: { downloads: OrderDownload[] }) {
 
       <ConfirmDialog
         open={reissueTarget !== null}
-        title="Reissue this download?"
-        description="This resets the download count and can extend the expiry window. It does not reveal a token or a durable file URL."
-        confirmLabel="Reissue download"
+        title={
+          reissueTarget && !reissueTarget.redeemable
+            ? "Restore access to this download?"
+            : "Reissue this download?"
+        }
+        description={
+          reissueTarget && !reissueTarget.redeemable
+            ? "This lifts the revocation and resets the download count, so the buyer can download again. It does not reveal a token or a durable file URL."
+            : "This resets the download count and can extend the expiry window. It does not reveal a token or a durable file URL."
+        }
+        confirmLabel={
+          reissueTarget && !reissueTarget.redeemable ? "Restore access" : "Reissue download"
+        }
         busy={busyKey?.startsWith("reissue-") ?? false}
         onClose={() => setReissueTarget(null)}
         onConfirm={async () => {
@@ -181,12 +199,23 @@ export function OrderDownloads({ downloads }: { downloads: OrderDownload[] }) {
           setError(null);
           setNotice(null);
           try {
+            const restoring = !reissueTarget.redeemable;
             await reissueDownload({
               grantId: reissueTarget.id,
               resetCount: true,
               extendDays: parsedExtendDays ?? undefined,
+              /**
+               * Only ever true for a grant that is actually revoked. Sending it
+               * unconditionally would make a routine reissue silently reverse a
+               * revocation the merchant meant to keep.
+               */
+              unrevoke: restoring,
             });
-            setNotice(`Reissued ${reissueTarget.fileName}.`);
+            setNotice(
+              restoring
+                ? `Restored access to ${reissueTarget.fileName}.`
+                : `Reissued ${reissueTarget.fileName}.`,
+            );
             setReissueTarget(null);
             router.refresh();
           } catch (reissueError) {
