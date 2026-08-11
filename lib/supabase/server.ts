@@ -24,6 +24,20 @@ function getEnv() {
  * Cookie flags for every session cookie we write. `httpOnly` is the whole point
  * of D30; `secure` is relaxed only on localhost, where there is no HTTPS to
  * attach it to and the browser would otherwise drop the cookie silently.
+ *
+ * **`sameSite: "lax"` is load-bearing, and one route depends on it for CSRF
+ * protection.** Storefront pages are server-rendered with no client islands
+ * beyond cart and checkout, so
+ * `POST /_sites/{slug}/api/account/memberships/{id}/renewal` accepts a plain
+ * HTML form — that is the only way to offer cancellation without shipping JS.
+ * A form POST carries no preflight and no custom header, so nothing but the
+ * cookie policy stops a cross-site page submitting it: under `lax` the cookie is
+ * withheld on cross-site POSTs and the request lands unauthenticated.
+ *
+ * Relaxing this to `"none"` — the obvious move the day someone wants storefronts
+ * embeddable in an iframe — silently turns that route into a CSRF hole that
+ * cancels a member's subscription. If that day comes, give the form route an
+ * explicit token first.
  */
 export const SESSION_COOKIE_OPTIONS = {
   httpOnly: true,

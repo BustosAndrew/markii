@@ -24,13 +24,48 @@ export type ThemeTokens = {
   /** Product card image aspect ratio, e.g. "4/3" or "1/1". */
   imageAspect: string;
   gridGap: string;
+  /**
+   * **Structure, not decoration** — what actually makes these themes rather
+   * than palettes.
+   *
+   * Deliberately a small closed enum per surface, never free-form CSS.
+   * `CLAUDE.md` requires the visual system stay **block-based, never a free
+   * canvas of nested divs**: an enum is auditable, testable, and can be rendered
+   * by anything that understands the four axes. A `customCss` escape hatch here
+   * would recreate exactly the problem the builder's node model exists to avoid.
+   *
+   * **Layout never changes the HTML.** Every theme emits the same semantic
+   * elements and the same JSON-LD; only the CSS that arranges them differs. That
+   * is what lets a merchant pick a look without changing a single thing an agent
+   * reads — which is the product, and the one constraint no theme may trade
+   * against.
+   */
+  layout: ThemeLayout;
+};
+
+export type ThemeLayout = {
+  /** `split` puts the store name and nav on one line; `stacked` centres them. */
+  header: "split" | "stacked";
+  /**
+   * `none` drops the homepage intro entirely — right for a dense catalogue where
+   * the products *are* the page.
+   */
+  hero: "none" | "banner" | "editorial";
+  /**
+   * `split` sets image and details side by side on wide screens; `stacked` runs
+   * the image full width above the details. This is the single biggest
+   * perceived difference between two themes, and it costs one grid rule.
+   */
+  productPage: "split" | "stacked";
+  /** `list` is one product per row with the image inline — a catalogue, not a gallery. */
+  productGrid: "grid" | "list";
 };
 
 export const THEMES: Record<ThemeId, ThemeTokens> = {
   studio: {
     id: "studio",
     label: "Studio",
-    description: "Editorial magazine layout, generous whitespace",
+    description: "Editorial — full-width imagery, centred masthead, serif",
     background: "#FAFAF8",
     surface: "#FFFFFF",
     foreground: "#1A1A18",
@@ -48,11 +83,12 @@ export const THEMES: Record<ThemeId, ThemeTokens> = {
     gridMin: "280px",
     imageAspect: "5/4",
     gridGap: "2rem",
+    layout: { header: "stacked", hero: "editorial", productPage: "stacked", productGrid: "grid" },
   },
   atlas: {
     id: "atlas",
     label: "Atlas",
-    description: "Dense catalog utility grid",
+    description: "Dense catalogue — list rows, no hero, maximum scanning",
     background: "#F4F5F7",
     surface: "#FFFFFF",
     foreground: "#111827",
@@ -70,11 +106,12 @@ export const THEMES: Record<ThemeId, ThemeTokens> = {
     gridMin: "160px",
     imageAspect: "1/1",
     gridGap: "0.75rem",
+    layout: { header: "split", hero: "none", productPage: "split", productGrid: "list" },
   },
   noir: {
     id: "noir",
     label: "Noir",
-    description: "Dark high-contrast portfolio",
+    description: "Gallery — dark, split product pages, large imagery",
     background: "#0C0C0E",
     surface: "#16161A",
     foreground: "#F4F4F5",
@@ -92,11 +129,12 @@ export const THEMES: Record<ThemeId, ThemeTokens> = {
     gridMin: "300px",
     imageAspect: "3/4",
     gridGap: "1.5rem",
+    layout: { header: "split", hero: "banner", productPage: "split", productGrid: "grid" },
   },
   bloom: {
     id: "bloom",
     label: "Bloom",
-    description: "Warm soft creator shop",
+    description: "Warm shop — banner intro, roomy grid, soft edges",
     background: "#FFF8F3",
     surface: "#FFFFFF",
     foreground: "#2C1810",
@@ -114,6 +152,7 @@ export const THEMES: Record<ThemeId, ThemeTokens> = {
     gridMin: "220px",
     imageAspect: "4/3",
     gridGap: "1.25rem",
+    layout: { header: "stacked", hero: "banner", productPage: "stacked", productGrid: "grid" },
   },
 };
 
@@ -147,6 +186,81 @@ export function themeCssVars(theme: ThemeTokens): string {
     `--sf-image-aspect:${theme.imageAspect}`,
     `--sf-grid-gap:${theme.gridGap}`,
   ].join(";");
+}
+
+/**
+ * Layout rules derived from `theme.layout`.
+ *
+ * **This is the whole structural difference between themes, and it is CSS
+ * only.** The markup is identical for every theme — same `<article>`, same
+ * headings, same JSON-LD — so a merchant switching from Atlas to Noir changes
+ * nothing an agent reads. Arranging the same elements differently is the most a
+ * theme is ever allowed to do.
+ *
+ * Emitted from the enum rather than hand-written per theme so that adding a
+ * fifth theme is choosing four values, not writing a stylesheet nobody reviews.
+ */
+function layoutRules(layout: ThemeLayout): string {
+  const rules: string[] = [];
+
+  if (layout.header === "stacked") {
+    rules.push(
+      ".sf-header-inner{flex-direction:column;align-items:center;text-align:center;gap:.75rem}",
+      ".sf-nav{justify-content:center;flex:0 1 auto}",
+      ".sf-header-actions{margin-left:0}",
+    );
+  }
+
+  if (layout.hero === "none") {
+    /**
+     * Hidden rather than removed from the markup: the heading still exists for
+     * screen readers and for anything parsing the page, it simply is not painted.
+     * Deleting it in a theme would mean two themes emitting different documents,
+     * which is the line themes do not cross.
+     */
+    rules.push(".sf-hero{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}");
+  } else if (layout.hero === "editorial") {
+    rules.push(
+      ".sf-hero{text-align:center;margin:0 0 3.5rem;padding:2.5rem 0 2rem;border-bottom:1px solid var(--sf-border)}",
+      ".sf-hero h1{font-size:clamp(2rem,5vw,3rem);line-height:1.1;margin:0 0 .75rem}",
+    );
+  } else {
+    rules.push(
+      ".sf-hero{background:var(--sf-surface);border:1px solid var(--sf-border);border-radius:var(--sf-radius);padding:2rem 1.75rem;margin:0 0 2rem}",
+    );
+  }
+
+  if (layout.productPage === "split") {
+    /**
+     * Side by side only where there is room for it. Below the breakpoint the
+     * base `display:block` still applies, so the mobile experience is the
+     * stacked one for every theme — which is the right answer on a phone
+     * regardless of what the merchant picked.
+     */
+    rules.push(
+      "@media(min-width:820px){.sf-product{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:2.5rem;align-items:start}" +
+        ".sf-product-media{margin:0;position:sticky;top:1.5rem}}",
+    );
+  } else {
+    rules.push(
+      "@media(min-width:820px){.sf-product-media{margin:0 0 2.5rem}.sf-product-media img{width:100%}.sf-product-body{max-width:42rem;margin:0 auto}}",
+    );
+  }
+
+  if (layout.productGrid === "list") {
+    /**
+     * One product per row with the image inline. `grid-template-columns:1fr`
+     * overrides the auto-fill track rather than switching to flex, so the same
+     * `<ul>` serves both shapes.
+     */
+    rules.push(
+      "@media(min-width:640px){.sf-grid{grid-template-columns:1fr}" +
+        ".sf-card{display:grid;grid-template-columns:var(--sf-grid-min) minmax(0,1fr);gap:1.25rem;align-items:center}" +
+        ".sf-card-media{margin:0}}",
+    );
+  }
+
+  return rules.join("\n");
 }
 
 /**
@@ -195,6 +309,9 @@ export function themeStylesheet(theme: ThemeTokens): string {
 .sf-form{display:grid;gap:.75rem;max-width:22rem;margin:1rem 0 2rem}
 .sf-form input{padding:.625rem .75rem;border:1px solid var(--sf-border);border-radius:var(--sf-radius);font:inherit;background:var(--sf-surface);color:var(--sf-fg)}
 .sf-form button{padding:.625rem 1rem;border:0;border-radius:var(--sf-radius);font:inherit;font-weight:600;cursor:pointer;background:var(--sf-accent);color:var(--sf-accent-text)}
+
+/* —— Layout, from theme.layout —— */
+${layoutRules(theme.layout)}
 
 /* —— Studio: editorial magazine —— */
 [data-theme="studio"] .sf-header{border-bottom-width:1px;padding:1.5rem 1.25rem}
