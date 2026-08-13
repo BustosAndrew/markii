@@ -179,13 +179,25 @@ async function main() {
     process.exit(1);
   }
 
+  /**
+   * The live guard blocks **writing**, not reading.
+   *
+   * It originally refused a live key outright, which also blocked the dry run —
+   * so the one safe way to find out what a live account is missing was
+   * unavailable, and the only path forward was the flag that creates things.
+   * A guard that makes the cautious option impossible pushes people toward the
+   * dangerous one.
+   */
   const isLive = !secret.startsWith("sk_test") && !secret.startsWith("rk_test");
-  if (isLive && !allowLive) {
+  if (isLive && apply && !allowLive) {
     console.error(
-      "✖ STRIPE_SECRET_KEY is a LIVE key. Refusing without --allow-live.\n" +
+      "✖ STRIPE_SECRET_KEY is a LIVE key. Refusing to --apply without --allow-live.\n" +
         "  The plan prices are signed off (docs/PRICING.md §3, 2026-08-10), so this is a\n" +
         "  legitimate thing to do — but a live Price is what real merchants get charged\n" +
-        "  against, and Stripe amounts cannot be edited afterwards. Re-run with --allow-live\n" +
+        "  against, and Stripe amounts cannot be edited afterwards. Only archived and\n" +
+        "  replaced, which changes what existing subscribers pay at renewal.\n" +
+        "\n" +
+        "  Run without --apply first to see what is missing. Re-run with --allow-live\n" +
         "  when you mean it.",
     );
     process.exit(1);
