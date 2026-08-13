@@ -94,11 +94,38 @@ Unset, nothing is billed at all: **it refuses rather than running open** (D41).
 **Still nothing else is scheduled** — no T12 rollup, no abandoned-cart timer, no dunning sweep of
 Markii's own. Membership status stays derived per request for exactly this reason.
 
-**Email plumbing is built; no mail is sent.** `lib/email/` has the SES v2 transport (hand-rolled
-SigV4 over `fetch`), per-merchant sending identities, the suppression list, a signature-verified
-SNS bounce webhook, and the five transactional templates — wired into `orders.*` and checkout
-completion (§24). **Every send is recorded as `not_configured`** because this deployment has no AWS
-credentials, and merchant mail is never rerouted through Resend to hide that (G1).
+**SES is live as of 2026-08-11 — the platform gate is closed, the merchant gate is not.**
+`lib/email/` has the SES v2 transport (hand-rolled SigV4 over `fetch`), per-merchant sending
+identities, the suppression list, a signature-verified SNS bounce webhook, and the five
+transactional templates — wired into `orders.*` and checkout completion (§24).
+
+**Production access was granted in `us-west-2`, and everything in SES is per-region** — access,
+identities, configuration sets, quotas. `AWS_REGION` must name that region or SES is still
+sandboxed: sending "succeeds" only to verified addresses and merchant identities verified elsewhere
+do not exist. Nothing in the code can detect that; the credentials are valid, the region is wrong.
+Verified end to end by a live send to `success@simulator.amazonses.com` carrying
+`SES_CONFIGURATION_SET`, which proves the config set exists because SES refuses an unknown one.
+
+**A merchant still cannot send until they verify their own domain.** `resolveSender` returns null
+and the send refuses with `domain_verification_required` — there is **no fallback to
+`markii.shop`**, which is the whole of G1: a merchant's bounces must never land on Markii's
+reputation.
+
+**The feedback loop is proven up to the last hop.** Simulator sends to
+`bounce@` and `complaint@simulator.amazonses.com` (labelled, so each is traceable) produced both
+SNS notifications, which confirms the configuration set really is subscribed to `BOUNCE` **and**
+`COMPLAINT` — something the SES-scoped IAM key cannot read back, so it was verified by observation
+rather than by API. Simulator mail does not touch reputation or the daily quota.
+
+```
+send → SES → config set → SNS topic → [ unproven ] → /api/webhooks/ses → suppression list
+```
+
+**Only `SNS → /api/webhooks/ses` remains**, and it is blocked on infrastructure rather than code:
+SNS cannot reach `localhost`, so it needs a deployed host or a tunnel. Until that subscription
+exists, **SES sends and nothing is ever suppressed** — the drift that walks an account toward a
+bounce-rate suspension unseen. `lib/email/sns.ts` handles `SubscriptionConfirmation` itself, so the
+subscription should self-confirm; check it reads **Confirmed**, not Pending.
 
 **Membership gating and storefront shopper login are built** (§18.9, D34). Tiers gate products;
 buying a granting product confers one inside the order transaction. **Membership status is derived
@@ -202,9 +229,10 @@ the dashboard.
 `tests/integration/stripe-fee-invoice.test.ts` (opt-in, `MARKII_STRIPE_TESTS=1`) creates a real
 subscription and asserts the fee line's amount, currency, and description **against Stripe**, not
 against the response that raised it. Until then every test org lacked a subscription, so
-`assessmentBillable` refused before Stripe was ever called and the boundary itself was unproven. AWS SES is the same shape: the code is finished, so
-credentials plus sandbox escape plus a merchant's verified domain are all that stand between here and
-real mail. Everything refuses rather than stubs — see the `configuration_required` pattern in
+`assessmentBillable` refused before Stripe was ever called and the boundary itself was unproven.
+**AWS SES cleared the same boundary on 2026-08-11** — credentials, sandbox escape, and a live send
+are done; a merchant's own verified domain is the only gate left, and that one is theirs to pass.
+Everything refuses rather than stubs — see the `configuration_required` pattern in
 `lib/payments/`, `app/api/billing/`, and `lib/email/`.
 
 Two credentials also gate the card rail at *runtime*, and they fail differently:

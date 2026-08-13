@@ -40,7 +40,7 @@ carry an explicit status — **never call a `PLANNED` endpoint and never fake it
 | 20 | Disputes & chargebacks | 🟡 PLANNED | F |
 | 21 | Agent Ops add-on | 🟡 PLANNED | F (last) |
 | 22 | **Action registry & MCP** — agent-native architecture | ✅ LIVE (registry, invoke, dry-run, audit). Undo + MCP server PLANNED | **Registry: C · MCP: D** |
-| 24 | Email — sending domains, deliverability, suppression | partial — ✅ LIVE: SES transport, templates, suppression list, bounce webhook, `/api/settings/email`, §22 actions. **Nothing sends here** (no AWS credentials); every attempt is recorded as `not_configured` and merchant mail never falls back to Markii's domain | **C** |
+| 24 | Email — sending domains, deliverability, suppression | ✅ LIVE — SES transport, templates, suppression list, bounce webhook, `/api/settings/email`, §22 actions. **Sending works as of 2026-08-11** (production access in `us-west-2`, verified by a live send). A merchant still cannot send until they verify their own domain — `domain_verification_required`, never a fallback to Markii's domain. **The SNS → webhook hop is still unproven**: it needs a publicly reachable host | **C** |
 
 **v3 note.** Markii is now a full commerce platform (`docs/PLAN.md` v3). §16 was a **breaking change
 to everything above it**, and as of 2026-07-31 that change has landed: **every `/api/*` route
@@ -2550,9 +2550,21 @@ In local dev, storefronts are reachable at `http://localhost:3000/_sites/{siteSl
 
 ## 24. Email — sending domains, deliverability, suppression — partial ✅/🟡
 
-Transport, templates, and the suppression list are ✅ LIVE. **No mail is sent from this
-deployment**, because AWS SES has no credentials here — every send is recorded as
-`not_configured` and no surface claims otherwise.
+Transport, templates, and the suppression list are ✅ LIVE, and **mail actually sends as of
+2026-08-11**. Production access was granted in `us-west-2`; a live send to the SES mailbox
+simulator carrying `SES_CONFIGURATION_SET` verified credentials, region, identity, and
+configuration set in one call.
+
+**SES → SNS is verified too.** Labelled simulator sends to `bounce@` and
+`complaint@simulator.amazonses.com` both produced notifications, which proves the configuration set
+carries `BOUNCE` and `COMPLAINT` — unreadable via the SES-scoped IAM key, so confirmed by
+observation. Simulator mail affects neither reputation nor quota.
+
+**Two gates remain, and they are different problems.** A merchant without their own verified domain
+gets `domain_verification_required` and no send — never a fallback to `markii.shop`. And the
+**SNS → `/api/webhooks/ses` hop has never carried a real bounce**, because SNS cannot reach
+`localhost`; it needs a deployed host or a tunnel. Until it does, SES sends and nothing is
+suppressed.
 
 **Two streams, split by whose mail it is, and the split is load-bearing** (`CLAUDE.md`, G1):
 
@@ -2602,7 +2614,8 @@ the two streams exist. Without a verified domain, merchant mail does not send.
 ```
 
 `customerEmail.code` distinguishes **whose problem it is**: `configuration_required` is Markii's
-(no AWS credentials), `domain_verification_required` is the merchant's. `platformEmail` is reported
+(AWS credentials or region — resolved 2026-08-11), `domain_verification_required` is the merchant's
+and is now the only one most merchants will see. `platformEmail` is reported
 separately and must never be merged into one "email: OK" — a merchant whose password reset arrived
 would otherwise conclude their order confirmations work, and they do not.
 
