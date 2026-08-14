@@ -8,6 +8,15 @@ import { getMe, getMfaStatus } from "@/lib/api/server";
 import { ApiClientError } from "@/lib/api/types";
 
 /**
+ * Applies to every segment beneath this layout. The whole dashboard resolves
+ * the caller from `cookies()`, so none of it can ever be prerendered — saying
+ * so up front stops Next attempting a static pass that throws
+ * `DynamicServerError` on each page and litters the deploy log with failures
+ * for routes that were always dynamic.
+ */
+export const dynamic = "force-dynamic";
+
+/**
  * Identity is resolved **once here** and passed down, rather than fetched by the
  * sidebar and the mobile drawer separately. Both render the same org card, and
  * two independent fetches could briefly disagree about which org is active —

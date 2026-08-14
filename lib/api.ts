@@ -45,7 +45,27 @@ export const unauthorized = (message = "Authentication required") =>
   new ApiError("UNAUTHORIZED", 401, message);
 export const forbidden = (message: string) => new ApiError("FORBIDDEN", 403, message);
 
+/**
+ * Next signals control flow by throwing: `DYNAMIC_SERVER_USAGE` when a render
+ * touches `cookies()`, `NEXT_REDIRECT` for `redirect()`, `NEXT_NOT_FOUND` for
+ * `notFound()`. These are not failures and must reach the framework.
+ *
+ * `handler` wraps every route, and server components call those handlers
+ * **in-process** (`lib/api/server.ts`), so a framework throw lands in our
+ * `catch` rather than Next's. Swallowing it logged a stack and returned a 500
+ * that the page then rendered as "unavailable" — the deploy-log noise from the
+ * dashboard's static pass came through exactly this path.
+ */
+function isFrameworkSignal(e: unknown): boolean {
+  const digest = (e as { digest?: unknown } | null)?.digest;
+  return (
+    typeof digest === "string" &&
+    (digest === "DYNAMIC_SERVER_USAGE" || digest.startsWith("NEXT_"))
+  );
+}
+
 export function errorResponse(e: unknown): NextResponse {
+  if (isFrameworkSignal(e)) throw e;
   if (e instanceof ZodError) {
     return NextResponse.json(
       { error: { code: "VALIDATION_ERROR", message: "Invalid input", details: e.issues } },
