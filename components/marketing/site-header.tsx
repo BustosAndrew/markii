@@ -2,9 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import { ArrowRight } from "lucide-react";
 import { Logo } from "@/components/logo";
 import { ButtonLink } from "@/components/ui/button";
+import { getMe } from "@/lib/api/org";
+import { ApiClientError } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
 const navLinks = [
@@ -13,8 +16,45 @@ const navLinks = [
   { href: "/contact", label: "Contact" },
 ] as const;
 
+/**
+ * Whether the visitor already has a merchant session.
+ *
+ * Asked from the client on purpose. The session cookie is httpOnly (D30), so
+ * the only way to answer is to ask the server — and doing that in the layout
+ * would read `cookies()` and turn every marketing page dynamic, losing the
+ * static prerender for what is mostly anonymous traffic. Signed-out is the
+ * assumed answer until proven otherwise, so the common case never waits.
+ */
+function useSignedIn() {
+  const [signedIn, setSignedIn] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    getMe()
+      .then(() => {
+        if (!cancelled) setSignedIn(true);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        /**
+         * `403 MFA_REQUIRED` is a merchant who is signed in but has not cleared
+         * the gate (D40) — still signed in, and `/dashboard` is still the right
+         * destination, since the layout there routes them to `/mfa`. Only a
+         * `401` means nobody is home.
+         */
+        setSignedIn(err instanceof ApiClientError && err.status === 403);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return signedIn;
+}
+
 export function MarketingHeader() {
   const pathname = usePathname();
+  const signedIn = useSignedIn();
 
   return (
     <header className="sticky top-3 z-50 px-3 sm:top-5 sm:px-6">
@@ -47,10 +87,10 @@ export function MarketingHeader() {
           </ul>
 
           <ButtonLink
-            href="/sign-up"
+            href={signedIn ? "/dashboard" : "/sign-up"}
             className="ml-auto shrink-0 gap-1.5 rounded-full px-4 py-2.5 sm:ml-0 sm:px-5"
           >
-            Start selling
+            {signedIn ? "Dashboard" : "Start selling"}
             <ArrowRight className="size-4" />
           </ButtonLink>
       </nav>
