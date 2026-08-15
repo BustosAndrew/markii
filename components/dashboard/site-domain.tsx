@@ -183,7 +183,7 @@ function DomainState({ state }: { state: SiteDomain }) {
         </span>{" "}
         <span className="text-muted">
           {state.pointsToMarkii
-            ? "this domain resolves to Markii"
+            ? "this domain resolves to Markii’s edge"
             : `not pointing here yet — traffic will not arrive until it does`}
         </span>
       </p>

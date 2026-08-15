@@ -201,6 +201,13 @@ recorded, not applied, or a resolver blip would take a live store offline. `stor
 unverified domain for the same reason it ignores nothing else: it feeds order email, `llms.txt`, and
 every JSON-LD `url`.
 
+**Verification is step one of two, and step two is not built.** Verifying proves ownership and makes
+Markii willing to route the host; it does **not** register the domain with the hosting platform.
+Nothing calls the Vercel domains API, and Vercel rejects an unregistered hostname at the edge — the
+request never reaches `proxy.ts` and no TLS certificate is issued. So on Vercel a domain can read
+`verified` with `pointsToMarkii: true` and still not serve. **Do not call a verified domain live**
+until platform registration exists (`docs/API.md` §2).
+
 **Migration 0031 is applied and the path is verified end to end** —
 `tests/integration/domains.test.ts`, 13 tests, including a real DNS lookup that finds nothing, a
 second org holding a pending claim on the same hostname, and a `23505` raised by Postgres when a

@@ -301,6 +301,10 @@ Three rules for any screen that touches this, all of them the same rule:
 - **A missing record is the normal first answer, not a failure.** Propagation takes up to an hour.
   `checked: false` is the real error case — DNS was unreachable — and it never downgrades a verified
   domain.
+- **⛔ Do not call a verified domain "live".** Verification is step one of two: it does not register
+  the domain with Vercel, and Vercel rejects an unregistered hostname at the edge, so a domain can
+  read `verified` + `pointsToMarkii: true` and still not serve. Copy should say *verified*, never
+  *live* or *connected*, until platform registration is built (`docs/API.md` §2).
 
 **`/dashboard/settings/domains` is a real screen now**, not a `ComingSoon`. It is an *overview*, not
 a control panel: connecting and verifying stay on the storefront's own page, because the DNS records

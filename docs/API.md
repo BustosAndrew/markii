@@ -428,10 +428,20 @@ Cards for the website slug page:
 ### `POST /api/sites/:idOrSlug/deploy`
 Marks the site `live`. → `200` `{ "status": "live", "storefrontUrl": "https://demo-store.markii.shop" }`
 
-Deploying does **not** attach a custom domain and never has. A domain is attached by
-`domains.connect` and starts serving when it verifies, so `storefrontUrl` here is the custom domain
-only if it was already verified — an unverified claim routes nothing and must not be printed as an
-address.
+Deploying does **not** attach a custom domain and never has. `storefrontUrl` here is the custom
+domain only if it was already verified — an unverified claim routes nothing and must not be printed
+as an address.
+
+> **⛔ Verification is step one of two, and step two does not exist yet.** Verifying proves the
+> merchant owns the hostname and makes Markii willing to route it. It does **not** register the
+> domain with the hosting platform, and nothing in the tree calls the Vercel domains API. On Vercel,
+> a hostname not registered to the project is rejected at the edge — the request never reaches
+> `proxy.ts` — and no TLS certificate is ever issued for it.
+>
+> So on a Vercel deployment a domain can be `verified` with `pointsToMarkii: true` and still not
+> serve. Local and self-hosted deployments that route by `Host` header are unaffected; this is
+> specifically the managed-platform hop. **Do not describe a verified domain as live** until the
+> registration step is built.
 
 ### Previews (create-site wizard live panes)
 
