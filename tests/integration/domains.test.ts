@@ -150,6 +150,31 @@ describe("custom domain verification", () => {
     expect(res.json.records.some((r: any) => r.purpose === "pointing")).toBe(true);
   }, 60_000);
 
+  it("lists every storefront org-wide, without claiming a live reading", async () => {
+    const res = await merchant.get("/api/settings/domains");
+    expect(res.status).toBe(200);
+
+    const mine = res.json.items.find((i: any) => i.siteId === site.id);
+    expect(mine.domain).toBe(hostname);
+    expect(mine.status).toBe("pending");
+
+    /**
+     * **Absent, not false.** The endpoint reads no DNS — a fan-out of one
+     * resolver round trip per store would make this the slowest page in the
+     * dashboard — so a `pointsToMarkii` here could only ever be stale, and a
+     * stale "not pointing" sends a merchant off to break DNS that works.
+     */
+    expect(mine).not.toHaveProperty("pointsToMarkii");
+    expect(res.json.dnsCheckedLive, "screens must not infer freshness").toBe(false);
+
+    // A worklist: the row anyone has to act on comes first.
+    expect(res.json.items[0].status).toBe("pending");
+    expect(res.json.counts.pending).toBeGreaterThanOrEqual(1);
+
+    // Org-scoped like everything else — another merchant's stores are not here.
+    expect(res.json.items.some((i: any) => i.siteId === rivalSite.id)).toBe(false);
+  }, 60_000);
+
   it("does not verify a domain whose record was never published, and says why", async () => {
     // A real DNS lookup against a hostname that does not exist.
     const res = await merchant.invoke("domains.verify", { siteId: site.id });

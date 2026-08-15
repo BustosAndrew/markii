@@ -284,6 +284,7 @@ New service `lib/api/domains.ts` (`DOMAINS_API_LIVE = true`) and a new server lo
 | Call | What it is |
 |---|---|
 | `getSiteDomain(slug)` | Status + the records to publish. **Reads DNS live**, so fetch it on the server and pass it down — do not poll it from a client effect |
+| `getOrgDomains()` | Every storefront's domain, org-wide. **Reads no DNS** — backs Settings → Domains |
 | `connectDomain({ siteId, domain })` | Claims it. `409` only if another storefront **verified** it |
 | `verifyDomain({ siteId })` | The "Check DNS" button. Pull, not push — nothing polls for the merchant |
 | `disconnectDomain({ siteId })` | High risk. `stoppedServing` tells a live removal from an abandoned claim |
@@ -300,6 +301,13 @@ Three rules for any screen that touches this, all of them the same rule:
 - **A missing record is the normal first answer, not a failure.** Propagation takes up to an hour.
   `checked: false` is the real error case — DNS was unreachable — and it never downgrades a verified
   domain.
+
+**`/dashboard/settings/domains` is a real screen now**, not a `ComingSoon`. It is an *overview*, not
+a control panel: connecting and verifying stay on the storefront's own page, because the DNS records
+are per site and a merchant acting on them needs that site in front of them. The one rule it adds —
+**nothing on that page is a live reading.** `getOrgDomains` reads no DNS, so a domain whose DNS broke
+an hour ago still shows `verified` there. The page says so in as many words; do not add a "reachable"
+tick to it, and do not treat a missing `pointsToMarkii` as `false`.
 
 `Site` gains `domainStatus`, `domainVerifiedAt`, `domainCheckedAt`, `domainLastError`. Readiness
 gains **`DOMAIN_NOT_VERIFIED`** (warning), which replaces `NO_CUSTOM_DOMAIN` for a pending claim —

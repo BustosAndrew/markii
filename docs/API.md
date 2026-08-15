@@ -361,6 +361,37 @@ Deployment targets come from `SITE_DOMAIN_CNAME_TARGET` / `SITE_DOMAIN_A_RECORD`
 Vercel's documented values. They change **what the merchant is told to publish**, never whether a
 domain verifies — ownership is the only gate.
 
+### `GET /api/settings/domains` — ✅ LIVE
+
+Every storefront's domain in one call, for Settings → Domains.
+
+```jsonc
+{
+  "items": [{
+    "siteId": 1, "siteName": "Demo Store", "siteSlug": "demo-store",
+    "storefrontUrl": "https://demo-store.markii.shop",   // verified-only, as everywhere
+    "domain": "shop.example.com",
+    "status": "pending",
+    "verifiedAt": null,
+    "checkedAt": "2026-08-14T…",   // null = never checked, ≠ checked and failing
+    "problem": "No TXT record found at …"
+  }],
+  "counts": { "verified": 0, "pending": 1, "none": 2 },
+  "expectedTarget": "cname.vercel-dns.com",
+  "dnsCheckedLive": false
+}
+```
+
+**This route reads no DNS, and that is why it exists rather than a loop over
+`/api/sites/:id/domain`.** That route reads live — right for one site, and one resolver round trip
+per store on a single page load for a merchant with ten, each able to time out independently.
+
+So **`pointsToMarkii` is absent here, not `false`.** It is a live fact and this response carries
+none; a stale "not pointing" would send a merchant off to break DNS that works. `dnsCheckedLive` is
+returned explicitly so no screen can infer freshness from the absence of a problem. Rows are ordered
+`pending` → `verified` → `none`: the list is a worklist, and a claim awaiting DNS is the only row
+anyone must act on.
+
 ### Domain actions (§22)
 
 | Action | Permission | Risk | Notes |

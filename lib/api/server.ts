@@ -42,6 +42,7 @@ import { GET as sitesGET } from "@/app/api/sites/route";
 import { GET as siteGET } from "@/app/api/sites/[idOrSlug]/route";
 import { GET as siteSummaryGET } from "@/app/api/sites/[idOrSlug]/summary/route";
 import { GET as siteDomainGET } from "@/app/api/sites/[idOrSlug]/domain/route";
+import { GET as orgDomainsGET } from "@/app/api/settings/domains/route";
 import { buildQuery, type QueryValue } from "./client";
 import type {
   Addon,
@@ -69,7 +70,7 @@ import type { PaymentsResponse } from "./payments";
 import type { CategoriesQuery } from "./categories";
 import type { ProductsQuery } from "./products";
 import type { SiteSummary, SitesQuery } from "./sites";
-import type { SiteDomain } from "./domains";
+import type { OrgDomains, SiteDomain } from "./domains";
 import {
   ApiClientError,
   type Category,
@@ -144,6 +145,13 @@ export const getSiteSummary = (idOrSlug: string) =>
  */
 export const getSiteDomain = (idOrSlug: string) =>
   call<SiteDomain>(siteDomainGET, `/api/sites/${idOrSlug}/domain`, undefined, { idOrSlug });
+
+/**
+ * Org-wide domain overview. **Reads no DNS** — unlike `getSiteDomain`, which
+ * reads it live. Ten stores would otherwise mean ten resolver round trips on one
+ * page load, so this serves stored state and says so (`dnsCheckedLive: false`).
+ */
+export const getOrgDomains = () => call<OrgDomains>(orgDomainsGET, "/api/settings/domains");
 
 export const listProducts = (query?: ProductsQuery) =>
   call<Paginated<Product>>(productsGET, "/api/products", query as Record<string, QueryValue>);

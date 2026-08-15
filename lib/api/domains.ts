@@ -54,6 +54,49 @@ export function getSiteDomain(idOrSlug: string, init?: RequestInit) {
   );
 }
 
+/** One storefront's row in the org-wide overview. */
+export type OrgDomainRow = {
+  siteId: number;
+  siteName: string;
+  siteSlug: string;
+  /** Verified-only, like `Site.storefrontUrl` — never the unverified claim. */
+  storefrontUrl: string;
+  domain: string | null;
+  status: DomainStatus;
+  verifiedAt: string | null;
+  /** Null means never checked — different from checked and still failing. */
+  checkedAt: string | null;
+  problem: string | null;
+};
+
+export type OrgDomains = {
+  items: OrgDomainRow[];
+  counts: { verified: number; pending: number; none: number };
+  expectedTarget: string;
+  /**
+   * Always `false` on this endpoint, and it is here so a screen cannot infer
+   * freshness from the absence of a problem.
+   */
+  dnsCheckedLive: boolean;
+};
+
+/**
+ * Every storefront's domain in one call.
+ *
+ * **No DNS is read here** — that is the point of the endpoint. A loop over
+ * `getSiteDomain` would be one resolver round trip per store on a single page
+ * load, each able to time out on its own.
+ *
+ * So **`pointsToMarkii` is absent, not false.** It is a live fact and this
+ * response carries none; rendering a stale "not pointing" would send a merchant
+ * off to break DNS that works. Link to the site's own page for a fresh answer.
+ */
+export function getOrgDomains(init?: RequestInit) {
+  return callWhenLive(DOMAINS_API_LIVE, DOMAINS_SECTION, () =>
+    apiGet<OrgDomains>("/api/settings/domains", undefined, init),
+  );
+}
+
 /**
  * Claim a hostname and get the records to publish.
  *
