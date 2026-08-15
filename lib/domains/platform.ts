@@ -26,6 +26,8 @@ import "server-only";
  * business carrying an API client.
  */
 
+import { isReservedHost } from "./records";
+
 const API = "https://api.vercel.com";
 
 /** Short: this sits on a merchant-facing request, behind their own DNS wait. */
@@ -157,10 +159,25 @@ export async function registerDomain(host: string): Promise<RegisterResult> {
   return { ok: false, code: "provider_error", message: added.problem };
 }
 
-/** Detach on disconnect, so the hostname can be attached elsewhere afterwards. */
+/**
+ * Detach on disconnect, so the hostname can be attached elsewhere afterwards.
+ *
+ * **Refuses a platform host outright.** Every caller passes a site's own
+ * `custom_domain`, and `connectDomain` already refuses to let a merchant claim
+ * `ROOT_DOMAIN` or a `*.vercel.app` host — so this is unreachable today. It is
+ * here because the operation is an irreversible DELETE against the live project
+ * that serves every merchant: if a future change ever passed the wrong value,
+ * the failure would be Markii's own apex being detached, and there is no undo.
+ * Defence in depth is cheap; a deleted production domain is not.
+ */
 export async function unregisterDomain(
   host: string,
 ): Promise<{ ok: boolean; message: string | null }> {
+  if (isReservedHost(host)) {
+    console.error(`refused to detach the platform host ${host}`);
+    return { ok: false, message: `${host} is a Markii hostname and is never detached.` };
+  }
+
   const creds = credentials();
   if (!creds) return { ok: false, message: PLATFORM_UNCONFIGURED };
 

@@ -189,6 +189,24 @@ describe("unregisterDomain", () => {
     expect(await unregisterDomain("shop.acme.com")).toEqual({ ok: true, message: null });
   });
 
+  it("refuses to detach a platform host, even fully configured", async () => {
+    /**
+     * Unreachable today — `connectDomain` will not let a merchant claim
+     * `ROOT_DOMAIN`, so no site row can hold it. This guards the *irreversible*
+     * half: a future change passing the wrong value would delete Markii's own
+     * apex from the project that serves every merchant, with no undo.
+     */
+    configure();
+    process.env.ROOT_DOMAIN = "markii.shop";
+    const calls = stubFetch([{ status: 200 }]);
+
+    for (const host of ["markii.shop", "shop.markii.shop", "markii-orcin.vercel.app"]) {
+      const res = await unregisterDomain(host);
+      expect(res.ok, `${host} must never be detached`).toBe(false);
+    }
+    expect(calls.length, "no request may even be issued").toBe(0);
+  });
+
   it("reports a refusal so a stuck domain is not silently left attached", async () => {
     // A hostname left bound to Markii's project blocks the merchant from
     // attaching it anywhere else — including to a competitor.

@@ -96,6 +96,29 @@ export const connectCustomDomain = defineAction({
       invalidateCustomDomain(site.customDomain, result.site.customDomain);
     });
 
+    /**
+     * **Replacing a verified domain has to detach the old one.**
+     *
+     * Connecting overwrites `custom_domain`, so after this the row no longer
+     * names the previous hostname — and `domains.disconnect` only ever detaches
+     * what the row names. Without this the old host stays attached to Markii's
+     * Vercel project *permanently*: nothing left would know to remove it. That
+     * consumes the project's domain allowance, and worse, keeps the hostname
+     * bound to Markii so the merchant cannot attach it anywhere else.
+     *
+     * Only verified domains are ever registered, so only those are detached.
+     * `unchanged` means they re-connected the same domain — nothing moved.
+     */
+    const replaced = site.customDomain;
+    if (!result.unchanged && site.domainStatus === "verified" && replaced) {
+      ctx.effect("detach the replaced domain from the hosting platform", async () => {
+        const platform = await unregisterDomain(replaced);
+        if (!platform.ok) {
+          console.error(`domain detach failed for replaced ${replaced}: ${platform.message}`);
+        }
+      });
+    }
+
     return {
       siteId: site.id,
       domain: result.site.customDomain,

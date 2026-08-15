@@ -209,6 +209,14 @@ hostname at its edge, before `proxy.ts` runs, and issues no TLS certificate. Reg
 repair path; `domains.disconnect` detaches. **Ordering is a security property**: registering on
 *claim* would let anyone add any hostname to Markii's Vercel project on a form submission.
 
+**Three paths drop a verified domain and all three must detach it** — `domains.disconnect`,
+`domains.connect` replacing one, and `DELETE /api/sites/:id`. The latter two were leaks when
+registration first landed: each stops the row naming the hostname, so nothing afterwards could ever
+release it and the domain stayed bound to Markii's Vercel project — consuming its allowance and
+blocking the merchant from using that hostname anywhere else. `unregisterDomain` additionally
+refuses a platform host outright, because the operation is an irreversible DELETE against the
+project that serves every merchant.
+
 `VERCEL_TOKEN` + `VERCEL_PROJECT_ID` gate it, and **unset, a verified domain still does not serve** —
 the API reports `platform.configured: false` rather than calling the domain working. So the status
 surface now carries **three** facts that fail independently — ownership (merchant), pointing

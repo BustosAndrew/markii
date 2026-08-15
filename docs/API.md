@@ -420,7 +420,7 @@ anyone must act on.
 
 | Action | Permission | Risk | Notes |
 |---|---|---|---|
-| `domains.connect` | `cms.write` | medium | Claims the hostname and returns the records. **Connecting is not connecting traffic** — the row lands `pending` and routes nothing. `409` only when another storefront has *verified* it; a pending claim elsewhere is not a conflict. Re-connecting an already-verified domain is a no-op rather than a token reset, which would take a live storefront offline. A dry run shows the records with a placeholder token and writes nothing |
+| `domains.connect` | `cms.write` | medium | Claims the hostname and returns the records. **Connecting is not connecting traffic** — the row lands `pending` and routes nothing. `409` only when another storefront has *verified* it; a pending claim elsewhere is not a conflict. Re-connecting an already-verified domain is a no-op rather than a token reset, which would take a live storefront offline. **Replacing a verified domain detaches the old one from the platform** — the row stops naming it, so nothing later could. A dry run shows the records with a placeholder token and writes nothing |
 | `domains.verify` | `cms.write` | low | Re-reads DNS. **Pull, not push** — nothing here schedules jobs, so this is what advances a claim. A DNS failure is *reported*, never applied: nothing ever moves a domain from `verified` back down, or a resolver blip would take a live store offline. A dry run still reads DNS — reads leave nothing behind, and refusing to look would make the proposal useless. On success it queues platform registration as a post-commit effect, so `platformRegistration: "queued"` means **attempted, not done** — re-read the domain endpoint for the outcome |
 | `domains.disconnect` | `cms.write` | **high** | Nothing errors; traffic simply stops arriving and every inbound link, search result, and agent citation on that domain breaks at once. `stoppedServing` distinguishes a live removal from an abandoned claim. Also detaches from the platform — a hostname left attached blocks the merchant from using it anywhere else |
 
@@ -437,6 +437,16 @@ by Postgres when a second row tries to verify the same host.
 ### `DELETE /api/sites/:idOrSlug`
 Cascades: deletes the site's categories, products, and traffic; orders are kept (site
 reference nulled) for financial history. → `{ "deleted": true, "id": 1 }`
+
+**Also detaches a verified custom domain from the hosting platform.** The row that named the
+hostname is gone after this, so nothing later could ever release it — it would stay bound to
+Markii's Vercel project, consuming its allowance and blocking the merchant from using that hostname
+anywhere else. Detach runs *after* the delete succeeds, and a failure is logged rather than thrown:
+the deletion really did happen, and reporting it as failed would be worse than a stranded domain.
+
+**Three paths drop a verified domain and all three detach it** — `domains.disconnect`,
+`domains.connect` replacing one, and this. That set is the invariant worth re-checking if a fourth
+is ever added.
 
 ### `GET /api/sites/:idOrSlug/summary`
 Cards for the website slug page:

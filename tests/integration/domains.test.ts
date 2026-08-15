@@ -308,6 +308,42 @@ describe("custom domain verification", () => {
     expect(row.custom_domain, "a dry run must not claim the hostname").toBe(hostname);
   }, 60_000);
 
+  it("releases the old hostname when a verified domain is replaced", async () => {
+    /**
+     * Reachable only through the action — the settings screen disables the field
+     * once verified and offers Remove instead. The registry is the boundary that
+     * matters though: an agent or MCP client calls this directly.
+     *
+     * What this asserts is the *local* half — the row moves and the old
+     * hostname is left claimable by anyone else. The other half, detaching it
+     * from the hosting platform, cannot be seen from here: without platform
+     * credentials the effect reports `configuration_required`, and with them it
+     * would mutate the real Vercel project. That half is proved separately.
+     */
+    const replacement = `moved-${Date.now()}.example.com`;
+    const before = hostname;
+
+    const res = await merchant.invoke("domains.connect", {
+      siteId: site.id,
+      domain: replacement,
+    });
+    expect(res.status, JSON.stringify(res.json)).toBe(200);
+
+    const [row] = await sql`select custom_domain, domain_status from sites where id = ${site.id}`;
+    expect(row.custom_domain).toBe(replacement);
+    // Back to pending: a new hostname has proved nothing yet.
+    expect(row.domain_status).toBe("pending");
+
+    // The old host is no longer held as verified by anyone, so it is free again.
+    const stillHeld = await sql`
+      select id from sites where custom_domain = ${before} and domain_status = 'verified'`;
+    expect(stillHeld.length).toBe(0);
+
+    // Put it back so the disconnect test below still exercises a verified removal.
+    await sql`update sites set custom_domain = ${before}, domain_status = 'verified',
+              domain_verified_at = now() where id = ${site.id}`;
+  }, 60_000);
+
   it("disconnects back to a coherent empty state", async () => {
     const res = await merchant.invoke("domains.disconnect", { siteId: site.id });
     expect(res.status, JSON.stringify(res.json)).toBe(200);

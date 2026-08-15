@@ -7,6 +7,7 @@ import { normalizeDomain } from "./normalize";
 import {
   dnsRecordsFor,
   generateVerificationToken,
+  isReservedHost,
   ownershipRecordName,
   pointsHere,
   txtCarriesToken,
@@ -91,21 +92,6 @@ export async function observeDns(domain: string): Promise<DnsObservation> {
 export type ConnectResult =
   | { ok: true; site: Site; records: DnsRecord[]; unchanged: boolean }
   | { ok: false; code: "invalid_domain" | "taken" | "reserved"; message: string };
-
-/**
- * Reserved because they are Markii's own routing. `proxy.ts` treats these hosts
- * as platform hosts and never consults the custom-domain table, so a claim on
- * one would sit in the database looking connected and route nothing.
- */
-function isReservedHost(domain: string): boolean {
-  const root = normalizeDomain(process.env.ROOT_DOMAIN ?? "");
-  return (
-    domain === "localhost" ||
-    domain.endsWith(".localhost") ||
-    domain.endsWith(".vercel.app") ||
-    (root !== null && (domain === root || domain.endsWith(`.${root}`)))
-  );
-}
 
 /**
  * Claim a hostname for a site and hand back the records to publish.

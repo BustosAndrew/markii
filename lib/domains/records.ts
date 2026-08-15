@@ -82,6 +82,27 @@ export function looksLikeApex(domain: string): boolean {
   return domain.split(".").length === 2;
 }
 
+/**
+ * Hostnames that are Markii's own routing and can never be a merchant's custom
+ * domain. `proxy.ts` treats these as platform hosts and never consults the
+ * custom-domain table, so a claim on one would sit in the database looking
+ * connected while routing nothing.
+ *
+ * Lives here rather than beside the claim check because **two** callers need it
+ * and one of them must not import `node:dns`: it is also the guard on detaching
+ * a domain from the hosting platform, where the operation is an irreversible
+ * DELETE against a live project.
+ */
+export function isReservedHost(domain: string): boolean {
+  const root = normalizeDomain(process.env.ROOT_DOMAIN ?? "");
+  return (
+    domain === "localhost" ||
+    domain.endsWith(".localhost") ||
+    domain.endsWith(".vercel.app") ||
+    (root !== null && (domain === root || domain.endsWith(`.${root}`)))
+  );
+}
+
 /** Every record a merchant may need, ownership first — it is the one that gates. */
 export function dnsRecordsFor(domain: string, token: string): DnsRecord[] {
   const records: DnsRecord[] = [

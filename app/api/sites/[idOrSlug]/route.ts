@@ -4,6 +4,7 @@ import { conflict } from "@/lib/api";
 import { orgHandler } from "@/lib/auth/handler";
 import { db, sites } from "@/lib/db";
 import { invalidateCustomDomain } from "@/lib/domains";
+import { unregisterDomain } from "@/lib/domains/platform";
 import { resolveSite, serializeSite } from "@/lib/queries";
 import { assertNoRedirectedSiteFields, siteUpdateSchema } from "@/lib/validation";
 
@@ -58,6 +59,29 @@ export const DELETE = orgHandler(
     // categories/products/traffic cascade; orders keep a nulled site reference
     await db.delete(sites).where(eq(sites.id, site.id));
     invalidateCustomDomain(site.customDomain);
+
+    /**
+     * Deleting the storefront must release its domain from the hosting platform
+     * too (§2 step two). The row that named the hostname is gone, so nothing
+     * after this point could ever know to detach it — the domain would stay
+     * bound to Markii's Vercel project forever, consuming its allowance and
+     * blocking the merchant from attaching that hostname anywhere else.
+     *
+     * After the delete, not before: detaching a domain for a storefront that
+     * then failed to delete would take a live store offline. Only verified
+     * domains are ever registered, so only those are detached, and a failure is
+     * logged rather than thrown — the deletion itself already succeeded and
+     * reporting it as failed would be worse than a stranded domain.
+     */
+    if (site.domainStatus === "verified" && site.customDomain) {
+      const platform = await unregisterDomain(site.customDomain);
+      if (!platform.ok) {
+        console.error(
+          `domain detach failed for deleted site ${site.id} (${site.customDomain}): ${platform.message}`,
+        );
+      }
+    }
+
     return NextResponse.json({ deleted: true, id: site.id });
   },
   /** Deleting a storefront cascades its catalog. Read-only roles could do this. */
