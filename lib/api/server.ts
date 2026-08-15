@@ -41,6 +41,7 @@ import { GET as readinessIssuesGET } from "@/app/api/readiness/issues/route";
 import { GET as sitesGET } from "@/app/api/sites/route";
 import { GET as siteGET } from "@/app/api/sites/[idOrSlug]/route";
 import { GET as siteSummaryGET } from "@/app/api/sites/[idOrSlug]/summary/route";
+import { GET as siteDomainGET } from "@/app/api/sites/[idOrSlug]/domain/route";
 import { buildQuery, type QueryValue } from "./client";
 import type {
   Addon,
@@ -68,6 +69,7 @@ import type { PaymentsResponse } from "./payments";
 import type { CategoriesQuery } from "./categories";
 import type { ProductsQuery } from "./products";
 import type { SiteSummary, SitesQuery } from "./sites";
+import type { SiteDomain } from "./domains";
 import {
   ApiClientError,
   type Category,
@@ -133,6 +135,15 @@ export const getSiteSummary = (idOrSlug: string) =>
   call<SiteSummary>(siteSummaryGET, `/api/sites/${idOrSlug}/summary`, undefined, {
     idOrSlug,
   });
+
+/**
+ * Custom domain status. Reads DNS live, so it is a slower call than the rest of
+ * this file — deliberately: a cached "verified" is a claim about the present
+ * that nobody re-tested, and this is the surface where being wrong means telling
+ * a merchant their storefront is reachable when it is not.
+ */
+export const getSiteDomain = (idOrSlug: string) =>
+  call<SiteDomain>(siteDomainGET, `/api/sites/${idOrSlug}/domain`, undefined, { idOrSlug });
 
 export const listProducts = (query?: ProductsQuery) =>
   call<Paginated<Product>>(productsGET, "/api/products", query as Record<string, QueryValue>);

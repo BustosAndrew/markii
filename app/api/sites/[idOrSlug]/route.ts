@@ -37,16 +37,16 @@ export const PATCH = orgHandler(
       .where(eq(sites.id, site.id))
       .returning();
 
-    // Both hosts: the old one must stop resolving as surely as the new one starts.
-    if ("customDomain" in input) invalidateCustomDomain(site.customDomain, row.customDomain);
-
     return NextResponse.json(await serializeSite(row));
   },
   /**
    * Matches `POST /api/sites`, which has always required this. Editing a
-   * storefront — its domain, whether it takes payments at all — is the same
-   * authority as creating one, and this route carried **no** permission until
-   * 2026-08-11, so every role including `viewer` could do it.
+   * storefront — whether it takes payments at all — is the same authority as
+   * creating one, and this route carried **no** permission until 2026-08-11, so
+   * every role including `viewer` could do it.
+   *
+   * The custom domain is no longer among the fields it can write: it needs proof
+   * of ownership, which a field assignment cannot express (`domains.*`, §2).
    */
   { permission: "cms.write" },
 );

@@ -115,8 +115,14 @@ this is a driver and services swap. Full task list in `docs/DECISIONS.md` §"Dat
 > ✅ Migrations moved to `drizzle-kit generate`: `0000_init` (baseline, **includes `sites.themeId`**,
 > so a fresh database no longer needs the outstanding D29 `db:push`) and `0001_action_invocations`.
 > Both end with hand-authored **RLS deny-by-default**. `pnpm db:generate` / `db:migrate` added.
-> ✅ Proxy custom-domain lookup cached in `lib/domains.ts`, with negative caching and invalidation
+> ✅ Proxy custom-domain lookup cached in `lib/domains/`, with negative caching and invalidation
 > on site create/update/delete — no more database query per storefront request.
+> ✅ **Only a verified domain resolves** (2026-08-14, migration 0031). Ownership is a DNS TXT nonce;
+> `customDomain` is refused by name on the site routes and moves through `domains.*`. Note the
+> import boundary: `lib/domains/index.ts` is in the **proxy bundle** and must never import
+> `node:dns` — the lookups live in `lib/domains/verification.ts`. Verification is a **pull**:
+> nothing here schedules jobs, so the merchant's "check" is what advances a claim, and there is no
+> sweep that could un-verify a live storefront on a resolver blip.
 > ✅ Seed script closes its connection; `.env.example` rewritten to match what the code reads.
 >
 > ✅ **Task 8 done — uploads are on Supabase Storage** (`lib/storage/`). Two buckets: `public-media`
@@ -128,7 +134,7 @@ this is a driver and services swap. Full task list in `docs/DECISIONS.md` §"Dat
 > ⏳ **Still needing credentials, not code:** SMTP config, regenerating seed data against the hosted
 > project, and dropping the Neon project.
 >
-> ⚠️ **Edge Config was not used.** `lib/domains.ts` caches in-process with a 5-minute TTL, which
+> ⚠️ **Edge Config was not used.** `lib/domains/` caches in-process with a 5-minute TTL, which
 > removes the per-request query but means an invalidation only clears the instance that served the
 > write; other instances correct within one TTL. Moving to Edge Config needs a provisioned store —
 > the module is shaped so that becomes a lookup swap, not a rewrite.

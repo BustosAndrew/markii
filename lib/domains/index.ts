@@ -1,5 +1,5 @@
-import { eq } from "drizzle-orm";
-import { db, isDatabaseConfigured, sites } from "./db";
+import { and, eq } from "drizzle-orm";
+import { db, isDatabaseConfigured, sites } from "../db";
 
 /**
  * Host → site-slug resolution for custom domains.
@@ -18,6 +18,10 @@ import { db, isDatabaseConfigured, sites } from "./db";
  * points at Markii but was never connected — stale DNS, or someone aiming a
  * domain at us on purpose — is an unbounded stream of database queries from
  * unauthenticated requests (G12).
+ *
+ * **Nothing here may import `node:dns`.** This module is pulled into the proxy
+ * bundle; the verification lookups live in `./verification`, which the proxy
+ * never touches.
  */
 
 const POSITIVE_TTL_MS = 5 * 60_000;
@@ -44,6 +48,12 @@ export function normalizeHost(host: string): string {
 /**
  * Returns the site slug a custom domain maps to, or `null`.
  *
+ * **Only a `verified` domain resolves** (migration 0031). A pending claim is a
+ * merchant asserting they own a hostname, and routing on an assertion is how one
+ * org ends up answering for another company's domain the moment its DNS points
+ * here. The unique index guarantees at most one verified holder, so the `limit 1`
+ * below is now deterministic rather than whichever row the planner returned.
+ *
  * Never throws: a resolution failure must degrade to "not a tenant host" and let
  * the request fall through, not 500 the storefront.
  */
@@ -61,7 +71,7 @@ export async function resolveCustomDomain(host: string): Promise<string | null> 
     const rows = await db
       .select({ slug: sites.slug })
       .from(sites)
-      .where(eq(sites.customDomain, key))
+      .where(and(eq(sites.customDomain, key), eq(sites.domainStatus, "verified")))
       .limit(1);
     slug = rows[0]?.slug ?? null;
   } catch (e) {
@@ -88,9 +98,13 @@ function remember(key: string, slug: string | null) {
 }
 
 /**
- * Call on domain connect and disconnect so the writing instance serves the new
+ * Call on connect, verify, and disconnect so the writing instance serves the new
  * mapping immediately. Pass both the old and new hostnames on a change — the old
  * one must stop resolving as much as the new one must start.
+ *
+ * **Verification is a routing change too**, not just a status change: the host
+ * was cached as a negative result while the claim was pending, and without this
+ * the storefront stays dark for the negative TTL after it verifies.
  */
 export function invalidateCustomDomain(...hosts: (string | null | undefined)[]) {
   for (const host of hosts) {
@@ -98,3 +112,11 @@ export function invalidateCustomDomain(...hosts: (string | null | undefined)[]) 
     cache.delete(normalizeHost(host));
   }
 }
+
+export { normalizeDomain } from "./normalize";
+export {
+  dnsRecordsFor,
+  ownershipRecordName,
+  ownershipRecordValue,
+  type DnsRecord,
+} from "./records";

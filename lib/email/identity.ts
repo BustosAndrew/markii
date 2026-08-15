@@ -2,6 +2,7 @@ import "server-only";
 
 import { and, eq } from "drizzle-orm";
 import { db, emailIdentities, organizations, type DbHandle, type EmailIdentity } from "../db";
+import { normalizeDomain } from "../domains/normalize";
 import { createSesIdentity, deleteSesIdentity, getSesIdentity, isSesConfigured } from "./ses";
 
 /**
@@ -29,23 +30,12 @@ function statusFromDkim(dkim: string, verifiedForSending: boolean): EmailIdentit
  * Each of those is a different SES identity or an outright rejection, and the
  * failure arrives minutes later as an unexplained verification that never
  * completes — so normalise before anything touches AWS.
+ *
+ * Shared with custom storefront domains (`lib/domains/normalize.ts`) rather than
+ * copied: the accepted shape mirrors a CHECK constraint in both tables, and two
+ * copies would drift into a domain that verifies for mail but not for routing.
  */
-export function normalizeDomain(raw: string): string | null {
-  let value = raw.trim().toLowerCase();
-  if (value === "") return null;
-
-  value = value.replace(/^[a-z][a-z0-9+.-]*:\/\//, "");
-  value = value.split("@").pop() ?? value;
-  value = value.split("/")[0];
-  value = value.split(":")[0];
-  value = value.replace(/\.+$/, "");
-
-  // Mirrors the CHECK constraint in `0018_email_plumbing.sql`, so a rejection
-  // arrives as a message rather than a 500 from the database.
-  return /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(value)
-    ? value
-    : null;
-}
+export { normalizeDomain };
 
 export type ResolvedSender = {
   address: string;

@@ -19,8 +19,19 @@ import { ownSites, siteScope, siteScopeForStaff, type OrgId } from "@/lib/tenanc
 
 // ---------- URLs ----------
 
-export function storefrontUrl(site: Pick<Site, "slug" | "customDomain">): string {
-  if (site.customDomain) return `https://${site.customDomain}`;
+/**
+ * Where this storefront actually answers.
+ *
+ * **A custom domain counts only once it is verified.** An unverified claim is a
+ * hostname a merchant typed; `resolveCustomDomain` will not route it, so
+ * returning it here would print a URL that 404s — in the dashboard, in order
+ * confirmation emails, in `llms.txt`, and in every JSON-LD `url` an agent reads.
+ * The Markii subdomain always works, so it is the honest fallback.
+ */
+export function storefrontUrl(site: Pick<Site, "slug" | "customDomain" | "domainStatus">): string {
+  if (site.customDomain && site.domainStatus === "verified") {
+    return `https://${site.customDomain}`;
+  }
   return tenantBaseUrl(site.slug);
 }
 
@@ -143,13 +154,27 @@ export async function serializeSites(list: Site[]) {
       .groupBy(categories.siteId);
     for (const r of cc) catCounts.set(r.siteId, Number(r.c));
   }
-  return list.map((s) => ({
-    ...s,
-    themeId: s.themeId ?? "studio",
-    productCount: prodCounts.get(s.id) ?? 0,
-    categoryCount: catCounts.get(s.id) ?? 0,
-    storefrontUrl: storefrontUrl(s),
-  }));
+  return list.map((s) => {
+    /**
+     * The verification token is dropped rather than serialized. It is not a
+     * secret — it ends up in public DNS — but it belongs to one screen, and a
+     * field that appears on every site payload gets read, cached, and eventually
+     * relied on somewhere it was never meant to be. `GET /api/sites/:id/domain`
+     * is where it is needed and where it is served.
+     */
+    const rest: Omit<Site, "domainVerificationToken"> & {
+      domainVerificationToken?: string | null;
+    } = { ...s };
+    delete rest.domainVerificationToken;
+    return {
+      ...rest,
+      themeId: s.themeId ?? "studio",
+      productCount: prodCounts.get(s.id) ?? 0,
+      categoryCount: catCounts.get(s.id) ?? 0,
+      /** Verified-only. An unverified claim routes nothing, so it is not a URL. */
+      storefrontUrl: storefrontUrl(s),
+    };
+  });
 }
 
 export async function serializeSite(site: Site) {

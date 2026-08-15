@@ -34,11 +34,27 @@ export type Paginated<T> = {
   limit: number;
 };
 
+/**
+ * Whether a site's custom domain has been proved (§2, migration 0031).
+ *
+ * `pending` is a claim, not a connection — nothing routes on it. Never render a
+ * `pending` domain as the storefront's address; `storefrontUrl` already falls
+ * back to the Markii subdomain for exactly that reason.
+ */
+export type DomainStatus = "none" | "pending" | "verified";
+
 export type Site = {
   id: number;
   name: string;
   slug: string;
   customDomain: string | null;
+  domainStatus: DomainStatus;
+  /** ISO. Null unless `domainStatus` is `verified`. */
+  domainVerifiedAt: string | null;
+  /** ISO. When DNS was last read — distinguishes "never checked" from "not there yet". */
+  domainCheckedAt: string | null;
+  /** Why the last check did not verify. Present on `pending` domains, not an outage. */
+  domainLastError: string | null;
   status: SiteStatus;
   themeId: ThemeId;
   indexed: boolean;

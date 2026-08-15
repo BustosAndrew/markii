@@ -255,6 +255,8 @@ export type StoreFacts = {
   /** Falls back to the org's default wallet when the site has none. */
   orgWalletAddress: string | null;
   customDomain: string | null;
+  /** A claim is not a connection — only `verified` routes (§2, migration 0031). */
+  domainStatus: "none" | "pending" | "verified";
   enabledProductCount: number;
   /** True when anything on the store needs shipping — the trigger for rate rules. */
   sellsShippable: boolean;
@@ -469,7 +471,28 @@ export function storeFindings(s: StoreFacts): RuleFinding[] {
     });
   }
 
-  if (!s.customDomain) {
+  /**
+   * A pending domain reads as its own finding rather than as "no domain". The
+   * merchant has done the work and is one DNS record short — telling them to
+   * "connect a domain you own" when they already tried is the kind of advice
+   * that teaches people to ignore the list.
+   */
+  if (s.domainStatus === "pending" && s.customDomain) {
+    findings.push({
+      code: "DOMAIN_NOT_VERIFIED",
+      severity: "warning",
+      component: "protocol_coverage",
+      title: `${s.customDomain} is connected but not verified`,
+      affectedFields: ["customDomain"],
+      evidence: [{ field: "domainStatus", current: "pending", expected: "verified" }],
+      recommendation:
+        "Publish the TXT record shown in the site's domain settings, then check again.",
+      expectedImpact:
+        "The domain does not serve this storefront until it verifies. Anyone visiting it now " +
+        "reaches nothing.",
+      scope,
+    });
+  } else if (!s.customDomain) {
     findings.push({
       code: "NO_CUSTOM_DOMAIN",
       severity: "opportunity",

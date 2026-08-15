@@ -31,6 +31,7 @@ import "./definitions/memberships";
 import "./definitions/billing";
 import "./definitions/integrations";
 import "./definitions/payments";
+import "./definitions/domains";
 
 export { defineAction, getAction, allActions, describeAction } from "./registry";
 export {

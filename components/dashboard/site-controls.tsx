@@ -13,7 +13,7 @@ import {
 import { THEMES } from "@/lib/storefront/themes";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { FieldError, Input, Label } from "@/components/ui/field";
+import { FieldError, Label } from "@/components/ui/field";
 import { Toggle } from "@/components/ui/toggle";
 
 export function SiteControls({ site }: { site: Site }) {
@@ -21,7 +21,6 @@ export function SiteControls({ site }: { site: Site }) {
   const [current, setCurrent] = useState(site);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [domain, setDomain] = useState(site.customDomain ?? "");
   const [pauseOpen, setPauseOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
@@ -118,27 +117,12 @@ export function SiteControls({ site }: { site: Site }) {
         </div>
       </section>
 
-      <section className="rounded-[var(--radius-card)] border border-border bg-surface p-5">
-        <Label htmlFor="custom-domain">Custom domain</Label>
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <Input
-            id="custom-domain"
-            value={domain}
-            onChange={(e) => setDomain(e.target.value)}
-            placeholder="shop.example.com"
-          />
-          <Button
-            variant="secondary"
-            className="shrink-0 whitespace-nowrap"
-            disabled={busy}
-            onClick={() =>
-              patch({ customDomain: domain.trim() ? domain.trim() : null })
-            }
-          >
-            Save domain
-          </Button>
-        </div>
-      </section>
+      {/*
+        The custom domain used to be a field on this form. It is not one any
+        more: it needs proof of ownership before anything routes, which is a
+        flow rather than a value. `SiteDomainCard` is rendered by the page,
+        beside this, so its DNS read happens on the server.
+      */}
 
       <section className="flex flex-wrap gap-2">
         {current.status !== "live" ? (

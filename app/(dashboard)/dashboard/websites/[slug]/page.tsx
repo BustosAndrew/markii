@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getSite, getSiteSummary } from "@/lib/api/server";
+import { getSite, getSiteDomain, getSiteSummary } from "@/lib/api/server";
 import { loadOrError } from "@/lib/api/load";
 import { Badge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { MoneyText } from "@/components/ui/money-text";
 import { PageHeader } from "@/components/ui/page-header";
 import { FetchError } from "@/components/dashboard/fetch-error";
 import { SiteControls } from "@/components/dashboard/site-controls";
+import { SiteDomainCard } from "@/components/dashboard/site-domain";
 
 export default async function WebsiteDetailPage({
   params,
@@ -36,6 +37,8 @@ export default async function WebsiteDetailPage({
     getSiteSummary(site.slug),
   );
   const summary = summaryResult.data;
+  // Reads DNS live on the server, so the panel never shows a stale "verified".
+  const domainResult = await loadOrError(() => getSiteDomain(site.slug));
 
   return (
     <div className="space-y-8">
@@ -115,6 +118,12 @@ export default async function WebsiteDetailPage({
           href={`/dashboard/orders/settlements/${site.slug}`}
         />
       </div>
+
+      <SiteDomainCard
+        site={site}
+        state={domainResult.data ?? null}
+        loadError={domainResult.error}
+      />
 
       <SiteControls site={site} />
     </div>

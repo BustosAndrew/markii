@@ -42,7 +42,17 @@ export const themeIdSchema = z.enum(["studio", "atlas", "noir", "bloom"]);
 export const siteCreateSchema = z.object({
   name: z.string().min(1).max(200),
   slug: slugSchema.optional(),
-  customDomain: z.string().max(255).nullish(),
+  /**
+   * **`customDomain` is deliberately absent**, for the same reason as
+   * `walletAddress` below: writing it here set the storefront routing table with
+   * no proof the merchant owned the hostname. One org could claim another
+   * company's domain and answer for it the moment DNS pointed at Markii, and
+   * nothing stopped two sites holding the same host — the resolver took
+   * whichever row the planner returned first.
+   *
+   * It now moves only through `domains.connect`, and only a domain whose TXT
+   * record has been verified resolves (migration 0031).
+   */
   status: z.enum(["draft", "live", "paused"]).optional(),
   themeId: themeIdSchema.optional(),
   indexed: z.boolean().optional(),
@@ -76,6 +86,9 @@ export const SITE_FIELDS_ELSEWHERE: Record<string, string> = {
   walletAddress:
     "The x402 payout address is set with the payments.connectRail action, which requires " +
     "billing permission and a fresh MFA challenge.",
+  customDomain:
+    "A custom domain is connected with the domains.connect action and starts serving only " +
+    "once domains.verify finds its DNS ownership record. Use domains.disconnect to remove one.",
 };
 
 /** Throws when a request body carries a field this route refuses to write. */

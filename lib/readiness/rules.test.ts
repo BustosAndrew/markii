@@ -38,6 +38,7 @@ const store = (over: Partial<StoreFacts> = {}): StoreFacts => ({
   walletAddress: "0xabc",
   orgWalletAddress: null,
   customDomain: "shop.example.test",
+  domainStatus: "verified",
   enabledProductCount: 4,
   sellsShippable: true,
   shippingZoneCount: 1,
@@ -252,6 +253,28 @@ describe("storeFindings", () => {
     expect(codes(found)).not.toContain("CARD_RAIL_UNAVAILABLE");
   });
 
+  it("tells an unverified domain apart from no domain at all", () => {
+    /**
+     * A merchant one DNS record short has done the work. Telling them to
+     * "connect a domain you own" when they already tried is the kind of advice
+     * that teaches people to ignore the list — and the pending case is the more
+     * urgent of the two, because anyone visiting the domain reaches nothing.
+     */
+    const pending = storeFindings(
+      store({ customDomain: "shop.example.test", domainStatus: "pending" }),
+    );
+    expect(codes(pending)).toContain("DOMAIN_NOT_VERIFIED");
+    expect(codes(pending)).not.toContain("NO_CUSTOM_DOMAIN");
+
+    const none = storeFindings(store({ customDomain: null, domainStatus: "none" }));
+    expect(codes(none)).toContain("NO_CUSTOM_DOMAIN");
+    expect(codes(none)).not.toContain("DOMAIN_NOT_VERIFIED");
+
+    const verified = storeFindings(store({ domainStatus: "verified" }));
+    expect(codes(verified)).not.toContain("DOMAIN_NOT_VERIFIED");
+    expect(codes(verified)).not.toContain("NO_CUSTOM_DOMAIN");
+  });
+
   it("every finding carries a recommendation and an impact", () => {
     // An issue a merchant cannot act on is noise. This is the property that
     // keeps the list useful rather than long.
@@ -265,6 +288,7 @@ describe("storeFindings", () => {
         status: "draft",
         indexed: false,
         customDomain: null,
+        domainStatus: "none",
       }),
     );
     expect(found.length).toBeGreaterThan(4);

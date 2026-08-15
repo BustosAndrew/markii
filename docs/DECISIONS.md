@@ -70,6 +70,48 @@ tests check `/api/me` returns 200 with the expected org and role before trusting
 
 ---
 
+### Custom domains need proof of ownership — closed 2026-08-14
+
+**`sites.custom_domain` was free text, and `proxy.ts` routes on it.** Any role with `cms.write`
+could write any hostname into the routing table, with nothing asking whether the org owned it. That
+is a claim on someone else's domain that lies dormant and activates on its own: a lapsed
+registration, a stale DNS record, a merchant part-way through migrating to Markii — the moment the
+host resolves here, the squatter's storefront answers for it.
+
+The column had no uniqueness either, and `resolveCustomDomain` takes `limit 1`. Two sites holding
+one hostname meant whichever row the planner returned won, and that could change between
+deployments — a coin-flip between two merchants' storefronts, with no error anywhere.
+
+Ownership is now a DNS **TXT** nonce at `_markii-verify.{domain}`, and **only a `verified` row
+resolves**. Four decisions inside that are worth keeping:
+
+- **The exclusivity index is partial** (`WHERE domain_status = 'verified'`). A global unique index
+  would let anyone park a *pending* claim on a hostname and lock its real owner out of ever
+  connecting it. Several orgs may hold unverified claims on the same host at once; only proof is
+  exclusive, and the index is where that is enforced rather than in a check-then-write that races.
+- **Ownership gates; pointing does not.** The CNAME/A record that actually delivers traffic is
+  *reported* (`pointsToMarkii`), never required. It propagates on its own schedule, and a domain
+  that is owned but not yet pointed simply receives nothing — failing verification on it would tell
+  a merchant who did everything right that they failed.
+- **Nothing ever un-verifies.** A DNS read that fails is recorded and not applied. Otherwise a
+  resolver blip during a routine check takes a live storefront offline, which is a far worse
+  outcome than a stale `verified` on a domain whose owner has moved on.
+- **`storefrontUrl` ignores an unverified domain.** It feeds the dashboard, order emails,
+  `llms.txt`, and every JSON-LD `url`. Printing a hostname that routes nothing would put a dead
+  address in front of shoppers and agents; the Markii subdomain always answers.
+
+Existing rows were **grandfathered where uncontested** — a live storefront must not go dark because
+verification arrived — and contested hostnames dropped to `pending` on both sides, since there is
+no honest way to pick a winner among claims that were never checked.
+
+**This is the fourth instance of the same shape** as the payout-address holes and the cross-tenant
+tier: a field reachable through `{ ...input }` on a route, with the check that should govern it
+living somewhere else or nowhere. `customDomain` now joins `walletAddress` in
+`SITE_FIELDS_ELSEWHERE` and is refused *by name*, and it moves only through `domains.*` in the
+action registry.
+
+---
+
 ### Cross-tenant tier hole — found and closed 2026-08-11
 
 **Adding membership fields to the product form opened a cross-tenant write.**

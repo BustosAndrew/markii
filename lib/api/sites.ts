@@ -17,16 +17,41 @@ export function getSite(idOrSlug: string, init?: RequestInit) {
   return apiGet<Site>(`/api/sites/${encodeURIComponent(idOrSlug)}`, undefined, init);
 }
 
-export function createSite(
-  body: Partial<Site> & { name: string },
-  init?: RequestInit,
-) {
+/**
+ * What these routes will actually write.
+ *
+ * `customDomain` and `walletAddress` are **refused by name**, not ignored: both
+ * need something a field assignment cannot express — proof of domain ownership,
+ * and a fresh MFA factor for a payout destination. Sending either is a `400`.
+ * They are excluded here so that is a type error rather than a runtime surprise.
+ *
+ * Use `lib/api/domains.ts` for the domain, `payments.connectRail` for the wallet.
+ */
+export type SiteWritable = Partial<
+  Omit<
+    Site,
+    | "id"
+    | "customDomain"
+    | "domainStatus"
+    | "domainVerifiedAt"
+    | "domainCheckedAt"
+    | "domainLastError"
+    | "walletAddress"
+    | "productCount"
+    | "categoryCount"
+    | "storefrontUrl"
+    | "createdAt"
+    | "updatedAt"
+  >
+>;
+
+export function createSite(body: SiteWritable & { name: string }, init?: RequestInit) {
   return apiPost<Site>("/api/sites", body, init);
 }
 
 export function updateSite(
   idOrSlug: string,
-  body: Partial<Site>,
+  body: SiteWritable,
   init?: RequestInit,
 ) {
   return apiPatch<Site>(

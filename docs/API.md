@@ -25,7 +25,7 @@ carry an explicit status — **never call a `PLANNED` endpoint and never fake it
 
 | § | Area | Status | Phase |
 |---|---|---|---|
-| 1–8 | Overview, sites, categories, products, import, analytics, finances, integrations | ✅ LIVE | — |
+| 1–8 | Overview, sites, categories, products, import, analytics, finances, integrations | ✅ LIVE. **Breaking, 2026-08-14:** `customDomain` is no longer a writable site field — the site routes refuse it by name and it moves through `domains.*` (§2). Only a **verified** domain routes | — |
 | 9 | Readiness & catalog health | ✅ LIVE — rule-based, deterministic, no model inference. Issues recomputed per request; only merchant decisions and daily score snapshots persist | **C** |
 | 10 | Channels | 🟡 PLANNED | E |
 | 11 | Product agent-data extension | 🟡 PLANNED | E |
@@ -122,7 +122,11 @@ Mode flag with a persistent indicator, and must never be presented as production
   id: number,
   name: string,
   slug: string,                  // used as subdomain: {slug}.markii.shop
-  customDomain: string | null,
+  customDomain: string | null,   // read-only here; set via domains.* (§2)
+  domainStatus: "none" | "pending" | "verified",
+  domainVerifiedAt: string | null,
+  domainCheckedAt: string | null,
+  domainLastError: string | null,
   status: "draft" | "live" | "paused",
   themeId: "studio" | "atlas" | "noir" | "bloom", // launch storefront theme; default "studio"
   indexed: boolean,              // include in sitemap / allow crawler indexing
@@ -260,6 +264,29 @@ One call powers the whole main dashboard grid.
 
 ## 2. Sites
 
+> ### Custom domains need proof of ownership (2026-08-14)
+>
+> `customDomain` **is no longer a writable site field**. `POST /api/sites` and
+> `PATCH /api/sites/:id` refuse it **by name** (`400`), the way they already refuse
+> `walletAddress`. It moves only through `domains.connect` / `domains.verify` /
+> `domains.disconnect`, and **only a verified domain routes**.
+>
+> It was free text that any `cms.write` role could set, and `proxy.ts` routes on it. So an org
+> could write a hostname it did not own into the routing table and answer for it the moment that
+> host pointed at Markii — a lapsed domain, stale DNS, a merchant mid-migration. Nothing enforced
+> uniqueness either, and the resolver takes `limit 1`: two sites holding one hostname meant
+> whichever row the planner returned won, and that could change between deployments.
+>
+> Ownership is a DNS **TXT** nonce at `_markii-verify.{domain}`. A partial unique index makes
+> `verified` exclusive; **pending claims are not exclusive**, so a squatter cannot park a claim to
+> lock the real owner out. Only proof is exclusive.
+>
+> **Ownership and pointing are separate facts and are never merged into one tick.** Ownership is
+> what Markii gates routing on; pointing (CNAME/A) is what actually delivers traffic. A domain can
+> be verified and still not answer, so `pointsToMarkii` is reported alongside the status — and
+> `storefrontUrl` falls back to the Markii subdomain until the domain is verified, because printing
+> an address that 404s into emails, `llms.txt`, and JSON-LD is worse than printing a plain one.
+
 ### `GET /api/sites`
 Query: `q`, `status` (`draft|live|paused`), `page`, `limit`, `sort` (`name|createdAt|-createdAt`).
 Returns paginated list of **Site** (includes computed counts — enough to render the grid cards).
@@ -276,27 +303,81 @@ Body (only `name` required; everything else defaults):
   "agentDiscovery": true,
   "purchasesEnabled": true,
   "paymentProviders": { "x402": true, "stripe": false },
-  "customDomain": null,
   "status": "draft"                // wizard's "save for later" = draft, "deploy" = live
 }
 ```
 
-→ `201` **Site**. `409 CONFLICT` if slug taken.
+→ `201` **Site**. `409 CONFLICT` if slug taken. `400` if the body carries `customDomain` or
+`walletAddress` — both are refused by name, not stripped (a caller who thinks they set a payout
+destination or a domain and did not is worse off than one who got an error).
 
 ### `GET /api/sites/:idOrSlug`
 → **Site** (with counts and `storefrontUrl`).
 
 ### `PATCH /api/sites/:idOrSlug`
-Any subset of the `POST` fields plus `status`, `walletAddress`, `googleSiteVerification`,
-`themeId`. Use this for every toggle on the website slug page:
+Any subset of the `POST` fields plus `status`, `googleSiteVerification`, `themeId`. Use this for
+every toggle on the website slug page:
 
 - pause/enable site → `{ "status": "paused" }` / `{ "status": "live" }`
 - indexed toggle → `{ "indexed": false }`
 - agent discovery / purchases → `{ "agentDiscovery": false }`, `{ "purchasesEnabled": false }`
 - payment providers → `{ "paymentProviders": { "x402": true, "stripe": true } }`
-- custom domain → `{ "customDomain": "shop.example.com" }`
+- custom domain → **not here.** `domains.connect`, then `domains.verify` (see below)
+- x402 payout address → **not here.** `payments.connectRail`
 
-→ `200` **Site**.
+→ `200` **Site**. `400` on `customDomain` or `walletAddress`.
+
+### `GET /api/sites/:idOrSlug/domain` — ✅ LIVE
+
+Custom domain status for one storefront. **Reads DNS live on every call** — a stored
+"verified" ages into a claim about the present that nobody re-tested, and this is the surface
+where being wrong means telling a merchant their storefront is reachable when it is not.
+
+```jsonc
+{
+  "siteId": 1,
+  "domain": "shop.example.com",   // null when none is connected
+  "status": "pending",            // none | pending | verified — only verified routes
+  "verifiedAt": null,
+  "checkedAt": "2026-08-14T…",    // when domains.verify last ran; null = never
+  "problem": "No TXT record found at _markii-verify.shop.example.com…",
+  "records": [
+    { "type": "TXT",   "name": "_markii-verify.shop.example.com",
+      "value": "markii-domain-verification=…", "purpose": "ownership" },
+    { "type": "CNAME", "name": "shop.example.com",
+      "value": "cname.vercel-dns.com", "purpose": "pointing" }
+  ],
+  "pointsToMarkii": false,        // read live; `verified` + this is what "reachable" means
+  "lookupProblem": null,          // set only when DNS itself was unreachable
+  "expectedTarget": "cname.vercel-dns.com"
+}
+```
+
+An **apex** domain gets `A` records instead of a `CNAME`. The suggestion is label-count based and
+therefore wrong for `acme.co.uk` — deliberately, since it only orders the table: verification
+accepts either record regardless, so being wrong costs a merchant one extra row to read.
+
+Deployment targets come from `SITE_DOMAIN_CNAME_TARGET` / `SITE_DOMAIN_A_RECORD`, which default to
+Vercel's documented values. They change **what the merchant is told to publish**, never whether a
+domain verifies — ownership is the only gate.
+
+### Domain actions (§22)
+
+| Action | Permission | Risk | Notes |
+|---|---|---|---|
+| `domains.connect` | `cms.write` | medium | Claims the hostname and returns the records. **Connecting is not connecting traffic** — the row lands `pending` and routes nothing. `409` only when another storefront has *verified* it; a pending claim elsewhere is not a conflict. Re-connecting an already-verified domain is a no-op rather than a token reset, which would take a live storefront offline. A dry run shows the records with a placeholder token and writes nothing |
+| `domains.verify` | `cms.write` | low | Re-reads DNS. **Pull, not push** — nothing here schedules jobs, so this is what advances a claim. A DNS failure is *reported*, never applied: nothing ever moves a domain from `verified` back down, or a resolver blip would take a live store offline. A dry run still reads DNS — reads leave nothing behind, and refusing to look would make the proposal useless |
+| `domains.disconnect` | `cms.write` | **high** | Nothing errors; traffic simply stops arriving and every inbound link, search result, and agent citation on that domain breaks at once. `stoppedServing` distinguishes a live removal from an abandoned claim |
+
+None requires MFA step-up. Step-up guards money and access (D40), and taking over a hostname
+already requires control of its DNS — a second factor here would add a prompt without adding a
+barrier, and a prompt that fires on routine work is one people learn to click through.
+
+**Verified end to end** — `tests/integration/domains.test.ts` (13 tests): the by-name refusal on
+both site routes with the row asserted unchanged in the database, a real DNS lookup that finds
+nothing and leaves the status alone, a verified domain that survives that same failed lookup, two
+orgs holding pending claims on one hostname, a `409` once one of them verifies, and a `23505` raised
+by Postgres when a second row tries to verify the same host.
 
 ### `DELETE /api/sites/:idOrSlug`
 Cascades: deletes the site's categories, products, and traffic; orders are kept (site
@@ -314,8 +395,12 @@ Cards for the website slug page:
 ```
 
 ### `POST /api/sites/:idOrSlug/deploy`
-Marks the site `live` (and, when the Vercel domain integration lands, attaches the custom
-domain). → `200` `{ "status": "live", "storefrontUrl": "https://demo-store.markii.shop" }`
+Marks the site `live`. → `200` `{ "status": "live", "storefrontUrl": "https://demo-store.markii.shop" }`
+
+Deploying does **not** attach a custom domain and never has. A domain is attached by
+`domains.connect` and starts serving when it verifies, so `storefrontUrl` here is the custom domain
+only if it was already verified — an unverified claim routes nothing and must not be printed as an
+address.
 
 ### Previews (create-site wizard live panes)
 

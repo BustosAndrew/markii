@@ -187,6 +187,26 @@ close. Every mutating route now passes a permission; only `actions/[id]` and
 refused **by name** on the site routes and moves only through `payments.connectRail` (D-entry in
 `docs/DECISIONS.md`).
 
+**Custom storefront domains are verified as of 2026-08-14, and that closed the same shape of hole
+one more time.** `sites.customDomain` was free text any `cms.write` role could write, and `proxy.ts`
+routes on it — so an org could claim a hostname it did not own and answer for it the moment that
+host pointed here. There was no uniqueness either, so two sites holding one hostname was decided by
+whichever row the planner returned. Ownership is now a DNS **TXT** nonce at `_markii-verify.{domain}`
+(`lib/domains/`), the field is refused **by name** on both site routes, and it moves only through
+`domains.connect` / `verify` / `disconnect`. **Only a `verified` row resolves**, and the exclusivity
+index is **partial** so a pending claim cannot lock the real owner out — only proof is exclusive.
+**Ownership gates, pointing does not**: the CNAME/A record is reported (`pointsToMarkii`), never
+required, because it propagates on its own schedule. Nothing ever un-verifies — a failed DNS read is
+recorded, not applied, or a resolver blip would take a live store offline. `storefrontUrl` ignores an
+unverified domain for the same reason it ignores nothing else: it feeds order email, `llms.txt`, and
+every JSON-LD `url`.
+
+**Migration 0031 is applied and the path is verified end to end** —
+`tests/integration/domains.test.ts`, 13 tests, including a real DNS lookup that finds nothing, a
+second org holding a pending claim on the same hostname, and a `23505` raised by Postgres when a
+second row tries to verify one. The `storefrontUrl` gate was **falsified deliberately**: removing it
+fails the suite, which is the check this repo's own history says to make before trusting a green run.
+
 **The test that should have caught it was passing for the wrong reason**, which is the more useful
 lesson: the integration `Client` replaced its whole cookie jar on every `Set-Cookie`, so after
 `POST /api/org/switch` the auth cookies were dropped and everything 401'd — and `refused()` accepts
@@ -287,7 +307,9 @@ campaigns. Rationale in `docs/DECISIONS.md` §G10.
   (every storefront 404s). `%5F` is the documented escape hatch; the public URL is
   still `/_sites/{slug}/…`.
 - `proxy.ts` — Host-header → site rewrite (platform hosts pass through; `{slug}.{ROOT_DOMAIN}`,
-  `{slug}.localhost`, custom domains → `/_sites/[slug]`)
+  `{slug}.localhost`, **verified** custom domains → `/_sites/[slug]`). Resolution and its cache live
+  in `lib/domains/index.ts`, which **must never import `node:dns`** — it is in the proxy bundle; the
+  verification lookups are in `lib/domains/verification.ts`, which the proxy never touches
 - `lib/` — Drizzle schema (`db/`), api helpers, queries/serializers, importer, x402,
   generators, integrations, storefront loader; FE-only client helpers under `lib/api/`
 

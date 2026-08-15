@@ -3,7 +3,6 @@ import { NextResponse } from "next/server";
 import { badRequest, conflict, pagination, slugify } from "@/lib/api";
 import { orgHandler } from "@/lib/auth/handler";
 import { db, sites } from "@/lib/db";
-import { invalidateCustomDomain } from "@/lib/domains";
 import { serializeSite, serializeSites } from "@/lib/queries";
 import { ownSitesForStaff } from "@/lib/tenancy";
 import { assertNoRedirectedSiteFields, siteCreateSchema } from "@/lib/validation";
@@ -51,8 +50,9 @@ export const GET = orgHandler(async (req, { session, orgId }) => {
 export const POST = orgHandler(
   async (req, { orgId }) => {
     const body = await req.json();
-    // Same refusal as PATCH: a payout address is set through the action that
-    // demands billing permission and a fresh factor, never as a site field.
+    // Same refusal as PATCH. A payout address is set through the action that
+    // demands billing permission and a fresh factor; a custom domain through the
+    // one that demands proof of ownership. Neither is a site field.
     assertNoRedirectedSiteFields(body);
     const input = siteCreateSchema.parse(body);
     const slug = input.slug ?? slugify(input.name);
@@ -69,8 +69,8 @@ export const POST = orgHandler(
       // orgId comes from the session, never the request body (§16).
       .values({ ...input, slug, orgId })
       .returning();
-    // Clears any negative entry cached while the host was still unconnected.
-    invalidateCustomDomain(row.customDomain);
+    // No cache invalidation here: a new site cannot carry a custom domain. One is
+    // attached afterwards through `domains.connect`, which invalidates its own.
     return NextResponse.json(await serializeSite(row), { status: 201 });
   },
   { permission: "cms.write" },

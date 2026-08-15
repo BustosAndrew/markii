@@ -218,6 +218,13 @@
       "when": 1786172435149,
       "tag": "0030_mfa_recovery_codes",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1786769274774,
+      "tag": "0031_site_domain_verification",
+      "breakpoints": true
     }
   ]
 }

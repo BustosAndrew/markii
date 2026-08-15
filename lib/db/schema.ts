@@ -40,7 +40,39 @@ export const sites = pgTable(
       .references(() => organizations.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     slug: text("slug").notNull(),
+    /**
+     * The merchant's own hostname, lowercased and bare — `shop.acme.com`.
+     *
+     * **Set only through `domains.connect`**, never as a site field: the routes
+     * refuse it by name (`SITE_FIELDS_ELSEWHERE`). It used to be plain text any
+     * role could write, which meant one org could claim a hostname belonging to
+     * another and answer for it the moment DNS pointed here.
+     */
     customDomain: text("custom_domain"),
+    /**
+     * Whether ownership of `customDomain` has been proved (migration 0031).
+     *
+     * **Only `verified` resolves.** `pending` is a claim, and a claim is not
+     * evidence: several orgs may hold a pending claim on the same hostname at
+     * once, which is exactly what stops a squatter from locking out the real
+     * owner. A partial unique index makes `verified` exclusive.
+     */
+    domainStatus: text("domain_status", { enum: ["none", "pending", "verified"] })
+      .notNull()
+      .default("none"),
+    /**
+     * The nonce published as a DNS TXT record to prove control of the domain.
+     *
+     * Per site rather than per org: two sites in one org claiming the same
+     * hostname is still two claims, and one token shared between them would
+     * verify both.
+     */
+    domainVerificationToken: text("domain_verification_token"),
+    domainVerifiedAt: timestamp("domain_verified_at", { withTimezone: true }),
+    /** When DNS was last read. Distinguishes "never checked" from "checked, not there yet". */
+    domainCheckedAt: timestamp("domain_checked_at", { withTimezone: true }),
+    /** Why the last check did not verify, in words a merchant can act on. */
+    domainLastError: text("domain_last_error"),
     status: text("status", { enum: ["draft", "live", "paused"] })
       .notNull()
       .default("draft"),
@@ -61,7 +93,20 @@ export const sites = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex("sites_slug_uq").on(t.slug), index("sites_org_idx").on(t.orgId)],
+  (t) => [
+    uniqueIndex("sites_slug_uq").on(t.slug),
+    index("sites_org_idx").on(t.orgId),
+    /** Read on every custom-domain request, before anything renders. */
+    index("sites_custom_domain_idx").on(t.customDomain),
+    /**
+     * A verified domain belongs to exactly one site — enforced here rather than
+     * in application code, because the check and the write would otherwise race
+     * and two storefronts would answer for one hostname.
+     */
+    uniqueIndex("sites_custom_domain_verified_uq")
+      .on(t.customDomain)
+      .where(sql`${t.domainStatus} = 'verified'`),
+  ],
 );
 
 export const categories = pgTable(

@@ -266,6 +266,46 @@ Two knock-on details worth having:
   no screen calls it. If a billing-ops screen is ever wanted, ask first — it needs the platform
   secret, not a merchant session.
 
+### 🔴 Custom domains are verified now — and `customDomain` stopped being a writable field (2026-08-14)
+
+**Breaking, and it is a type error, not a surprise at runtime.** `createSite` and `updateSite` take
+`SiteWritable` (`lib/api/sites.ts`), which **omits** `customDomain` — sending it is a `400`, refused
+by name rather than stripped, exactly like `walletAddress`. Two screens sent it and both are updated:
+the create-website wizard now claims the domain after the site exists, and the website detail page
+uses the new panel.
+
+It was free text that any `cms.write` role could write straight into the routing table with no proof
+of ownership — so one org could claim a hostname belonging to somebody else and answer for it the
+moment that host pointed at Markii. Ownership is now a DNS TXT record.
+
+New service `lib/api/domains.ts` (`DOMAINS_API_LIVE = true`) and a new server loader
+`getSiteDomain(slug)` in `lib/api/server.ts`:
+
+| Call | What it is |
+|---|---|
+| `getSiteDomain(slug)` | Status + the records to publish. **Reads DNS live**, so fetch it on the server and pass it down — do not poll it from a client effect |
+| `connectDomain({ siteId, domain })` | Claims it. `409` only if another storefront **verified** it |
+| `verifyDomain({ siteId })` | The "Check DNS" button. Pull, not push — nothing polls for the merchant |
+| `disconnectDomain({ siteId })` | High risk. `stoppedServing` tells a live removal from an abandoned claim |
+
+Three rules for any screen that touches this, all of them the same rule:
+
+- **Never render a `pending` domain as the store's address.** It routes nothing. `Site.storefrontUrl`
+  already falls back to the Markii subdomain until the domain verifies — trust it rather than
+  building the URL from `customDomain` yourself.
+- **Ownership and pointing are two facts, never one tick.** `status: "verified"` means Markii will
+  route the host; `pointsToMarkii` means the merchant's DNS actually sends traffic here. Only both
+  together mean the storefront answers. A merchant who published one record and not the other needs
+  to be told *which*.
+- **A missing record is the normal first answer, not a failure.** Propagation takes up to an hour.
+  `checked: false` is the real error case — DNS was unreachable — and it never downgrades a verified
+  domain.
+
+`Site` gains `domainStatus`, `domainVerifiedAt`, `domainCheckedAt`, `domainLastError`. Readiness
+gains **`DOMAIN_NOT_VERIFIED`** (warning), which replaces `NO_CUSTOM_DOMAIN` for a pending claim —
+telling someone to "connect a domain you own" when they already tried is how a checklist teaches
+people to ignore it.
+
 ### The threshold meter is still the screen most easily made dishonest
 
 `docs/PRICING.md` §6 is required reading before you write it. The three rules that matter:

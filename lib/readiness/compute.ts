@@ -194,6 +194,7 @@ async function loadFacts(orgId: string, filters: ReadinessFilters) {
       walletAddress: s.walletAddress,
       orgWalletAddress: orgWallet,
       customDomain: s.customDomain,
+      domainStatus: s.domainStatus,
       enabledProductCount: mine.filter((p) => p.enabled).length,
       sellsShippable: mine.some((p) => p.enabled && p.variants.some((v) => v.requiresShipping)),
       shippingZoneCount: myZones.length,

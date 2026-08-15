@@ -10,6 +10,7 @@ import {
   type PreviewResponse,
 } from "@/lib/api/preview";
 import { createCategory } from "@/lib/api/categories";
+import { connectDomain } from "@/lib/api/domains";
 import { createProduct } from "@/lib/api/products";
 import { createSite, deploySite } from "@/lib/api/sites";
 import {
@@ -51,6 +52,13 @@ export function CreateWebsiteWizard({ sites }: { sites: Site[] }) {
   const [step, setStep] = useState<Step>(1);
   const [draft, setDraft] = useState<PreviewDraft>(emptyDraft);
   const [customDomain, setCustomDomain] = useState("");
+  /**
+   * Set only when the site saved but its domain claim did not. Two separate
+   * outcomes, so they get two separate messages — "Save failed" would be untrue
+   * and would invite the merchant to run the whole wizard again.
+   */
+  const [domainNote, setDomainNote] = useState<string | null>(null);
+  const [savedSlug, setSavedSlug] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
   const [previewTab, setPreviewTab] = useState<
     "html" | "llms" | "agent" | "sitemap"
@@ -210,9 +218,29 @@ export function CreateWebsiteWizard({ sites }: { sites: Site[] }) {
         agentDiscovery: true,
         purchasesEnabled: true,
         paymentProviders: { x402: true, stripe: false },
-        customDomain: customDomain.trim() || null,
         status: "draft",
       });
+
+      /**
+       * The domain is claimed after the site exists, and claiming is all it is:
+       * it does not serve traffic until the merchant publishes a DNS record and
+       * verifies. A failure here must not lose the site and everything else the
+       * wizard just created, so it is reported and the flow continues — the
+       * site's own settings page is where the claim is finished anyway.
+       */
+      let domainFailed = false;
+      if (customDomain.trim()) {
+        try {
+          await connectDomain({ siteId: site.id, domain: customDomain.trim() });
+        } catch (err) {
+          domainFailed = true;
+          setDomainNote(
+            err instanceof ApiClientError
+              ? `The site was created, but the domain was not connected: ${err.message}`
+              : "The site was created, but the domain was not connected.",
+          );
+        }
+      }
 
       const categoryIdBySlug = new Map<string, number>();
       for (const cat of draft.categories) {
@@ -243,6 +271,14 @@ export function CreateWebsiteWizard({ sites }: { sites: Site[] }) {
 
       if (mode === "live") {
         await deploySite(site.slug);
+      }
+
+      // Navigating away on a failed domain claim would erase the only notice
+      // the merchant gets that one part of what they asked for did not happen.
+      if (domainFailed) {
+        setSavedSlug(site.slug);
+        setBusy(false);
+        return;
       }
 
       router.push(`/dashboard/websites/${site.slug}`);
@@ -566,21 +602,42 @@ export function CreateWebsiteWizard({ sites }: { sites: Site[] }) {
             />
           </div>
           <p className="text-sm text-muted">
+            A domain does not serve the store until you publish a DNS record proving you own it.
+            You will get the records to publish on the site&rsquo;s settings page.
+          </p>
+          <p className="text-sm text-muted">
             Save keeps the site as <span className="text-foreground">draft</span>.
             Deploy marks it <span className="text-foreground">live</span>.
           </p>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant="secondary"
-              disabled={busy}
-              onClick={() => void persist("draft")}
-            >
-              {busy ? "Saving…" : "Save for later"}
-            </Button>
-            <Button disabled={busy} onClick={() => void persist("live")}>
-              {busy ? "Deploying…" : "Deploy site"}
-            </Button>
-          </div>
+          {domainNote ? (
+            <div className="space-y-2 rounded-[var(--radius-control)] border border-border p-3 text-sm">
+              <p className="text-muted">{domainNote}</p>
+              {savedSlug ? (
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    router.push(`/dashboard/websites/${savedSlug}`);
+                    router.refresh();
+                  }}
+                >
+                  Go to the website
+                </Button>
+              ) : null}
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="secondary"
+                disabled={busy}
+                onClick={() => void persist("draft")}
+              >
+                {busy ? "Saving…" : "Save for later"}
+              </Button>
+              <Button disabled={busy} onClick={() => void persist("live")}>
+                {busy ? "Deploying…" : "Deploy site"}
+              </Button>
+            </div>
+          )}
         </section>
       ) : null}
 
