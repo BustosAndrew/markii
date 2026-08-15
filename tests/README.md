@@ -204,6 +204,26 @@ would verify. That still depends on a mode-matched secret (`docs/BACKEND.md`).
 Events use `livemode: false` to match a test-mode key. A live-mode event is turned away by the mode
 gate before any handler runs — which is itself what `stripe-webhook-mode.test.ts` asserts.
 
+## ⚠️ Run the dev server without `VERCEL_TOKEN`
+
+`domains.verify` attaches a verified hostname to the **real Vercel project** as a post-commit
+effect (API §2 step two). `domains.test.ts` verifies a domain and re-verifies it, so with
+`VERCEL_TOKEN` and `VERCEL_PROJECT_ID` present in `.env.local` the suite attaches a throwaway
+`shop-….example.com` to the live project — against its plan's domain allowance.
+
+The suite's own `domains.disconnect` detaches it again, so a clean run leaves nothing behind. **A
+run that fails partway does not**, and that is the case worth designing for.
+
+```bash
+VERCEL_TOKEN= DEMO_SKIP_PAYMENT_VERIFICATION=1 ROOT_DOMAIN=localhost pnpm dev
+```
+
+Unset, the platform path is still *exercised* — it returns `configuration_required`, and the tests
+assert that a verified domain is never reported as serving without it, which is the failure that
+actually matters. The Vercel request shapes themselves are covered by `lib/domains/platform.test.ts`
+with `fetch` stubbed. Set the token on the dev server only when deliberately testing the live hop,
+and check the project's domain list afterwards.
+
 ## Tests that call Stripe — opt-in again
 
 `stripe-fee-invoice.test.ts` is the one file that talks to **Stripe's real API**.

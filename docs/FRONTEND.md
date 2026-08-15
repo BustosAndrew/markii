@@ -301,10 +301,15 @@ Three rules for any screen that touches this, all of them the same rule:
 - **A missing record is the normal first answer, not a failure.** Propagation takes up to an hour.
   `checked: false` is the real error case — DNS was unreachable — and it never downgrades a verified
   domain.
-- **⛔ Do not call a verified domain "live".** Verification is step one of two: it does not register
-  the domain with Vercel, and Vercel rejects an unregistered hostname at the edge, so a domain can
-  read `verified` + `pointsToMarkii: true` and still not serve. Copy should say *verified*, never
-  *live* or *connected*, until platform registration is built (`docs/API.md` §2).
+- **Three facts now, not two.** `SiteDomain.platform` is the one that decides whether the storefront
+  actually answers: Vercel rejects a hostname not registered to the project at its edge and issues no
+  certificate. It is `null` until the domain verifies (correct, not a failure), and `registered:
+  null` means **unknown** — the platform was unreachable — which must not render as "not registered".
+  `configured: false` is **Markii's** problem, not the merchant's; word it that way, the same
+  distinction `customerEmail.code` draws on the email screen.
+- **`platformRegistration: "queued"` from `verifyDomain` means attempted, not done.** It runs after
+  the transaction commits, so the action cannot know the outcome. Never render it as success —
+  re-read `getSiteDomain`.
 
 **`/dashboard/settings/domains` is a real screen now**, not a `ComingSoon`. It is an *overview*, not
 a control panel: connecting and verifying stay on the storefront's own page, because the DNS records

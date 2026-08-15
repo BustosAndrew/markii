@@ -347,11 +347,35 @@ where being wrong means telling a merchant their storefront is reachable when it
     { "type": "CNAME", "name": "shop.example.com",
       "value": "cname.vercel-dns.com", "purpose": "pointing" }
   ],
-  "pointsToMarkii": false,        // read live; `verified` + this is what "reachable" means
+  "pointsToMarkii": false,        // read live: does DNS send traffic to Vercel's edge?
   "lookupProblem": null,          // set only when DNS itself was unreachable
+  "platform": null,               // null until verified — see below
   "expectedTarget": "cname.vercel-dns.com"
 }
 ```
+
+**Three facts, never merged into one tick.** They fail independently and a merchant needs to know
+which one is missing:
+
+| Field | Question it answers | Who fixes it |
+|---|---|---|
+| `status` | Has the merchant proved they own the hostname? | Merchant (publish TXT) |
+| `pointsToMarkii` | Does their DNS send traffic to Vercel's edge? | Merchant (CNAME/A) |
+| `platform` | Will Vercel accept it and serve HTTPS for it? | **Markii** |
+
+`platform` is `null` until the domain verifies — Markii does not register a hostname before
+ownership is proved, so "not registered" on a pending claim would read as a failure when it is the
+correct state. Once present:
+
+```jsonc
+{ "configured": true, "registered": true, "misconfigured": false, "problem": null }
+```
+
+`registered: null` means **unknown**, not false — the platform was unreachable, and rendering that
+as "not registered" sends a merchant off to fix DNS that is fine. `configured: false` means Markii
+has no platform credentials, which the merchant can do nothing about; phrase it accordingly.
+`misconfigured` is Vercel's own view of the DNS and may legitimately disagree with `pointsToMarkii`
+while records propagate.
 
 An **apex** domain gets `A` records instead of a `CNAME`. The suggestion is label-count based and
 therefore wrong for `acme.co.uk` — deliberately, since it only orders the table: verification
@@ -397,8 +421,8 @@ anyone must act on.
 | Action | Permission | Risk | Notes |
 |---|---|---|---|
 | `domains.connect` | `cms.write` | medium | Claims the hostname and returns the records. **Connecting is not connecting traffic** — the row lands `pending` and routes nothing. `409` only when another storefront has *verified* it; a pending claim elsewhere is not a conflict. Re-connecting an already-verified domain is a no-op rather than a token reset, which would take a live storefront offline. A dry run shows the records with a placeholder token and writes nothing |
-| `domains.verify` | `cms.write` | low | Re-reads DNS. **Pull, not push** — nothing here schedules jobs, so this is what advances a claim. A DNS failure is *reported*, never applied: nothing ever moves a domain from `verified` back down, or a resolver blip would take a live store offline. A dry run still reads DNS — reads leave nothing behind, and refusing to look would make the proposal useless |
-| `domains.disconnect` | `cms.write` | **high** | Nothing errors; traffic simply stops arriving and every inbound link, search result, and agent citation on that domain breaks at once. `stoppedServing` distinguishes a live removal from an abandoned claim |
+| `domains.verify` | `cms.write` | low | Re-reads DNS. **Pull, not push** — nothing here schedules jobs, so this is what advances a claim. A DNS failure is *reported*, never applied: nothing ever moves a domain from `verified` back down, or a resolver blip would take a live store offline. A dry run still reads DNS — reads leave nothing behind, and refusing to look would make the proposal useless. On success it queues platform registration as a post-commit effect, so `platformRegistration: "queued"` means **attempted, not done** — re-read the domain endpoint for the outcome |
+| `domains.disconnect` | `cms.write` | **high** | Nothing errors; traffic simply stops arriving and every inbound link, search result, and agent citation on that domain breaks at once. `stoppedServing` distinguishes a live removal from an abandoned claim. Also detaches from the platform — a hostname left attached blocks the merchant from using it anywhere else |
 
 None requires MFA step-up. Step-up guards money and access (D40), and taking over a hostname
 already requires control of its DNS — a second factor here would add a prompt without adding a
@@ -432,16 +456,24 @@ Deploying does **not** attach a custom domain and never has. `storefrontUrl` her
 domain only if it was already verified — an unverified claim routes nothing and must not be printed
 as an address.
 
-> **⛔ Verification is step one of two, and step two does not exist yet.** Verifying proves the
-> merchant owns the hostname and makes Markii willing to route it. It does **not** register the
-> domain with the hosting platform, and nothing in the tree calls the Vercel domains API. On Vercel,
-> a hostname not registered to the project is rejected at the edge — the request never reaches
-> `proxy.ts` — and no TLS certificate is ever issued for it.
+> **Serving a custom domain is two steps, and they fail differently.** Verifying proves the merchant
+> owns the hostname, which is what makes Markii willing to route it. **Registering** attaches it to
+> the Vercel project, which is what makes the request arrive at all — Vercel matches the `Host`
+> header against domains registered to a project and rejects the rest at its edge, before `proxy.ts`
+> runs, issuing no TLS certificate for them.
 >
-> So on a Vercel deployment a domain can be `verified` with `pointsToMarkii: true` and still not
-> serve. Local and self-hosted deployments that route by `Host` header are unaffected; this is
-> specifically the managed-platform hop. **Do not describe a verified domain as live** until the
-> registration step is built.
+> Both are built. Registration runs as a **post-commit effect of `domains.verify`**, on every
+> successful verify rather than only the first, so "Check DNS" is also the repair path for a
+> registration that failed earlier. `domains.disconnect` detaches, or the hostname stays bound to
+> Markii's project and the merchant cannot attach it anywhere else.
+>
+> **Ordering is a security property.** Registration happens only *after* the TXT record proves
+> ownership — registering on claim would let anyone add any hostname to Markii's Vercel project,
+> against its plan limit, on nothing more than a form submission.
+>
+> Needs `VERCEL_TOKEN` and `VERCEL_PROJECT_ID` (plus `VERCEL_TEAM_ID` for team projects). **Unset,
+> a verified domain still does not serve** — and the API says exactly that
+> (`platform.configured: false`) rather than reporting the domain as working.
 
 ### Previews (create-site wizard live panes)
 

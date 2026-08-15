@@ -148,6 +148,12 @@ describe("custom domain verification", () => {
     expect(res.json).toHaveProperty("pointsToMarkii");
     expect(res.json.pointsToMarkii).toBe(false);
     expect(res.json.records.some((r: any) => r.purpose === "pointing")).toBe(true);
+    /**
+     * Null while unverified, and that is the correct state rather than a
+     * failure: Markii does not attach a hostname to its hosting project before
+     * ownership is proved, so "not registered" here would be misread as broken.
+     */
+    expect(res.json.platform).toBeNull();
   }, 60_000);
 
   it("lists every storefront org-wide, without claiming a live reading", async () => {
@@ -256,6 +262,36 @@ describe("custom domain verification", () => {
 
     const [row] = await sql`select domain_status from sites where id = ${site.id}`;
     expect(row.domain_status).toBe("verified");
+
+    /**
+     * Registration is a post-commit effect, so the only honest word here is
+     * "attempted". Without platform credentials it must say so plainly rather
+     * than claim the domain is serving — this deployment has none.
+     */
+    expect(["queued", "configuration_required"]).toContain(
+      res.json.result.platformRegistration,
+    );
+  }, 60_000);
+
+  it("never reports a verified domain as serving without platform credentials", async () => {
+    /**
+     * The trap this closes: ownership proved and DNS pointed, so two of three
+     * ticks are green — and the storefront still answers nothing, because
+     * Vercel drops a hostname that is not registered to the project. The
+     * response must carry that third fact rather than let a screen infer
+     * success from the absence of a problem.
+     */
+    const res = await merchant.get(`/api/sites/${site.id}/domain`);
+    expect(res.status).toBe(200);
+    expect(res.json.status).toBe("verified");
+    expect(res.json.platform, "a verified domain must report platform state").not.toBeNull();
+
+    if (!res.json.platform.configured) {
+      // Unknown, never false — and the message must not read as the merchant's
+      // task, because a missing credential is not theirs to fix.
+      expect(res.json.platform.registered).toBeNull();
+      expect(res.json.platform.problem).toMatch(/Markii's to fix/);
+    }
   }, 60_000);
 
   it("writes nothing on a dry run", async () => {

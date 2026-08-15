@@ -201,12 +201,18 @@ recorded, not applied, or a resolver blip would take a live store offline. `stor
 unverified domain for the same reason it ignores nothing else: it feeds order email, `llms.txt`, and
 every JSON-LD `url`.
 
-**Verification is step one of two, and step two is not built.** Verifying proves ownership and makes
-Markii willing to route the host; it does **not** register the domain with the hosting platform.
-Nothing calls the Vercel domains API, and Vercel rejects an unregistered hostname at the edge — the
-request never reaches `proxy.ts` and no TLS certificate is issued. So on Vercel a domain can read
-`verified` with `pointsToMarkii: true` and still not serve. **Do not call a verified domain live**
-until platform registration exists (`docs/API.md` §2).
+**Serving a custom domain is two steps and both are built.** Verifying proves ownership, which makes
+Markii willing to route the host. **Registering** (`lib/domains/platform.ts`) attaches it to the
+Vercel project, which is what makes the request arrive at all — Vercel rejects an unregistered
+hostname at its edge, before `proxy.ts` runs, and issues no TLS certificate. Registration is a
+**post-commit effect of `domains.verify`**, re-attempted on every verify so "Check DNS" is also the
+repair path; `domains.disconnect` detaches. **Ordering is a security property**: registering on
+*claim* would let anyone add any hostname to Markii's Vercel project on a form submission.
+
+`VERCEL_TOKEN` + `VERCEL_PROJECT_ID` gate it, and **unset, a verified domain still does not serve** —
+the API reports `platform.configured: false` rather than calling the domain working. So the status
+surface now carries **three** facts that fail independently — ownership (merchant), pointing
+(merchant), platform (Markii) — and they are never merged into one tick.
 
 **Migration 0031 is applied and the path is verified end to end** —
 `tests/integration/domains.test.ts`, 13 tests, including a real DNS lookup that finds nothing, a

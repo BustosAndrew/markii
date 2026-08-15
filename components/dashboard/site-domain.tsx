@@ -187,6 +187,20 @@ function DomainState({ state }: { state: SiteDomain }) {
             : `not pointing here yet — traffic will not arrive until it does`}
         </span>
       </p>
+      {/*
+        The third line, and the one that actually decides whether the storefront
+        answers. Only shown once ownership is proved, because Markii does not
+        register a hostname with the platform before then — showing "not
+        attached" on a pending claim would read as a failure when it is correct.
+      */}
+      {state.platform ? (
+        <p>
+          <span className={platformOk(state.platform) ? "text-foreground" : "text-muted"}>
+            {platformOk(state.platform) ? "✓" : "○"} Serving
+          </span>{" "}
+          <span className="text-muted">{platformNote(state.platform)}</span>
+        </p>
+      ) : null}
       {state.problem ? <p className="text-muted">{state.problem}</p> : null}
       {state.lookupProblem ? (
         <p className="text-muted">
@@ -195,6 +209,31 @@ function DomainState({ state }: { state: SiteDomain }) {
       ) : null}
     </div>
   );
+}
+
+/** Only a domain the platform has accepted *and* is not flagging can serve. */
+function platformOk(p: NonNullable<SiteDomain["platform"]>): boolean {
+  return p.configured && p.registered === true && p.misconfigured !== true;
+}
+
+/**
+ * Whose problem it is, in the merchant's terms.
+ *
+ * `configured: false` is **Markii's** — the merchant has done everything right
+ * and cannot fix a missing platform credential, so it must not read as a task
+ * for them. That distinction is the same one `customerEmail.code` draws on the
+ * email screen, and for the same reason.
+ */
+function platformNote(p: NonNullable<SiteDomain["platform"]>): string {
+  if (!p.configured) {
+    return "Markii has not finished connecting this domain on its side. Nothing for you to do — we are on it.";
+  }
+  if (p.registered === false) return p.problem ?? "not attached to Markii's hosting yet";
+  if (p.registered === null) return p.problem ?? "could not be checked just now";
+  if (p.misconfigured === true) {
+    return "attached, but the hosting platform still cannot see your DNS — this usually clears within the hour";
+  }
+  return "your storefront answers on this domain, over HTTPS";
 }
 
 function RecordTable({ records }: { records: DomainRecord[] }) {

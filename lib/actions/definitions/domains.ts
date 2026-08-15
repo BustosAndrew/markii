@@ -4,6 +4,11 @@ import { badRequest, conflict, notFound } from "../../api";
 import { sites } from "../../db";
 import { invalidateCustomDomain } from "../../domains";
 import { normalizeDomain } from "../../domains/normalize";
+import {
+  isPlatformConfigured,
+  registerDomain,
+  unregisterDomain,
+} from "../../domains/platform";
 import { dnsRecordsFor } from "../../domains/records";
 import { connectDomain, disconnectDomain, verifyDomain } from "../../domains/verification";
 import { defineAction } from "../registry";
@@ -140,6 +145,28 @@ export const verifyCustomDomain = defineAction({
       });
     }
 
+    /**
+     * Step two: attach the hostname to the hosting platform, without which
+     * Vercel rejects it at the edge and no certificate is issued — verified or
+     * not (§2). Attempted on **every** successful verify rather than only the
+     * first, which makes "Check DNS" the repair path for a registration that
+     * failed earlier; `registerDomain` is idempotent for exactly that.
+     *
+     * A post-commit effect, so a Vercel outage cannot roll back a proof of
+     * ownership that DNS already gave us. The consequence is that this response
+     * cannot report the outcome — `GET /api/sites/:id/domain` reads the
+     * platform live and is the honest place to look.
+     */
+    const domain = result.site.customDomain;
+    if (result.verified && domain) {
+      ctx.effect("register domain with the hosting platform", async () => {
+        const platform = await registerDomain(domain);
+        if (!platform.ok) {
+          console.error(`domain registration failed for ${domain}: ${platform.message}`);
+        }
+      });
+    }
+
     return {
       siteId: site.id,
       domain: result.site.customDomain,
@@ -156,6 +183,17 @@ export const verifyCustomDomain = defineAction({
       verifiedAt: result.site.domainVerifiedAt?.toISOString() ?? null,
       problem: result.problem,
       records: result.records,
+      /**
+       * **Queued, not done.** Registration runs after this transaction commits,
+       * so the only honest thing to say here is that it was attempted. Anything
+       * stronger would be a success message for work that has not happened yet.
+       * `GET /api/sites/:id/domain` reports what the platform actually says.
+       */
+      platformRegistration: result.verified
+        ? isPlatformConfigured()
+          ? ("queued" as const)
+          : ("configuration_required" as const)
+        : ("not_applicable" as const),
     };
   },
 });
@@ -188,6 +226,8 @@ export const disconnectCustomDomain = defineAction({
       };
     }
 
+    const removed = site.customDomain;
+    const wasVerified = site.domainStatus === "verified";
     const row = await disconnectDomain(site, ctx.db);
     ctx.recordDiff({
       entity: "site",
@@ -197,8 +237,24 @@ export const disconnectCustomDomain = defineAction({
       after: null,
     });
     ctx.effect("invalidate custom-domain cache", async () => {
-      invalidateCustomDomain(site.customDomain);
+      invalidateCustomDomain(removed);
     });
+
+    /**
+     * Detach from the platform too, or the hostname stays bound to Markii's
+     * Vercel project — consuming the plan's domain allowance and, worse,
+     * blocking the merchant from attaching it anywhere else, including a
+     * competitor. Only ever registered if it was verified, so only unregistered
+     * in that case.
+     */
+    if (wasVerified && removed) {
+      ctx.effect("detach domain from the hosting platform", async () => {
+        const platform = await unregisterDomain(removed);
+        if (!platform.ok) {
+          console.error(`domain detach failed for ${removed}: ${platform.message}`);
+        }
+      });
+    }
 
     return {
       siteId: row.id,

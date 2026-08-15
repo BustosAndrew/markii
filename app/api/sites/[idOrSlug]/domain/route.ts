@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { orgHandler } from "@/lib/auth/handler";
+import { platformStatus } from "@/lib/domains/platform";
 import { cnameTarget, dnsRecordsFor, pointsHere } from "@/lib/domains/records";
 import { observeDns } from "@/lib/domains/verification";
 import { resolveSite } from "@/lib/queries";
@@ -31,6 +32,7 @@ export const GET = orgHandler(
         problem: null,
         records: [],
         pointsToMarkii: false,
+        platform: null,
         /** So a screen can show the target before a domain is even typed. */
         expectedTarget: cnameTarget(),
       });
@@ -43,7 +45,21 @@ export const GET = orgHandler(
      * kind of surface that reports success after the underlying fact changed.
      * One resolver round trip on a settings screen is a fair price.
      */
-    const observed = await observeDns(site.customDomain);
+    /**
+     * Both live reads, in parallel — they are independent, and doing them in
+     * series would double the wait on a settings screen for no gain.
+     *
+     * The platform is only asked about a **verified** domain, because that is
+     * the only state in which Markii ever registers one. Asking about a pending
+     * claim would reliably answer "not registered" and read as a failure, when
+     * it is the correct and expected state.
+     */
+    const [observed, platform] = await Promise.all([
+      observeDns(site.customDomain),
+      site.domainStatus === "verified"
+        ? platformStatus(site.customDomain)
+        : Promise.resolve(null),
+    ]);
 
     return NextResponse.json({
       siteId: site.id,
@@ -62,6 +78,15 @@ export const GET = orgHandler(
       pointsToMarkii: pointsHere({ cname: observed.cname, a: observed.a }),
       /** Null unless DNS itself was unreachable. An absent record is not an error. */
       lookupProblem: observed.problem,
+      /**
+       * **The third fact, and the one that actually decides reachability.**
+       * Ownership makes Markii willing to route the host and pointing sends
+       * traffic to Vercel's edge — but Vercel drops a hostname that is not
+       * registered to this project before `proxy.ts` runs, and issues no
+       * certificate for it. Null while the domain is unverified, because Markii
+       * does not register one until ownership is proved.
+       */
+      platform,
       expectedTarget: cnameTarget(),
     });
   },

@@ -28,6 +28,27 @@ export type DomainRecord = {
   purpose: "ownership" | "pointing";
 };
 
+/**
+ * Whether the hosting platform will actually accept traffic for the hostname.
+ *
+ * **This is the fact that decides reachability, and it is separate from both
+ * others.** Ownership makes Markii willing to route the host; pointing sends
+ * traffic to Vercel's edge; but Vercel drops a hostname not registered to this
+ * project *before* the app runs, and issues no TLS certificate for it. A domain
+ * can be verified, pointing correctly, and still serve nothing.
+ *
+ * `configured: false` means Markii has no platform credentials — **the
+ * merchant can do nothing about it**, so never phrase it as their problem.
+ */
+export type PlatformStatus = {
+  configured: boolean;
+  /** Null when unknown — unconfigured, or the platform was unreachable. */
+  registered: boolean | null;
+  /** Vercel's own view of the DNS. May lag `pointsToMarkii` while records propagate. */
+  misconfigured: boolean | null;
+  problem: string | null;
+};
+
 export type SiteDomain = {
   siteId: number;
   domain: string | null;
@@ -44,6 +65,12 @@ export type SiteDomain = {
   pointsToMarkii: boolean;
   /** Set only when DNS itself was unreachable — an absent record is not this. */
   lookupProblem?: string | null;
+  /**
+   * Null until the domain is verified — Markii does not register a hostname
+   * with the platform before ownership is proved, so "not registered" on a
+   * pending claim would read as a failure when it is the correct state.
+   */
+  platform: PlatformStatus | null;
   /** The CNAME target for this deployment, so a screen can show it up front. */
   expectedTarget: string;
 };
@@ -139,6 +166,13 @@ export function verifyDomain(body: { siteId: number }, init?: RequestInit) {
     verifiedAt: string | null;
     problem: string | null;
     records: DomainRecord[];
+    /**
+     * **`"queued"` means attempted, not done.** Attaching the hostname to the
+     * hosting platform runs after the transaction commits, so this response
+     * cannot know the outcome. Re-read `getSiteDomain` for what the platform
+     * actually says, and never render `"queued"` as success.
+     */
+    platformRegistration: "queued" | "configuration_required" | "not_applicable";
   }>("domains.verify", body, init);
 }
 
