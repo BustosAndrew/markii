@@ -86,10 +86,21 @@ export function getSiteSummary(idOrSlug: string, init?: RequestInit) {
   );
 }
 
+/**
+ * Publish a storefront, and attach `{slug}.{ROOT_DOMAIN}` to the hosting
+ * platform so the address actually answers.
+ *
+ * **`hostAttached: false` means published but not reachable** — the status write
+ * succeeded and the hostname did not, so `storefrontUrl` will fail TLS until it
+ * is retried. Say so rather than showing a link that breaks; `hostProblem`
+ * carries copy that already distinguishes Markii's fault from the merchant's.
+ * Re-running deploy is the retry.
+ */
 export function deploySite(idOrSlug: string, init?: RequestInit) {
-  return apiPost<{ status: "live"; storefrontUrl: string }>(
-    `/api/sites/${encodeURIComponent(idOrSlug)}/deploy`,
-    undefined,
-    init,
-  );
+  return apiPost<{
+    status: "live";
+    storefrontUrl: string;
+    hostAttached: boolean;
+    hostProblem: string | null;
+  }>(`/api/sites/${encodeURIComponent(idOrSlug)}/deploy`, undefined, init);
 }

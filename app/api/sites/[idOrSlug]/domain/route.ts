@@ -69,13 +69,17 @@ export const GET = orgHandler(
       checkedAt: site.domainCheckedAt?.toISOString() ?? null,
       problem: site.domainLastError,
       /** Derived from the current token, never a stored copy of the instructions. */
-      records: dnsRecordsFor(site.customDomain, site.domainVerificationToken),
+      records: dnsRecordsFor(
+        site.customDomain,
+        site.domainVerificationToken,
+        observed.targetIps,
+      ),
       /**
        * Verified but not pointed is a real state, and a common one — the
        * merchant proved ownership and has not moved traffic over yet. Saying
        * only "verified" would imply the storefront answers there, and it does not.
        */
-      pointsToMarkii: pointsHere({ cname: observed.cname, a: observed.a }),
+      pointsToMarkii: pointsHere({ cname: observed.cname, a: observed.a }, observed.targetIps),
       /** Null unless DNS itself was unreachable. An absent record is not an error. */
       lookupProblem: observed.problem,
       /**

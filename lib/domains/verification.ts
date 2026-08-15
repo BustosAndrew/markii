@@ -5,6 +5,8 @@ import { and, eq, ne } from "drizzle-orm";
 import { db, sites, type DbHandle, type Site } from "../db";
 import { normalizeDomain } from "./normalize";
 import {
+  cnameTarget,
+  configuredARecords,
   dnsRecordsFor,
   generateVerificationToken,
   isReservedHost,
@@ -55,9 +57,34 @@ export type DnsObservation = {
   txt: string[][];
   cname: string[];
   a: string[];
+  /**
+   * What `cnameTarget()` answers on right now, so the apex instruction and the
+   * apex check both derive from live data instead of a constant that drifts.
+   * Empty when it could not be resolved, which falls back rather than failing.
+   */
+  targetIps: string[];
   /** Set only when DNS itself failed — never when a record is merely absent. */
   problem: string | null;
 };
+
+/**
+ * The addresses the platform's CNAME target currently resolves to.
+ *
+ * Read live rather than hardcoded because Vercel's addresses differ per account
+ * and change over time — the constant this replaces was Vercel's documented
+ * `76.76.21.21` while this deployment's own apex answers on `216.198.79.1`.
+ * Skipped entirely when the deployment has stated its own addresses: an explicit
+ * `SITE_DOMAIN_A_RECORD` is a decision, not a guess to be widened.
+ */
+export async function resolveTargetIps(): Promise<string[]> {
+  if (configuredARecords()) return [];
+  try {
+    return await resolver().resolve4(cnameTarget());
+  } catch {
+    // A failure here costs accuracy, never correctness — `aRecords` falls back.
+    return [];
+  }
+}
 
 /**
  * Read everything the verification decision needs, in one pass.
@@ -80,13 +107,16 @@ export async function observeDns(domain: string): Promise<DnsObservation> {
     }
   }
 
-  const [txt, cname, a] = await Promise.all([
+  const [txt, cname, a, targetIps] = await Promise.all([
     attempt("TXT", () => r.resolveTxt(ownershipRecordName(domain)), [] as string[][]),
     attempt("CNAME", () => r.resolveCname(domain), [] as string[]),
     attempt("A", () => r.resolve4(domain), [] as string[]),
+    // In parallel with the rest: it is an independent lookup and serialising it
+    // would add a round trip to every check for no gain.
+    resolveTargetIps(),
   ]);
 
-  return { txt, cname, a, problem: problems.length > 0 ? problems.join("; ") : null };
+  return { txt, cname, a, targetIps, problem: problems.length > 0 ? problems.join("; ") : null };
 }
 
 export type ConnectResult =
@@ -122,13 +152,20 @@ export async function connectDomain(
     };
   }
 
+  /**
+   * Connect is where a merchant *first* reads the records, so the apex addresses
+   * have to be right here too — not only at verify. Resolved once and reused
+   * below.
+   */
+  const targetIps = await resolveTargetIps();
+
   // Already connected and proved on this site: return it untouched. Re-issuing a
   // token here would set a live storefront back to `pending` and stop routing it.
   if (input.site.customDomain === domain && input.site.domainStatus === "verified") {
     return {
       ok: true,
       site: input.site,
-      records: dnsRecordsFor(domain, input.site.domainVerificationToken ?? ""),
+      records: dnsRecordsFor(domain, input.site.domainVerificationToken ?? "", targetIps),
       unchanged: true,
     };
   }
@@ -169,7 +206,12 @@ export async function connectDomain(
     .where(eq(sites.id, input.site.id))
     .returning();
 
-  return { ok: true, site: row, records: dnsRecordsFor(domain, token), unchanged: false };
+  return {
+    ok: true,
+    site: row,
+    records: dnsRecordsFor(domain, token, targetIps),
+    unchanged: false,
+  };
 }
 
 export type VerifyResult = {
@@ -222,9 +264,11 @@ export async function verifyDomain(site: Site, handle: DbHandle = db): Promise<V
     site = row;
   }
 
-  const records = dnsRecordsFor(domain, token);
   const observed = await observeDns(domain);
-  const pointing = pointsHere({ cname: observed.cname, a: observed.a });
+  // Instruction and check derive from the same live resolution, so they cannot
+  // tell a merchant to publish one address and then reject it.
+  const records = dnsRecordsFor(domain, token, observed.targetIps);
+  const pointing = pointsHere({ cname: observed.cname, a: observed.a }, observed.targetIps);
   const carries = txtCarriesToken(observed.txt, token);
 
   if (!carries) {

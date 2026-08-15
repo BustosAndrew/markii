@@ -460,7 +460,37 @@ Cards for the website slug page:
 ```
 
 ### `POST /api/sites/:idOrSlug/deploy`
-Marks the site `live`. → `200` `{ "status": "live", "storefrontUrl": "https://demo-store.markii.shop" }`
+Marks the site `live` **and attaches `{slug}.{ROOT_DOMAIN}` to the hosting platform**, without which
+that address fails TLS — Vercel rejects a hostname not registered to the project even though the
+wildcard DNS record resolves.
+
+→ `200`
+
+```jsonc
+{
+  "status": "live",
+  "storefrontUrl": "https://demo-store.markii.shop",
+  "hostAttached": true,        // false = published but NOT reachable yet
+  "hostProblem": null
+}
+```
+
+**`hostAttached: false` is published-but-broken**, and it is reported rather than thrown: the status
+write really did succeed, so failing the request would be wrong in the other direction — but
+returning a `storefrontUrl` while knowing it does not answer is the fabricated success this codebase
+refuses. Re-running deploy is the retry.
+
+**Why per-slug rather than a wildcard.** A wildcard domain on Vercel needs a wildcard certificate,
+which needs DNS-01 validation, which needs Vercel to serve the whole zone — and `markii.shop` carries
+Microsoft 365 mail, Resend DKIM, SPF and DMARC, so that is a migration rather than a toggle.
+Per-host registration gets an HTTP-01 certificate instead. **The accepted ceiling:** one project
+domain per live storefront against Vercel's per-project limit — right now, wrong at a few hundred
+merchants, at which point the wildcard and its DNS migration is the answer.
+
+Registration happens on **going live**, not on create: a draft is not meant to be reachable and would
+spend a slot for nothing. Paused stores keep theirs — pausing is a reversible toggle, and
+re-attaching on resume would make it slow and failure-prone. A **slug change** moves the address, so
+`PATCH /api/sites/:id` detaches the old host and attaches the new one; `DELETE` detaches.
 
 Deploying does **not** attach a custom domain and never has. `storefrontUrl` here is the custom
 domain only if it was already verified — an unverified claim routes nothing and must not be printed

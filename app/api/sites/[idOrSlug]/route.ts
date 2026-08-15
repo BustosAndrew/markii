@@ -4,7 +4,11 @@ import { conflict } from "@/lib/api";
 import { orgHandler } from "@/lib/auth/handler";
 import { db, sites } from "@/lib/db";
 import { invalidateCustomDomain } from "@/lib/domains";
-import { unregisterDomain } from "@/lib/domains/platform";
+import {
+  attachTenantHost,
+  detachTenantHost,
+  unregisterDomain,
+} from "@/lib/domains/platform";
 import { resolveSite, serializeSite } from "@/lib/queries";
 import { assertNoRedirectedSiteFields, siteUpdateSchema } from "@/lib/validation";
 
@@ -37,6 +41,36 @@ export const PATCH = orgHandler(
       .set({ ...input, updatedAt: new Date() })
       .where(eq(sites.id, site.id))
       .returning();
+
+    /**
+     * A slug **is** the storefront's address, so renaming one moves the host it
+     * answers on. The old `{slug}.{ROOT_DOMAIN}` has to be released and the new
+     * one attached, or the store becomes unreachable at its new name while the
+     * old name keeps a project domain slot forever — the same orphan the custom
+     * domain paths had.
+     *
+     * Also covers a storefront going live through this route rather than
+     * `/deploy`, which is a second real entry point to the same state.
+     *
+     * Failures are logged, not thrown: the rename itself committed, and turning
+     * a successful write into an error would be worse than a hostname that a
+     * re-deploy can reattach.
+     */
+    const slugChanged = row.slug !== site.slug;
+    const wentLive = row.status === "live" && site.status !== "live";
+
+    if (slugChanged) {
+      const detached = await detachTenantHost(site.slug);
+      if (!detached.ok) {
+        console.error(`tenant host detach failed for old slug ${site.slug}: ${detached.message}`);
+      }
+    }
+    if (row.status === "live" && (slugChanged || wentLive)) {
+      const attached = await attachTenantHost(row.slug);
+      if (!attached.ok) {
+        console.error(`tenant host attach failed for ${row.slug}: ${attached.message}`);
+      }
+    }
 
     return NextResponse.json(await serializeSite(row));
   },
@@ -80,6 +114,17 @@ export const DELETE = orgHandler(
           `domain detach failed for deleted site ${site.id} (${site.customDomain}): ${platform.message}`,
         );
       }
+    }
+
+    /**
+     * The storefront's own `{slug}.{ROOT_DOMAIN}` goes the same way, and for the
+     * same reason: the row naming it is gone, so nothing afterwards could
+     * release it. Unlike a custom domain this one is only ever Markii's own
+     * namespace, but it still occupies a project domain slot indefinitely.
+     */
+    const tenant = await detachTenantHost(site.slug);
+    if (!tenant.ok) {
+      console.error(`tenant host detach failed for deleted site ${site.slug}: ${tenant.message}`);
     }
 
     return NextResponse.json({ deleted: true, id: site.id });

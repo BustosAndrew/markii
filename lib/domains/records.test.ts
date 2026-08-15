@@ -120,6 +120,51 @@ describe("pointsHere", () => {
     process.env.SITE_DOMAIN_A_RECORD = "203.0.113.7, 203.0.113.8";
     expect(pointsHere({ cname: [], a: ["203.0.113.8"] })).toBe(true);
   });
+
+  it("accepts the target's live addresses when none are configured", () => {
+    /**
+     * The bug this closes. The hardcoded default was Vercel's documented
+     * `76.76.21.21` while the deployment's own apex answered on a different
+     * address — so a merchant who pointed their apex correctly was told it was
+     * wrong. A false negative on someone who did everything right.
+     */
+    delete process.env.SITE_DOMAIN_A_RECORD;
+    expect(pointsHere({ cname: [], a: ["216.198.79.1"] }, ["216.198.79.1"])).toBe(true);
+    expect(pointsHere({ cname: [], a: ["198.51.100.1"] }, ["216.198.79.1"])).toBe(false);
+  });
+
+  it("lets an explicit configuration override live resolution", () => {
+    // A deployment that has stated its addresses means them; resolving must not
+    // quietly widen what it accepts.
+    process.env.SITE_DOMAIN_A_RECORD = "203.0.113.7";
+    expect(pointsHere({ cname: [], a: ["203.0.113.7"] }, ["216.198.79.1"])).toBe(true);
+    expect(pointsHere({ cname: [], a: ["216.198.79.1"] }, ["216.198.79.1"])).toBe(false);
+  });
+
+  it("falls back to the documented address when resolution fails", () => {
+    // Showing an apex no record at all is worse than showing a possibly stale one.
+    delete process.env.SITE_DOMAIN_A_RECORD;
+    expect(pointsHere({ cname: [], a: ["76.76.21.21"] }, [])).toBe(true);
+  });
+});
+
+describe("instruction and check agree", () => {
+  it("suggests exactly the addresses it will accept", () => {
+    /**
+     * The property that matters more than either half: telling a merchant to
+     * publish one address and then rejecting it is the failure mode this whole
+     * change exists to remove. Same source, so they cannot disagree.
+     */
+    delete process.env.SITE_DOMAIN_A_RECORD;
+    const resolved = ["216.198.79.1", "76.76.21.93"];
+    const suggested = dnsRecordsFor("acme.com", "tok", resolved)
+      .filter((r) => r.type === "A")
+      .map((r) => r.value);
+    expect(suggested).toEqual(resolved);
+    for (const ip of suggested) {
+      expect(pointsHere({ cname: [], a: [ip] }, resolved), `${ip} was suggested`).toBe(true);
+    }
+  });
 });
 
 describe("ownershipRecordName", () => {

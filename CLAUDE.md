@@ -209,6 +209,15 @@ hostname at its edge, before `proxy.ts` runs, and issues no TLS certificate. Reg
 repair path; `domains.disconnect` detaches. **Ordering is a security property**: registering on
 *claim* would let anyone add any hostname to Markii's Vercel project on a form submission.
 
+**Storefronts' own `{slug}.{ROOT_DOMAIN}` addresses are registered the same way**, because a
+wildcard domain on Vercel needs a wildcard certificate, which needs DNS-01, which needs Vercel to
+serve the whole zone — and `markii.shop` carries Microsoft 365 mail, Resend DKIM, SPF and DMARC, so
+that is a migration rather than a toggle. A `*` CNAME at the registrar handles *resolution*;
+per-host registration gets the certificate. Attached on **going live** (not create — a draft would
+spend a project domain slot for nothing), moved on slug change, released on delete, kept through a
+pause. **The accepted ceiling is one project domain per live storefront**, which is right now and
+wrong at a few hundred merchants.
+
 **Three paths drop a verified domain and all three must detach it** — `domains.disconnect`,
 `domains.connect` replacing one, and `DELETE /api/sites/:id`. The latter two were leaks when
 registration first landed: each stops the row naming the hostname, so nothing afterwards could ever

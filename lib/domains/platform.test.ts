@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { isPlatformConfigured, platformStatus, registerDomain, unregisterDomain } from "./platform";
+import {
+  attachTenantHost,
+  detachTenantHost,
+  isPlatformConfigured,
+  platformStatus,
+  registerDomain,
+  unregisterDomain,
+} from "./platform";
 
 /**
  * Platform registration (§2 "step two").
@@ -189,22 +196,63 @@ describe("unregisterDomain", () => {
     expect(await unregisterDomain("shop.acme.com")).toEqual({ ok: true, message: null });
   });
 
-  it("refuses to detach a platform host, even fully configured", async () => {
+  it("refuses to detach Markii's own routing, even fully configured", async () => {
     /**
-     * Unreachable today — `connectDomain` will not let a merchant claim
-     * `ROOT_DOMAIN`, so no site row can hold it. This guards the *irreversible*
-     * half: a future change passing the wrong value would delete Markii's own
-     * apex from the project that serves every merchant, with no undo.
+     * Guards the irreversible half: a future change passing the wrong value
+     * would delete Markii's apex from the project that serves every merchant,
+     * with no undo.
      */
     configure();
     process.env.ROOT_DOMAIN = "markii.shop";
     const calls = stubFetch([{ status: 200 }]);
 
-    for (const host of ["markii.shop", "shop.markii.shop", "markii-orcin.vercel.app"]) {
+    for (const host of ["markii.shop", "www.markii.shop", "markii-orcin.vercel.app", "localhost"]) {
       const res = await unregisterDomain(host);
       expect(res.ok, `${host} must never be detached`).toBe(false);
     }
     expect(calls.length, "no request may even be issued").toBe(0);
+  });
+
+  it("still detaches a tenant subdomain, which is Markii's to hand out", async () => {
+    /**
+     * The distinction the guard has to get right. A merchant may not *claim*
+     * `{slug}.markii.shop` as a custom domain — `isReservedHost` says no — but
+     * Markii attaches and detaches those itself as storefronts are published,
+     * renamed, and deleted. Covering them in the detach guard would make that
+     * lifecycle refuse itself, stranding a project domain slot per rename.
+     */
+    configure();
+    process.env.ROOT_DOMAIN = "markii.shop";
+    const calls = stubFetch([{ status: 200 }]);
+
+    const res = await unregisterDomain("aurora-supply.markii.shop");
+    expect(res.ok).toBe(true);
+    expect(calls[0].method).toBe("DELETE");
+  });
+
+  it("attaches and detaches a storefront's own address by slug", async () => {
+    configure();
+    process.env.ROOT_DOMAIN = "markii.shop";
+    const calls = stubFetch([{ status: 200 }]);
+
+    await attachTenantHost("aurora-supply");
+    expect(calls[0].url).toContain("/v10/projects/prj_test/domains");
+
+    await detachTenantHost("aurora-supply");
+    expect(calls[1].url).toContain(encodeURIComponent("aurora-supply.markii.shop"));
+    expect(calls[1].method).toBe("DELETE");
+  });
+
+  it("does nothing in local development, where *.localhost needs no registration", async () => {
+    // ROOT_DOMAIN=localhost is what the integration suite runs with. Issuing
+    // Vercel calls there would mutate a real project from a test run.
+    configure();
+    process.env.ROOT_DOMAIN = "localhost";
+    const calls = stubFetch([{ status: 200 }]);
+
+    expect(await attachTenantHost("aurora-supply")).toEqual({ ok: true, alreadyRegistered: true });
+    expect(await detachTenantHost("aurora-supply")).toEqual({ ok: true, message: null });
+    expect(calls.length, "no platform call may be made").toBe(0);
   });
 
   it("reports a refusal so a stuck domain is not silently left attached", async () => {

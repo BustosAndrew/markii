@@ -248,3 +248,30 @@ Everything it creates is torn down in `afterAll`: the subscription is cancelled
 and the customer deleted, which discards the pending invoice item with it.
 Stripe keeps *canceled* subscription records permanently — those cannot be
 deleted by anyone and are expected residue, not a leak.
+
+## Tests that touch the real Vercel project — opt-in
+
+`domain-platform.test.ts` attaches and detaches domains on the **live project**.
+It is gated on `MARKII_VERCEL_TESTS=1` and needs the dev server to run with a
+**real** `ROOT_DOMAIN` — on `localhost` tenant hosts are skipped entirely, so it
+would pass without testing anything, which is why it refuses rather than skips
+in that case.
+
+```bash
+ROOT_DOMAIN=markii.shop DEMO_SKIP_PAYMENT_VERIFICATION=1 pnpm dev
+
+MARKII_VERCEL_TESTS=1 pnpm exec cross-env MARKII_ALLOW_INTEGRATION_TESTS=1 \
+  vitest run --project integration domain-platform
+```
+
+**What only this can show.** Every other test of the platform hop runs with
+`fetch` stubbed or on `localhost`, where no Vercel call happens — so they prove
+the decisions, not the wiring. The bug class is an *orphaned external resource*:
+a hostname left attached after the row naming it is gone. That is invisible from
+the database and invisible from the API response; only a real project listing
+catches it. Verified by deleting the detach and watching this fail.
+
+The last assertion is the one that matters — not "the hosts I know about are
+gone" but **"nothing was added that I did not remove"**, compared against a
+baseline taken in `beforeAll`. It also detaches its own hosts in `afterAll`, so a
+mid-run failure does not leave one on a real project.

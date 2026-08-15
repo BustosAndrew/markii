@@ -310,6 +310,11 @@ Three rules for any screen that touches this, all of them the same rule:
 - **`platformRegistration: "queued"` from `verifyDomain` means attempted, not done.** It runs after
   the transaction commits, so the action cannot know the outcome. Never render it as success —
   re-read `getSiteDomain`.
+- **`deploySite` gained `hostAttached` / `hostProblem`.** Publishing now also attaches
+  `{slug}.{ROOT_DOMAIN}` to the hosting platform, and it can fail on its own. **`hostAttached: false`
+  means published but not reachable** — `storefrontUrl` will fail TLS. Show `hostProblem` (its copy
+  already separates Markii's fault from the merchant's) and offer deploy again as the retry, rather
+  than linking to an address that breaks.
 
 **`/dashboard/settings/domains` is a real screen now**, not a `ComingSoon`. It is an *overview*, not
 a control panel: connecting and verifying stay on the storefront's own page, because the DNS records

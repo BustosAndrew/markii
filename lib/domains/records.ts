@@ -61,12 +61,33 @@ export function cnameTarget(): string {
   return normalizeDomain(process.env.SITE_DOMAIN_CNAME_TARGET ?? "") ?? DEFAULT_CNAME_TARGET;
 }
 
-export function aRecords(): string[] {
+/** Explicitly configured apex IPs, or null when the deployment has not set any. */
+export function configuredARecords(): string[] | null {
   const configured = (process.env.SITE_DOMAIN_A_RECORD ?? "")
     .split(",")
     .map((v) => v.trim())
     .filter(Boolean);
-  return configured.length > 0 ? configured : [DEFAULT_A_RECORD];
+  return configured.length > 0 ? configured : null;
+}
+
+/**
+ * The apex IPs a merchant should publish, and the ones a pointed apex is
+ * accepted at — deliberately the **same list**, so the instruction and the check
+ * cannot disagree.
+ *
+ * `resolved` is what `cnameTarget()` currently resolves to, read at check time.
+ * Preferring it over a constant is the fix for a real failure: the hardcoded
+ * default was Vercel's historically documented `76.76.21.21`, while this
+ * deployment's own apex answers on `216.198.79.1`. A merchant following the
+ * instruction would publish an address that may not serve them, and the check
+ * would then call a *correctly* pointed apex wrong.
+ *
+ * Precedence is explicit config → live resolution → the documented constant.
+ * The constant survives only as a last resort for a DNS outage, because showing
+ * an apex no record at all is worse than showing one that might be stale.
+ */
+export function aRecords(resolved: string[] = []): string[] {
+  return configuredARecords() ?? (resolved.length > 0 ? resolved : [DEFAULT_A_RECORD]);
 }
 
 /**
@@ -103,8 +124,56 @@ export function isReservedHost(domain: string): boolean {
   );
 }
 
-/** Every record a merchant may need, ownership first — it is the one that gates. */
-export function dnsRecordsFor(domain: string, token: string): DnsRecord[] {
+/**
+ * The storefront's own address on Markii — `{slug}.{ROOT_DOMAIN}`.
+ *
+ * Null when `ROOT_DOMAIN` is unset or is a local host, which is the development
+ * case: `*.localhost` resolves without any registration and there is no platform
+ * to attach it to.
+ */
+export function tenantHost(slug: string): string | null {
+  const root = normalizeDomain(process.env.ROOT_DOMAIN ?? "");
+  if (!root || root === "localhost" || root.endsWith(".localhost")) return null;
+  return `${slug}.${root}`;
+}
+
+/**
+ * Hosts that must **never** be detached from the hosting platform.
+ *
+ * Narrower than {@link isReservedHost} on purpose, and the difference is the
+ * whole point. `isReservedHost` answers "may a *merchant* claim this as a custom
+ * domain?", for which every `{slug}.{ROOT_DOMAIN}` is a no — those are Markii's
+ * to hand out. But Markii **does** attach and detach tenant subdomains as
+ * storefronts are published, renamed, and deleted, so they cannot be covered by
+ * the detach guard or that lifecycle would refuse itself.
+ *
+ * What stays protected is Markii's own routing: the apex, its `www`, the
+ * deployment's `*.vercel.app`, and localhost. Detaching one of those would take
+ * the whole platform down, and there is no undo.
+ */
+export function isPlatformCriticalHost(domain: string): boolean {
+  const root = normalizeDomain(process.env.ROOT_DOMAIN ?? "");
+  return (
+    domain === "localhost" ||
+    domain.endsWith(".localhost") ||
+    domain.endsWith(".vercel.app") ||
+    (root !== null && (domain === root || domain === `www.${root}`))
+  );
+}
+
+/**
+ * Every record a merchant may need, ownership first — it is the one that gates.
+ *
+ * `resolvedTargetIps` is what `cnameTarget()` currently resolves to. Callers that
+ * have already read DNS should pass it, so the apex instruction names addresses
+ * that are live rather than a constant that has drifted. Callers that have not
+ * may omit it and get the configured or documented value.
+ */
+export function dnsRecordsFor(
+  domain: string,
+  token: string,
+  resolvedTargetIps: string[] = [],
+): DnsRecord[] {
   const records: DnsRecord[] = [
     {
       type: "TXT",
@@ -115,7 +184,7 @@ export function dnsRecordsFor(domain: string, token: string): DnsRecord[] {
   ];
 
   if (looksLikeApex(domain)) {
-    for (const ip of aRecords()) {
+    for (const ip of aRecords(resolvedTargetIps)) {
       records.push({ type: "A", name: domain, value: ip, purpose: "pointing" });
     }
   } else {
@@ -138,10 +207,25 @@ export function txtCarriesToken(observed: string[][], token: string): boolean {
   return observed.some((chunks) => chunks.join("").trim().toLowerCase() === expected);
 }
 
-/** Does the host point here — by either record? Neither is required to verify. */
-export function pointsHere(observed: { cname: string[]; a: string[] }): boolean {
+/**
+ * Does the host point here — by either record? Neither is required to verify.
+ *
+ * `resolvedTargetIps` are the addresses `cnameTarget()` answers on right now.
+ * Accepting them is what stops this check from going stale: Vercel's addresses
+ * differ per account and move over time, so a check against a hardcoded IP
+ * eventually starts calling correctly pointed apex domains wrong — a false
+ * negative on a merchant who did everything right, which is the worst kind.
+ *
+ * An explicit `SITE_DOMAIN_A_RECORD` still wins, via `aRecords`: a deployment
+ * that has stated its addresses means it, and live resolution must not quietly
+ * widen what that deployment accepts.
+ */
+export function pointsHere(
+  observed: { cname: string[]; a: string[] },
+  resolvedTargetIps: string[] = [],
+): boolean {
   const target = cnameTarget();
-  const expectedIps = new Set(aRecords());
+  const expectedIps = new Set(aRecords(resolvedTargetIps));
   return (
     observed.cname.some((v) => normalizeDomain(v) === target) ||
     observed.a.some((ip) => expectedIps.has(ip))

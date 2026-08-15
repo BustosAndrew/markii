@@ -26,7 +26,7 @@ import "server-only";
  * business carrying an API client.
  */
 
-import { isReservedHost } from "./records";
+import { isPlatformCriticalHost, tenantHost } from "./records";
 
 const API = "https://api.vercel.com";
 
@@ -173,9 +173,9 @@ export async function registerDomain(host: string): Promise<RegisterResult> {
 export async function unregisterDomain(
   host: string,
 ): Promise<{ ok: boolean; message: string | null }> {
-  if (isReservedHost(host)) {
+  if (isPlatformCriticalHost(host)) {
     console.error(`refused to detach the platform host ${host}`);
-    return { ok: false, message: `${host} is a Markii hostname and is never detached.` };
+    return { ok: false, message: `${host} is Markii's own hostname and is never detached.` };
   }
 
   const creds = credentials();
@@ -189,6 +189,41 @@ export async function unregisterDomain(
   // Already gone is the outcome we wanted.
   if (res.ok || res.status === 404) return { ok: true, message: null };
   return { ok: false, message: res.problem };
+}
+
+/**
+ * A storefront's own `{slug}.{ROOT_DOMAIN}` address has to be registered too.
+ *
+ * **A wildcard would be tidier and is not available here.** Vercel issues a
+ * wildcard certificate only through DNS-01 validation, which needs control of
+ * the whole zone — and `markii.shop` carries Microsoft 365 mail, Resend DKIM,
+ * SPF and DMARC, so handing the zone over is a migration rather than a toggle.
+ * Registering each subdomain gets a per-host certificate over HTTP-01 instead,
+ * which needs nothing but traffic arriving.
+ *
+ * **The ceiling this accepts:** one project domain per live storefront, against
+ * Vercel's per-project limit. Correct now, wrong at a few hundred merchants —
+ * at which point the wildcard, and the DNS migration it requires, is the answer.
+ *
+ * Registered when a storefront **goes live**, not when it is created: a draft is
+ * not meant to be reachable and would spend an allowance slot for nothing.
+ * Paused stores keep theirs, because pausing is a reversible toggle and
+ * re-attaching on resume would make it slow and failure-prone.
+ */
+export async function attachTenantHost(slug: string): Promise<RegisterResult> {
+  const host = tenantHost(slug);
+  if (!host) {
+    // Local development: `*.localhost` resolves with no registration at all.
+    return { ok: true, alreadyRegistered: true };
+  }
+  return registerDomain(host);
+}
+
+/** Release it — on delete, or when a slug change moves the storefront's address. */
+export async function detachTenantHost(slug: string): Promise<{ ok: boolean; message: string | null }> {
+  const host = tenantHost(slug);
+  if (!host) return { ok: true, message: null };
+  return unregisterDomain(host);
 }
 
 export type PlatformStatus = {
