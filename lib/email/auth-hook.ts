@@ -3,6 +3,7 @@ import "server-only";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db, sites } from "../db";
+import { verifySiteRef } from "../auth/site-ref";
 import {
   confirmSignupEmail,
   emailChangeEmail,
@@ -90,6 +91,8 @@ export type HookPayload = {
     id: string;
     email: string;
     app_metadata?: Record<string, unknown> | null;
+    /** User-writable. Only ever read through a signature check. */
+    user_metadata?: Record<string, unknown> | null;
   };
   email_data: {
     token: string;
@@ -171,18 +174,37 @@ export type Recipient =
  * an auth token, while a shopper misrouted to Markii's stream is only unbranded.
  */
 export async function routeFor(payload: HookPayload): Promise<Recipient> {
-  const kind = (payload.user.app_metadata as Record<string, unknown> | null)?.user_kind;
-  if (kind !== "customer") return { stream: "platform", reason: "staff" };
+  const app = payload.user.app_metadata as Record<string, unknown> | null;
 
-  const rawSite = (payload.user.app_metadata as Record<string, unknown> | null)?.site_id;
-  const siteId = typeof rawSite === "number" ? rawSite : null;
-  if (!siteId) {
-    /**
-     * A shopper created before `site_id` was stamped. There is no honest way to
-     * guess the merchant — one address can be a customer of several stores — and
-     * guessing wrong sends an auth token from the wrong merchant's domain.
-     */
-    return { stream: "refuse", reason: "shopper has no site_id in app_metadata" };
+  /**
+   * `app_metadata` is authoritative and is checked first — service-role only,
+   * so it cannot be influenced by the account holder.
+   */
+  const stamped = app?.user_kind === "customer" && typeof app?.site_id === "number"
+    ? (app.site_id as number)
+    : null;
+
+  /**
+   * The signup-confirmation case, and the reason `site-ref.ts` exists. Supabase
+   * fires this hook *inside* `auth.signUp()`, before the route can stamp
+   * `app_metadata` — so a brand-new shopper arrives here looking exactly like an
+   * unmarked user, which routes to staff. Without this, every shopper's *first*
+   * email would come from Markii rather than their merchant. Confirmed live.
+   *
+   * The ref lives in user-writable `user_metadata`, so it is trusted only
+   * because it is **HMAC-verified**; a forged one resolves to null and falls
+   * through to the staff branch exactly as an absent one does.
+   */
+  const signed =
+    stamped === null
+      ? verifySiteRef((payload.user.user_metadata as Record<string, unknown> | null)?.site_ref)
+      : null;
+
+  const siteId = stamped ?? signed;
+  if (siteId === null) {
+    // Unmarked and unsigned: staff, or a shopper predating both. Staff is the
+    // safe direction — see the note on this function.
+    return { stream: "platform", reason: "staff" };
   }
 
   const [site] = await db.select().from(sites).where(eq(sites.id, siteId)).limit(1);

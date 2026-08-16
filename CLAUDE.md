@@ -18,7 +18,7 @@ Started as a 4-hour hackathon (v1, shipped). Now a platform build — read `docs
 ```bash
 pnpm dev              # dev server (Turbopack)
 pnpm build            # production build — run before considering work done
-pnpm lint             # eslint + the RLS deny-by-default check
+pnpm lint             # the RLS deny-by-default check, then eslint — in that order
 pnpm test             # unit tests — pure money/rule functions, ~1s, no deps
 pnpm test:integration # real HTTP + real DB; needs a dev server (see tests/README.md)
 pnpm db:push          # push Drizzle schema (dev only — see docs/DECISIONS.md D6)
@@ -27,6 +27,25 @@ pnpm db:seed          # seed demo data (3 sites, ~30 products, orders, traffic)
 pnpm storage:init     # create the two Storage buckets — NOT in the migration chain
 pnpm stripe:prices    # report the plan Prices on Stripe; --apply creates the missing ones
 ```
+
+**The RLS check runs before eslint, and the order is the point.** It used to be
+`eslint && pnpm check:rls`, so when a toolchain break stopped eslint from
+running at all — TypeScript 7 outpacing `typescript-eslint`, 2026-08-15 — the
+deny-by-default check silently stopped running with it. A security check must
+not be gated on a linter's plugin compatibility. `check-rls` degrades on its own
+terms without a database (static scan runs, live scan reports itself skipped),
+so putting it first costs nothing. **CI already keeps them as separate steps** —
+eslint in the fast job, `check:rls` in the integration job where a database
+exists — so this only closes the local gap.
+
+**TypeScript is pinned to `6.0.3`, deliberately not `^6`.** `typescript-eslint`
+cannot use the TS 7 API (typescript-eslint#10940), and TS 7 landing in a dep
+bump turned eslint off across the whole repo without failing anything that was
+being watched. Side-by-side does not work here: TypeScript is a **peer**
+dependency of typescript-eslint, so there is no dependency edge a pnpm override
+can redirect — it always resolves to the root copy. The exact pin is so a
+`^`-range does not silently walk back onto 7. **Unpin once typescript-eslint
+ships TS 7 support**, and re-run `pnpm lint` to confirm before trusting it.
 
 **Run `pnpm test` freely — it is a second and touches nothing.** `pnpm
 test:integration` **writes to the real database** and is opt-in behind a guard;
@@ -130,9 +149,11 @@ rather than by API. Simulator mail does not touch reputation or the daily quota.
 send → SES → config set → SNS topic → HTTPS subscription → /api/webhooks/ses → suppression list
 ```
 
-**Every link in that chain now exists** (verified in the AWS console 2026-08-15, since the SES-scoped
-IAM key can read back none of it — it has no `sns:ListTopics`, `ses:ListEmailIdentities`, or
-`ses:GetConfigurationSetEventDestinations`). Config set `my-first-configuration-set` publishes
+**Every link in that chain now exists** (verified in the AWS console 2026-08-15). The SES-scoped IAM
+key cannot read most of it back — no `sns:ListTopics`, `ses:ListEmailIdentities`, or
+`ses:GetConfigurationSetEventDestinations` — but **`ses:GetEmailIdentity` *is* permitted**, because
+`refreshIdentity` needs it. So an identity's verification and DKIM status are checkable by API given
+the domain name; only the SNS subscription and the config set's destinations require the console. Config set `my-first-configuration-set` publishes
 **Hard bounces and Complaints** through destination `markii-suppression-feed` to topic
 `markii-ses-feedback`, whose one subscription is `https://markii.shop/api/webhooks/ses`, HTTPS,
 **Confirmed**. Hard-bounce-only publishing matches `suppressionSignals`, which suppresses

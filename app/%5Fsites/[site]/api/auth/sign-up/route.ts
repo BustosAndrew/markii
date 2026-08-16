@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { ApiError, badRequest, handler } from "@/lib/api";
 import { setUserKind } from "@/lib/auth/admin";
+import { signSiteRef } from "@/lib/auth/site-ref";
 import { ensureCustomerForShopper, readCredentialBody } from "@/lib/auth/shopper";
 import { loadStore } from "@/lib/commerce/cart";
 import { storefrontUrl } from "@/lib/queries";
@@ -52,8 +53,15 @@ export const POST = handler(async (req, { params }) => {
        * Lands in user-writable `user_metadata`, so it is a label rather than a
        * boundary — `setUserKind` below writes the authoritative copy into
        * `app_metadata`, which only the service role can set.
+       *
+       * `site_ref` is the exception, and it exists because of an ordering
+       * problem: Supabase fires the Send Email Hook *inside* this `signUp` call,
+       * before the `app_metadata` stamp below has run — so the confirmation
+       * email would otherwise route to the staff stream and reach the shopper
+       * branded Markii rather than as their merchant. The ref is HMAC-signed,
+       * so living in writable metadata does not make it forgeable (§24).
        */
-      data: { signup_kind: "customer" },
+      data: { signup_kind: "customer", site_ref: signSiteRef(site.id) },
     },
   });
 

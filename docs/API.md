@@ -2924,7 +2924,16 @@ nothing.
 **What the fallback is not: reputation isolation.** SES covers subdomains under the parent domain
 identity, so mail from `{slug}.markii.shop` still DKIM-signs as `markii.shop`, and SES bounce and
 complaint rates are account-wide regardless of sending domain. It buys a recognisable sender and an
-unblocked signup — nothing more. Requires `markii.shop` to be a **verified SES domain identity**.
+unblocked signup — nothing more.
+
+**Its prerequisite is met** (checked 2026-08-15): `markii.shop` is verified for sending with Easy
+DKIM `SUCCESS`, so subdomain mail signs `d=markii.shop` and passes DMARC on **DKIM** alignment. SPF
+does not align — SES's default MAIL FROM is `amazonses.com` — which is fine, since DMARC needs only
+one. Setting a custom MAIL FROM would align both, and is not required.
+
+`ses:GetEmailIdentity` is permitted to the deployment's IAM key (`refreshIdentity` needs it), so
+identity and DKIM status are verifiable by API rather than by console — worth using if an email
+health surface is ever built.
 
 Requires `SEND_EMAIL_HOOK_SECRET`; unset, the route refuses with `503` rather than sending
 unverified mail — an unauthenticated caller could otherwise make Markii send an attacker-chosen link
