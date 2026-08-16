@@ -80,6 +80,39 @@ export async function resolveSender(
   };
 }
 
+/**
+ * The storefront's own sending address, used only when a merchant has not yet
+ * verified a domain of their own (§24, shopper account mail).
+ *
+ * `accounts@{slug}.{ROOT_DOMAIN}` — the store's name is in the address, so a
+ * shopper sees who the mail is from rather than a platform they have never
+ * heard of.
+ *
+ * **Two things this is not.** It is not a general fallback: `sendMerchantMail`
+ * honours it for `auth_*` templates only, because an order confirmation from
+ * Markii's namespace is the G1 violation the whole two-stream split exists to
+ * prevent. And it is not full reputation isolation — SES covers subdomains
+ * under the parent domain identity, so DKIM signs as `markii.shop` and account
+ * -level bounce rates are shared regardless. It buys a recognisable sender and
+ * an unblocked signup, not a separate reputation.
+ *
+ * Requires `markii.shop` to be a **verified SES domain identity**; subdomain
+ * sending is covered by the parent. Returns null in local development, where
+ * `ROOT_DOMAIN` is a localhost value and no such identity exists.
+ */
+export function tenantFallbackSender(input: {
+  slug: string;
+  storeName: string;
+}): { address: string; name: string; replyTo: null } | null {
+  const root = normalizeDomain(process.env.ROOT_DOMAIN ?? "");
+  if (!root || root === "localhost" || root.endsWith(".localhost")) return null;
+  return {
+    address: `accounts@${input.slug}.${root}`,
+    name: input.storeName,
+    replyTo: null,
+  };
+}
+
 /** Every identity an org has claimed, verified or not, for the settings screen. */
 export async function listIdentities(orgId: string): Promise<EmailIdentity[]> {
   return db.select().from(emailIdentities).where(eq(emailIdentities.orgId, orgId));

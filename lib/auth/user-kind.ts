@@ -47,3 +47,35 @@ export function isStaffUser(user: Pick<User, "app_metadata">): boolean {
 export function userKindMetadata(kind: UserKind): { user_kind: UserKind } {
   return { [CLAIM]: kind } as { user_kind: UserKind };
 }
+
+const SITE_CLAIM = "site_id";
+
+/**
+ * Which storefront a shopper belongs to (§24, Send Email Hook).
+ *
+ * **Auth mail is the reason this exists.** Supabase's Send Email Hook hands over
+ * a user and a token and expects the application to send the message — and a
+ * shopper's message has to come from *their merchant's* verified domain, so the
+ * hook must be able to answer "whose customer is this?" from the user alone.
+ *
+ * Nothing else could answer it reliably. `redirect_to` is a URL that varies by
+ * flow and is partly caller-supplied; `customers` is keyed by `siteId`, so one
+ * email address can legitimately exist on several stores and a lookup by
+ * address is ambiguous by construction.
+ *
+ * In `app_metadata` for exactly the reason `user_kind` is: `user_metadata` is
+ * user-writable, and a shopper who could edit this could make their store's auth
+ * mail send from another merchant's domain.
+ *
+ * Staff have no site — they belong to an organization, and their mail is
+ * Markii's own.
+ */
+export function shopperSiteMetadata(siteId: number): { site_id: number } {
+  return { [SITE_CLAIM]: siteId } as { site_id: number };
+}
+
+/** The storefront a shopper belongs to, or null for staff and older accounts. */
+export function shopperSiteIdOf(user: Pick<User, "app_metadata">): number | null {
+  const raw = (user.app_metadata as Record<string, unknown> | null)?.[SITE_CLAIM];
+  return typeof raw === "number" && Number.isInteger(raw) && raw > 0 ? raw : null;
+}

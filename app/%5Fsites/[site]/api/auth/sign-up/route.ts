@@ -72,7 +72,9 @@ export const POST = handler(async (req, { params }) => {
    * refused by the storefront while being structurally valid for the dashboard,
    * where the membership lookup is what actually stops them.
    */
-  await setUserKind(data.user.id, "customer");
+  // The site is stamped alongside the kind so auth mail can find the merchant
+  // whose domain it must send from (§24 Send Email Hook).
+  await setUserKind(data.user.id, "customer", site.id);
 
   /**
    * Creates or links the customer record for *this* store. Returns null while

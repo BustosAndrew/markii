@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { userKindMetadata, type UserKind } from "./user-kind";
+import { shopperSiteMetadata, userKindMetadata, type UserKind } from "./user-kind";
 
 /**
  * Service-role Supabase client — **server-only, never the browser** (D6).
@@ -34,13 +34,23 @@ export function isAdminConfigured() {
 export async function setUserKind(
   userId: string,
   kind: UserKind,
+  /**
+   * The storefront a shopper belongs to. Written in the **same** admin call as
+   * `user_kind` on purpose: two calls could leave a shopper stamped as a
+   * customer with no site, and that user's auth mail would then have no
+   * merchant to send from — a broken account created by a partial write.
+   */
+  siteId?: number,
 ): Promise<{ ok: boolean; reason?: string }> {
   const admin = adminClient();
   if (!admin) {
     return { ok: false, reason: "SUPABASE_SERVICE_ROLE_KEY is not configured" };
   }
   const { error } = await admin.auth.admin.updateUserById(userId, {
-    app_metadata: userKindMetadata(kind),
+    app_metadata: {
+      ...userKindMetadata(kind),
+      ...(kind === "customer" && siteId ? shopperSiteMetadata(siteId) : {}),
+    },
   });
   if (error) {
     console.error("[auth] failed to stamp user_kind", error.message);

@@ -1,7 +1,7 @@
 import "server-only";
 
 import { db, emailDeliveries } from "../db";
-import { resolveSender } from "./identity";
+import { resolveSender, tenantFallbackSender } from "./identity";
 import { isResendConfigured, sendViaResend } from "./resend";
 import { isSesConfigured, sendViaSes } from "./ses";
 import { normalizeEmail, suppressionFor } from "./suppression";
@@ -80,7 +80,24 @@ export async function sendMerchantMail(
     return { sent: false, provider: "none", reason };
   }
 
-  const sender = await resolveSender(orgId);
+  const verified = await resolveSender(orgId);
+
+  /**
+   * The storefront's own address, and **only for shopper account mail**.
+   *
+   * The template prefix is checked here rather than trusted from the caller: a
+   * receipt sent from Markii's namespace is the exact G1 violation the two
+   * streams exist to prevent, and a field a caller could set wrongly is not a
+   * boundary. Auth mail is the one case where refusing is worse than an
+   * unbranded sender — a shopper who cannot receive a confirmation cannot make
+   * an account at all.
+   */
+  const fallback =
+    !verified && input.tenantFallback && input.template.startsWith("auth_") && isSesConfigured()
+      ? tenantFallbackSender(input.tenantFallback)
+      : null;
+
+  const sender = verified ?? fallback;
   if (!sender) {
     const reason = isSesConfigured()
       ? "No verified sending domain. Verify a domain in Settings → Email before sending " +

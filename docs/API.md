@@ -40,7 +40,7 @@ carry an explicit status — **never call a `PLANNED` endpoint and never fake it
 | 20 | Disputes & chargebacks | 🟡 PLANNED | F |
 | 21 | Agent Ops add-on | 🟡 PLANNED | F (last) |
 | 22 | **Action registry & MCP** — agent-native architecture | ✅ LIVE (registry, invoke, dry-run, audit). Undo + MCP server PLANNED | **Registry: C · MCP: D** |
-| 24 | Email — sending domains, deliverability, suppression | ✅ LIVE — SES transport, templates, suppression list, bounce webhook, `/api/settings/email`, §22 actions. **Sending works as of 2026-08-11** (production access in `us-west-2`, verified by a live send). A merchant still cannot send until they verify their own domain — `domain_verification_required`, never a fallback to Markii's domain. **The SNS → webhook hop is still unproven**: it needs a publicly reachable host | **C** |
+| 24 | Email — sending domains, deliverability, suppression | ✅ LIVE — SES transport, templates, suppression list, bounce webhook, `/api/settings/email`, §22 actions. **Sending works as of 2026-08-11** (production access in `us-west-2`, verified by a live send). A merchant still cannot send until they verify their own domain — `domain_verification_required`, never a fallback to Markii's domain. **The SNS → webhook hop is wired and confirmed as of 2026-08-15** (topic `markii-ses-feedback` → `https://markii.shop/api/webhooks/ses`, Confirmed), but has **never carried a real event** — nothing has been sent, so nothing has bounced | **C** |
 
 **v3 note.** Markii is now a full commerce platform (`docs/PLAN.md` v3). §16 was a **breaking change
 to everything above it**, and as of 2026-07-31 that change has landed: **every `/api/*` route
@@ -2758,11 +2758,24 @@ configuration set in one call.
 carries `BOUNCE` and `COMPLAINT` — unreadable via the SES-scoped IAM key, so confirmed by
 observation. Simulator mail affects neither reputation nor quota.
 
-**Two gates remain, and they are different problems.** A merchant without their own verified domain
-gets `domain_verification_required` and no send — never a fallback to `markii.shop`. And the
-**SNS → `/api/webhooks/ses` hop has never carried a real bounce**, because SNS cannot reach
-`localhost`; it needs a deployed host or a tunnel. Until it does, SES sends and nothing is
-suppressed.
+**The SNS → webhook hop is wired and confirmed as of 2026-08-15.** Topic `markii-ses-feedback`
+carries one subscription — `https://markii.shop/api/webhooks/ses`, HTTPS, **Confirmed** — fed by
+destination `markii-suppression-feed` on `my-first-configuration-set`, publishing **Hard bounces and
+Complaints**. Hard-bounce-only matches `suppressionSignals`, which acts on `Permanent` bounces and
+every complaint and ignores `Transient` ones on purpose. Verified in the console because the
+SES-scoped IAM key can read none of it (no `sns:ListTopics`, `ses:ListEmailIdentities`, or
+`ses:GetConfigurationSetEventDestinations`), and **nothing in the app would notice if that chain
+later broke** — re-check after any AWS change.
+
+**One gate remains, and it is the merchant's.** Without their own verified domain a merchant gets
+`domain_verification_required` and no send — never a fallback to `markii.shop`.
+
+**The loop has still never carried a real event**, and that is a fact about data rather than
+plumbing: `email_deliveries` is empty and no sending identity exists, so nothing has been sent and
+nothing has bounced. Note the observation this needs is narrower than it looks — a bounce suppresses
+only for mail **the app sent**, since the webhook maps the SNS message id to an `email_deliveries`
+row to find the org and answers `{ suppressed: 0, reason: "unknown_message" }` otherwise. A raw send
+to `bounce@simulator.amazonses.com` from outside the app would therefore prove nothing.
 
 **Two streams, split by whose mail it is, and the split is load-bearing** (`CLAUDE.md`, G1):
 
@@ -2852,13 +2865,14 @@ customers, and the damage would look exactly like a deliverability problem. So:
 
 ### What still needs AWS, not code
 
-1. `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_REGION`.
-2. **Sandbox escape** — a support request with a queue in front of it. Until granted, SES accepts
-   mail only to verified addresses. **Start it early; it is refusable.**
-3. A configuration set with an SNS destination pointing at `/api/webhooks/ses`
-   (`SES_CONFIGURATION_SET`). Without it SES still sends, nothing is ever suppressed, and the
-   account drifts toward a bounce-rate suspension unseen.
-4. Per-merchant domain verification — a product feature, and the merchant's own task.
+1. ✅ `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_REGION` — done (`us-west-2`).
+2. ✅ **Sandbox escape** — granted 2026-08-11, and **it is per region**: `AWS_REGION` must name the
+   region access was granted in, or sending is still sandboxed with nothing in the code able to tell.
+3. ✅ A configuration set with an SNS destination pointing at `/api/webhooks/ses`
+   (`SES_CONFIGURATION_SET`) — done 2026-08-15, subscription **Confirmed**. It stayed open this long
+   because SNS cannot reach `localhost`; it needed the deployed host.
+4. 🔴 **Per-merchant domain verification** — the last gate, and the merchant's own task. None exists
+   yet, which is why no mail has been sent and the suppression loop has never run.
 
 **Frontend:** `lib/api/email.ts` and `/dashboard/settings/email` (added 2026-08-02). The screen is
 what `lib/email/`'s own copy — "Verify a sending domain in Settings → Email" — points at; before it
@@ -2866,8 +2880,57 @@ existed that instruction led nowhere. It renders the two streams separately, and
 add-domain form entirely when `providerConfigured` is false** rather than offering one that AWS
 would reject after the merchant filled it in.
 
-**Not built:** shopper auth mail via Supabase's Send Email Hook, Secure Email Change's two-message
-flow, abandoned-cart mail, and broadcast/campaign sending.
+**Shopper auth mail is built** (`POST /api/webhooks/supabase-email`), and **dormant until the hook is
+enabled in the Supabase dashboard** — see below.
+
+**Not built:** abandoned-cart mail.
+
+⛔ **Broadcast/campaign sending is deferred — D43.** Not unbuilt, *deferred*: no broadcast, lists,
+segmentation, or campaign analytics, and no schema anticipating them. The blocker is reputation
+isolation — SES suspends on account-wide rates, so one merchant's stale list would take down every
+merchant's order confirmations.
+
+### Shopper auth mail — `POST /api/webhooks/supabase-email` (§24)
+
+Supabase's Send Email Hook. **Enabling it replaces Supabase's mailer for the entire project**, both
+identity domains — so this route handles staff mail too, and a bug here removes auth email rather
+than degrading it. The route is the one place the two streams are chosen:
+
+| `user_kind` | Stream | From |
+|---|---|---|
+| `staff` (and unmarked) | Resend | `markii.shop` |
+| `customer` | **SES** | the merchant's **own verified domain** |
+
+**Unmarked users route to staff**, matching `userKindOf`. That is the safe direction: a staff message
+misrouted to a merchant domain would leak an auth token across a tenancy boundary, while a shopper
+misrouted to Markii's stream is merely unbranded.
+
+Shoppers carry **`site_id` in `app_metadata`**, stamped in the same service-role write as `user_kind`
+at sign-up. Nothing else can answer "whose customer is this?" — `redirect_to` varies by flow and is
+partly caller-supplied, and `customers` is keyed by `siteId`, so one address may legitimately exist
+on several stores.
+
+**A merchant without a verified domain does not block signup.** Auth mail falls back to the
+storefront's own address — `accounts@{slug}.{ROOT_DOMAIN}` — still through SES, still carrying the
+store's name. A shopper who cannot receive a confirmation cannot create an account, and punishing
+the shopper for the merchant's unfinished setup is the worse outcome.
+
+**The fallback applies to `auth_*` templates only, and that is enforced in `sendMerchantMail`, not
+trusted from the caller.** Order confirmations, shipping and refund notices still refuse with
+`domain_verification_required` — a receipt leaving from Markii's namespace is exactly the G1
+violation the two streams exist to prevent. Passing `tenantFallback` on a non-auth template does
+nothing.
+
+**What the fallback is not: reputation isolation.** SES covers subdomains under the parent domain
+identity, so mail from `{slug}.markii.shop` still DKIM-signs as `markii.shop`, and SES bounce and
+complaint rates are account-wide regardless of sending domain. It buys a recognisable sender and an
+unblocked signup — nothing more. Requires `markii.shop` to be a **verified SES domain identity**.
+
+Requires `SEND_EMAIL_HOOK_SECRET`; unset, the route refuses with `503` rather than sending
+unverified mail — an unauthenticated caller could otherwise make Markii send an attacker-chosen link
+from a merchant's domain. Signature is Standard Webhooks (`webhook-id`, `webhook-timestamp`,
+`webhook-signature`), with a 5-minute replay window and multiple accepted signatures so a secret can
+be rolled without dropping events.
 
 ---
 

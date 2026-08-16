@@ -13,6 +13,13 @@ export type {
   RefundNoticeInput,
   ShippingNoticeInput,
 } from "./orders";
+export {
+  confirmSignupEmail,
+  emailChangeEmail,
+  magicLinkEmail,
+  resetPasswordEmail,
+} from "./auth";
+export type { AuthMailContext } from "./auth";
 export type { RenderedEmail } from "./layout";
 
 /**
@@ -29,6 +36,15 @@ export const TEMPLATE_IDS = [
   "refund_notice",
   "cancellation_notice",
   "digital_delivery",
+  /**
+   * Shopper account mail (§24). Separate ids per action so "which of our emails
+   * is bouncing?" stays answerable — a single `auth` id would merge a
+   * confirmation nobody clicked with a password reset that never arrived.
+   */
+  "auth_confirm_signup",
+  "auth_reset_password",
+  "auth_magic_link",
+  "auth_email_change",
 ] as const;
 
 export type TemplateId = (typeof TEMPLATE_IDS)[number];

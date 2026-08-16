@@ -111,21 +111,47 @@ and the send refuses with `domain_verification_required` — there is **no fallb
 `markii.shop`**, which is the whole of G1: a merchant's bounces must never land on Markii's
 reputation.
 
-**The feedback loop is proven up to the last hop.** Simulator sends to
+**Shopper account mail is the one exception, and it is narrow** (§24). Auth mail falls back to the
+storefront's own `accounts@{slug}.{ROOT_DOMAIN}` address — still SES, still the store's name — because
+a shopper who cannot receive a confirmation cannot create an account, and blocking them for a
+merchant's unfinished setup punishes the wrong person. **Restricted to `auth_*` templates and
+enforced inside `sendMerchantMail`**, never trusted from the caller: a receipt from Markii's
+namespace is the violation G1 exists to prevent. It is not reputation isolation — SES covers
+subdomains under the parent identity, so DKIM still signs as `markii.shop` and account-level rates
+are shared either way.
+
+**The feedback loop is wired end to end as of 2026-08-15.** Simulator sends to
 `bounce@` and `complaint@simulator.amazonses.com` (labelled, so each is traceable) produced both
 SNS notifications, which confirms the configuration set really is subscribed to `BOUNCE` **and**
 `COMPLAINT` — something the SES-scoped IAM key cannot read back, so it was verified by observation
 rather than by API. Simulator mail does not touch reputation or the daily quota.
 
 ```
-send → SES → config set → SNS topic → [ unproven ] → /api/webhooks/ses → suppression list
+send → SES → config set → SNS topic → HTTPS subscription → /api/webhooks/ses → suppression list
 ```
 
-**Only `SNS → /api/webhooks/ses` remains**, and it is blocked on infrastructure rather than code:
-SNS cannot reach `localhost`, so it needs a deployed host or a tunnel. Until that subscription
-exists, **SES sends and nothing is ever suppressed** — the drift that walks an account toward a
-bounce-rate suspension unseen. `lib/email/sns.ts` handles `SubscriptionConfirmation` itself, so the
-subscription should self-confirm; check it reads **Confirmed**, not Pending.
+**Every link in that chain now exists** (verified in the AWS console 2026-08-15, since the SES-scoped
+IAM key can read back none of it — it has no `sns:ListTopics`, `ses:ListEmailIdentities`, or
+`ses:GetConfigurationSetEventDestinations`). Config set `my-first-configuration-set` publishes
+**Hard bounces and Complaints** through destination `markii-suppression-feed` to topic
+`markii-ses-feedback`, whose one subscription is `https://markii.shop/api/webhooks/ses`, HTTPS,
+**Confirmed**. Hard-bounce-only publishing matches `suppressionSignals`, which suppresses
+`Permanent` bounces and every complaint and deliberately ignores `Transient` ones. The endpoint
+answers `403` to an unsigned body, which is `verifySnsMessage` working.
+
+**Wired is not the same as observed, and the loop has never carried a real event.**
+`email_deliveries` is empty and no merchant sending identity exists, so nothing has ever been sent
+and nothing has ever bounced. That is the honest state rather than a defect.
+
+**The observation that would close it is narrower than it looks.** A bounce only suppresses if the
+app *sent* the mail: the webhook maps the SNS message id back to an `email_deliveries` row to find
+the org, and an unmappable one returns `{ suppressed: 0, reason: "unknown_message" }`. So a raw send
+to `bounce@simulator.amazonses.com` from outside the app proves nothing — it would write no
+suppression even with the chain working. It takes a merchant with a verified sending domain sending
+**through** the app.
+
+Nothing here notices if that chain later breaks — a deleted subscription or an edited config set
+would be silent, and the SES-scoped key cannot check. Re-verify in the console after any AWS change.
 
 **Membership gating and storefront shopper login are built** (§18.9, D34). Tiers gate products;
 buying a granting product confers one inside the order transaction. **Membership status is derived
@@ -257,7 +283,17 @@ one-directional and consistent — work lands and the doc does not move — so a
 finished, while a "built" item has generally earned it.
 
 **Deferred until further notice — do not build, and do not let schema anticipate it:** **gift
-cards** (D33, 2026-08-03). The metering exclusion in `docs/PRICING.md` §4.1 is asserted but
+cards** (D33, 2026-08-03) and **merchant email marketing campaigns** (D43, 2026-08-15).
+
+Campaigns sharpen D27 from "not at launch" into a standing deferral: no broadcast sending, list
+management, segmentation, or campaign analytics. **Transactional merchant mail is unaffected** —
+§24 keeps sending from the merchant's own verified domain, and ESP-as-a-Channel stays the answer for
+merchants who need campaigns now. The prerequisite that decides the shape when it does arrive is
+**reputation isolation**: SES suspends on *account-wide* bounce and complaint rates, so one merchant
+blasting a stale list would take down every merchant's order confirmations. Campaigns cannot share
+the transactional sending path — they need dedicated IPs or per-merchant sub-accounts first.
+
+ The metering exclusion in `docs/PRICING.md` §4.1 is asserted but
 unimplemented, so a naive implementation mis-bills merchants in one direction or the other —
 `lib/commerce/orders.ts` carries the detail. **This got sharper now that threshold fees are actually
 invoiced:** while gift cards do not exist the metering base is not wrong, but the day they ship
