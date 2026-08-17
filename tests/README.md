@@ -275,3 +275,31 @@ The last assertion is the one that matters — not "the hosts I know about are
 gone" but **"nothing was added that I did not remove"**, compared against a
 baseline taken in `beforeAll`. It also detaches its own hosts in `afterAll`, so a
 mid-run failure does not leave one on a real project.
+
+## Tests that send real email through SES — opt-in
+
+Two files, both gated on `MARKII_SES_TESTS=1` **and** a real `ROOT_DOMAIN` on the
+dev server. On `localhost` there is no fallback sender at all, so they would
+pass while testing nothing — they refuse rather than skip in that case.
+
+```bash
+ROOT_DOMAIN=markii.shop DEMO_SKIP_PAYMENT_VERIFICATION=1 pnpm dev
+
+MARKII_SES_TESTS=1 pnpm exec cross-env MARKII_ALLOW_INTEGRATION_TESTS=1 \
+  vitest run --project integration merchant-mail-fallback ses-suppression
+```
+
+- **`merchant-mail-fallback`** — a receipt sends from `{slug}.markii.shop` when
+  the merchant has no verified domain (D44), and readiness still nags them.
+- **`ses-suppression`** — a real hard bounce travels
+  `SES → config set → SNS → /api/webhooks/ses → email_suppressions`, and the
+  **next send to that address is refused**. Suppression that does not stop the
+  retry is decoration.
+
+**`ses-suppression` reaches across machines, deliberately.** The send comes from
+the local dev server, but SNS delivers to the **deployed** webhook, and both
+resolve against the shared database. It therefore exercises production's
+receiver — and fails if the deployment is behind the branch under test.
+
+Mail goes to `simulator.amazonses.com`, which touches neither the account's
+sending reputation nor its daily quota, so both are safe to re-run.

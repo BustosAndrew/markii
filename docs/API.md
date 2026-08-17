@@ -2770,12 +2770,16 @@ later broke** — re-check after any AWS change.
 **One gate remains, and it is the merchant's.** Without their own verified domain a merchant gets
 `domain_verification_required` and no send — never a fallback to `markii.shop`.
 
-**The loop has still never carried a real event**, and that is a fact about data rather than
-plumbing: `email_deliveries` is empty and no sending identity exists, so nothing has been sent and
-nothing has bounced. Note the observation this needs is narrower than it looks — a bounce suppresses
-only for mail **the app sent**, since the webhook maps the SNS message id to an `email_deliveries`
-row to find the org and answers `{ suppressed: 0, reason: "unknown_message" }` otherwise. A raw send
-to `bounce@simulator.amazonses.com` from outside the app would therefore prove nothing.
+**The loop has carried a real bounce as of 2026-08-16** —
+`tests/integration/ses-suppression.test.ts` (gated, `MARKII_SES_TESTS=1`). A receipt to
+`bounce@simulator.amazonses.com` produced a suppression row carrying its own `source_message_id`,
+marked the delivery `bounced`, and the **next send to that address was refused**. That last check is
+the point: a list that records bounces without stopping the retry is decoration, and the first three
+assertions cannot see the difference.
+
+A bounce suppresses only for mail **the app sent** — the webhook maps the SNS message id to an
+`email_deliveries` row to find the org, and answers `{ suppressed: 0, reason: "unknown_message" }`
+otherwise. So this only became testable once D44 let receipts send without a verified domain.
 
 **Two streams, split by whose mail it is, and the split is load-bearing** (`CLAUDE.md`, G1):
 
@@ -2883,7 +2887,38 @@ would reject after the merchant filled it in.
 **Shopper auth mail is built** (`POST /api/webhooks/supabase-email`), and **dormant until the hook is
 enabled in the Supabase dashboard** — see below.
 
-**Not built:** abandoned-cart mail.
+### Abandoned-cart recovery — ✅ LIVE (D27)
+
+**Opt-in per storefront** (`sites.abandonedCartEmails`, default **false**). This mail leaves from the
+merchant's own sending domain to their own customers and lands on their reputation, so switching it
+on for every store because the feature shipped would be sending on their behalf unasked.
+
+Swept hourly by `GET /api/cron/abandoned-carts` (§25). A cart qualifies when **all** of these hold,
+and each clause stops a specific way this becomes spam:
+
+| Rule | Why |
+|---|---|
+| site opted in | it is the merchant's domain and reputation |
+| `status = 'open'` | a converted cart was bought, not abandoned |
+| has an email | the shopper's only act of consent |
+| `abandoned_mail_sent_at IS NULL` | **one per cart, ever** |
+| quiet ≥ 1h | mailing someone still on the page makes a store look broken |
+| quiet < 24h | and it stops the **first run** mailing every historic cart at once |
+| not expired | the link *is* the cart; one that restores nothing is worse than no mail |
+| at least one line | "you left something behind" listing nothing is absurd |
+
+**The cart is claimed before the send, not after** — conditionally (`is null`), so two overlapping
+runs cannot both take it, and a crash mid-send costs one missed reminder rather than an hourly
+repeat. A refusal (usually suppression) is counted as failed and **not** un-claimed: retrying a
+bounced address next hour is exactly the wrong response to it.
+
+The email links to `{storefrontUrl}/cart?recover={token}`. The cart island adopts the token and then
+**strips the parameter from the URL** — it is a bearer credential for the cart, so it should not sit
+in browser history or leak through a `Referer` header.
+
+The copy carries its own provenance ("you are receiving this because you left items in your cart")
+and **invents no urgency** — carts live 14 days, so scarcity or a countdown would be false. Tested
+as such: `lib/email/templates/cart.test.ts` asserts the absence of `expir`, `hurry`, `last chance`.
 
 ⛔ **Broadcast/campaign sending is deferred — D43.** Not unbuilt, *deferred*: no broadcast, lists,
 segmentation, or campaign analytics, and no schema anticipating them. The blocker is reputation

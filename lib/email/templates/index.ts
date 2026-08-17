@@ -20,6 +20,8 @@ export {
   resetPasswordEmail,
 } from "./auth";
 export type { AuthMailContext } from "./auth";
+export { abandonedCart } from "./cart";
+export type { AbandonedCartContext, AbandonedCartItem } from "./cart";
 export type { RenderedEmail } from "./layout";
 
 /**
@@ -45,6 +47,8 @@ export const TEMPLATE_IDS = [
   "auth_reset_password",
   "auth_magic_link",
   "auth_email_change",
+  /** The one merchant email a shopper did not ask for — see templates/cart.ts. */
+  "abandoned_cart",
 ] as const;
 
 export type TemplateId = (typeof TEMPLATE_IDS)[number];

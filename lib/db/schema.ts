@@ -90,6 +90,14 @@ export const sites = pgTable(
       .default({ x402: true, stripe: false }),
     walletAddress: text("wallet_address"),
     googleSiteVerification: text("google_site_verification"),
+    /**
+     * Whether Markii may email this store's shoppers about carts they left
+     * behind (§24). **Opt-in, and off by default**: the mail goes from the
+     * merchant's own domain to their own customers and lands on their sending
+     * reputation, so turning it on for everyone because the feature shipped
+     * would be sending on their behalf without being asked.
+     */
+    abandonedCartEmails: boolean("abandoned_cart_emails").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -1112,6 +1120,12 @@ export const carts = pgTable(
       .notNull()
       .default("open"),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    /**
+     * When the recovery email went out. **One per cart, ever** — the sweep runs
+     * hourly against a time window, so without a durable marker a cart inside
+     * that window would be mailed on every pass.
+     */
+    abandonedMailSentAt: timestamp("abandoned_mail_sent_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

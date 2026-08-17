@@ -110,8 +110,15 @@ rest on system actors being "never reachable over HTTP"; `CRON_SECRET` now carri
 alone (`lib/cron/auth.ts` — refuses when unset, refuses under 32 chars, constant-time compare).
 Unset, nothing is billed at all: **it refuses rather than running open** (D41).
 
-**Still nothing else is scheduled** — no T12 rollup, no abandoned-cart timer, no dunning sweep of
-Markii's own. Membership status stays derived per request for exactly this reason.
+**A second job is scheduled now: abandoned-cart recovery** (`0 * * * *`, D27). It holds *less*
+authority than the billing cron on purpose — it authenticates with the same `CRON_SECRET` and then
+mints no actor at all, because all it does is send email. **Opt-in per storefront and off by
+default** (`sites.abandonedCartEmails`): the mail leaves from the merchant's domain and lands on
+their reputation, so it is theirs to switch on. One reminder per cart ever, and the cart is claimed
+*before* the send so a crash costs a missed email rather than an hourly repeat.
+
+**Still nothing else is scheduled** — no T12 rollup, no dunning sweep of Markii's own. Membership
+status stays derived per request for exactly this reason.
 
 **SES is live as of 2026-08-11 — the platform gate is closed, the merchant gate is not.**
 `lib/email/` has the SES v2 transport (hand-rolled SigV4 over `fetch`), per-merchant sending
@@ -162,16 +169,19 @@ the domain name; only the SNS subscription and the config set's destinations req
 `Permanent` bounces and every complaint and deliberately ignores `Transient` ones. The endpoint
 answers `403` to an unsigned body, which is `verifySnsMessage` working.
 
-**Wired is not the same as observed, and the loop has never carried a real event.**
-`email_deliveries` is empty and no merchant sending identity exists, so nothing has ever been sent
-and nothing has ever bounced. That is the honest state rather than a defect.
+**The loop has now carried a real bounce, end to end** (2026-08-16,
+`tests/integration/ses-suppression.test.ts`, gated on `MARKII_SES_TESTS=1`). A receipt to
+`bounce@simulator.amazonses.com` produced a suppression row keyed to its own `source_message_id`,
+flipped the delivery to `bounced`, and — the assertion that matters most — **the next send to that
+address was refused**. A suppression list that records bounces without stopping the retry is
+decoration, and that is invisible from the first three checks.
 
-**The observation that would close it is narrower than it looks.** A bounce only suppresses if the
-app *sent* the mail: the webhook maps the SNS message id back to an `email_deliveries` row to find
-the org, and an unmappable one returns `{ suppressed: 0, reason: "unknown_message" }`. So a raw send
-to `bounce@simulator.amazonses.com` from outside the app proves nothing — it would write no
-suppression even with the chain working. It takes a merchant with a verified sending domain sending
-**through** the app.
+**It became testable only because of D44.** The webhook maps the SNS message id back to an
+`email_deliveries` row to find the org, so a raw send from outside the app suppresses nothing
+(`unknown_message`). Before receipts could send without a verified domain, no test could produce a
+mappable bounce at all. The test drives a **local** dev server while SNS delivers to the **deployed**
+webhook, both resolving against the shared database — so it exercises production's receiver and
+fails if the deployment is behind.
 
 Nothing here notices if that chain later breaks — a deleted subscription or an edited config set
 would be silent, and the SES-scoped key cannot check. Re-verify in the console after any AWS change.

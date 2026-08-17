@@ -73,6 +73,11 @@ export const siteCreateSchema = z.object({
    * name rather than letting zod strip it silently, because a payout change
    * that quietly does nothing is its own kind of dangerous.
    */
+  /**
+   * Opt-in, and it stays opt-in: this sends mail from the merchant's domain to
+   * their customers, so it is theirs to switch on (§24).
+   */
+  abandonedCartEmails: z.boolean().optional(),
   googleSiteVerification: z.string().max(200).nullish(),
 });
 

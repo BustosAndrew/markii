@@ -22,6 +22,7 @@ import {
   patchCart,
   quoteShippingRates,
   readCartToken,
+  writeCartToken,
   removeDiscount,
   type StorefrontCart,
 } from "@/lib/api/storefront-cart";
@@ -152,6 +153,27 @@ export function CartCheckout({
   useEffect(() => {
     let cancelled = false;
     void (async () => {
+      /**
+       * `?recover=<token>` adopts a cart from an abandoned-cart email (§24).
+       *
+       * Without this the recovery link would land on an empty cart — the token
+       * lives in a cookie, and a shopper opening the mail on their phone has a
+       * different one. Adopting **overwrites** whatever is in the cookie: they
+       * clicked a link asking for that specific cart, and silently showing them
+       * a different one would be worse than the mail not working at all.
+       *
+       * The parameter is stripped from the URL afterwards so the cart token —
+       * which is a bearer credential for the cart — does not sit in history, get
+       * copy-pasted, or leak through a `Referer` header.
+       */
+      const recover = new URLSearchParams(window.location.search).get("recover");
+      if (recover) {
+        writeCartToken(recover);
+        const clean = new URL(window.location.href);
+        clean.searchParams.delete("recover");
+        window.history.replaceState({}, "", clean.toString());
+      }
+
       const token = readCartToken();
       if (!token) {
         if (!cancelled) {

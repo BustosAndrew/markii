@@ -225,6 +225,13 @@
       "when": 1786769274774,
       "tag": "0031_site_domain_verification",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1786948712293,
+      "tag": "0032_abandoned_cart_email",
+      "breakpoints": true
     }
   ]
 }

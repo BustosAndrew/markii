@@ -63,6 +63,8 @@ export type Site = {
   paymentProviders: { x402: boolean; stripe: boolean };
   walletAddress: string | null;
   googleSiteVerification: string | null;
+  /** Recovery mail for abandoned carts (§24). Opt-in; false by default. */
+  abandonedCartEmails: boolean;
   productCount: number;
   categoryCount: number;
   storefrontUrl: string;
