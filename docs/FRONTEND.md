@@ -334,7 +334,12 @@ means *published but not reachable* — show `hostProblem` (its copy already sep
 from the merchant's) and offer deploy again as the retry, rather than linking to an address that
 breaks.
 
-**2. Settings → Email has a third state now.** `CustomerEmailStatus.code` gained
+**2. DONE — the abandoned-cart toggle** now sits with the other site switches in
+`site-controls.tsx`. Left here as a note only because the feature is **opt-in and useless without
+it**: the sweep ships off by default, so shipping the backend alone would have been a feature no
+merchant could reach.
+
+**3. Settings → Email has a third state now.** `CustomerEmailStatus.code` gained
 **`unverified_sender`** and **lost `domain_verification_required`**. This is not a rename:
 the old code meant mail was *refused*, and `canSend` is now **`true`** in that state because mail
 sends from the storefront's Markii address (D44). The page already badges three states; anything

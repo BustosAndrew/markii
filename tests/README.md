@@ -286,11 +286,14 @@ pass while testing nothing — they refuse rather than skip in that case.
 ROOT_DOMAIN=markii.shop DEMO_SKIP_PAYMENT_VERIFICATION=1 pnpm dev
 
 MARKII_SES_TESTS=1 pnpm exec cross-env MARKII_ALLOW_INTEGRATION_TESTS=1 \
-  vitest run --project integration merchant-mail-fallback ses-suppression
+  vitest run --project integration merchant-mail-fallback ses-suppression abandoned-cart
 ```
 
 - **`merchant-mail-fallback`** — a receipt sends from `{slug}.markii.shop` when
   the merchant has no verified domain (D44), and readiness still nags them.
+- **`abandoned-cart`** — the hourly sweep sends one recovery email, only for a
+  storefront that opted in, and never a second for the same cart. Verified by
+  deleting the opt-in check and watching an opted-out store get mailed.
 - **`ses-suppression`** — a real hard bounce travels
   `SES → config set → SNS → /api/webhooks/ses → email_suppressions`, and the
   **next send to that address is refused**. Suppression that does not stop the

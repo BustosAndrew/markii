@@ -304,10 +304,13 @@ any 4xx. **A refusal test must assert the session is live first and pin the exac
 **A route-vs-service sweep on 2026-08-10 found four live endpoints with no typed client** — digital
 delivery in full (`/api/digital-assets` plus every `delivery.*` action), and the discount, tax, and
 inventory-level previews. Services now exist (`lib/api/delivery.ts`, plus additions to `commerce.ts`
-and `tax-shipping.ts`); **screens still do not**. Digital delivery is the serious one: D5 names
-digital-goods sellers as the beachhead, and until a screen lands they cannot upload the files they
-sell. The remaining `*_API_LIVE: false` constants (`ACTIONS_UNDO`, `ORG_AUDIT`, `ORG_SESSIONS`) were
-checked and are correct — no route backs any of them.
+and `tax-shipping.ts`). **Digital delivery screens have since landed** — verified 2026-08-17:
+`/dashboard/delivery`, `components/dashboard/digital-assets-panel.tsx`, and the product page's
+attachment editor. That entry said "screens still do not" for a week after they shipped, which is
+the same one-directional staleness this file warns about two paragraphs down. The discount, tax, and
+inventory-level previews are the ones still without a screen. The remaining `*_API_LIVE: false`
+constants (`ACTIONS_UNDO`, `ORG_AUDIT`, `ORG_SESSIONS`) were checked and are correct — no route
+backs any of them.
 
 **Recurring membership billing came off this list** on 2026-08-10: it was listed as planned while
 being built and passing, which is the same staleness that had MFA's screens listed as missing after

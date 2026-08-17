@@ -103,6 +103,22 @@ export function SiteControls({ site }: { site: Site }) {
           />
         </div>
         <div className="border-t border-border">
+          {/*
+            Opt-in, and the copy says whose mail it is. Enabling this sends from
+            the merchant's own domain to their customers and lands on their
+            sending reputation — so it stays off until they choose it, and the
+            description has to make that ownership obvious rather than reading
+            like a Markii feature they are switching on.
+          */}
+          <Toggle
+            label="Abandoned cart emails"
+            description="Email shoppers once if they leave items behind. Sent from your store, an hour after they stop."
+            checked={current.abandonedCartEmails}
+            disabled={busy}
+            onChange={(abandonedCartEmails) => patch({ abandonedCartEmails })}
+          />
+        </div>
+        <div className="border-t border-border">
           <Toggle
             label="Stripe"
             description="Offer card checkout on this storefront when Stripe can accept payments."
