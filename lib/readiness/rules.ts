@@ -270,6 +270,14 @@ export type StoreFacts = {
   hasVariantBackedProducts: boolean;
   /** Whether Markii's own Stripe credentials exist in this environment. */
   stripeConfigured: boolean;
+  /**
+   * Whether AWS SES is connected on this deployment. When false, customer email
+   * is **Markii's** problem and no finding is raised — an issue the merchant
+   * cannot act on is noise, and this list only carries their tasks.
+   */
+  emailProviderConfigured: boolean;
+  /** Whether the org has a **verified** sending domain of its own (§24). */
+  customerEmailReady: boolean;
 };
 
 export function storeFindings(s: StoreFacts): RuleFinding[] {
@@ -467,6 +475,48 @@ export function storeFindings(s: StoreFacts): RuleFinding[] {
       evidence: [{ field: "products", current: "0 enabled", expected: "at least one" }],
       recommendation: "Add a product, or enable one you have already created.",
       expectedImpact: "There is nothing for an agent to find or buy.",
+      scope,
+    });
+  }
+
+  /**
+   * **A store that cannot email its customers is selling blind.**
+   *
+   * Order confirmations, shipping and refund notices, and digital delivery all
+   * refuse without the merchant's own verified sending domain — there is no
+   * fallback to `markii.shop` for them (G1). So a shopper can buy and receive
+   * *nothing*: no receipt, no tracking, and for a digital product, not even the
+   * file they paid for.
+   *
+   * Shopper **account** mail is the one exception and does still send, from the
+   * storefront's own subdomain (§24) — which is exactly why this needs saying
+   * out loud. A merchant who watched a signup confirmation arrive has every
+   * reason to assume receipts work too.
+   *
+   * Critical once live, because by then real buyers are affected. A warning
+   * before that: it is a go-live blocker rather than a live emergency.
+   */
+  if (s.emailProviderConfigured && !s.customerEmailReady) {
+    findings.push({
+      code: "UNVERIFIED_SENDING_DOMAIN",
+      severity: s.status === "live" ? "warning" : "opportunity",
+      component: "protocol_coverage",
+      title: "Customer email does not come from your domain",
+      affectedFields: ["emailIdentity"],
+      evidence: [
+        { field: "sendingDomain", current: `${s.name} on markii.shop`, expected: "a domain you own" },
+      ],
+      recommendation: "Verify a sending domain in Settings → Email.",
+      /**
+       * Not critical, and no longer "cannot email" — receipts **do** send, from
+       * the storefront's Markii address (D44). Overstating this would train
+       * merchants to discount the list, and the list only works if every
+       * critical really is one.
+       */
+      expectedImpact:
+        "Receipts and delivery emails are sending, but from a markii.shop address rather than " +
+        "yours. Your own domain looks like you to buyers, and its sending reputation is yours " +
+        "rather than shared with every other store.",
       scope,
     });
   }

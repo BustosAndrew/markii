@@ -109,13 +109,10 @@ export async function POST(req: Request) {
   /**
    * Always SES, never Resend — this is the merchant's mail to their customer.
    *
-   * `tenantFallback` is what keeps signup working before a merchant has
-   * verified a domain: the message goes from `accounts@{slug}.{ROOT_DOMAIN}`
-   * instead, which still carries the store's name and still leaves from SES. It
-   * applies to `auth_*` templates **only** — enforced inside `sendMerchantMail`,
-   * not here — because a receipt from Markii's namespace is the G1 violation the
-   * two streams exist to prevent. Blocking account creation over a merchant's
-   * unfinished setup would punish the shopper for someone else's task.
+   * `siteId` is what lets `sendMerchantMail` fall back to the storefront's own
+   * `{slug}.{ROOT_DOMAIN}` address when the merchant has not verified a domain
+   * (D44), rather than refusing. Blocking account creation over someone else's
+   * unfinished setup would punish the shopper.
    */
   const sent = await sendMerchantMail(route.orgId, {
     to,
@@ -123,7 +120,7 @@ export async function POST(req: Request) {
     html: rendered.html,
     text: rendered.text,
     template: template.id,
-    tenantFallback: { slug: route.slug, storeName: route.storeName },
+    siteId: route.siteId,
   });
 
   if (!sent.sent) {

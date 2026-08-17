@@ -76,10 +76,13 @@ const DESCRIPTION =
   "sending reputation stays yours.";
 
 /**
- * `code` answers **whose problem it is**: `configuration_required` is Markii's
- * (no AWS credentials on this deployment), `domain_verification_required` is the
- * merchant's. That is the difference between a task they can complete and one
- * they cannot, so the resolution text differs with it.
+ * `code` answers **whether mail is going out, and from whose address**.
+ *
+ * `configuration_required` is Markii's problem (no AWS credentials here) and
+ * nothing the merchant does will help. `unverified_sender` means mail **is**
+ * sending, from the storefront's Markii address, and verifying their own domain
+ * is an improvement rather than a repair (D44) — so it is not an error state and
+ * must not be badged as one.
  */
 function CustomerEmailCard({ settings }: { settings: EmailSettings }) {
   const { customerEmail, providerConfigured } = settings;
@@ -93,8 +96,25 @@ function CustomerEmailCard({ settings }: { settings: EmailSettings }) {
             Order confirmations, shipping and refund notices, cancellations, and digital delivery.
           </p>
         </div>
-        <Badge variant={customerEmail.canSend ? "success" : "warning"}>
-          {customerEmail.canSend ? "Sending" : "Not sending"}
+        {/*
+          Three states, not two. "Sending, unverified" is the common one before a
+          merchant sets up their domain, and calling it "Not sending" would be
+          false — their customers are receiving mail.
+        */}
+        <Badge
+          variant={
+            customerEmail.code === "ready"
+              ? "success"
+              : customerEmail.canSend
+                ? "info"
+                : "warning"
+          }
+        >
+          {customerEmail.code === "ready"
+            ? "Sending"
+            : customerEmail.canSend
+              ? "Sending — unverified"
+              : "Not sending"}
         </Badge>
       </div>
 

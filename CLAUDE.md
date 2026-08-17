@@ -125,19 +125,21 @@ do not exist. Nothing in the code can detect that; the credentials are valid, th
 Verified end to end by a live send to `success@simulator.amazonses.com` carrying
 `SES_CONFIGURATION_SET`, which proves the config set exists because SES refuses an unknown one.
 
-**A merchant still cannot send until they verify their own domain.** `resolveSender` returns null
-and the send refuses with `domain_verification_required` — there is **no fallback to
-`markii.shop`**, which is the whole of G1: a merchant's bounces must never land on Markii's
-reputation.
+**Customer mail sends even before a merchant verifies a domain** (D44, 2026-08-16 — this amended
+G1). Without one, `sendMerchantMail` falls back to the storefront's own
+`accounts@{slug}.{ROOT_DOMAIN}` address: still SES, still the store's name, **never bare
+`markii.shop` and never Resend**. It applies to *all* merchant mail — receipts, shipping and refund
+notices, digital delivery, account mail — because a store that takes an order and sends nothing is
+broken, and for a digital product the missing email *is* the product. Silence is the worse failure.
 
-**Shopper account mail is the one exception, and it is narrow** (§24). Auth mail falls back to the
-storefront's own `accounts@{slug}.{ROOT_DOMAIN}` address — still SES, still the store's name — because
-a shopper who cannot receive a confirmation cannot create an account, and blocking them for a
-merchant's unfinished setup punishes the wrong person. **Restricted to `auth_*` templates and
-enforced inside `sendMerchantMail`**, never trusted from the caller: a receipt from Markii's
-namespace is the violation G1 exists to prevent. It is not reputation isolation — SES covers
-subdomains under the parent identity, so DKIM still signs as `markii.shop` and account-level rates
-are shared either way.
+**The verified domain always wins when it exists**, and `UNVERIFIED_SENDING_DOMAIN` (§9) nags until
+it does — `warning` on a live store, `opportunity` before that. Deliberately not `critical`: mail is
+*sending*, and overstating it teaches merchants to discount the whole list.
+
+**It is not reputation isolation.** SES covers subdomains under the parent identity, so DKIM signs
+as `markii.shop` and bounce rates are account-wide regardless — one merchant's bad list can still
+cost every merchant their receipts. That is why suppression stays load-bearing and why D43 keeps
+*campaigns* off this path entirely.
 
 **The feedback loop is wired end to end as of 2026-08-15.** Simulator sends to
 `bounce@` and `complaint@simulator.amazonses.com` (labelled, so each is traceable) produced both

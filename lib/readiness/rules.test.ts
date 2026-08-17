@@ -48,6 +48,10 @@ const store = (over: Partial<StoreFacts> = {}): StoreFacts => ({
   locationCount: 1,
   hasVariantBackedProducts: true,
   stripeConfigured: false,
+  // Default to a store that *can* email, so NO_CUSTOMER_EMAIL does not appear
+  // in every unrelated assertion below.
+  emailProviderConfigured: true,
+  customerEmailReady: true,
   ...over,
 });
 
@@ -251,6 +255,38 @@ describe("storeFindings", () => {
       store({ paymentProviders: { x402: true, stripe: true }, stripeConfigured: true }),
     );
     expect(codes(found)).not.toContain("CARD_RAIL_UNAVAILABLE");
+  });
+
+  it("flags an unverified sending domain without overstating it", () => {
+    /**
+     * Receipts **do** send without a verified domain — from the storefront's
+     * Markii address (D44) — so this is a quality issue, not an outage. Calling
+     * it critical would be the fabricated-urgency version of the same mistake
+     * as fabricated success, and it teaches merchants to discount the list.
+     */
+    const live = storeFindings(store({ status: "live", customerEmailReady: false }));
+    const found = live.find((f) => f.code === "UNVERIFIED_SENDING_DOMAIN");
+    expect(found?.severity).toBe("warning");
+    expect(found?.expectedImpact, "must not claim mail is failing").toMatch(/are sending/);
+
+    const draft = storeFindings(store({ status: "draft", customerEmailReady: false }));
+    expect(draft.find((f) => f.code === "UNVERIFIED_SENDING_DOMAIN")?.severity).toBe("opportunity");
+  });
+
+  it("stays silent when email is Markii's problem rather than the merchant's", () => {
+    // No SES on the deployment means nothing the merchant does will help, and a
+    // finding they cannot act on is noise — the same rule every other finding
+    // here is held to.
+    const found = storeFindings(
+      store({ status: "live", emailProviderConfigured: false, customerEmailReady: false }),
+    );
+    expect(codes(found)).not.toContain("UNVERIFIED_SENDING_DOMAIN");
+  });
+
+  it("says nothing once a sending domain is verified", () => {
+    expect(codes(storeFindings(store({ status: "live" })))).not.toContain(
+      "UNVERIFIED_SENDING_DOMAIN",
+    );
   });
 
   it("tells an unverified domain apart from no domain at all", () => {

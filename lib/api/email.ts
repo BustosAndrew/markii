@@ -17,17 +17,27 @@ const EMAIL_SECTION = "API §24";
 const EMAIL_API_LIVE = true;
 
 /**
- * Whose problem it is when customer mail cannot go out.
+ * Whether customer mail goes out, and from whose address.
  *
- * - `configuration_required` — Markii's: no AWS credentials on this deployment.
- * - `domain_verification_required` — the merchant's: no verified sending domain.
+ * - `ready` — sending from the merchant's own verified domain.
+ * - `unverified_sender` — **still sending** (`canSend: true`), but from the
+ *   storefront's `{slug}.markii.shop` address, because the merchant has not
+ *   verified a domain of their own (D44).
+ * - `configuration_required` — Markii's problem: no AWS credentials on this
+ *   deployment. Nothing the merchant does will help.
  *
- * The distinction is the difference between a task a merchant can complete and
- * one they cannot, so never collapse the two into a single "email is broken".
+ * **`unverified_sender` replaced `domain_verification_required`, and it is not a
+ * rename.** The old code meant mail was *refused*; mail now sends from a
+ * fallback address, so `canSend` is true where it used to be false. A screen
+ * still treating that state as "not sending" would tell a merchant their
+ * receipts are broken while their customers receive them.
+ *
+ * `senderAddress` is null for `unverified_sender`: the address is per storefront,
+ * so an org with several stores has several.
  */
 export type CustomerEmailStatus = {
   canSend: boolean;
-  code: "ready" | "configuration_required" | "domain_verification_required";
+  code: "ready" | "configuration_required" | "unverified_sender";
   message: string;
   senderAddress: string | null;
 };
@@ -71,6 +81,22 @@ export type EmailSettings = {
   platformEmail: { status: "ready" | "configuration_required"; scope: string };
   /** When false, nothing above can work regardless of what the merchant does. */
   providerConfigured: boolean;
+  /**
+   * Health of the **shared** fallback sender — `{slug}.markii.shop` (D44).
+   *
+   * Only relevant while this merchant has no verified domain of their own, but
+   * when it breaks it breaks for *every* such merchant simultaneously, and none
+   * of them can fix it. `ok: false` here is a Markii incident, not a merchant
+   * task — word it that way, and do not put a "verify your domain" call to
+   * action next to it.
+   */
+  fallbackSender: {
+    ok: boolean;
+    domain: string | null;
+    verifiedForSending: boolean | null;
+    dkimStatus: string | null;
+    problem: string | null;
+  };
 };
 
 export function getEmailSettings(init?: RequestInit) {

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { orgHandler } from "@/lib/auth/handler";
-import { emailStatus, isSesConfigured, merchantEmailStatus } from "@/lib/email";
+import { emailStatus, fallbackSenderHealth, isSesConfigured, merchantEmailStatus } from "@/lib/email";
 import { dnsRecords, listIdentities } from "@/lib/email/identity";
 import { listSuppressions } from "@/lib/email/suppression";
 
@@ -20,9 +20,10 @@ import { listSuppressions } from "@/lib/email/suppression";
 export const GET = orgHandler(
   async (_req, { orgId }) => {
     const identities = await listIdentities(orgId);
-    const [merchant, suppressions] = await Promise.all([
+    const [merchant, suppressions, fallbackHealth] = await Promise.all([
       merchantEmailStatus(orgId),
       listSuppressions(orgId),
+      fallbackSenderHealth(),
     ]);
 
     const platform = emailStatus();
@@ -73,6 +74,14 @@ export const GET = orgHandler(
        * complete and one they cannot.
        */
       providerConfigured: isSesConfigured(),
+
+      /**
+       * Health of the shared fallback sender (D44). Only meaningful while this
+       * merchant has no domain of their own — but when it breaks it breaks for
+       * every such merchant at once, and none of them can fix it. Surfaced so
+       * the failure is visible before customers notice the silence.
+       */
+      fallbackSender: fallbackHealth,
     });
   },
   { permission: "org.read" },

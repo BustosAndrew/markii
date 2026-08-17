@@ -323,6 +323,31 @@ are per site and a merchant acting on them needs that site in front of them. The
 an hour ago still shows `verified` there. The page says so in as many words; do not add a "reachable"
 tick to it, and do not treat a missing `pointsToMarkii` as `false`.
 
+### 🔴 Two frontend jobs left over from the backend work — for whoever picks up screens next
+
+**1. `deploySite` reports a failure the UI throws away.** Publishing now also attaches
+`{slug}.{ROOT_DOMAIN}` to Vercel, and that can fail on its own — so the response carries
+`hostAttached: boolean` and `hostProblem: string | null`. **Both call sites currently ignore it**
+(`components/dashboard/site-controls.tsx`, `components/dashboard/create-website-wizard.tsx`), so a
+merchant sees "Deploy live" succeed and gets a `storefrontUrl` that fails TLS. `hostAttached: false`
+means *published but not reachable* — show `hostProblem` (its copy already separates Markii's fault
+from the merchant's) and offer deploy again as the retry, rather than linking to an address that
+breaks.
+
+**2. Settings → Email has a third state now.** `CustomerEmailStatus.code` gained
+**`unverified_sender`** and **lost `domain_verification_required`**. This is not a rename:
+the old code meant mail was *refused*, and `canSend` is now **`true`** in that state because mail
+sends from the storefront's Markii address (D44). The page already badges three states; anything
+else reading this type needs the same treatment. **Never render `unverified_sender` as an error** —
+their customers are receiving mail, and telling them otherwise is the same class of lie as a false
+success.
+
+Readiness gains **`UNVERIFIED_SENDING_DOMAIN`** — `warning` on a live store, `opportunity` before
+launch. Deliberately **not** critical: receipts are sending, just not from the merchant's own
+domain, and overstating it teaches merchants to discount the whole list. It stays silent when SES
+itself is unconfigured, since that is Markii's problem and a finding the merchant cannot act on is
+noise.
+
 `Site` gains `domainStatus`, `domainVerifiedAt`, `domainCheckedAt`, `domainLastError`. Readiness
 gains **`DOMAIN_NOT_VERIFIED`** (warning), which replaces `NO_CUSTOM_DOMAIN` for a pending claim —
 telling someone to "connect a domain you own" when they already tried is how a checklist teaches

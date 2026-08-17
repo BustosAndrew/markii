@@ -38,20 +38,15 @@ export type MerchantMailInput = MailInput & {
   template: string;
   orderId?: number | null;
   /**
-   * Sender of last resort for **shopper account mail only** (§24).
+   * Which storefront this message is about, for the fallback sender (D44).
    *
-   * When a merchant has no verified sending domain, auth mail falls back to the
-   * storefront's own `{slug}.{ROOT_DOMAIN}` address rather than refusing —
-   * because a shopper who cannot receive a confirmation cannot create an
-   * account, and blocking signup is a worse outcome than an unbranded sender.
-   *
-   * **Honoured only for `auth_*` templates, and that is enforced in
-   * `sendMerchantMail` rather than trusted here.** Order confirmations, shipping
-   * and refund notices must never use it: those are the merchant's mail to their
-   * customer, and sending them from Markii's namespace is precisely what G1
-   * forbids. Passing this on a non-auth template does nothing.
+   * When the merchant has no verified sending domain, mail goes from that
+   * store's own `{slug}.{ROOT_DOMAIN}` address instead of refusing. Optional
+   * because `orderId` can answer the same question — `sendMerchantMail` resolves
+   * the site from the order when this is absent, so the transactional callers
+   * needed no signature change.
    */
-  tenantFallback?: { slug: string; storeName: string } | null;
+  siteId?: number | null;
 };
 
 /**

@@ -1,9 +1,10 @@
 import "server-only";
 
-import { db, emailDeliveries } from "../db";
+import { eq } from "drizzle-orm";
+import { db, emailDeliveries, orders, sites } from "../db";
 import { resolveSender, tenantFallbackSender } from "./identity";
 import { isResendConfigured, sendViaResend } from "./resend";
-import { isSesConfigured, sendViaSes } from "./ses";
+import { getSesIdentity, isSesConfigured, sendViaSes } from "./ses";
 import { normalizeEmail, suppressionFor } from "./suppression";
 import type { MailInput, MerchantMailInput, SendResult } from "./types";
 
@@ -31,8 +32,9 @@ export function sendPlatformMail(input: MailInput): Promise<SendResult> {
  *
  * 1. **Suppression.** Checked first, because mailing a known-bad address costs
  *    the whole platform's sending reputation and nothing else here can undo it.
- * 2. **Sender resolution.** No verified domain means no send — there is
- *    deliberately no fallback to Resend and to `markii.shop` (G1).
+ * 2. **Sender resolution.** The merchant's own verified domain when it exists;
+ *    otherwise the storefront's `{slug}.{ROOT_DOMAIN}` address (D44). Never
+ *    Resend, and never bare `markii.shop` — the stream split still holds.
  * 3. **The send itself**, via SES.
  * 4. **Recording the outcome** in `email_deliveries`, whatever it was. "Did the
  *    customer get their receipt?" is a support question that arrives days later.
@@ -40,6 +42,35 @@ export function sendPlatformMail(input: MailInput): Promise<SendResult> {
  * The result is a value, never a throw: a caller that swallowed an exception
  * here would report a confirmation that never left the building.
  */
+/**
+ * The storefront whose address a fallback send goes out from.
+ *
+ * Takes `siteId` when the caller knows it, and otherwise derives it from the
+ * order — which is what let the transactional callers keep their signatures
+ * when the fallback widened past account mail (D44). Runs **only** when there is
+ * no verified sender, so the happy path pays for neither lookup.
+ */
+async function fallbackSender(input: MerchantMailInput) {
+  let siteId = input.siteId ?? null;
+
+  if (siteId === null && input.orderId != null) {
+    const [row] = await db
+      .select({ siteId: orders.siteId })
+      .from(orders)
+      .where(eq(orders.id, input.orderId))
+      .limit(1);
+    siteId = row?.siteId ?? null;
+  }
+  if (siteId === null) return null;
+
+  const [site] = await db
+    .select({ slug: sites.slug, name: sites.name })
+    .from(sites)
+    .where(eq(sites.id, siteId))
+    .limit(1);
+  return site ? tenantFallbackSender({ slug: site.slug, storeName: site.name }) : null;
+}
+
 export async function sendMerchantMail(
   orgId: string,
   input: MerchantMailInput,
@@ -83,25 +114,28 @@ export async function sendMerchantMail(
   const verified = await resolveSender(orgId);
 
   /**
-   * The storefront's own address, and **only for shopper account mail**.
+   * The storefront's own address, when the merchant has none of their own (D44).
    *
-   * The template prefix is checked here rather than trusted from the caller: a
-   * receipt sent from Markii's namespace is the exact G1 violation the two
-   * streams exist to prevent, and a field a caller could set wrongly is not a
-   * boundary. Auth mail is the one case where refusing is worse than an
-   * unbranded sender — a shopper who cannot receive a confirmation cannot make
-   * an account at all.
+   * **This used to apply to account mail only, and refusing everything else was
+   * wrong.** A store that takes an order and sends no receipt is broken: the
+   * buyer has paid and heard nothing, and for a digital product the missing
+   * email *is* the product — the download link never arrives. Silence is a worse
+   * failure than an unbranded sender, so mail now goes from
+   * `{slug}.{ROOT_DOMAIN}` rather than not going.
+   *
+   * The merchant's own verified domain still wins whenever it exists, and
+   * `UNVERIFIED_SENDING_DOMAIN` (§9) nags until it does — the fallback is a floor, not a
+   * destination. The cost it accepts is that those bounces land on Markii's
+   * shared SES reputation, which is why the readiness finding stays loud.
    */
   const fallback =
-    !verified && input.tenantFallback && input.template.startsWith("auth_") && isSesConfigured()
-      ? tenantFallbackSender(input.tenantFallback)
-      : null;
+    !verified && isSesConfigured() ? await fallbackSender(input) : null;
 
   const sender = verified ?? fallback;
   if (!sender) {
     const reason = isSesConfigured()
-      ? "No verified sending domain. Verify a domain in Settings → Email before sending " +
-        "customer mail — Markii will not send it from markii.shop on your behalf."
+      ? "No verified sending domain, and no storefront to fall back to. Verify a domain in " +
+        "Settings → Email so this mail sends from your own address."
       : "Merchant email is not configured on this deployment — AWS SES is not connected " +
         "(docs/BACKEND.md §6).";
     await record("not_configured", "none", { reason });
@@ -120,6 +154,58 @@ export async function sendMerchantMail(
     await record("failed", result.provider, { reason: result.reason });
   }
   return result;
+}
+
+/**
+ * Whether the **fallback** sender is actually usable, checked against SES.
+ *
+ * `{slug}.{ROOT_DOMAIN}` sends only because SES covers subdomains of a verified
+ * parent identity (D44). If `ROOT_DOMAIN` is not verified — or its DKIM lapses —
+ * every fallback send fails at AWS, which would take out receipts for *every*
+ * merchant who has not verified a domain of their own. That is a platform-wide
+ * outage with no merchant able to fix it, and until now nothing could see it
+ * coming: the deployment's IAM key cannot list identities or read the config
+ * set, but it **can** call `GetEmailIdentity` on a name it already knows.
+ *
+ * Read live and never cached — a stale "healthy" is the failure mode here.
+ */
+export async function fallbackSenderHealth(): Promise<{
+  ok: boolean;
+  domain: string | null;
+  verifiedForSending: boolean | null;
+  dkimStatus: string | null;
+  problem: string | null;
+}> {
+  const domain = process.env.ROOT_DOMAIN?.trim().toLowerCase() || null;
+  const base = { domain, verifiedForSending: null, dkimStatus: null };
+
+  if (!isSesConfigured()) {
+    return { ...base, ok: false, problem: "AWS SES is not connected on this deployment." };
+  }
+  if (!domain || domain === "localhost" || domain.endsWith(".localhost")) {
+    return { ...base, ok: false, problem: `ROOT_DOMAIN is ${domain ?? "unset"}; there is no fallback sender.` };
+  }
+
+  const res = await getSesIdentity(domain);
+  if (!res.ok) return { ...base, ok: false, problem: res.reason };
+
+  /**
+   * DKIM matters as much as verification. Without it the fallback still sends
+   * but signs nothing that aligns, so `p=quarantine` on the apex sends every
+   * merchant's receipts to spam — mail that is accepted and never read.
+   */
+  const ok = res.state.verifiedForSending && res.state.dkimStatus === "SUCCESS";
+  return {
+    domain,
+    ok,
+    verifiedForSending: res.state.verifiedForSending,
+    dkimStatus: res.state.dkimStatus,
+    problem: ok
+      ? null
+      : `${domain} is not fully set up for sending in SES (verified: ` +
+        `${res.state.verifiedForSending}, DKIM: ${res.state.dkimStatus}). Every merchant without ` +
+        `their own verified domain depends on it.`,
+  };
 }
 
 /** For status surfaces: which streams can actually deliver right now. */
@@ -141,7 +227,7 @@ export function emailStatus() {
  */
 export async function merchantEmailStatus(orgId: string): Promise<{
   canSend: boolean;
-  code: "ready" | "configuration_required" | "domain_verification_required";
+  code: "ready" | "configuration_required" | "unverified_sender";
   message: string;
   senderAddress: string | null;
 }> {
@@ -155,12 +241,22 @@ export async function merchantEmailStatus(orgId: string): Promise<{
   }
   const sender = await resolveSender(orgId);
   if (!sender) {
+    /**
+     * **`canSend` is true here, and the code changed to say why** (D44). Mail
+     * does go out — from the storefront's own `{slug}.{ROOT_DOMAIN}` address —
+     * so the old `domain_verification_required` / `canSend: false` pair now
+     * describes a refusal that no longer happens. Reporting "not sending" while
+     * receipts arrive is the same class of lie as the reverse.
+     *
+     * `senderAddress` stays null because there isn't one answer: the address is
+     * per storefront, and an org with several stores sends from several.
+     */
     return {
-      canSend: false,
-      code: "domain_verification_required",
+      canSend: true,
+      code: "unverified_sender",
       message:
-        "Verify a sending domain in Settings → Email. Customer mail is sent from your own " +
-        "domain, never from markii.shop.",
+        "Customer mail is sending from your storefront's Markii address. Verify your own domain " +
+        "in Settings → Email so it comes from you — better deliverability, and your branding.",
       senderAddress: null,
     };
   }

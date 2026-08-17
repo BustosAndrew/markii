@@ -18,6 +18,8 @@ import {
 } from "../db";
 import { defaultWallet } from "../integrations";
 import { stripeConfigured } from "../payments";
+import { isSesConfigured } from "../email/ses";
+import { resolveSender } from "../email/identity";
 import { ownSites } from "../tenancy";
 import { issueId, productFindings, storeFindings, type ProductFacts, type RuleFinding, type StoreFacts } from "./rules";
 import { buildReport, compareIssues } from "./score";
@@ -179,6 +181,14 @@ async function loadFacts(orgId: string, filters: ReadinessFilters) {
   const orgWallet = await defaultWallet(orgId).catch(() => null);
   const stripeReady = stripeConfigured();
 
+  /**
+   * Org-level, like the wallet above: a sending domain belongs to the
+   * organization rather than to one storefront, so every store in the org shares
+   * the answer. Resolved once rather than per site.
+   */
+  const sesReady = isSesConfigured();
+  const sender = sesReady ? await resolveSender(orgId).catch(() => null) : null;
+
   const stores: StoreFacts[] = siteRows.map((s) => {
     const mine = productList.filter((p) => p.siteId === s.id);
     const tax = taxRows.find((t) => t.siteId === s.id);
@@ -204,6 +214,8 @@ async function loadFacts(orgId: string, filters: ReadinessFilters) {
       locationCount: locationRows.filter((l) => l.siteId === s.id).length,
       hasVariantBackedProducts: mine.some((p) => p.variants.length > 0),
       stripeConfigured: stripeReady,
+      emailProviderConfigured: sesReady,
+      customerEmailReady: sender !== null,
     };
   });
 

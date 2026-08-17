@@ -2910,16 +2910,18 @@ at sign-up. Nothing else can answer "whose customer is this?" — `redirect_to` 
 partly caller-supplied, and `customers` is keyed by `siteId`, so one address may legitimately exist
 on several stores.
 
-**A merchant without a verified domain does not block signup.** Auth mail falls back to the
-storefront's own address — `accounts@{slug}.{ROOT_DOMAIN}` — still through SES, still carrying the
-store's name. A shopper who cannot receive a confirmation cannot create an account, and punishing
-the shopper for the merchant's unfinished setup is the worse outcome.
+**A merchant without a verified domain does not block anything (D44).** *All* merchant mail falls
+back to the storefront's own address — `accounts@{slug}.{ROOT_DOMAIN}` — still through SES, still
+carrying the store's name. Receipts, shipping and refund notices, digital delivery, account mail.
 
-**The fallback applies to `auth_*` templates only, and that is enforced in `sendMerchantMail`, not
-trusted from the caller.** Order confirmations, shipping and refund notices still refuse with
-`domain_verification_required` — a receipt leaving from Markii's namespace is exactly the G1
-violation the two streams exist to prevent. Passing `tenantFallback` on a non-auth template does
-nothing.
+**This amended G1**, which used to refuse everything but account mail. The reason is not competitor
+parity — `docs/COMPETITORS.md` records nothing about competitors' transactional email — but that a
+store which takes an order and sends **nothing** is broken. The buyer has paid and heard silence,
+and for a digital product the missing email *is* the product: the download link never arrives.
+
+What G1 still forbids is unchanged: **never bare `markii.shop`, never Resend for merchant mail.**
+`sendMerchantMail` resolves the storefront from `siteId`, or from the order when only `orderId` is
+given — which is why the transactional callers needed no signature change.
 
 **What the fallback is not: reputation isolation.** SES covers subdomains under the parent domain
 identity, so mail from `{slug}.markii.shop` still DKIM-signs as `markii.shop`, and SES bounce and
