@@ -16,6 +16,8 @@ import {
   type CheckoutSession,
   type DbHandle,
 } from "../db";
+import { getIntegration } from "../integrations";
+import { createTaxTransaction } from "../payments/stripe-tax";
 import { allocate } from "./allocation";
 import { deliverableItems, issueDelivery } from "./delivery";
 import { recordRedemptions } from "./discounts";
@@ -206,6 +208,59 @@ export type CompletionResult = {
 };
 
 /**
+ * Records the sale on the merchant's Stripe Tax reports (§18.6).
+ *
+ * **A calculation is a quote; a transaction is the filing record.** Without this
+ * the shopper is charged the right tax and the merchant has nothing to file
+ * with — Stripe Tax's reports would show none of it. It is the half of Stripe
+ * Tax that is easy to skip and impossible to reconstruct later, because a
+ * calculation expires.
+ *
+ * **After the commit, and it cannot throw.** The money has already moved and the
+ * order exists; failing the completion over a reporting call would leave a paid
+ * shopper with an error page and stock still held. The failure it can produce is
+ * a merchant's tax report missing one order, which `taxTransactionId` records as
+ * absent — a reconciliation problem someone can find, rather than a fabricated
+ * one nobody can.
+ *
+ * Idempotent on the order id via Stripe's `reference`, so the webhook and the
+ * browser redirect racing to complete cannot file the same sale twice.
+ */
+async function recordTaxTransaction(input: {
+  orgId: string;
+  orderId: number;
+  calculationId: string | null;
+}): Promise<void> {
+  // Every other tax path — manual rates, `none`, and every order placed before
+  // Stripe Tax existed — has nothing to record, and that is not a gap.
+  if (!input.calculationId) return;
+
+  try {
+    const connection = await getIntegration(input.orgId, "stripe");
+    const accountId = connection?.status === "connected" ? connection.config.accountId : null;
+    if (!accountId) return;
+
+    const created = await createTaxTransaction({
+      accountId,
+      calculationId: input.calculationId,
+      reference: `markii_order_${input.orderId}`,
+    });
+    if (!created.ok) {
+      console.error(
+        `[tax] order ${input.orderId} was not recorded in Stripe Tax: ${created.reason}`,
+      );
+      return;
+    }
+    await db
+      .update(orders)
+      .set({ taxTransactionId: created.transactionId })
+      .where(eq(orders.id, input.orderId));
+  } catch (e) {
+    console.error(`[tax] order ${input.orderId} tax transaction failed`, e);
+  }
+}
+
+/**
  * Completes a paid checkout: order, stock, metering, cart — atomically.
  *
  * Safe to call twice. A session already `completed` returns its existing order
@@ -215,7 +270,7 @@ export type CompletionResult = {
 export async function completeCheckout(input: CompletionInput): Promise<CompletionResult> {
   const { session } = input;
 
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     /**
      * Re-read under a row lock. Without it, two concurrent completions both see
      * `requires_payment` and both create an order — the shopper is charged once
@@ -230,7 +285,13 @@ export async function completeCheckout(input: CompletionInput): Promise<Completi
     if (!current) throw new Error(`Checkout session ${session.id} disappeared`);
 
     if (current.status === "completed" && current.orderId != null) {
-      return { orderId: current.orderId, alreadyCompleted: true };
+      // Nothing to file: whichever caller completed this first already did.
+      return {
+        orderId: current.orderId,
+        alreadyCompleted: true,
+        orgId: null as string | null,
+        taxCalculationId: null as string | null,
+      };
     }
 
     const [site] = await tx
@@ -520,8 +581,31 @@ export async function completeCheckout(input: CompletionInput): Promise<Completi
       .set({ status: "converted", updatedAt: new Date() })
       .where(eq(carts.id, current.cartId));
 
-    return { orderId: order.id, alreadyCompleted: false };
+    return {
+      orderId: order.id,
+      alreadyCompleted: false,
+      orgId: site.orgId as string | null,
+      taxCalculationId: current.taxCalculationId,
+    };
   });
+
+  /**
+   * **Outside the transaction, and deliberately.** Stripe cannot be rolled back,
+   * so filing the sale inside the commit would leave a transaction on the
+   * merchant's tax report for an order that never existed if anything below it
+   * failed. Running after means the opposite residual risk — an order missing
+   * from the report — which is the survivable direction and is visible in
+   * `orders.tax_transaction_id`.
+   */
+  if (!result.alreadyCompleted && result.orgId) {
+    await recordTaxTransaction({
+      orgId: result.orgId,
+      orderId: result.orderId,
+      calculationId: result.taxCalculationId,
+    });
+  }
+
+  return { orderId: result.orderId, alreadyCompleted: result.alreadyCompleted };
 }
 
 /** Marks a checkout failed and gives its held stock back. */

@@ -40,6 +40,7 @@ import {
 import { getIntegration } from "../../integrations";
 import { stripeConfigured } from "../../payments";
 import { createStripeRefund, refundIdempotencyKey } from "../../payments/stripe-refunds";
+import { createTaxReversal } from "../../payments/stripe-tax";
 import { siteScope } from "../../tenancy";
 import { defineAction } from "../registry";
 import type { ActionContext } from "../types";
@@ -597,6 +598,57 @@ export const refundOrder = defineAction({
       before: order.refundedMinor,
       after: refundedMinor,
     });
+
+    /**
+     * Reverse the tax on the merchant's Stripe Tax reports (§18.6), so they do
+     * not file — and pay — tax on money they gave back.
+     *
+     * **A `ctx.effect`, unlike the processor refund above, and the difference is
+     * what each call moves.** The refund moves money, so it runs before the
+     * write and a failure aborts everything. This moves a reporting entry:
+     * running it first would reverse tax on a refund the transaction then rolled
+     * back, leaving the merchant's report short by an amount the shopper never
+     * got. Running it after can only leave the report *over*stated, which
+     * `refunds.tax_reversal_id` records as absent and a merchant can correct.
+     *
+     * `full` when the order came back entirely — Stripe reverses the whole
+     * transaction and no amount is quoted. Otherwise `flat_amount`, which Stripe
+     * defines as the total returned **including** its tax; that is exactly
+     * `computed.amountMinor`, so no second allocation is invented to disagree
+     * with the first.
+     *
+     * Keyed on the refund id, so Stripe itself refuses a duplicate reference —
+     * a re-run reverses nothing twice.
+     */
+    if (order.taxTransactionId) {
+      const transactionId = order.taxTransactionId;
+      const isFull = refundedMinor >= order.amountCents;
+      const refundId = refund.id;
+      const orgId = order.orgId;
+      const amountMinor = computed.amountMinor;
+
+      ctx.effect(`reverse Stripe Tax for refund ${refundId}`, async () => {
+        const connection = await getIntegration(orgId, "stripe");
+        const accountId = connection?.status === "connected" ? connection.config.accountId : null;
+        if (!accountId) return;
+
+        const reversal = await createTaxReversal({
+          accountId,
+          transactionId,
+          reference: `markii_refund_${refundId}`,
+          mode: isFull ? "full" : "partial",
+          amountMinor,
+        });
+        if (!reversal.ok) {
+          console.error(`[tax] refund ${refundId} was not reversed in Stripe Tax: ${reversal.reason}`);
+          return;
+        }
+        await db
+          .update(refunds)
+          .set({ taxReversalId: reversal.reversalId })
+          .where(eq(refunds.id, refundId));
+      });
+    }
 
     if (input.notifyCustomer) {
       const { storeName, supportEmail } = await storeIdentity(order.siteId, ctx.db);

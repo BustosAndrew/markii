@@ -10,9 +10,10 @@ import {
   type Product,
   type Variant,
 } from "../db";
+import { allocate } from "./allocation";
 import { evaluateDiscounts, type DiscountEvaluation } from "./discounts";
 import { selectedRate, type QuotedRate, type ShippingQuote } from "./shipping";
-import { calculateTax } from "./tax";
+import { calculateTax, type TaxableLine } from "./tax";
 
 /**
  * Server-side cart pricing (§18.4).
@@ -28,6 +29,16 @@ import { calculateTax } from "./tax";
  * explicit {@link ComponentState} and the caller must surface it. A total that
  * omits an uncalculated component is `provisional`, never `final`.
  */
+
+/**
+ * Stripe's product tax code for goods that are not taxed.
+ *
+ * Named rather than inlined because it is the one tax code this codebase ever
+ * chooses on a merchant's behalf, and it is chosen only to carry a decision the
+ * merchant already made (`variants.taxable: false`) into the vocabulary Stripe
+ * understands. Every other code comes from the variant or the store's default.
+ */
+const STRIPE_NON_TAXABLE_CODE = "txcd_00000000";
 
 /** Why a money component is what it is. Callers must render this, not just the number. */
 export type ComponentState =
@@ -82,6 +93,16 @@ export type PricedCart = {
    * total must never be presented to a shopper as the amount they will pay.
    */
   totalState: "final" | "provisional";
+  /**
+   * Stripe's `taxcalc_…` when Stripe Tax produced `tax`, else null (§18.6).
+   *
+   * Frozen onto the checkout session, and from there turned into the merchant's
+   * Stripe Tax transaction once the payment succeeds. It travels with the quote
+   * because the cart's own cached calculation moves the moment the shopper edits
+   * their basket, and a transaction created from the wrong one files tax against
+   * an order that was never placed.
+   */
+  taxCalculationId: string | null;
   /** Blocking problems — a cart with any of these cannot open a checkout. */
   issues: LineIssue[];
 };
@@ -315,11 +336,54 @@ export async function priceCart(cart: Cart): Promise<PricedCart> {
    * Shipping is included in the taxable base only when tax is actually being
    * added; most jurisdictions tax delivery charges, and leaving it out would
    * under-collect on every shipped order.
+   *
+   * **Stripe Tax needs the lines, not the base.** Whether a jurisdiction taxes
+   * delivery, and at what rate a given kind of good is taxed, are decisions
+   * Stripe makes per line — so the taxable base a manual rate multiplies is
+   * exactly the information Stripe cannot work from. Both are passed; the
+   * provider decides which it reads.
+   *
+   * **The lines go over net of discount**, apportioned with the same
+   * largest-remainder allocation an order's lines get at completion (§18.7).
+   * Tax is charged on what the shopper actually pays, so quoting list prices
+   * would over-collect on every discounted order — and reusing `allocate` is
+   * what keeps the tax base and the order's own line allocations from
+   * disagreeing by a penny.
    */
+  const discountShares = allocate(
+    discount.amountMinor,
+    priced.map((l) => l.lineTotalMinor),
+  );
+
+  /**
+   * `variants.taxable: false` is the merchant's own statement that a variant is
+   * not taxed, so it is sent as Stripe's non-taxable product code rather than
+   * dropped from the calculation — a line Stripe never sees is also a line
+   * missing from the transaction that backs the merchant's filing.
+   *
+   * The manual path has no equivalent: one rate over one base has nowhere to
+   * express a per-line exemption, and it has never honoured this flag. That
+   * asymmetry is real and documented in `docs/API.md` §18.6 rather than papered
+   * over here.
+   */
+  const taxableLines: TaxableLine[] = priced.map((l, i) => {
+    const variant = l.variantId != null ? byVariant.get(l.variantId) : null;
+    return {
+      reference: `line:${l.id}`,
+      amountMinor: l.lineTotalMinor - discountShares[i],
+      quantity: l.quantity,
+      taxCode: variant && !variant.taxable ? STRIPE_NON_TAXABLE_CODE : (variant?.taxCode ?? null),
+    };
+  });
+
   const taxResult = await calculateTax({
     siteId: cart.siteId,
+    cartId: cart.id,
     address: cart.shippingAddress ?? null,
     taxableBaseMinor: subtotalMinor - discount.amountMinor + shipping.amountMinor,
+    lines: taxableLines,
+    shippingMinor: shipping.amountMinor,
+    currency: cart.currency,
   });
   const tax: MoneyComponent = {
     amountMinor: taxResult.amountMinor,
@@ -365,6 +429,7 @@ export async function priceCart(cart: Cart): Promise<PricedCart> {
     totalMinor:
       subtotalMinor - discount.amountMinor + tax.amountMinor + shipping.amountMinor,
     totalState,
+    taxCalculationId: taxResult.calculationId ?? null,
     issues: priced.flatMap((l) => l.issues.filter((i) => i.code !== "price_changed")),
   };
 }

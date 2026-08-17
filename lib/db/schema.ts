@@ -322,6 +322,18 @@ export const orders = pgTable(
     discountMinor: integer("discount_minor").notNull().default(0),
     taxMinor: integer("tax_minor").notNull().default(0),
     shippingMinor: integer("shipping_minor").notNull().default(0),
+    /**
+     * The Stripe Tax transaction backing this order's tax (§18.6), on the
+     * merchant's own account.
+     *
+     * Null on every other path and that is not a gap: a manual-rate store, a
+     * `provider: "none"` store, and an order placed before Stripe Tax existed
+     * all have tax that Stripe was never asked about. It is set only when Stripe
+     * calculated the tax *and* accepted the transaction, so its presence is the
+     * one honest answer to "is this order in the merchant's Stripe Tax report?"
+     * — and it is what a refund reverses against.
+     */
+    taxTransactionId: text("tax_transaction_id"),
     /** Gross refunded so far, across every refund on this order. */
     refundedMinor: integer("refunded_minor").notNull().default(0),
     /**
@@ -1119,6 +1131,25 @@ export const carts = pgTable(
     status: text("status", { enum: ["open", "abandoned", "converted"] })
       .notNull()
       .default("open"),
+    /**
+     * The last Stripe Tax calculation for this cart, cached (§18.6).
+     *
+     * **Stripe bills the merchant per calculation**, and `priceCart` runs on
+     * every cart render — so calling Stripe each time would charge a merchant
+     * for a shopper reloading a page. The fingerprint covers everything that can
+     * change the answer (line amounts, shipping, destination, and the store's
+     * own settings), so a cache hit is only ever the same question.
+     *
+     * **Per cart rather than per store**, deliberately. A calculation converts
+     * into exactly one Stripe Tax transaction, so two carts sharing one cached
+     * id would leave the second sale unrecorded in the merchant's tax report.
+     */
+    taxCalculationId: text("tax_calculation_id"),
+    taxCalculationFingerprint: text("tax_calculation_fingerprint"),
+    /** Stripe's own 90-day limit on converting a calculation into a transaction. */
+    taxCalculationExpiresAt: timestamp("tax_calculation_expires_at", { withTimezone: true }),
+    /** The figures Stripe returned, so a cache hit answers without a round trip. */
+    taxCalculationResult: jsonb("tax_calculation_result").$type<CachedTaxCalculation | null>(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     /**
      * When the recovery email went out. **One per cart, ever** — the sweep runs
@@ -1242,6 +1273,17 @@ export const checkoutSessions = pgTable(
       .$type<CheckoutLineSnapshot[]>()
       .notNull()
       .default([]),
+    /**
+     * The Stripe Tax calculation that produced `taxMinor`, frozen with the quote
+     * (§18.6).
+     *
+     * Carried here rather than looked up at completion because the cart's cache
+     * moves: a shopper who edits their basket after opening a checkout would
+     * leave the session pointing at a calculation for a different order. This is
+     * what the merchant's tax transaction is created from, so it has to be the
+     * calculation the shopper actually paid against.
+     */
+    taxCalculationId: text("tax_calculation_id"),
     /** Stripe PaymentIntent id, or the x402 transaction hash. */
     paymentReference: text("payment_reference"),
     /** Set on completion. The session is the only thing that may create it. */
@@ -1697,6 +1739,17 @@ export const refunds = pgTable(
     rail: text("rail", { enum: ["stripe", "x402", "manual", "external"] }).notNull(),
     /** Stripe refund id, or the on-chain hash of the merchant's return transfer. */
     processorReference: text("processor_reference"),
+    /**
+     * The Stripe Tax reversal this refund produced (§18.6), when the order's tax
+     * was calculated by Stripe.
+     *
+     * Null means no reversal was recorded — either the order was never in Stripe
+     * Tax, or the call failed after the refund committed. The second case leaves
+     * the merchant's tax report overstating what they collected, which is a
+     * reconciliation problem rather than a money one, so it is recorded as
+     * absent rather than allowed to block a refund the shopper is owed.
+     */
+    taxReversalId: text("tax_reversal_id"),
     actorType: text("actor_type", { enum: ["user", "agent", "token", "system"] }).notNull(),
     actorId: text("actor_id"),
     /** Ties the refund to the invocation that made it (§22). */
@@ -2402,6 +2455,21 @@ export const stripeWebhookEvents = pgTable(
     index("stripe_webhook_events_account_idx").on(t.stripeAccount),
   ],
 );
+
+/**
+ * A Stripe Tax answer, cached on the cart that asked for it (§18.6).
+ *
+ * Stores the *figures*, not just the id, because the point of the cache is to
+ * answer without a round trip. `inclusive` records which side of the price the
+ * tax sat on when it was calculated — a store that flips `pricesIncludeTax`
+ * changes the fingerprint, so a cached answer can never be read under the other
+ * meaning.
+ */
+export type CachedTaxCalculation = {
+  taxAmountMinor: number;
+  inclusive: boolean;
+  breakdown: { name: string; rateBps: number; amountMinor: number }[];
+};
 
 /** One manual tax rate. `rateBps` is basis points — 875 is 8.75%. */
 export type ManualTaxRate = {

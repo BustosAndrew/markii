@@ -232,6 +232,13 @@
       "when": 1786948712293,
       "tag": "0032_abandoned_cart_email",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1786956110919,
+      "tag": "0033_stripe_tax",
+      "breakpoints": true
     }
   ]
 }

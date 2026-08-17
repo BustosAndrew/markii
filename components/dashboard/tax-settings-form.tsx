@@ -178,12 +178,11 @@ export function TaxSettingsForm({
           >
             <option value="none">None — do not calculate tax</option>
             <option value="manual">Manual rates</option>
-            <option value="stripe" disabled>
-              Stripe Tax (not available yet)
-            </option>
+            <option value="stripe">Stripe Tax</option>
           </Select>
           <p className="mt-1.5 text-xs text-muted">
-            Stripe Tax is not available yet on Markii. Use manual rates or none until it ships.
+            Stripe Tax runs on your own Stripe account, using your own registrations — activate it
+            there first. Markii never decides what you owe.
           </p>
         </div>
 

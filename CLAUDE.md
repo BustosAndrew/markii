@@ -232,8 +232,44 @@ Agent Ops and Chargeback Assist are Phase F and do not exist, and selling a $29/
 a product nobody can use is the fabricated-success rule with a card behind it. The billing path for
 them is already there the day they ship.
 
-**Still planned:** Stripe Tax, shopper auth mail via Supabase's Send Email Hook, and abandoned-cart
-mail — all three confirmed absent 2026-08-10, not merely unlisted. Everything in §10–15 and §19–21
+**Stripe Tax is built as of 2026-08-17** (§18.6, migration 0033). **Every call carries
+`Stripe-Account`** — the merchant is the seller of record (G2), so their registrations decide what is
+owed, their account is billed for the calculation, and the transactions backing their filings land in
+their reports. A calculation on Markii's platform account would answer with Markii's tax position.
+
+**Calculation and transaction are two different things and only one is optional.** A calculation is
+the quote the shopper pays from; a transaction is the filing record, created **only after payment
+succeeds** — at quote time it would report tax on every abandoned basket, and skipped entirely it
+leaves a merchant charging tax correctly with nothing to file. It cannot be reconstructed later,
+because a calculation expires in 90 days. Refunds reverse it, so nobody files tax on money they gave
+back. All three ids are recorded (`carts` → `checkout_sessions` → `orders.taxTransactionId` →
+`refunds.taxReversalId`), and the two post-payment calls are **post-commit and cannot fail a
+transaction**: a settled checkout must not error over a reporting call, so the residual risk runs the
+survivable way and is recorded as absent rather than left invisible.
+
+**Calculations are cached on the cart, and that is a cost control, not a convenience.** Stripe bills
+the merchant per calculation and `priceCart` runs on every render, so an uncached path charges a
+merchant for a shopper reloading a page. **Per cart, never per store** — a calculation converts into
+exactly one transaction, so a shared id leaves the second sale missing from the report. The
+fingerprint covers postal code, because US rates are decided below the state line.
+
+**Three Stripe Tax facts fail independently and are never merged** (`stripeTax` on `GET
+/api/settings/tax`): Markii's credentials, the merchant's Connect link and Tax activation, and their
+registrations. **`activeRegistrations: 0` is the dangerous number** — Stripe Tax with no registration
+calculates a legitimate zero everywhere, so the store looks configured, collects nothing, and the
+merchant discovers it at filing time.
+
+**Recurring memberships are now taxed by Stripe or not sold** — a behaviour change. Nothing here runs
+on a clock, so there is no moment months out at which Markii could tax a renewal; the subscription
+carries `automatic_tax` and the shopper's address is written to the Stripe customer, the only place a
+renewal can read a location from. A `manual`-rate store is refused with `409` rather than selling a
+membership taxed once and silently never again. Before this they were untaxed on every store.
+
+**`variants.taxable: false` is honoured on the Stripe path only.** The manual path never has: one
+rate over one base has nowhere to express a per-line exemption. The asymmetry is real and documented
+rather than papered over.
+
+**Still planned:** shopper auth mail via Supabase's Send Email Hook. Everything in §10–15 and §19–21
 is untouched.
 
 **Authorization on the v1 REST surface was closed 2026-08-11.** `orgHandler` authorizes **every

@@ -35,7 +35,7 @@ carry an explicit status — **never call a `PLANNED` endpoint and never fake it
 | 15 | Automations, activity, notifications, team | 🟡 PLANNED | E |
 | 16 | Accounts, organizations, staff | partial — `/api/auth/*`, `/api/me`, `/api/org`, `/api/org/staff*`, `/api/org/tokens*`, `/api/org/switch`, and **org scoping of §1–8** are ✅ LIVE; **audit, sessions, and MFA** remain PLANNED. (Tokens and org switching were listed as planned here until 2026-08-03; both were already routed.) Frontend: `/dashboard/settings/team` and the sidebar org switcher | **A** |
 | 17 | Billing, plans, metering, threshold fees | partial — ✅ LIVE: usage ledger, threshold fee engine, meter, plan catalog, entitlements, period-close assessments, and the **Stripe webhook** (verified + idempotent; Connect account handlers live, billing handlers not built). 🟡 Stripe-dependent routes (subscription changes, payment method, invoices) refuse with 503 CONFIGURATION_REQUIRED; **nothing is charged** | B |
-| 18 | Commerce core (variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping, **memberships**) | partial — §18.1–18.6 ✅ LIVE, including the §18.4 card rail (Stripe Connect direct charges), **except** §18.6 Stripe Tax; §18.5 gift cards are ⛔ **deferred** (D33). §18.7 order operations (incl. **processor-executed card refunds**), §18.8 digital delivery, and §18.9 membership gating + shopper login ✅ LIVE, **except** recurring/auto-renewing membership billing | C |
+| 18 | Commerce core (variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping, **memberships**) | partial — §18.1–18.6 ✅ LIVE, including the §18.4 card rail (Stripe Connect direct charges) and **§18.6 Stripe Tax** (2026-08-17); §18.5 gift cards are ⛔ **deferred** (D33). §18.7 order operations (incl. **processor-executed card refunds**), §18.8 digital delivery, and §18.9 membership gating + shopper login ✅ LIVE, **except** recurring/auto-renewing membership billing | C |
 | 19 | Site builder & content | 🟡 PLANNED | D |
 | 20 | Disputes & chargebacks | 🟡 PLANNED | F |
 | 21 | Agent Ops add-on | 🟡 PLANNED | F (last) |
@@ -2220,7 +2220,7 @@ currently *asserted and unimplemented*: `lib/commerce/orders.ts` computes
 double-bill merchants and adding them as a discount would under-bill. See D33 for the three
 prerequisites (split tender, stored-value ledger, metering term).
 
-### 18.6 Tax & shipping rates ✅ LIVE (shipping + manual tax) · 🟡 Stripe Tax PLANNED
+### 18.6 Tax & shipping rates ✅ LIVE (shipping, manual tax, **and Stripe Tax**)
 
 Rate *configuration*, not logistics. **Out of scope permanently:** carrier rate shopping, label
 purchase, tracking sync (`docs/PLAN.md` §3).
@@ -2252,17 +2252,93 @@ rather than quietly staying free.
 
 **Tax providers:** `none` (no tax line; prices stand as listed), `manual` (the merchant's own rates
 by country/province, in **basis points** so a rate is an integer), and `stripe` (Stripe Tax — the
-decided provider, `docs/DECISIONS.md` G3, not yet implemented). Rates resolve most-specific-first
-like zones. With `pricesIncludeTax` the tax is **extracted** from the price (`p × r / (1 + r)`),
-never added — adding it would charge the shopper twice. All arithmetic is integer, half-up (D31).
+decided provider, `docs/DECISIONS.md` G3, ✅ **LIVE 2026-08-17**). Manual rates resolve
+most-specific-first like zones. With `pricesIncludeTax` the tax is **extracted** from the price
+(`p × r / (1 + r)`), never added — adding it would charge the shopper twice. All arithmetic is
+integer, half-up (D31).
 
 **A provider that cannot calculate blocks checkout.** `manual` with no rate for the destination, or
-`stripe` with no credentials, returns `not_configured` and the sale is refused — a merchant who
-selected a tax provider is telling us they collect tax, and completing without it leaves them owing
-money they never charged. A store on `provider: "none"` is unaffected.
+`stripe` that cannot answer for any reason, returns `not_configured` and the sale is refused — a
+merchant who selected a tax provider is telling us they collect tax, and completing without it
+leaves them owing money they never charged. A store on `provider: "none"` is unaffected.
 
 **Markii never gives tax advice** (`docs/DECISIONS.md` G2). Under Connect Standard the merchant is
 the seller of record and the taxpayer; `GET /api/settings/tax` returns that disclaimer as data.
+
+#### Stripe Tax ✅ LIVE (2026-08-17)
+
+**Every call carries `Stripe-Account`, and that is the whole design.** The merchant is the seller of
+record (G2), so their registrations decide what is owed, their account is billed for the
+calculation, and the transactions backing their filings land in their Stripe Tax reports. A
+calculation on Markii's platform account would answer with *Markii's* tax position — the wrong
+company's number, shown to a shopper as their own. Same direction of money as the card rail, and the
+exact opposite of `lib/billing/` (D4).
+
+**Calculation and transaction are two different things and only one of them is optional.** A
+*calculation* is the quote the shopper is charged from; a *transaction* is the filing record. Markii
+creates the calculation while pricing the cart and the transaction **only after the payment
+succeeds** — a transaction at quote time would report tax on every abandoned basket, and skipping it
+entirely would leave the merchant charging tax correctly with nothing to file. It cannot be
+reconstructed afterwards, because a calculation expires (90 days).
+
+| Stage | Where it is recorded | When |
+|---|---|---|
+| Calculation | `carts.tax_calculation_id` (cached), frozen to `checkout_sessions.tax_calculation_id` | Pricing the cart |
+| Transaction | `orders.tax_transaction_id` | After payment succeeds, post-commit |
+| Reversal | `refunds.tax_reversal_id` | After a refund commits, post-commit |
+
+**Calculations are cached on the cart, and that is a cost control.** Stripe bills the merchant per
+calculation, and cart pricing runs on every render — so an uncached path would charge a merchant for
+a shopper reloading a page. The fingerprint covers line amounts, tax codes, shipping, the full
+destination (postal code included — US rates are decided below the state line), currency, and the
+store's own settings. Cached **per cart**, never per store: a calculation converts into exactly one
+transaction, so a shared id would leave the second sale missing from the merchant's report.
+
+**Lines go to Stripe net of discount**, apportioned with the same largest-remainder `allocate` an
+order's lines get at completion (§18.7), so the tax base and the order's allocations cannot disagree
+by a penny. **Shipping is quoted as its own component** rather than folded into a line, because
+whether delivery is taxable is a jurisdiction's decision Stripe already knows.
+
+**`variants.taxable: false` is honoured on the Stripe path only**, sent as Stripe's non-taxable
+product code. The manual path has never honoured it and still does not: one rate over one base has
+nowhere to express a per-line exemption. That asymmetry is real — a store with non-taxable variants
+gets a different answer from the two providers, and the Stripe one is the correct one.
+
+**`GET /api/settings/tax` carries three Stripe Tax facts that fail independently** (`stripeTax`, null
+on other providers), and they are never merged into one tick — the same rule the domain status
+surface follows:
+
+| Fact | Whose | Failure |
+|---|---|---|
+| `platform` | Markii's | No `STRIPE_SECRET_KEY` |
+| `connected` + `status` | The merchant's | Stripe not connected, or Stripe Tax not activated on their account (`missing[]` is Stripe's own list) |
+| `activeRegistrations` | The merchant's, elsewhere | **`0` is the dangerous number** — Stripe Tax with no registration calculates a legitimate zero everywhere, so the store looks configured and collects nothing until they file. `null` means the count could not be read, not that there are none |
+
+Read **live** on each request rather than cached at connect: a merchant activates Stripe Tax in
+their own dashboard at a moment Markii is never told about, so a stored flag would be stale in the
+direction that reports a working store as broken.
+
+**Refunds reverse the tax** so the merchant does not file — and pay — tax on money they gave back.
+`full` when the order came back entirely, otherwise a `flat_amount` partial quoted as the total
+returned *including* its tax, which is exactly the refund's own `amountMinor` — no second allocation
+is invented to disagree with the first. Keyed on the refund id, so Stripe itself refuses a duplicate.
+
+**Both post-payment calls are post-commit and neither can fail a transaction.** The money has
+already moved; failing a settled checkout or an owed refund over a reporting call would be the worse
+outcome. The residual risk runs the survivable way — a merchant's report missing an order, or
+overstating a refund — and `tax_transaction_id` / `tax_reversal_id` record it as absent so it is
+findable rather than invisible.
+
+**Recurring memberships (§18.9) are taxed by Stripe or not sold.** Nothing here runs on a clock, so
+there is no moment months from now at which Markii could tax a renewal — the subscription is created
+with `automatic_tax[enabled]` and the shopper's address is written to the Stripe customer, because
+that is the only place a renewal can read a location from. **A `manual`-rate store is refused with
+`409`** rather than selling a membership that is taxed once and silently never again. This changed
+2026-08-17; before it, recurring memberships were untaxed on every store.
+
+**`POST /api/tax/calculate` previews Stripe Tax too**, and it is a real billed call — do not fire it
+on every keystroke. Its calculation id is deliberately never returned: a preview must not become the
+source of a tax transaction on a merchant's filings.
 
 ### 18.7 Order operations ✅ LIVE · processor-executed refunds ✅ LIVE on card, ⛔ impossible on x402
 

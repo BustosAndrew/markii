@@ -1,5 +1,6 @@
 import "server-only";
 import type { MembershipInterval } from "../db";
+import type { TaxAddress } from "../payments/stripe-tax";
 
 /**
  * Recurring memberships (§18.9) — a shopper subscribing to a **merchant's**
@@ -96,7 +97,28 @@ export async function ensureShopperCustomer(input: {
   existingStripeCustomerId: string | null;
   email: string;
   name: string | null;
+  /**
+   * Where the shopper is, for Stripe Tax (§18.6).
+   *
+   * A subscription's renewals are invoiced months later with no cart and no
+   * request to read an address from, so the location has to live on the Stripe
+   * customer or every renewal after the first is untaxed. Absent on stores that
+   * do not use Stripe Tax, where Stripe needs no location at all.
+   */
+  address?: TaxAddress | null;
 }): Promise<{ ok: true; stripeCustomerId: string } | MembershipBillingFailure> {
+  const addressFields = (): URLSearchParams => {
+    const fields = new URLSearchParams();
+    const a = input.address;
+    if (!a) return fields;
+    fields.set("address[country]", a.country.toUpperCase());
+    if (a.line1) fields.set("address[line1]", a.line1);
+    if (a.city) fields.set("address[city]", a.city);
+    if (a.province) fields.set("address[state]", a.province);
+    if (a.postalCode) fields.set("address[postal_code]", a.postalCode);
+    return fields;
+  };
+
   if (input.existingStripeCustomerId) {
     const existing = await call<{ id?: string; deleted?: boolean }>(
       input.accountId,
@@ -104,6 +126,18 @@ export async function ensureShopperCustomer(input: {
       { method: "GET" },
     );
     if (existing.ok && existing.data.id && !existing.data.deleted) {
+      /**
+       * The address is refreshed on an existing customer rather than set once.
+       * A shopper who moved would otherwise keep being taxed where they used to
+       * live, for as long as the membership renews — and nothing would report it.
+       */
+      const fields = addressFields();
+      if ([...fields.keys()].length > 0) {
+        await call(input.accountId, `/customers/${encodeURIComponent(existing.data.id)}`, {
+          method: "POST",
+          body: fields,
+        });
+      }
       return { ok: true, stripeCustomerId: existing.data.id };
     }
     // Anything other than a definite "gone" is left alone rather than replaced:
@@ -116,6 +150,7 @@ export async function ensureShopperCustomer(input: {
     "metadata[markii_customer_id]": String(input.customerId),
   });
   if (input.name) body.set("name", input.name);
+  for (const [k, v] of addressFields()) body.set(k, v);
 
   const created = await call<{ id?: string }>(input.accountId, "/customers", {
     method: "POST",
@@ -193,6 +228,12 @@ export type MembershipSubscription = {
  *
  * **No `application_fee_percent`.** Adding one would take a cut of a shopper's
  * payment to a merchant, which Markii does not do on any rail (D4).
+ *
+ * **`automatic_tax` is how a renewal gets taxed at all** (§18.6). Nothing in
+ * Markii schedules a renewal — Stripe does — so there is no moment months from
+ * now at which this codebase could calculate tax on one. Handing the whole
+ * subscription to Stripe Tax at creation is the only arrangement where invoice
+ * twelve is taxed on the same terms as invoice one.
  */
 export async function createMembershipSubscription(input: {
   accountId: string;
@@ -200,6 +241,8 @@ export async function createMembershipSubscription(input: {
   priceId: string;
   customerId: number;
   productId: number;
+  /** True only when the store's tax provider is `stripe`. */
+  automaticTax: boolean;
 }): Promise<{ ok: true; subscription: MembershipSubscription } | MembershipBillingFailure> {
   const body = new URLSearchParams({
     customer: input.stripeCustomerId,
@@ -210,6 +253,7 @@ export async function createMembershipSubscription(input: {
     "metadata[markii_customer_id]": String(input.customerId),
     "metadata[markii_product_id]": String(input.productId),
   });
+  if (input.automaticTax) body.set("automatic_tax[enabled]", "true");
 
   const res = await call<{
     id?: string;

@@ -226,6 +226,14 @@ export const POST = handler(async (req, { params }) => {
       // become the order's lines, and lines that do not sum to the subtotal
       // charged are a refund that returns the wrong money (§18.7).
       lineSnapshot: snapshotLines(priced),
+      /**
+       * Frozen for the same reason the amounts are (§18.6). The cart's own
+       * cached calculation moves the moment the shopper edits their basket, so
+       * the merchant's Stripe Tax transaction has to be created from the
+       * calculation that produced `taxMinor` here — not from whatever the cart
+       * holds by the time the payment lands.
+       */
+      taxCalculationId: priced.taxCalculationId,
       paymentReference: paymentIntentId,
       expiresAt,
     });

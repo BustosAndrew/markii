@@ -235,6 +235,36 @@ not burn it. `previewTax` is never the source of a number anyone is billed — c
 from the cart. `listInventoryLevels` answers "what is low across the catalog", which per-product
 reads cannot assemble without fetching everything.
 
+**Stripe Tax went LIVE 2026-08-17 (`docs/API.md` §18.6), and it changes three things on
+`/dashboard/settings/tax`.**
+
+1. **`stripe` is a selectable provider now.** The form's disabled option and its "not available yet"
+   caption are gone. Nothing else about `updateTaxSettings` changed.
+2. **`TaxSettings` gains `stripeTax`** (`StripeTaxFacts | null`, null on any other provider), and it
+   carries **three facts that must be rendered separately**: `platform` (Markii's credentials, ours
+   to fix), `connected` + `status` + `missing[]` (the merchant's Stripe account — `missing` is
+   Stripe's own list of what it still wants, show it verbatim), and `activeRegistrations`. One
+   combined tick sends a merchant to fix the wrong thing, which is the same reason the domain status
+   surface keeps ownership, pointing, and platform apart.
+   **`activeRegistrations: 0` is the state to shout about**: Stripe Tax with no registration
+   calculates a real zero everywhere, so the store looks configured, charges nothing, and the
+   merchant finds out when they file. `null` means the count could not be read — *not* that there
+   are none, so never render `null` as zero. `operational.reason` already says all of this in one
+   sentence if you would rather show one line.
+3. **`previewTax` on a `stripe` store is a real Stripe call the merchant is billed for.** Do not fire
+   it on keystroke — put it behind an explicit "Preview" button, or debounce hard. It also takes
+   `shippingMinor`, `taxCode`, and `currency` now, and returns `currency`.
+
+**Two stale types in `lib/api/tax-shipping.ts` were corrected in the same change**, and one of them
+was actively wrong on screen: `TaxPreview["state"]` was typed `"calculated" | "not_configured" |
+"address_required"`. The route has never returned `"address_required"` (a missing address is
+`not_configured` with the reason in `note`), and it was **missing `"none"`** — the common case, a
+store that has told us it collects no tax. A screen branching on that union rendered every
+un-taxed store as a misconfiguration. `breakdown[].name` is also `string`, never null.
+
+Nothing changes for storefront checkout screens: `not_configured` still blocks the sale and still
+carries its reason, exactly as it did for manual rates.
+
 **Plan prices are FINAL as of 2026-08-10 (D42) — and this one changes a type.** `GET
 /api/billing/plans` and `GET /api/billing/subscription` now return `status: "final"` where they
 returned `"proposed"`. In `lib/api/billing.ts` the field was pinned to the literal `"proposed"`;

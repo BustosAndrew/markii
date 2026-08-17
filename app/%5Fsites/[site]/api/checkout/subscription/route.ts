@@ -12,6 +12,7 @@ import {
 } from "@/lib/commerce/membership-billing";
 import { recurringMembershipInCart } from "@/lib/commerce/memberships";
 import { priceCart } from "@/lib/commerce/pricing";
+import { taxSettingsFor } from "@/lib/commerce/tax";
 import { customers, db, products } from "@/lib/db";
 import { getIntegration } from "@/lib/integrations";
 import { matchedPublishableKey } from "@/lib/stripe-mode";
@@ -219,12 +220,70 @@ export const POST = handler(async (req, { params }) => {
       .where(eq(products.id, recurring.productId));
   }
 
+  /**
+   * **Stripe Tax on the subscription, or nothing taxes the renewals** (§18.6).
+   *
+   * A one-off checkout is taxed by `priceCart` at the moment of sale. A
+   * subscription has no such moment after the first: Stripe invoices it months
+   * later, and nothing in Markii runs on a clock to meet it. So the store's tax
+   * provider has to be handed to Stripe once, at creation, and left there.
+   *
+   * **A `manual`-rate store cannot sell one.** Markii's own rates exist only
+   * where Markii is in the request, and it never is for a renewal. Selling the
+   * membership anyway would tax the first month and silently stop, which is the
+   * shape of failure §18.6 refuses over: the merchant would owe tax they never
+   * charged, and nothing would tell them.
+   */
+  const tax = await taxSettingsFor(site.id);
+  if (tax.provider === "manual") {
+    return NextResponse.json(
+      {
+        error: {
+          code: "CONFLICT",
+          message: "This store cannot sell auto-renewing memberships yet.",
+          details: {
+            resolution:
+              "Renewals are invoiced by Stripe months later, so they can only be taxed by Stripe " +
+              "Tax. Switch this store's tax provider to Stripe Tax in Settings → Tax, or sell " +
+              "this membership as a one-off product.",
+          },
+        },
+      },
+      { status: 409 },
+    );
+  }
+
+  /**
+   * Stripe Tax locates the shopper from the **customer**, not the cart — there
+   * is no cart at renewal time. Without a location Stripe refuses the invoice
+   * outright, so this is refused here, before a subscription exists, rather than
+   * on invoice one with the shopper watching.
+   */
+  const taxAddress = cart.shippingAddress ?? null;
+  if (tax.provider === "stripe" && !taxAddress?.country) {
+    return NextResponse.json(
+      {
+        error: {
+          code: "CONFLICT",
+          message: "An address is needed before this membership can be bought.",
+          details: {
+            resolution:
+              "This store calculates tax with Stripe Tax, which needs to know where you are — " +
+              "add an address to your cart and check out again.",
+          },
+        },
+      },
+      { status: 409 },
+    );
+  }
+
   const shopper = await ensureShopperCustomer({
     accountId,
     customerId: customer.id,
     existingStripeCustomerId: customer.stripeCustomerId,
     email: input.email ?? customer.email,
     name: [customer.firstName, customer.lastName].filter(Boolean).join(" ") || null,
+    address: tax.provider === "stripe" ? taxAddress : null,
   });
   if (!shopper.ok) return refuse(shopper);
 
@@ -247,6 +306,8 @@ export const POST = handler(async (req, { params }) => {
     priceId,
     customerId: customer.id,
     productId: recurring.productId,
+    /** The store's own choice, carried to the only party that can act on it. */
+    automaticTax: tax.provider === "stripe",
   });
   if (!subscription.ok) return refuse(subscription);
 

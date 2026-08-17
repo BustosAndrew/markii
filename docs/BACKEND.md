@@ -67,8 +67,9 @@ merchant's own account out of their own balance. `method: "manual"` still record
 merchant issued themselves and is the only option on x402, whose settlement is irreversible.
 
 **What is still missing** is Markii's own subscription billing (plan changes, invoices, payment
-methods — all `503`), Stripe Tax, and **content** membership gating, which has no content model to
-gate until Phase D.
+methods — all `503`) and **content** membership gating, which has no content model to gate until
+Phase D. **Stripe Tax landed 2026-08-17** — every call carries `Stripe-Account`, because the merchant
+is the seller of record and their registrations decide what is owed (§18.6).
 
 **Storage buckets are not in the migration chain.** Supabase creates them through its Storage API,
 not DDL, so a fresh environment has none and uploads fail until `pnpm storage:init` runs. It is
@@ -439,8 +440,11 @@ Contract `docs/API.md` §18. The largest phase. Order within it:
 4. ~~**Cart and checkout**~~ — done on both rails. The card rail creates a PaymentIntent as a direct
    charge on the merchant's connected account and verifies it **server-side** at `/complete`; a
    browser posting "it worked" is a free-goods bug, exactly as it would be on x402
-5. ~~**Discounts**, tax, shipping rates~~ — done. Stripe Tax still open; **gift cards are deferred
-   until further notice (D33)** — do not build, and do not let schema anticipate them
+5. ~~**Discounts**, tax, shipping rates~~ — done, **including Stripe Tax** (2026-08-17): calculated
+   on the merchant's own connected account, cached per cart because Stripe bills them per
+   calculation, and recorded as a tax *transaction* only after payment succeeds — the half that
+   backs their filing and cannot be reconstructed later. **Gift cards are deferred until further
+   notice (D33)** — do not build, and do not let schema anticipate them
 6. ~~**Orders**: refunds, cancellations, manual fulfillment status, timeline~~ — done, **including
    executing a card refund on the rail** rather than only recording one (`method: "processor"`).
    x402 refuses permanently: its settlement is final and no key here can reverse it

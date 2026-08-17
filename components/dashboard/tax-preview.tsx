@@ -156,8 +156,13 @@ export function TaxPreviewPanel({
             </div>
           </dl>
 
+          {/*
+            `reason` used to be rendered here beside `note`. The route has never
+            returned it — the field existed only in the stale `TaxPreview` type
+            (corrected 2026-08-17 with Stripe Tax), so this line has always been
+            dead. `note` is where the actionable half actually lives.
+          */}
           {result.note ? <p className="mt-3 text-sm text-muted">{result.note}</p> : null}
-          {result.reason ? <p className="mt-2 text-sm text-muted">{result.reason}</p> : null}
 
           {result.breakdown.length > 0 ? (
             <ul className="mt-4 space-y-2 text-sm">
