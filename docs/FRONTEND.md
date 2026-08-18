@@ -260,6 +260,22 @@ checkout's `409`.
    it on keystroke — put it behind an explicit "Preview" button, or debounce hard. It also takes
    `shippingMinor`, `taxCode`, and `currency` now, and returns `currency`.
 
+**The cart's `tax` component now carries a `breakdown`, and two more stale types were corrected.**
+
+`StorefrontCart["tax"]` is a `TaxComponent` — `MoneyComponent` plus
+`breakdown: { name, rateBps, amountMinor }[]` (empty, never absent). Both engines were already
+producing it and `priceCart` was throwing it away, so no surface could show a shopper *what* they
+were charged. **Render it**: a single "Tax $4.99" line on a Colorado order hides a state rate, a city
+rate, and a district rate, several jurisdictions require the itemisation on a receipt, and on a
+**tax-inclusive** store `amountMinor` is zero by design — the breakdown is the only place the
+figure appears at all. Never read a zero there as "no tax".
+
+`MoneyComponent["state"]` in `lib/api/storefront-cart.ts` was typed `"final" | "provisional" |
+"not_applicable"` — **none of which the server has ever returned**. Those are `totalState`'s
+values, copied onto the wrong type, so any screen branching on that union matched nothing and fell
+through its default for every cart. It is `"calculated" | "none" | "not_configured"`, and
+`not_configured` is the one that blocks checkout.
+
 **Two stale types in `lib/api/tax-shipping.ts` were corrected in the same change**, and one of them
 was actively wrong on screen: `TaxPreview["state"]` was typed `"calculated" | "not_configured" |
 "address_required"`. The route has never returned `"address_required"` (a missing address is

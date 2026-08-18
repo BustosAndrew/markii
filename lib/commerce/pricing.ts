@@ -51,6 +51,27 @@ export type ComponentState =
 
 export type MoneyComponent = { amountMinor: number; state: ComponentState; note?: string };
 
+/**
+ * Tax, plus the jurisdictions it came from.
+ *
+ * **The breakdown was being computed and thrown away.** Both engines produce one
+ * — a manual rate has a name and a rate, and Stripe Tax returns a row per
+ * jurisdiction — and `priceCart` was flattening the result into a bare
+ * `MoneyComponent`, so nothing downstream could show a shopper *what* they were
+ * charged. That is not a cosmetic loss: several jurisdictions require the
+ * itemisation on a receipt, and a single "Tax $4.99" line on a Colorado order
+ * hides a state rate, a city rate, and a district rate that a merchant has to be
+ * able to account for separately.
+ *
+ * Typed apart from `MoneyComponent` rather than widening it, because a discount
+ * and a shipping charge have no jurisdictions and a field that is always absent
+ * on two of three components is a field callers stop trusting.
+ */
+export type TaxComponent = MoneyComponent & {
+  /** Empty when nothing was calculated — never absent, so callers can map it. */
+  breakdown: { name: string; rateBps: number; amountMinor: number }[];
+};
+
 /** Something the shopper has to be told about a line before they pay. */
 export type LineIssue =
   | { code: "price_changed"; wasMinor: number; nowMinor: number }
@@ -79,7 +100,7 @@ export type PricedCart = {
   lines: PricedLine[];
   subtotalMinor: number;
   discount: MoneyComponent;
-  tax: MoneyComponent;
+  tax: TaxComponent;
   shipping: MoneyComponent;
   /** Rates the shopper may pick from, so the cart and the rate list never disagree. */
   shippingRates: QuotedRate[];
@@ -385,10 +406,16 @@ export async function priceCart(cart: Cart): Promise<PricedCart> {
     shippingMinor: shipping.amountMinor,
     currency: cart.currency,
   });
-  const tax: MoneyComponent = {
+  const tax: TaxComponent = {
     amountMinor: taxResult.amountMinor,
     state: taxResult.state,
     note: taxResult.note,
+    /**
+     * Carried through rather than dropped. On a tax-inclusive store this is the
+     * only place the tax figure appears at all — `amountMinor` is zero
+     * there by design, because the tax is already inside the listed price.
+     */
+    breakdown: taxResult.breakdown ?? [],
   };
 
   /**

@@ -11,10 +11,42 @@ import { ApiClientError, type ApiErrorBody } from "./types";
 
 const CART_COOKIE = "markii_cart";
 
+/**
+ * One component of a cart total, with **why it is what it is**.
+ *
+ * Corrected 2026-08-17. `state` was typed `"final" | "provisional" |
+ * "not_applicable"` — none of which the server has ever returned. Those are
+ * `totalState`'s values, copied onto the wrong type, so any screen that
+ * branched on this union matched nothing and silently fell through its default
+ * for every cart. The real values are below, and each one must be rendered:
+ * `not_configured` is the one that blocks checkout, and a shopper who is not
+ * told why sees a cart that simply refuses to proceed.
+ */
 export type MoneyComponent = {
   amountMinor: number;
-  state: "final" | "provisional" | "not_applicable";
+  /** `calculated` from real config — `none` genuinely zero — `not_configured` blocks the sale. */
+  state: "calculated" | "none" | "not_configured";
   note?: string | null;
+};
+
+/**
+ * Tax, plus the jurisdictions that produced it (§18.6, live 2026-08-17).
+ *
+ * **Render the breakdown, not just the total.** A single "Tax $4.99" line on a
+ * Colorado order hides a state rate, a city rate, and a district rate; several
+ * jurisdictions require the itemisation on a receipt, and a merchant has to be
+ * able to account for each separately. It was being computed and discarded
+ * before Stripe Tax landed.
+ *
+ * On a **tax-inclusive** store `amountMinor` is zero by design — the tax is
+ * already inside the listed prices — so the breakdown is the only place the
+ * figure appears at all. Never infer "no tax" from a zero here without checking
+ * `state` and the breakdown.
+ *
+ * Empty rather than absent when nothing was calculated, so it is always mappable.
+ */
+export type TaxComponent = MoneyComponent & {
+  breakdown: { name: string; rateBps: number; amountMinor: number }[];
 };
 
 export type CartLine = {
@@ -42,7 +74,7 @@ export type StorefrontCart = {
   lines: CartLine[];
   subtotalMinor: number;
   discount: MoneyComponent;
-  tax: MoneyComponent;
+  tax: TaxComponent;
   shipping: MoneyComponent;
   shippingRates: { id: number; name: string; priceMinor: number }[];
   shippingState: string;

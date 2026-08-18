@@ -2316,6 +2316,13 @@ product code. The manual path has never honoured it and still does not: one rate
 nowhere to express a per-line exemption. That asymmetry is real — a store with non-taxable variants
 gets a different answer from the two providers, and the Stripe one is the correct one.
 
+**The cart's `tax` component carries a `breakdown`** — `{ name, rateBps, amountMinor }[]`, empty
+rather than absent. Both engines produce one (a manual rate has a name and a rate; Stripe Tax returns
+a row per jurisdiction) and `priceCart` was discarding it until 2026-08-17. Zero-amount rows are
+dropped: Stripe returns one per jurisdiction it considered, and "0% Colorado" on a receipt is noise a
+shopper has to decide is not a mistake. On a **tax-inclusive** store the breakdown is the only place
+the tax figure appears, since `amountMinor` is zero there by design.
+
 **`GET /api/settings/tax` carries three Stripe Tax facts that fail independently** (`stripeTax`, null
 on other providers), and they are never merged into one tick — the same rule the domain status
 surface follows:
