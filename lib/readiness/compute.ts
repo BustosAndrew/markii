@@ -16,7 +16,7 @@ import {
   variants,
   type DbHandle,
 } from "../db";
-import { defaultWallet } from "../integrations";
+import { defaultWallet, getIntegration } from "../integrations";
 import { stripeConfigured } from "../payments";
 import { isSesConfigured } from "../email/ses";
 import { resolveSender } from "../email/identity";
@@ -182,6 +182,16 @@ async function loadFacts(orgId: string, filters: ReadinessFilters) {
   const stripeReady = stripeConfigured();
 
   /**
+   * Org-level, like the wallet: a Stripe connection belongs to the organization,
+   * not to one storefront. Resolved once rather than per site, and it is a plain
+   * database read — readiness never makes a network call, so a slow Stripe
+   * cannot make the whole score fail.
+   */
+  const stripeConnected = await getIntegration(orgId, "stripe")
+    .then((c) => c?.status === "connected" && Boolean(c.config.accountId))
+    .catch(() => false);
+
+  /**
    * Org-level, like the wallet above: a sending domain belongs to the
    * organization rather than to one storefront, so every store in the org shares
    * the answer. Resolved once rather than per site.
@@ -214,6 +224,7 @@ async function loadFacts(orgId: string, filters: ReadinessFilters) {
       locationCount: locationRows.filter((l) => l.siteId === s.id).length,
       hasVariantBackedProducts: mine.some((p) => p.variants.length > 0),
       stripeConfigured: stripeReady,
+      stripeConnected,
       emailProviderConfigured: sesReady,
       customerEmailReady: sender !== null,
     };

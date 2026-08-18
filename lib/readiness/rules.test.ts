@@ -48,6 +48,7 @@ const store = (over: Partial<StoreFacts> = {}): StoreFacts => ({
   locationCount: 1,
   hasVariantBackedProducts: true,
   stripeConfigured: false,
+  stripeConnected: false,
   // Default to a store that *can* email, so NO_CUSTOMER_EMAIL does not appear
   // in every unrelated assertion below.
   emailProviderConfigured: true,
@@ -219,6 +220,39 @@ describe("storeFindings", () => {
     expect(codes(storeFindings(store({ taxProvider: "none" })))).not.toContain(
       "MANUAL_TAX_WITHOUT_RATES",
     );
+  });
+
+  it("flags Stripe Tax selected with no Stripe account connected", () => {
+    expect(
+      codes(storeFindings(store({ taxProvider: "stripe", stripeConfigured: true, stripeConnected: false }))),
+    ).toContain("STRIPE_TAX_WITHOUT_CONNECTION");
+  });
+
+  it("says nothing once the merchant has connected Stripe", () => {
+    // Whether Stripe Tax is *activated* on that account needs a live API call,
+    // so it is reported on the tax settings screen rather than guessed at here.
+    expect(
+      codes(storeFindings(store({ taxProvider: "stripe", stripeConfigured: true, stripeConnected: true }))),
+    ).not.toContain("STRIPE_TAX_WITHOUT_CONNECTION");
+  });
+
+  it("stays silent when it is Markii's credentials that are missing, not the merchant's", () => {
+    // An issue the merchant cannot act on is noise. Without platform Stripe
+    // credentials the store cannot connect anything, and telling them to try is
+    // a task with no completion — the same rule that keeps a missing email
+    // provider off this list.
+    expect(
+      codes(storeFindings(store({ taxProvider: "stripe", stripeConfigured: false, stripeConnected: false }))),
+    ).not.toContain("STRIPE_TAX_WITHOUT_CONNECTION");
+  });
+
+  it("does not confuse the two tax providers' failures", () => {
+    const manual = codes(storeFindings(store({ taxProvider: "manual", manualTaxRateCount: 0 })));
+    expect(manual).not.toContain("STRIPE_TAX_WITHOUT_CONNECTION");
+    const stripe = codes(
+      storeFindings(store({ taxProvider: "stripe", stripeConfigured: true, stripeConnected: false })),
+    );
+    expect(stripe).not.toContain("MANUAL_TAX_WITHOUT_RATES");
   });
 
   it("flags variant-backed products with no stock location", () => {

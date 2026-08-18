@@ -100,6 +100,39 @@ export const POST = handler(async (req, { params }) => {
   }
 
   /**
+   * **Stripe Tax on the subscription, or nothing taxes the renewals** (§18.6).
+   *
+   * A one-off checkout is taxed by `priceCart` at the moment of sale. A
+   * subscription has no such moment after the first: Stripe invoices it months
+   * later, and nothing in Markii runs on a clock to meet it. So the store's tax
+   * provider has to be handed to Stripe once, at creation, and left there.
+   *
+   * **A `manual`-rate store cannot sell one.** Markii's own rates exist only
+   * where Markii is in the request, and it never is for a renewal. Selling the
+   * membership anyway would tax the first month and silently stop, which is the
+   * shape of failure §18.6 refuses over: the merchant would owe tax they never
+   * charged, and nothing would tell them.
+   */
+  const tax = await taxSettingsFor(site.id);
+  if (tax.provider === "manual") {
+    return NextResponse.json(
+      {
+        error: {
+          code: "CONFLICT",
+          message: "This store cannot sell auto-renewing memberships yet.",
+          details: {
+            resolution:
+              "Renewals are invoiced by Stripe months later, so they can only be taxed by Stripe " +
+              "Tax. Switch this store's tax provider to Stripe Tax in Settings → Tax, or sell " +
+              "this membership as a one-off product.",
+          },
+        },
+      },
+      { status: 409 },
+    );
+  }
+
+  /**
    * **A subscription needs a shopper account**, and this is the one place that
    * is a hard requirement rather than a convenience. The membership hangs off a
    * `customers` row, and a renewal arriving months later has no browser session
@@ -218,39 +251,6 @@ export const POST = handler(async (req, { params }) => {
       .update(products)
       .set({ stripeRecurringPriceId: priceId, updatedAt: new Date() })
       .where(eq(products.id, recurring.productId));
-  }
-
-  /**
-   * **Stripe Tax on the subscription, or nothing taxes the renewals** (§18.6).
-   *
-   * A one-off checkout is taxed by `priceCart` at the moment of sale. A
-   * subscription has no such moment after the first: Stripe invoices it months
-   * later, and nothing in Markii runs on a clock to meet it. So the store's tax
-   * provider has to be handed to Stripe once, at creation, and left there.
-   *
-   * **A `manual`-rate store cannot sell one.** Markii's own rates exist only
-   * where Markii is in the request, and it never is for a renewal. Selling the
-   * membership anyway would tax the first month and silently stop, which is the
-   * shape of failure §18.6 refuses over: the merchant would owe tax they never
-   * charged, and nothing would tell them.
-   */
-  const tax = await taxSettingsFor(site.id);
-  if (tax.provider === "manual") {
-    return NextResponse.json(
-      {
-        error: {
-          code: "CONFLICT",
-          message: "This store cannot sell auto-renewing memberships yet.",
-          details: {
-            resolution:
-              "Renewals are invoiced by Stripe months later, so they can only be taxed by Stripe " +
-              "Tax. Switch this store's tax provider to Stripe Tax in Settings → Tax, or sell " +
-              "this membership as a one-off product.",
-          },
-        },
-      },
-      { status: 409 },
-    );
   }
 
   /**

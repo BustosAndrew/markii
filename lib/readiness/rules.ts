@@ -265,6 +265,14 @@ export type StoreFacts = {
   emptyShippingZoneCount: number;
   taxProvider: "none" | "manual" | "stripe";
   manualTaxRateCount: number;
+  /**
+   * Whether the org has a connected Stripe account (§18.6).
+   *
+   * Stripe Tax runs on the **merchant's own** account, so this is what decides
+   * whether a store set to `stripe` can calculate anything at all — the platform
+   * having credentials is a different fact and a different person's problem.
+   */
+  stripeConnected: boolean;
   /** Stock locations. Variant-backed products cannot be reserved without one. */
   locationCount: number;
   hasVariantBackedProducts: boolean;
@@ -395,6 +403,41 @@ export function storeFindings(s: StoreFacts): RuleFinding[] {
       affectedFields: ["taxSettings"],
       evidence: [{ field: "manualRates", current: "0 rates", expected: "at least one rate" }],
       recommendation: "Add a tax rate for each place you are registered, or set tax to none.",
+      expectedImpact: "Every checkout is refused for having no calculable tax.",
+      scope,
+    });
+  }
+
+  /**
+   * The Stripe Tax counterpart of the rule above, and the same failure: a
+   * provider was chosen that cannot calculate, so every checkout is refused.
+   *
+   * **Only the merchant's half is raised here.** Stripe Tax runs on their own
+   * connected account, so an unconnected account is their task and belongs on
+   * this list. Markii's own missing credentials are *ours*, and an issue a
+   * merchant cannot act on is noise — the same reasoning that keeps
+   * `emailProviderConfigured` from raising anything.
+   *
+   * The two remaining Stripe Tax failures — Tax not activated on the account,
+   * and activated with zero registrations — need a live Stripe call to detect
+   * and are surfaced on `GET /api/settings/tax` instead, which is the screen a
+   * merchant is already looking at when they configure this. Readiness stays a
+   * database read; a network round trip per store would make the whole score
+   * fail when Stripe is slow.
+   */
+  if (s.taxProvider === "stripe" && s.stripeConfigured && !s.stripeConnected) {
+    findings.push({
+      code: "STRIPE_TAX_WITHOUT_CONNECTION",
+      severity: "critical",
+      component: "policies",
+      title: "Tax is set to Stripe Tax but no Stripe account is connected",
+      affectedFields: ["taxSettings", "integrations.stripe"],
+      evidence: [
+        { field: "integrations.stripe", current: "not connected", expected: "connected" },
+      ],
+      recommendation:
+        "Connect your Stripe account in Settings → Payments, then activate Stripe Tax there. " +
+        "It calculates from your own registrations — Markii never decides what you owe.",
       expectedImpact: "Every checkout is refused for having no calculable tax.",
       scope,
     });

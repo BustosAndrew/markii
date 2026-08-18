@@ -914,6 +914,18 @@ issue vanish, not wait for a job. Only what the *merchant decided* persists
 (`readiness_issue_states`), keyed by an issue id derived deterministically from the rule and its
 subject. That determinism is what makes a dismissal survive tomorrow's recomputation.
 
+**Readiness never makes a network call.** Every fact behind a rule is a database read, so a slow or
+unreachable third party cannot make the whole score fail or hang the health page. That is why the
+Stripe Tax rule (§18.6) checks only whether the merchant has *connected* Stripe — whether Stripe
+Tax is activated on their account, and whether they hold any registration, need a live Stripe call
+and are reported on `GET /api/settings/tax` instead, which is the screen a merchant is already
+looking at when they configure tax.
+
+**A rule may only raise something the merchant can act on.** Markii's own missing credentials are
+*ours*: a store set to Stripe Tax in an environment with no `STRIPE_SECRET_KEY` raises nothing,
+because "connect Stripe" is a task with no completion there. Same reasoning keeps a missing email
+provider off the list while an unverified sending domain stays on it.
+
 **A rule may only check a field this platform actually offers.** The §11 agent-data extension
 (`useCases`, `faqs`, `machineSummary`, GTIN, dimensions, compatibility) is Phase E and does not
 exist, so nothing scores a merchant on it — marking someone down for a field they have no way to

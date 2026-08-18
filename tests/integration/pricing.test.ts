@@ -20,6 +20,20 @@ describe("pricing", () => {
   const cart = (p = "") => `/_sites/${slug}/api/cart${p}`;
   const checkout = (p = "") => `/_sites/${slug}/api/checkout${p}`;
 
+  /**
+   * Sets the store's tax provider, creating the row if it is not there.
+   *
+   * A bare `UPDATE` is a no-op when no `tax_settings` row exists yet, which
+   * makes any test using one silently depend on an earlier test in the file
+   * having inserted it — it then passes in a full run and quietly measures
+   * the wrong provider when run alone. Found while falsifying the Stripe Tax
+   * tests below, which is exactly what that exercise is for.
+   */
+  const setProvider = async (provider: "none" | "manual" | "stripe") => {
+    await sql`insert into tax_settings (site_id, provider) values (${site.id}, ${provider})
+      on conflict (site_id) do update set provider = ${provider}`;
+  };
+
   const mkDiscount = async (row: Record<string, unknown>) => {
     const [d] = await sql`insert into discounts ${sql({ site_id: site.id, ...row } as any)}
       returning *`;
@@ -205,8 +219,17 @@ describe("pricing", () => {
       expect(g.json.tax.note).toMatch(/Includes/);
     });
 
-    it("refuses to guess when Stripe Tax is selected but unavailable", async () => {
-      await sql`update tax_settings set provider = 'stripe' where site_id = ${site.id}`;
+    /**
+     * Stripe Tax on a store that cannot reach it (§18.6).
+     *
+     * This test org has no connected Stripe account, which is the *specific*
+     * refusal being pinned — not just "some 4xx". The repo's own history
+     * (`docs/DECISIONS.md`, the domains suite) records a refusal test that
+     * passed for the wrong reason, so the state, the reason, and the checkout
+     * status are each asserted rather than inferred from one another.
+     */
+    it("refuses to guess when Stripe Tax is selected but the store is not connected", async () => {
+      await setProvider("stripe");
       const { token, rates } = await shippableCart(1);
       await client.patch(cart(`/${token}`), {
         shippingRateId: rates.rates.find((r: any) => r.name === "Standard").id,
@@ -214,7 +237,61 @@ describe("pricing", () => {
 
       const g = await client.get(cart(`/${token}`));
       expect(g.json.tax.state).toBe("not_configured");
+      expect(g.json.tax.amountMinor).toBe(0);
+      // The reason has to name the missing thing. "Tax unavailable" sends a
+      // merchant to support; "connect your Stripe account" does not.
+      expect(g.json.tax.note).toMatch(/stripe/i);
       expect(g.json.totalState).toBe("provisional");
+
+      const s = await client.post(checkout("/session"), { cartToken: token, rail: "x402" });
+      expect(s.status).toBe(409);
+    });
+
+    it("caches nothing on the cart when Stripe could not answer", async () => {
+      // A cached row for a calculation that never happened would be served to
+      // the next render as a real answer. The cache may only ever hold what
+      // Stripe actually said.
+      await setProvider("stripe");
+      const { token } = await shippableCart(1);
+      await client.get(cart(`/${token}`));
+
+      const [row] = await sql`select tax_calculation_id, tax_calculation_fingerprint,
+        tax_calculation_result from carts where token = ${token}`;
+      expect(row.tax_calculation_id).toBeNull();
+      expect(row.tax_calculation_fingerprint).toBeNull();
+      expect(row.tax_calculation_result).toBeNull();
+    });
+
+    it("leaves the Stripe Tax columns null all the way through a manual-rate sale", async () => {
+      /**
+       * The other half of the same rule. A manual-rate order has tax Stripe was
+       * never asked about, so every id in the chain must stay null — a
+       * populated `tax_transaction_id` here would mean Markii filed something on
+       * a merchant's Stripe Tax report that Stripe never calculated.
+       */
+      await sql`insert into tax_settings (site_id, provider, prices_include_tax, manual_rates)
+        values (${site.id}, 'manual', false,
+          ${sql.json([{ country: "US", province: "CO", rateBps: 875, name: "CO" }])})
+        on conflict (site_id) do update set provider = 'manual', prices_include_tax = false,
+          manual_rates = ${sql.json([{ country: "US", province: "CO", rateBps: 875, name: "CO" }])}`;
+
+      const { token, rates } = await shippableCart(1);
+      await client.patch(cart(`/${token}`), {
+        shippingRateId: rates.rates.find((r: any) => r.name === "Standard").id,
+      });
+
+      const g = await client.get(cart(`/${token}`));
+      // The manual path still calculates — this is not a broken store.
+      expect(g.json.tax.state).toBe("calculated");
+
+      const s = await client.post(checkout("/session"), { cartToken: token, rail: "x402" });
+      expect(s.status).toBe(201);
+
+      const [session] = await sql`select tax_calculation_id, tax_minor
+        from checkout_sessions where id = ${s.json.id}`;
+      expect(session.tax_calculation_id).toBeNull();
+      // Tax was charged; it just was not Stripe's. The two facts are separate.
+      expect(session.tax_minor).toBeGreaterThan(0);
     });
   });
 

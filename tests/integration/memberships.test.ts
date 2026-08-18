@@ -324,6 +324,71 @@ describe("recurring memberships", () => {
   }, 120_000);
 
   /**
+   * **A store on manual tax rates cannot sell a renewing membership** (§18.6,
+   * D45).
+   *
+   * Nothing here runs on a clock, so Markii is never in the request when Stripe
+   * invoices month two — a manual rate would tax the first month and
+   * silently stop, leaving the merchant owing tax they never charged. The
+   * refusal fires **before** any Stripe object is created, so a store that
+   * cannot complete this sale does not accumulate Prices on its own dashboard
+   * for it.
+   */
+  it("refuses a renewing membership on a manual-rate store", async () => {
+    const shopper = shopperClient();
+    /**
+     * **Signed in deliberately, and the message assertion below is load-bearing.**
+     *
+     * Falsified by removing the gate from the route: as a guest it still
+     * returned `409` from "sign in to buy a membership", and once signed in it
+     * *still* returned `409` — from the unconnected Stripe account, since
+     * this suite has no real Connect link. Several gates on this route answer
+     * `409`, so **the status alone can never say which one fired**, and a test
+     * asserting only the status would pass with the tax gate deleted. Signing in
+     * removes one impostor; matching the message is what pins the rest.
+     */
+    await signUpShopper(shopper, "manualtax");
+    await makeRecurring("month");
+    await sql`insert into tax_settings (site_id, provider, manual_rates)
+      values (${siteId}, 'manual',
+        ${sql.json([{ country: "US", province: "CO", rateBps: 875, name: "CO" }])})
+      on conflict (site_id) do update set provider = 'manual'`;
+
+    try {
+      const cart = await shopper.post(`/_sites/${slug}/api/cart`, {
+        productId: grantingProductId,
+        quantity: 1,
+      });
+      expect(cart.status).toBe(201);
+      await trackCart(cleanup, cart.json.token);
+
+      const res = await shopper.post(`/_sites/${slug}/api/checkout/subscription`, {
+        cartToken: cart.json.token,
+      });
+      // Pinned exactly, not just "some 4xx": a 409 here and a 409 for an
+      // unconnected Stripe account are different problems for different people.
+      expect(res.status).toBe(409);
+      expect(JSON.stringify(res.json)).toMatch(/stripe tax/i);
+
+      /**
+       * Nothing was created on the merchant's account on the way to refusing.
+       *
+       * **Weak in this environment and kept anyway**: with no Stripe connection
+       * no Price could be created regardless, so this passing proves little
+       * here. It is the assertion that catches the gate drifting back below
+       * `createRecurringPrice` once a suite does run against a connected
+       * account — which is where it was originally written, littering a
+       * merchant's dashboard with Prices for a sale that can never complete.
+       */
+      const [product] = await sql`select stripe_recurring_price_id from products
+        where id = ${grantingProductId}`;
+      expect(product.stripe_recurring_price_id).toBeNull();
+    } finally {
+      await sql`update tax_settings set provider = 'none' where site_id = ${siteId}`;
+    }
+  }, 120_000);
+
+  /**
    * **A subscription needs an account.** A renewal arriving months later has no
    * browser session to attach to, so a guest subscription would be a recurring
    * charge with nobody to give the access to.
