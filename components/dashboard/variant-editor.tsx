@@ -26,6 +26,8 @@ type VariantDraft = {
   priceInput: string;
   sku: string;
   inventoryPolicy: Variant["inventoryPolicy"];
+  taxable: boolean;
+  taxCode: string;
   adjustDelta: string;
   adjustLocationId: string;
 };
@@ -70,6 +72,8 @@ function variantDraftFromRow(v: Variant, currency: string): VariantDraft {
     priceInput: decimalMinor(v.priceMinor, currency),
     sku: v.sku ?? "",
     inventoryPolicy: v.inventoryPolicy,
+    taxable: v.taxable,
+    taxCode: v.taxCode ?? "",
     adjustDelta: "",
     adjustLocationId: "",
   };
@@ -84,11 +88,14 @@ export function VariantEditor({
   siteId,
   currency,
   matrix: initialMatrix,
+  taxProvider,
 }: {
   productId: number;
   siteId: number;
   currency: string;
   matrix: VariantMatrix;
+  /** Saved tax provider for this store — `taxable: false` is honoured on Stripe Tax only. */
+  taxProvider?: "none" | "manual" | "stripe";
 }) {
   const router = useRouter();
   const [matrix, setMatrix] = useState(initialMatrix);
@@ -300,7 +307,7 @@ export function VariantEditor({
           />
         ) : (
           <div className="mt-4 overflow-x-auto">
-            <table className="w-full min-w-[52rem] text-left text-sm">
+            <table className="w-full min-w-[64rem] text-left text-sm">
               <thead className="text-muted">
                 <tr className="border-b border-border">
                   <th className="py-2 pr-4 font-medium">Variant</th>
@@ -308,6 +315,8 @@ export function VariantEditor({
                   <th className="py-2 pr-4 font-medium">SKU</th>
                   <th className="py-2 pr-4 font-medium">Inventory</th>
                   <th className="py-2 pr-4 font-medium">Policy</th>
+                  <th className="py-2 pr-4 font-medium">Taxable</th>
+                  <th className="py-2 pr-4 font-medium">Tax code</th>
                   {locations.length > 0 ? (
                     <th className="py-2 pr-4 font-medium">Adjust stock</th>
                   ) : null}
@@ -366,6 +375,33 @@ export function VariantEditor({
                           <option value="deny">Stop selling at 0</option>
                           <option value="continue">Allow overselling</option>
                         </Select>
+                      </td>
+                      <td className="py-3 pr-4">
+                        <label className="flex items-center gap-2 text-sm text-foreground">
+                          <input
+                            type="checkbox"
+                            checked={draft.taxable}
+                            disabled={busy !== null}
+                            onChange={(e) =>
+                              updateVariantDraft(v.id, { taxable: e.target.checked })
+                            }
+                            className="size-4 rounded border-border accent-[var(--brand)]"
+                            aria-label={`Taxable for ${v.title}`}
+                          />
+                          Taxable
+                        </label>
+                      </td>
+                      <td className="py-3 pr-4">
+                        <Input
+                          value={draft.taxCode}
+                          disabled={busy !== null}
+                          placeholder="txcd_…"
+                          onChange={(e) =>
+                            updateVariantDraft(v.id, { taxCode: e.target.value })
+                          }
+                          className="w-36"
+                          aria-label={`Tax code for ${v.title}`}
+                        />
                       </td>
                       {locations.length > 0 ? (
                         <td className="py-3 pr-4">
@@ -447,6 +483,8 @@ export function VariantEditor({
                                 priceMinor,
                                 sku: draft.sku.trim() || null,
                                 inventoryPolicy: draft.inventoryPolicy,
+                                taxable: draft.taxable,
+                                taxCode: draft.taxCode.trim() || null,
                               });
                               await refreshMatrix();
                             })
@@ -462,6 +500,12 @@ export function VariantEditor({
             </table>
           </div>
         )}
+
+        <p className="mt-3 text-xs leading-5 text-muted">
+          {taxProvider === "manual"
+            ? "Untaxed variants are ignored on a manual-rate store — one rate covers the whole basket. Switch the store to Stripe Tax in Settings → Tax to honour per-variant exemptions."
+            : "Untaxed variants are honoured on Stripe Tax only. A manual rate has nowhere to express a per-line exemption."}
+        </p>
 
         {error ? <FieldError>{error}</FieldError> : null}
       </section>

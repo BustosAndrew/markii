@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import type { MembershipTier } from "@/lib/api/memberships";
 import {
   createProduct,
@@ -9,6 +10,7 @@ import {
   duplicateProduct,
   updateProduct,
 } from "@/lib/api/products";
+import type { TaxProvider } from "@/lib/api/tax-shipping";
 import { uploadProductImage } from "@/lib/api/uploads";
 import { ApiClientError, type Category, type Product, type Site } from "@/lib/api/types";
 import { Button } from "@/components/ui/button";
@@ -34,6 +36,7 @@ export function ProductForm({
   sites,
   categories,
   tiers,
+  taxProviders = {},
 }: {
   mode: "create" | "edit";
   product?: Product;
@@ -41,6 +44,8 @@ export function ProductForm({
   categories: Category[];
   /** Loaded in the page RSC — never fetch tiers from the browser. */
   tiers: TierOption[];
+  /** Per-storefront tax provider, loaded on the server. Missing keys mean unknown. */
+  taxProviders?: Record<number, TaxProvider>;
 }) {
   const router = useRouter();
   const [siteId, setSiteId] = useState(String(product?.siteId ?? sites[0]?.id ?? ""));
@@ -92,6 +97,9 @@ export function ProductForm({
   const effectiveRenewalInterval = effectiveGrantsTierId
     ? grantsRenewalInterval
     : ("none" as const);
+  const siteTaxProvider = taxProviders[Number(siteId)];
+  const recurringBlockedByManualTax =
+    effectiveRenewalInterval !== "none" && siteTaxProvider === "manual";
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -333,6 +341,19 @@ export function ProductForm({
               Renewal interval requires a granting tier. Recurring purchases use the
               storefront subscription checkout.
             </p>
+            {recurringBlockedByManualTax ? (
+              <p className="mt-2 rounded-[var(--radius-control)] bg-warning-bg px-3 py-2 text-xs leading-5 text-warning-text">
+                Recurring memberships are taxed by Stripe or not sold. This store uses manual
+                rates, so checkout will refuse the sale. Switch the store to Stripe Tax in{" "}
+                <Link
+                  href={`/dashboard/settings/tax?siteId=${siteId}`}
+                  className="font-medium underline underline-offset-2"
+                >
+                  Settings → Tax
+                </Link>{" "}
+                first.
+              </p>
+            ) : null}
           </div>
 
           {effectiveRenewalInterval === "none" ? (

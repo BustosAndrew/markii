@@ -58,6 +58,7 @@ export function CreateWebsiteWizard({ sites }: { sites: Site[] }) {
    * and would invite the merchant to run the whole wizard again.
    */
   const [domainNote, setDomainNote] = useState<string | null>(null);
+  const [hostNote, setHostNote] = useState<string | null>(null);
   const [savedSlug, setSavedSlug] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
   const [previewTab, setPreviewTab] = useState<
@@ -269,13 +270,22 @@ export function CreateWebsiteWizard({ sites }: { sites: Site[] }) {
         });
       }
 
+      let hostFailed = false;
       if (mode === "live") {
-        await deploySite(site.slug);
+        const deployed = await deploySite(site.slug);
+        if (!deployed.hostAttached) {
+          hostFailed = true;
+          setHostNote(
+            deployed.hostProblem ??
+              "The site is live, but its Markii address is not reachable yet. Open the website and deploy again.",
+          );
+        }
       }
 
-      // Navigating away on a failed domain claim would erase the only notice
-      // the merchant gets that one part of what they asked for did not happen.
-      if (domainFailed) {
+      // Navigating away on a failed domain claim or host attach would erase the
+      // only notice the merchant gets that one part of what they asked for did
+      // not happen.
+      if (domainFailed || hostFailed) {
         setSavedSlug(site.slug);
         setBusy(false);
         return;
@@ -610,20 +620,27 @@ export function CreateWebsiteWizard({ sites }: { sites: Site[] }) {
             Deploy marks it <span className="text-foreground">live</span>.
           </p>
           {domainNote ? (
-            <div className="space-y-2 rounded-[var(--radius-control)] border border-border p-3 text-sm">
+            <div className="rounded-[var(--radius-control)] border border-border p-3 text-sm">
               <p className="text-muted">{domainNote}</p>
-              {savedSlug ? (
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    router.push(`/dashboard/websites/${savedSlug}`);
-                    router.refresh();
-                  }}
-                >
-                  Go to the website
-                </Button>
-              ) : null}
             </div>
+          ) : null}
+          {hostNote ? (
+            <div className="rounded-[var(--radius-control)] bg-warning-bg px-3 py-3 text-sm leading-6 text-warning-text">
+              <p>{hostNote} Do not share the storefront address until the host is attached.</p>
+            </div>
+          ) : null}
+          {domainNote || hostNote ? (
+            savedSlug ? (
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  router.push(`/dashboard/websites/${savedSlug}`);
+                  router.refresh();
+                }}
+              >
+                Go to the website
+              </Button>
+            ) : null
           ) : (
             <div className="flex flex-wrap gap-2">
               <Button

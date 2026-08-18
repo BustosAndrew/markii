@@ -236,7 +236,12 @@ from the cart. `listInventoryLevels` answers "what is low across the catalog", w
 reads cannot assemble without fetching everything.
 
 **Stripe Tax went LIVE 2026-08-17 (`docs/API.md` §18.6), and it changes three things on
-`/dashboard/settings/tax`.**
+`/dashboard/settings/tax`.** ✅ **screens updated 2026-08-17** — the form keeps `stripe` as a
+saved provider (it used to coerce it to `manual` on load, which would overwrite a live Stripe Tax
+store), renders the three `stripeTax` facts separately, saves `defaultTaxCode`, and the preview
+takes `shippingMinor` / `taxCode` / `currency` behind an explicit button. Variant `taxable` /
+`taxCode` are on the product editor; a recurring membership on a `manual` store warns before
+checkout's `409`.
 
 1. **`stripe` is a selectable provider now.** The form's disabled option and its "not available yet"
    caption are gone. Nothing else about `updateTaxSettings` changed.
@@ -355,27 +360,20 @@ tick to it, and do not treat a missing `pointsToMarkii` as `false`.
 
 ### 🔴 Two frontend jobs left over from the backend work — for whoever picks up screens next
 
-**1. `deploySite` reports a failure the UI throws away.** Publishing now also attaches
-`{slug}.{ROOT_DOMAIN}` to Vercel, and that can fail on its own — so the response carries
-`hostAttached: boolean` and `hostProblem: string | null`. **Both call sites currently ignore it**
-(`components/dashboard/site-controls.tsx`, `components/dashboard/create-website-wizard.tsx`), so a
-merchant sees "Deploy live" succeed and gets a `storefrontUrl` that fails TLS. `hostAttached: false`
-means *published but not reachable* — show `hostProblem` (its copy already separates Markii's fault
-from the merchant's) and offer deploy again as the retry, rather than linking to an address that
-breaks.
+**1. DONE — `deploySite` host attach** (2026-08-17). Both call sites read `hostAttached` /
+`hostProblem`. `hostAttached: false` is published-but-not-reachable: the UI shows `hostProblem` and
+offers deploy again, rather than a storefront link that fails TLS.
 
 **2. DONE — the abandoned-cart toggle** now sits with the other site switches in
 `site-controls.tsx`. Left here as a note only because the feature is **opt-in and useless without
 it**: the sweep ships off by default, so shipping the backend alone would have been a feature no
 merchant could reach.
 
-**3. Settings → Email has a third state now.** `CustomerEmailStatus.code` gained
-**`unverified_sender`** and **lost `domain_verification_required`**. This is not a rename:
-the old code meant mail was *refused*, and `canSend` is now **`true`** in that state because mail
-sends from the storefront's Markii address (D44). The page already badges three states; anything
-else reading this type needs the same treatment. **Never render `unverified_sender` as an error** —
-their customers are receiving mail, and telling them otherwise is the same class of lie as a false
-success.
+**3. DONE — Settings → Email D44.** `CustomerEmailStatus.code` gained **`unverified_sender`** and
+lost `domain_verification_required`. Mail still sends from the storefront's Markii address, so that
+state is badged "Sending — unverified", never as an error. Empty-domain copy no longer says mail is
+not going out. `fallbackSender.ok: false` is a Markii incident panel — not a "verify your domain"
+call to action, because none of the merchants in that state can fix a broken shared sender.
 
 Readiness gains **`UNVERIFIED_SENDING_DOMAIN`** — `warning` on a live store, `opportunity` before
 launch. Deliberately **not** critical: receipts are sending, just not from the merchant's own

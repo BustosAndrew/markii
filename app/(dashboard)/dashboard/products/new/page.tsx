@@ -1,3 +1,4 @@
+import { getTaxSettings } from "@/lib/api/server";
 import { listCategories } from "@/lib/api/server";
 import { listMembershipTiers } from "@/lib/api/server";
 import { listSites } from "@/lib/api/server";
@@ -32,6 +33,16 @@ export default async function NewProductPage() {
     );
   }
 
+  const sites = sitesResult.data.items;
+  const taxResults = await Promise.all(
+    sites.map((site) => loadOrError(() => getTaxSettings(site.id))),
+  );
+  const taxProviders: Record<number, "none" | "manual" | "stripe"> = {};
+  sites.forEach((site, index) => {
+    const provider = taxResults[index]?.data?.provider;
+    if (provider) taxProviders[site.id] = provider;
+  });
+
   return (
     <div>
       <PageHeader
@@ -40,13 +51,14 @@ export default async function NewProductPage() {
       />
       <ProductForm
         mode="create"
-        sites={sitesResult.data.items}
+        sites={sites}
         categories={categoriesResult.data?.items ?? []}
         tiers={(tiersResult.data?.items ?? []).map((tier) => ({
           id: tier.id,
           name: tier.name,
           siteId: tier.siteId,
         }))}
+        taxProviders={taxProviders}
       />
     </div>
   );

@@ -2,32 +2,61 @@
 
 import { useState } from "react";
 import { previewTax, type TaxPreview } from "@/lib/api/tax-shipping";
-import { formatMinor } from "@/lib/api/money";
+import { currencyExponent, formatMinor } from "@/lib/api/money";
 import { publicErrorMessage } from "@/lib/api/public-copy";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { FieldError, Input, Label } from "@/components/ui/field";
 
-function dollarsToMinor(value: string) {
-  const amount = Number(value);
-  if (!Number.isFinite(amount)) return null;
-  return Math.round(amount * 100);
+function parseDecimalToMinor(value: string, currency: string): number | null {
+  const trimmed = value.trim().replace(/,/g, "");
+  if (!trimmed) return null;
+  const exponent = currencyExponent(currency);
+  if (exponent === 0) {
+    const n = Number(trimmed);
+    return Number.isFinite(n) && n >= 0 && Number.isInteger(n) ? n : null;
+  }
+  if (!/^\d+(\.\d+)?$/.test(trimmed)) return null;
+  const [whole, frac = ""] = trimmed.split(".");
+  if (frac.length > exponent) return null;
+  const minor =
+    Number(whole) * 10 ** exponent + Number(frac.padEnd(exponent, "0").slice(0, exponent));
+  if (!Number.isFinite(minor) || minor < 0) return null;
+  return minor;
+}
+
+function previewBadge(state: TaxPreview["state"]): {
+  variant: "success" | "warning" | "neutral";
+  label: string;
+} {
+  if (state === "calculated") return { variant: "success", label: "calculated" };
+  if (state === "none") return { variant: "neutral", label: "no tax" };
+  return { variant: "warning", label: "not configured" };
 }
 
 export function TaxPreviewPanel({
   siteId,
   currency,
+  billedByStripe = false,
 }: {
   siteId: number;
   currency: string;
+  /** True when the saved provider is Stripe Tax — this preview is a billed call. */
+  billedByStripe?: boolean;
 }) {
   const [amount, setAmount] = useState("");
+  const [shipping, setShipping] = useState("");
+  const [taxCode, setTaxCode] = useState("");
+  const [previewCurrency, setPreviewCurrency] = useState(currency);
   const [country, setCountry] = useState("US");
   const [province, setProvince] = useState("");
   const [postalCode, setPostalCode] = useState("");
   const [result, setResult] = useState<TaxPreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const resultCurrency = result?.currency || previewCurrency || currency;
+  const badge = result ? previewBadge(result.state) : null;
 
   return (
     <section className="rounded-[var(--radius-card)] border border-border bg-surface p-5 shadow-[var(--shadow-sm)]">
@@ -36,24 +65,34 @@ export function TaxPreviewPanel({
           <h2 className="text-base font-medium text-foreground">Preview tax</h2>
           <p className="mt-1 text-sm leading-6 text-muted">
             Checkout recalculates from the cart. This is only a configuration preview.
+            {billedByStripe
+              ? " Stripe bills your account for each run, so it stays behind this button."
+              : ""}
           </p>
         </div>
-        {result ? (
-          <Badge variant={result.state === "calculated" ? "success" : "warning"}>
-            {result.state.replace(/_/g, " ")}
-          </Badge>
+        {badge ? (
+          <Badge variant={badge.variant}>{badge.label}</Badge>
         ) : (
           <Badge variant="info">Preview only</Badge>
         )}
       </div>
 
       <form
-        className="mt-5 grid gap-4 lg:grid-cols-[12rem_8rem_8rem_8rem_auto]"
+        className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
         onSubmit={async (event) => {
           event.preventDefault();
-          const amountMinor = dollarsToMinor(amount);
+          const code = previewCurrency.trim().toUpperCase() || currency;
+          const amountMinor = parseDecimalToMinor(amount, code);
           if (amountMinor === null) {
             setError("Enter a valid amount.");
+            return;
+          }
+          const shippingTrimmed = shipping.trim();
+          const shippingMinor = shippingTrimmed
+            ? parseDecimalToMinor(shippingTrimmed, code)
+            : undefined;
+          if (shippingTrimmed && shippingMinor === null) {
+            setError("Enter a valid shipping amount, or leave it blank.");
             return;
           }
           if (!country.trim()) {
@@ -67,6 +106,9 @@ export function TaxPreviewPanel({
               await previewTax({
                 siteId,
                 amountMinor,
+                shippingMinor: shippingMinor ?? undefined,
+                taxCode: taxCode.trim() || null,
+                currency: code,
                 address: {
                   country: country.trim().toUpperCase(),
                   province: province.trim() || null,
@@ -82,7 +124,7 @@ export function TaxPreviewPanel({
         }}
       >
         <div>
-          <Label htmlFor="tax-preview-amount">Amount ({currency})</Label>
+          <Label htmlFor="tax-preview-amount">Amount ({previewCurrency || currency})</Label>
           <Input
             id="tax-preview-amount"
             value={amount}
@@ -90,6 +132,37 @@ export function TaxPreviewPanel({
             disabled={busy}
             placeholder="49.99"
             onChange={(event) => setAmount(event.target.value)}
+          />
+        </div>
+        <div>
+          <Label htmlFor="tax-preview-shipping">Shipping (optional)</Label>
+          <Input
+            id="tax-preview-shipping"
+            value={shipping}
+            inputMode="decimal"
+            disabled={busy}
+            placeholder="5.00"
+            onChange={(event) => setShipping(event.target.value)}
+          />
+        </div>
+        <div>
+          <Label htmlFor="tax-preview-tax-code">Tax code (optional)</Label>
+          <Input
+            id="tax-preview-tax-code"
+            value={taxCode}
+            disabled={busy}
+            placeholder="txcd_…"
+            onChange={(event) => setTaxCode(event.target.value)}
+          />
+        </div>
+        <div>
+          <Label htmlFor="tax-preview-currency">Currency</Label>
+          <Input
+            id="tax-preview-currency"
+            value={previewCurrency}
+            disabled={busy}
+            className="uppercase"
+            onChange={(event) => setPreviewCurrency(event.target.value)}
           />
         </div>
         <div>
@@ -139,40 +212,34 @@ export function TaxPreviewPanel({
             <div>
               <dt className="text-muted">Tax amount</dt>
               <dd className="tabular-nums text-foreground">
-                {formatMinor(result.amountMinor, currency)}
+                {formatMinor(result.amountMinor, resultCurrency)}
               </dd>
             </div>
             <div>
               <dt className="text-muted">Taxable base</dt>
               <dd className="tabular-nums text-foreground">
-                {formatMinor(result.taxableBaseMinor, currency)}
+                {formatMinor(result.taxableBaseMinor, resultCurrency)}
               </dd>
             </div>
             <div>
               <dt className="text-muted">Total</dt>
               <dd className="tabular-nums text-foreground">
-                {formatMinor(result.totalMinor, currency)}
+                {formatMinor(result.totalMinor, resultCurrency)}
               </dd>
             </div>
           </dl>
 
-          {/*
-            `reason` used to be rendered here beside `note`. The route has never
-            returned it — the field existed only in the stale `TaxPreview` type
-            (corrected 2026-08-17 with Stripe Tax), so this line has always been
-            dead. `note` is where the actionable half actually lives.
-          */}
           {result.note ? <p className="mt-3 text-sm text-muted">{result.note}</p> : null}
 
           {result.breakdown.length > 0 ? (
             <ul className="mt-4 space-y-2 text-sm">
               {result.breakdown.map((item, index) => (
-                <li key={`${item.name ?? "tax"}-${index}`} className="flex justify-between gap-4">
+                <li key={`${item.name}-${index}`} className="flex justify-between gap-4">
                   <span className="text-muted">
-                    {(item.name ?? "Tax") + ` (${(item.rateBps / 100).toFixed(2)}%)`}
+                    {item.name + ` (${(item.rateBps / 100).toFixed(2)}%)`}
                   </span>
                   <span className="tabular-nums text-foreground">
-                    {formatMinor(item.amountMinor, currency)}
+                    {formatMinor(item.amountMinor, resultCurrency)}
                   </span>
                 </li>
               ))}

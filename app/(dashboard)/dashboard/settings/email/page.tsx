@@ -72,8 +72,8 @@ export default async function SettingsEmailPage() {
 }
 
 const DESCRIPTION =
-  "Customer email is sent from your own verified domain — never from markii.shop, so your " +
-  "sending reputation stays yours.";
+  "Customer email is sent from your own verified domain when you have one. Until then it " +
+  "sends from each storefront’s Markii address — never from markii.shop itself.";
 
 /**
  * `code` answers **whether mail is going out, and from whose address**.
@@ -85,7 +85,7 @@ const DESCRIPTION =
  * must not be badged as one.
  */
 function CustomerEmailCard({ settings }: { settings: EmailSettings }) {
-  const { customerEmail, providerConfigured } = settings;
+  const { customerEmail, providerConfigured, fallbackSender } = settings;
 
   return (
     <section className="rounded-[var(--radius-card)] border border-border bg-surface p-5 shadow-[var(--shadow-sm)]">
@@ -131,6 +131,13 @@ function CustomerEmailCard({ settings }: { settings: EmailSettings }) {
           Email is not connected on this deployment, so nothing below can send yet regardless of
           your DNS. Attempts are recorded rather than silently dropped, and appear on the order
           timeline as <span className="font-medium">email failed</span>.
+        </p>
+      ) : null}
+
+      {!fallbackSender.ok ? (
+        <p className="mt-4 rounded-[var(--radius-control)] bg-warning-bg px-3 py-2 text-sm leading-6 text-warning-text">
+          {fallbackSender.problem ??
+            "The shared storefront sender is not sending. This is a Markii incident, not something you can fix by verifying a domain."}
         </p>
       ) : null}
     </section>

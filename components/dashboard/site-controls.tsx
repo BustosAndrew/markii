@@ -20,6 +20,7 @@ export function SiteControls({ site }: { site: Site }) {
   const router = useRouter();
   const [current, setCurrent] = useState(site);
   const [error, setError] = useState<string | null>(null);
+  const [hostProblem, setHostProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [pauseOpen, setPauseOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -37,6 +38,31 @@ export function SiteControls({ site }: { site: Site }) {
       }
     } catch (err) {
       setError(err instanceof ApiClientError ? err.message : "Update failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function publish() {
+    setBusy(true);
+    setError(null);
+    setHostProblem(null);
+    try {
+      const deployed = await deploySite(current.slug);
+      setCurrent((prev) => ({
+        ...prev,
+        status: deployed.status,
+        storefrontUrl: deployed.storefrontUrl,
+      }));
+      if (!deployed.hostAttached) {
+        setHostProblem(
+          deployed.hostProblem ??
+            "The site is live, but its Markii address is not reachable yet. Try deploying again.",
+        );
+      }
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof ApiClientError ? err.message : "Deploy failed.");
     } finally {
       setBusy(false);
     }
@@ -142,23 +168,7 @@ export function SiteControls({ site }: { site: Site }) {
 
       <section className="flex flex-wrap gap-2">
         {current.status !== "live" ? (
-          <Button
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true);
-              setError(null);
-              try {
-                await deploySite(current.slug);
-                router.refresh();
-              } catch (err) {
-                setError(
-                  err instanceof ApiClientError ? err.message : "Deploy failed.",
-                );
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
+          <Button disabled={busy} onClick={() => void publish()}>
             Deploy live
           </Button>
         ) : (
@@ -170,6 +180,11 @@ export function SiteControls({ site }: { site: Site }) {
             Pause website
           </Button>
         )}
+        {hostProblem ? (
+          <Button variant="secondary" disabled={busy} onClick={() => void publish()}>
+            Retry host attach
+          </Button>
+        ) : null}
         {current.status === "paused" ? (
           <Button
             variant="secondary"
@@ -188,6 +203,13 @@ export function SiteControls({ site }: { site: Site }) {
           Delete
         </Button>
       </section>
+
+      {hostProblem ? (
+        <p className="rounded-[var(--radius-control)] bg-warning-bg px-3 py-2 text-sm leading-6 text-warning-text">
+          {hostProblem} The storefront address will fail TLS until this succeeds — do not share it
+          yet.
+        </p>
+      ) : null}
 
       <FieldError>{error}</FieldError>
 

@@ -59,13 +59,15 @@ export function EmailDomains({
     <section className="rounded-[var(--radius-card)] border border-border bg-surface p-5 shadow-[var(--shadow-sm)]">
       <h2 className="text-base font-medium text-foreground">Sending domains</h2>
       <p className="mt-1 text-sm leading-6 text-muted">
-        Customer mail is sent from a domain you own and have verified. Markii never sends it from
-        markii.shop on your behalf — your bounces must not land on Markii’s sending reputation.
+        Customer mail is sent from a domain you own once you have verified it. Until then, receipts
+        still go out from each storefront’s Markii address. Verifying your own domain is an
+        improvement, not a repair — your bounces must not land on Markii’s sending reputation.
       </p>
 
       {domains.length === 0 ? (
         <p className="mt-4 text-sm leading-6 text-muted">
-          No sending domain yet, so no customer email is going out.
+          No sending domain of your own yet. Customer email still goes out from each storefront’s
+          Markii address.
         </p>
       ) : (
         <ul className="mt-4 space-y-4">

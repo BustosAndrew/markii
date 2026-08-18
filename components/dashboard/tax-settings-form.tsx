@@ -5,6 +5,7 @@ import { useState } from "react";
 import {
   updateTaxSettings,
   type ManualTaxRate,
+  type StripeTaxFacts,
   type TaxSettings,
 } from "@/lib/api/tax-shipping";
 import { ApiClientError } from "@/lib/api/types";
@@ -65,9 +66,8 @@ export function TaxSettingsForm({
 }) {
   const router = useRouter();
   const pathname = usePathname();
-  const [provider, setProvider] = useState<TaxSettings["provider"]>(
-    settings.provider === "stripe" ? "manual" : settings.provider,
-  );
+  const [provider, setProvider] = useState<TaxSettings["provider"]>(settings.provider);
+  const [defaultTaxCode, setDefaultTaxCode] = useState(settings.defaultTaxCode ?? "");
   const [pricesIncludeTax, setPricesIncludeTax] = useState(settings.pricesIncludeTax);
   const [rateDrafts, setRateDrafts] = useState<RateDraft[]>(() =>
     ratesToDrafts(settings.manualRates),
@@ -92,6 +92,8 @@ export function TaxSettingsForm({
         provider,
         pricesIncludeTax,
         manualRates,
+        defaultTaxCode:
+          provider === "stripe" ? defaultTaxCode.trim() || null : settings.defaultTaxCode,
       });
       setNotice("Tax settings saved.");
       router.refresh();
@@ -156,6 +158,8 @@ export function TaxSettingsForm({
         )}
       </section>
 
+      {settings.stripeTax ? <StripeTaxFactsPanel facts={settings.stripeTax} /> : null}
+
       <form
         onSubmit={onSave}
         className="space-y-6 rounded-[var(--radius-card)] border border-border bg-surface p-5 shadow-[var(--shadow-sm)]"
@@ -184,7 +188,30 @@ export function TaxSettingsForm({
             Stripe Tax runs on your own Stripe account, using your own registrations — activate it
             there first. Markii never decides what you owe.
           </p>
+          {provider === "stripe" && !settings.stripeTax ? (
+            <p className="mt-1.5 text-xs text-muted">
+              Save Stripe Tax as the provider to see credential, account, and registration status.
+            </p>
+          ) : null}
         </div>
+
+        {provider === "stripe" ? (
+          <div className="max-w-md">
+            <Label htmlFor="default-tax-code">Default tax code</Label>
+            <Input
+              id="default-tax-code"
+              value={defaultTaxCode}
+              disabled={busy}
+              placeholder="txcd_99999999"
+              onChange={(e) => setDefaultTaxCode(e.target.value)}
+              className="mt-1.5"
+            />
+            <p className="mt-1.5 text-xs text-muted">
+              Stripe product tax code used when a variant does not set its own. Leave blank to use
+              Stripe&apos;s default.
+            </p>
+          </div>
+        ) : null}
 
         <Toggle
           checked={pricesIncludeTax}
@@ -278,7 +305,93 @@ export function TaxSettingsForm({
         </div>
       </form>
 
-      <TaxPreviewPanel siteId={siteId} currency={currency} />
+      <TaxPreviewPanel
+        siteId={siteId}
+        currency={currency}
+        billedByStripe={settings.provider === "stripe"}
+      />
     </div>
+  );
+}
+
+const STRIPE_STATUS_COPY: Record<StripeTaxFacts["status"], string> = {
+  active: "Tax is active on this Stripe account",
+  pending: "Stripe Tax is pending on this account",
+  unknown: "Stripe Tax status could not be read",
+  unavailable: "Stripe Tax is not available on this account",
+};
+
+/**
+ * Three facts, never one tick — they fail independently and want different people.
+ * Pattern copied from custom-domain ownership / pointing / serving.
+ */
+function StripeTaxFactsPanel({ facts }: { facts: StripeTaxFacts }) {
+  const registrations = facts.activeRegistrations;
+  return (
+    <section className="rounded-[var(--radius-card)] border border-border bg-surface p-5 shadow-[var(--shadow-sm)]">
+      <h2 className="text-base font-medium text-foreground">Stripe Tax</h2>
+      <p className="mt-1 text-sm leading-6 text-muted">
+        These fail independently. One combined tick would send you to fix the wrong thing.
+      </p>
+
+      {facts.error ? (
+        <p className="mt-4 rounded-[var(--radius-control)] bg-warning-bg px-3 py-2 text-sm leading-6 text-warning-text">
+          {facts.error}
+        </p>
+      ) : null}
+
+      <div className="mt-4 space-y-1.5 text-sm">
+        <p>
+          <span className={facts.platform ? "text-foreground" : "text-muted"}>
+            {facts.platform ? "✓" : "○"} Markii credentials
+          </span>{" "}
+          <span className="text-muted">
+            {facts.platform
+              ? "configured"
+              : "not configured — this is Markii’s to fix"}
+          </span>
+        </p>
+        <p>
+          <span className={facts.connected && facts.status === "active" ? "text-foreground" : "text-muted"}>
+            {facts.connected && facts.status === "active" ? "✓" : "○"} Your Stripe account
+          </span>{" "}
+          <span className="text-muted">
+            {facts.connected
+              ? STRIPE_STATUS_COPY[facts.status]
+              : "not connected — link Stripe in Payments, then activate Tax there"}
+          </span>
+        </p>
+        {facts.missing.length > 0 ? (
+          <ul className="ml-5 list-disc space-y-1 text-muted">
+            {facts.missing.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        ) : null}
+        <p>
+          <span
+            className={
+              registrations != null && registrations > 0 ? "text-foreground" : "text-muted"
+            }
+          >
+            {registrations != null && registrations > 0 ? "✓" : "○"} Registrations
+          </span>{" "}
+          <span className="text-muted">
+            {registrations === null
+              ? "could not be read — not the same as none"
+              : registrations === 0
+                ? "none active"
+                : `${registrations} active`}
+          </span>
+        </p>
+      </div>
+
+      {registrations === 0 ? (
+        <p className="mt-4 rounded-[var(--radius-control)] bg-warning-bg px-3 py-2 text-sm leading-6 text-warning-text">
+          Stripe Tax with no registration calculates a legitimate zero everywhere. The store looks
+          configured, charges nothing, and you find out at filing.
+        </p>
+      ) : null}
+    </section>
   );
 }

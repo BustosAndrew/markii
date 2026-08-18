@@ -1,6 +1,7 @@
 import {
   getMe,
   getProduct,
+  getTaxSettings,
   getVariantMatrix,
   listCategories,
   listDigitalAssets,
@@ -46,14 +47,20 @@ export default async function ProductDetailPage({
   }
 
   const product = productResult.data;
-  const [matrixResult, assetsResult] = await Promise.all([
+  const sites = sitesResult.data?.items ?? [];
+  const [matrixResult, assetsResult, ...taxResults] = await Promise.all([
     loadOrError(() => getVariantMatrix(slug, { siteId: product.siteId })),
     loadOrError(() => listDigitalAssets({ siteId: product.siteId, limit: 100 })),
+    ...sites.map((site) => loadOrError(() => getTaxSettings(site.id))),
   ]);
 
-  const sites = sitesResult.data?.items ?? [];
   const categories = categoriesResult.data?.items ?? [];
   const currency = product.currency || meResult.data?.org.currency || "USD";
+  const taxProviders: Record<number, "none" | "manual" | "stripe"> = {};
+  sites.forEach((site, index) => {
+    const provider = taxResults[index]?.data?.provider;
+    if (provider) taxProviders[site.id] = provider;
+  });
 
   return (
     <div>
@@ -76,6 +83,7 @@ export default async function ProductDetailPage({
           name: tier.name,
           siteId: tier.siteId,
         }))}
+        taxProviders={taxProviders}
       />
       <div className="mt-6">
         <ProductDeliveryPanel
@@ -96,6 +104,7 @@ export default async function ProductDetailPage({
             siteId={product.siteId}
             currency={currency}
             matrix={matrixResult.data}
+            taxProvider={taxProviders[product.siteId]}
           />
         ) : (
           <FetchError
