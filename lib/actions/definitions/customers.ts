@@ -116,7 +116,16 @@ export const updateCustomer = defineAction({
   }),
   permission: "commerce.write",
   riskTier: "low",
-  undoable: true,
+  /**
+   * **Not undoable, and this is a collision between two correct rules rather
+   * than a missing feature.** The diff records field *names* with `[redacted]`
+   * values, and `redactInput` strips the input, because the audit row is
+   * long-lived and widely readable and a customer's email does not belong in
+   * it. An inverse may read only that record (`lib/actions/undo.ts`), so there
+   * is nothing to restore from. Keeping the PII to enable undo would be the
+   * wrong trade; claiming undo works would be the wrong answer.
+   */
+  undoable: false,
   redactInput: redactCustomerPii,
   async run(input, ctx) {
     const { customerId, ...patch } = input;

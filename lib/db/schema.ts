@@ -1073,8 +1073,21 @@ export const actionInvocations = pgTable(
     ok: boolean("ok").notNull(),
     errorCode: text("error_code"),
     errorMessage: text("error_message"),
+    /**
+     * Derived from the definition's `inverse`, never hand-set — `defineAction`
+     * refuses a definition where the two disagree, so this column cannot claim
+     * a way back that does not exist.
+     */
     undoable: boolean("undoable").notNull().default(false),
+    /** Written by `undoInvocation`, conditionally, so one change is undone once. */
     undoneByInvocationId: text("undone_by_invocation_id"),
+    /**
+     * The other direction of the same link: this invocation *is* an undo of
+     * that one. Both are stored because the audit log is read forwards — a
+     * reader looking at a surprising change should see it was an undo without
+     * having to scan for a matching inverse.
+     */
+    undoOfInvocationId: text("undo_of_invocation_id"),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

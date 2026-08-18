@@ -13,6 +13,7 @@ import {
   SUPPORTED_RULE_FIELDS,
   UNSUPPORTED_RULE_FIELDS,
 } from "../../commerce/collections";
+import { patchInverse } from "../inverse";
 import { defineAction } from "../registry";
 import type { ActionContext } from "../types";
 
@@ -160,6 +161,20 @@ export const updateCollection = defineAction({
   permission: "catalog.write",
   riskTier: "low",
   undoable: true,
+  inverse: patchInverse({
+    actionId: "catalog.updateCollection",
+    idField: "collectionId",
+    map: {
+      /**
+       * The action takes `published: boolean` but writes — and records — the
+       * `publishedAt` column. Without this mapping the rebuilt input carries a
+       * key the schema does not declare, zod strips it, and undo restores every
+       * field **except** the published state, which is the one a merchant is
+       * most likely undoing.
+       */
+      publishedAt: (before) => ({ published: before !== null }),
+    },
+  }),
   async run(input, ctx) {
     const { collectionId, published, ...patch } = input;
     const existing = await ownedCollection(ctx, collectionId);
@@ -208,6 +223,12 @@ export const setCollectionProducts = defineAction({
   permission: "catalog.write",
   riskTier: "low",
   undoable: true,
+  /** The previous membership is the whole inverse — the action replaces, so replacing back is exact. */
+  inverse: patchInverse({
+    actionId: "catalog.setCollectionProducts",
+    idField: "collectionId",
+    map: { products: (before) => ({ productIds: before ?? [] }) },
+  }),
   async run(input, ctx) {
     const collection = await ownedCollection(ctx, input.collectionId);
     if (collection.type === "automated") {
@@ -231,6 +252,19 @@ export const setCollectionProducts = defineAction({
       }
     }
 
+    /**
+     * Read the membership before replacing it. This diff recorded `before:
+     * null` until undo was built, which made the action's `undoable: true` a
+     * claim its own audit record could not support — there was nothing to put
+     * back. Order matters as much as membership here, since a manual
+     * collection's positions are the merchandising.
+     */
+    const previous = await ctx.db
+      .select({ productId: collectionProducts.productId })
+      .from(collectionProducts)
+      .where(eq(collectionProducts.collectionId, collection.id))
+      .orderBy(collectionProducts.position);
+
     await ctx.db
       .delete(collectionProducts)
       .where(eq(collectionProducts.collectionId, collection.id));
@@ -248,7 +282,7 @@ export const setCollectionProducts = defineAction({
       entity: "collection",
       entityId: String(collection.id),
       path: "products",
-      before: null,
+      before: previous.map((p) => p.productId),
       after: input.productIds,
     });
     return { collectionId: collection.id, productCount: input.productIds.length };

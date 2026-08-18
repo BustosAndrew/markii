@@ -10,6 +10,7 @@ import {
 } from "../../db";
 import { extendedEndsAt, membershipStatus } from "../../commerce/memberships";
 import { ownSites, siteScope } from "../../tenancy";
+import { patchInverse } from "../inverse";
 import { defineAction } from "../registry";
 import type { ActionContext } from "../types";
 
@@ -113,6 +114,7 @@ export const updateTier = defineAction({
   permission: "commerce.write",
   riskTier: "low",
   undoable: true,
+  inverse: patchInverse({ actionId: "memberships.updateTier", idField: "tierId" }),
   async run({ tierId, ...patch }, ctx) {
     const tier = await ownedTier(ctx, tierId);
 
@@ -131,6 +133,12 @@ export const updateTier = defineAction({
       .where(eq(membershipTiers.id, tier.id))
       .returning();
 
+    /**
+     * Both editable fields are recorded. Only `name` was, until undo was built
+     * — so a description edit produced an invocation with an empty diff, which
+     * is indistinguishable from one that changed nothing and left the action's
+     * `undoable: true` with nothing to act on.
+     */
     if (patch.name !== undefined && patch.name !== tier.name) {
       ctx.recordDiff({
         entity: "membership_tier",
@@ -138,6 +146,15 @@ export const updateTier = defineAction({
         path: "name",
         before: tier.name,
         after: patch.name,
+      });
+    }
+    if (patch.description !== undefined && (patch.description ?? null) !== tier.description) {
+      ctx.recordDiff({
+        entity: "membership_tier",
+        entityId: String(tier.id),
+        path: "description",
+        before: tier.description,
+        after: patch.description ?? null,
       });
     }
 
@@ -208,6 +225,24 @@ export const grantMembership = defineAction({
   permission: "commerce.write",
   riskTier: "medium",
   undoable: true,
+  /**
+   * Only a grant that **created** the membership can be undone, and then by
+   * revoking it. An *extension* cannot: putting the previous `endsAt` back
+   * needs a way to set an expiry directly, and this action only ever extends
+   * from the current one. Revoking instead would end access the merchant never
+   * asked to end, so the extension case is refused rather than approximated.
+   */
+  inverse: (recorded) => {
+    const original = recorded.input as { customerId?: number; tierId?: number } | null;
+    if (!original?.customerId || !original.tierId) return null;
+    if (!recorded.diff.some((d) => d.path === "granted")) return null;
+    return {
+      actionId: "memberships.revoke",
+      input: { customerId: original.customerId, tierId: original.tierId },
+      /** The membership row's own guards decide; there is no shared path to compare. */
+      conflictCheck: "none" as const,
+    };
+  },
   async run(input, ctx) {
     const customer = await ownedCustomer(ctx, input.customerId);
     const tier = await ownedTier(ctx, input.tierId);
@@ -256,6 +291,21 @@ export const grantMembership = defineAction({
       })
       .returning();
 
+    /**
+     * Whether this **created** the membership is recorded separately, because
+     * `endsAt: null` cannot answer it: null is both "no membership existed" and
+     * "one existed and never expires". Undo has to tell those apart — revoking
+     * on the second would take away access this call did not grant.
+     */
+    if (!current) {
+      ctx.recordDiff({
+        entity: "customer_membership",
+        entityId: String(row.id),
+        path: "granted",
+        before: null,
+        after: tier.handle,
+      });
+    }
     ctx.recordDiff({
       entity: "customer_membership",
       entityId: String(row.id),
@@ -301,7 +351,16 @@ export const revokeMembership = defineAction({
    * puts it straight back, unlike `deleteTier`, which ungates a whole catalog.
    */
   riskTier: "medium",
-  undoable: true,
+  /**
+   * **Not undoable, despite what this said before undo existed.** Revoking sets
+   * `revokedAt` and leaves `endsAt` intact, so the information is all still
+   * there — but no action can clear that column. `memberships.grant` would
+   * re-grant with a *newly computed* expiry, handing back a different
+   * membership from the one that was taken away, which is worse than telling
+   * the merchant to grant it again themselves. The honest fix is a
+   * `memberships.unrevoke` action; until that exists this stays false.
+   */
+  undoable: false,
   async run(input, ctx) {
     const customer = await ownedCustomer(ctx, input.customerId);
     const tier = await ownedTier(ctx, input.tierId);

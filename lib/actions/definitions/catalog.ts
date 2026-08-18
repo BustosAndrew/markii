@@ -4,6 +4,7 @@ import { badRequest, notFound } from "../../api";
 import { products, productOptions, variants } from "../../db";
 import { siteScope } from "../../tenancy";
 import { planMatrix, type OptionSpec } from "../../commerce/variants";
+import { patchInverse } from "../inverse";
 import { defineAction } from "../registry";
 import type { ActionContext } from "../types";
 
@@ -164,6 +165,8 @@ export const updateVariant = defineAction({
   permission: "catalog.write",
   riskTier: "low",
   undoable: true,
+  /** Every changed field is recorded with its previous value, so undo is a replay. */
+  inverse: patchInverse({ actionId: "catalog.updateVariant", idField: "variantId" }),
   async run({ variantId, ...patch }, ctx) {
     if (!ctx.actor.orgId) throw notFound("Variant");
 

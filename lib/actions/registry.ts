@@ -23,6 +23,25 @@ export function defineAction<TInput, TResult>(
   if (!/^[a-z][a-zA-Z0-9]*\.[a-z][a-zA-Z0-9]*$/.test(def.id)) {
     throw new Error(`Action id "${def.id}" must look like "domain.verbNoun"`);
   }
+  /**
+   * `undoable` and `inverse` must agree, checked at module load.
+   *
+   * Before undo was built, `undoable: true` was a hand-set boolean nothing read
+   * — and it was wrong on four of the twenty-one actions carrying it, including
+   * one whose own PII redaction destroys the values an undo would need. A flag
+   * that the registry publishes to agents and stores on every audit row cannot
+   * be an unverified claim, so the two are now tied together and neither can be
+   * declared alone.
+   */
+  if (def.undoable === true && typeof def.inverse !== "function") {
+    throw new Error(
+      `Action "${def.id}" declares undoable: true but defines no inverse(). ` +
+        `Add one, or say undoable: false.`,
+    );
+  }
+  if (typeof def.inverse === "function" && def.undoable !== true) {
+    throw new Error(`Action "${def.id}" defines inverse() but does not declare undoable: true.`);
+  }
   registry.set(def.id, def as unknown as ActionDefinition<never, unknown>);
   return def;
 }
@@ -33,6 +52,36 @@ export function getAction(id: string): ActionDefinition<never, unknown> | undefi
 
 export function allActions(): ActionDefinition<never, unknown>[] {
   return [...registry.values()].sort((a, b) => a.id.localeCompare(b.id));
+}
+
+/**
+ * JSON Schema for an action's input.
+ *
+ * **A `z.date()` has no JSON Schema representation, and zod's default is to
+ * throw.** That took the whole of `GET /api/actions` down with a 500 for any
+ * caller holding `commerce.write`, because `discounts.create` and
+ * `discounts.update` accept `z.coerce.date()` — one unrepresentable field in
+ * one action, and the registry listing every agent discovers Markii through
+ * answered nothing at all. Found 2026-08-18 by the undo tests, which read
+ * `undoable` off this endpoint.
+ *
+ * A date is expressed as an ISO string here rather than `{}`, which is what
+ * `unrepresentable: "any"` alone would produce. `{}` means "anything goes" — an
+ * agent reading it would have no idea a date was wanted, which is worse than a
+ * loose type: it is a confident wrong answer. The wire format really is a
+ * string, since `coerce.date()` is what parses it.
+ */
+function inputSchemaFor(def: ActionDefinition<never, unknown>) {
+  return z.toJSONSchema(def.input, {
+    io: "input",
+    unrepresentable: "any",
+    override: (ctx) => {
+      if (ctx.zodSchema._zod.def.type === "date") {
+        ctx.jsonSchema.type = "string";
+        ctx.jsonSchema.format = "date-time";
+      }
+    },
+  });
 }
 
 /** Registry entry as `GET /api/actions` returns it — JSON Schema so agents can call it blind. */
@@ -54,7 +103,7 @@ export function describeAction(def: ActionDefinition<never, unknown>) {
      * so an agent knows before invoking that a human gate is coming.
      */
     requiresHumanApproval: def.riskTier === "high",
-    input: z.toJSONSchema(def.input, { io: "input" }),
+    input: inputSchemaFor(def),
   };
 }
 

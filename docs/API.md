@@ -39,7 +39,7 @@ carry an explicit status — **never call a `PLANNED` endpoint and never fake it
 | 19 | Site builder & content | 🟡 PLANNED | D |
 | 20 | Disputes & chargebacks | 🟡 PLANNED | F |
 | 21 | Agent Ops add-on | 🟡 PLANNED | F (last) |
-| 22 | **Action registry & MCP** — agent-native architecture | ✅ LIVE (registry, invoke, dry-run, audit). Undo + MCP server PLANNED | **Registry: C · MCP: D** |
+| 22 | **Action registry & MCP** — agent-native architecture | ✅ LIVE (registry, invoke, dry-run, audit, **and undo** — 2026-08-18). MCP server PLANNED. `undoable` is now derived from an `inverse()` and refused if declared without one, which corrected four actions that claimed it falsely | **Registry: C · MCP: D** |
 | 24 | Email — sending domains, deliverability, suppression | ✅ LIVE — SES transport, templates, suppression list, bounce webhook, `/api/settings/email`, §22 actions. **Sending works as of 2026-08-11** (production access in `us-west-2`, verified by a live send). **Customer mail sends even before a merchant verifies a domain** (D44, 2026-08-16): without one it leaves from the storefront's own `accounts@{slug}.{ROOT_DOMAIN}` — still SES, still the store's name, **never bare `markii.shop` and never Resend**. A verified domain always wins when it exists. **The SNS → webhook hop has carried a real bounce end to end as of 2026-08-16** (`tests/integration/ses-suppression.test.ts`, gated on `MARKII_SES_TESTS=1`): a suppression row was written and **the next send to that address was refused**. This row claimed "never carried a real event" until 2026-08-18 | **C** |
 
 **v3 note.** Markii is now a full commerce platform (`docs/PLAN.md` v3). §16 was a **breaking change
@@ -2729,7 +2729,7 @@ mutations through the registry from the start avoids refactoring every one of th
 adds builder actions and the MCP server on top; Phase F adds the chat product. See
 `docs/BACKEND.md` §1.
 
-### Status — ✅ LIVE (registry, invoke, dry-run, audit)
+### Status — ✅ LIVE (registry, invoke, dry-run, audit, undo)
 
 **As of 2026-07-31 the registry is wired end to end.** `GET /api/actions` (filtered to what the
 caller may invoke), `POST /api/actions/:id` (with `?dryRun=1`), and `GET /api/actions/invocations`
@@ -2746,9 +2746,63 @@ failures are audited while dry runs are not; an `analyst` token is refused a wri
 does not see it in the registry listing; cross-tenant invocation is a `404`; and each org's audit
 log contains its own invocations only, including its own refused attempts.
 
-Undo (`POST /api/actions/:id/undo`) and the MCP server remain planned. `catalog.updateVariant` and
-`inventory.adjust` are marked `undoable` because their inverse is well-defined — the endpoint to
-apply it is not built yet.
+#### Undo — ✅ LIVE (2026-08-18)
+
+`POST /api/actions/:id/undo`, body `{ invocationId }`. The MCP server remains planned.
+
+**An undo is a new forward invocation, not a rollback.** The transaction committed long ago, so the
+only honest way back is to make the opposite change now — which means undo re-checks the action's
+permission, re-demands step-up, re-validates the input, and is itself audited. A merchant who has
+lost `catalog.write` since cannot undo their way back into the catalog.
+
+**`undoable` stopped being a claim.** It is tied to a new `inverse()` on the definition, and
+`defineAction` refuses a definition that declares one without the other. `inverse` is **pure and
+synchronous** — it may read only the audit record (input, result, diff), never the database — so an
+action is undoable exactly when its own record contains enough to reverse it. Seventeen actions
+carry one. Four that used to say `undoable: true` were wrong and now say `false`:
+
+| Action | Why it is not undoable |
+|---|---|
+| `customers.update` | Its own `redactInput` and `[redacted]` diff — correctly — destroy the values an undo would restore. Keeping PII in a long-lived audit row to enable undo is the wrong trade |
+| `memberships.revoke` | Nothing can clear `revokedAt`; `memberships.grant` would compute a *new* expiry and hand back a different membership. Wants a `memberships.unrevoke` action |
+| `readiness.updateIssues` | Prior status is not recorded, and one `action` covers up to 500 ids that may have been in different states |
+| `catalog.setProductOptions` | Already `false`; listed because it is the fourth the audit found |
+
+**Refusals are all `409` with `error.details.undo`:** `already_undone`, `no_inverse`,
+`not_representable` (this *particular* invocation — a `memberships.grant` that extended rather than
+created), `failed_invocation`, and `conflict`. Only `conflict` is worth retrying, and only after a
+human sees `error.details.conflicts`.
+
+**A changed field is a conflict, not a silent overwrite.** The check dry-runs the inverse and
+compares its `before` against what the original recorded as `after`, so the current state is read by
+the same code that would do the writing. It narrows the window; it does not lock the row. Actions
+opt out with `conflictCheck: "none"` where the check is meaningless or wrong — `inventory.adjust`
+most of all, since the level is a sum over an append-only ledger and the opposite entry is correct
+whatever sold in between. Refusing there would refuse exactly when a merchant reaches for undo.
+
+Two diffs were **fixed** rather than worked around, because an inverse can only read what was
+recorded: `catalog.setCollectionProducts` stored `before: null` (nothing to restore), and
+`delivery.revokeDownload` stored the *reason* under a path called `revokedAt`. `memberships.grant`
+now records `granted` separately, because `endsAt: null` cannot distinguish "no membership existed"
+from "one existed and never expires" — and revoking on the second takes away access the grant never
+gave.
+
+The audit row links both ways: `undoneBy` on the original, `undoOf` on the undo (migration `0034`).
+
+#### 🔴 `GET /api/actions` was answering `500` — fixed 2026-08-18
+
+Found by the undo tests, which read `undoable` off this endpoint. `discounts.create` and
+`discounts.update` accept `z.coerce.date()`; a `Date` has no JSON Schema representation and zod's
+default for an unrepresentable type is to **throw** — so one field in one action emptied the
+registry for **every caller holding `commerce.write`**, which is every owner and admin. The endpoint
+an agent discovers Markii through returned nothing at all, and nothing was watching it: the
+integration suite invoked actions by id and never listed them.
+
+Dates are now described as `{ "type": "string", "format": "date-time" }`, which is what the wire
+format actually is. Not `{}` — that is what zod's `unrepresentable: "any"` produces on its own, and
+it says "anything goes", so an agent reading it would not know a date was wanted. A confident wrong
+answer is worse than a loose one. Covered by `lib/actions/registry.test.ts`, which describes every
+registered action.
 
 ### Historical note — why the primitive shipped before the routes
 
@@ -2798,7 +2852,7 @@ defineAction({
 | `GET` | `/api/actions` | Registry: id, description, JSON schema, permission, risk tier. Filtered to what the caller may invoke |
 | `POST` | `/api/actions/:id` | Invoke. Same validation, permissions, and audit for every caller |
 | `POST` | `/api/actions/:id?dryRun=1` | Return the diff an invocation *would* produce, without writing. A **query flag on the invoke route**, not a `/dry-run` sub-path — one handler, so the preview cannot drift from the execution |
-| `POST` | `/api/actions/:id/undo` | Invert a prior invocation by `invocationId`, when `undoable` |
+| `POST` | `/api/actions/:id/undo` | ✅ Invert a prior invocation by `invocationId`, when `undoable`. Runs the inverse as a **new** invocation — same permission, same step-up, its own audit row |
 | `GET` | `/api/actions/invocations` | Audit trail: actor (`user` \| `agent` \| `token`), input, result, `occurredAt` |
 | `ALL` | `/api/mcp` | MCP server: registry as tools, store/page context as resources |
 

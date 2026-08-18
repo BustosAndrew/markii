@@ -40,6 +40,10 @@ export const GET = orgHandler(
         diff: r.diff,
         error: r.ok ? null : { code: r.errorCode, message: r.errorMessage },
         undoable: r.undoable,
+        // Both directions of the undo link, so a screen listing history never
+        // has to query again to know a change was reversed — or *is* a reversal.
+        undoneBy: r.undoneByInvocationId,
+        undoOf: r.undoOfInvocationId,
         occurredAt: r.occurredAt.toISOString(),
       })),
       page,

@@ -334,6 +334,24 @@ export const setCancellation = defineAction({
   /** Reversible right up to the period boundary, which is what `undoable` means here. */
   riskTier: "medium",
   undoable: true,
+  /**
+   * The same action with the flag it had before. Withdrawing a cancellation is
+   * this action too, so undo needs no separate capability.
+   */
+  inverse: (recorded) => {
+    const entry = recorded.diff.find((d) => d.path === "cancelAtPeriodEnd");
+    if (!entry || typeof entry.before !== "boolean") return null;
+    return {
+      actionId: "billing.setCancellation",
+      input: { cancelAtPeriodEnd: entry.before },
+      /**
+       * Stripe holds the truth, and this action's dry run answers without
+       * calling it — so a strict check would compare against nothing. Stripe
+       * itself refuses the change if the subscription has since ended.
+       */
+      conflictCheck: "none" as const,
+    };
+  },
   async run(input, ctx) {
     if (!ctx.actor.orgId) throw notFound("Organization");
     const orgId = ctx.actor.orgId;

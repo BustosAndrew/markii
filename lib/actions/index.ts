@@ -41,12 +41,16 @@ export {
   type AuthorizationResolver,
 } from "./registry";
 export { invokeAction, type InvokeOptions } from "./invoke";
+export { undoInvocation, type UndoOptions, type UndoOutcome } from "./undo";
+export { patchInverse, beforeByPath } from "./inverse";
 export type {
   ActionContext,
   ActionDefinition,
+  ActionInverse,
   Actor,
   DiffEntry,
   InvocationOutcome,
   Permission,
+  RecordedInvocation,
   RiskTier,
 } from "./types";

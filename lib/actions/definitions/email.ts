@@ -59,6 +59,21 @@ export const addSendingDomain = defineAction({
   /** D40 step-up: moves money or grants access. */
   requiresStepUp: true,
   undoable: true,
+  /**
+   * Removing the identity is the inverse. It is `high` risk and carries its own
+   * step-up, both of which undo re-demands — the whole reason an inverse is a
+   * forward invocation rather than a rollback.
+   */
+  inverse: (recorded) => {
+    const identityId = (recorded.result as { identityId?: number } | null)?.identityId;
+    if (typeof identityId !== "number") return null;
+    return {
+      actionId: "email.removeSendingDomain",
+      input: { identityId },
+      /** The identity's state lives at AWS; there is no column here to compare. */
+      conflictCheck: "none" as const,
+    };
+  },
   async run(input, ctx) {
     if (!ctx.actor.orgId) throw notFound("Organization");
 
@@ -204,6 +219,17 @@ export const suppressAddress = defineAction({
   permission: "commerce.write",
   riskTier: "low",
   undoable: true,
+  /** Its opposite number. Lifting a suppression is refused for complaints, there. */
+  inverse: (recorded) => {
+    const email = (recorded.result as { email?: string } | null)?.email;
+    if (!email) return null;
+    return {
+      actionId: "email.unsuppressAddress",
+      input: { email },
+      /** The suppression list is not a column this diff describes. */
+      conflictCheck: "none" as const,
+    };
+  },
   async run(input, ctx) {
     if (!ctx.actor.orgId) throw notFound("Organization");
     const orgId = ctx.actor.orgId;
@@ -228,6 +254,23 @@ export const unsuppressAddress = defineAction({
   permission: "commerce.write",
   riskTier: "medium",
   undoable: true,
+  /**
+   * Suppressing again puts the address back on the list, but as `manual` — the
+   * original reason is not recoverable from this record. That loses why it was
+   * suppressed while keeping the fact, which errs towards not sending. A
+   * complaint could never have been lifted in the first place, so the reason
+   * being downgraded can only ever apply to a bounce or a manual entry.
+   */
+  inverse: (recorded) => {
+    const email = (recorded.result as { email?: string; removed?: boolean } | null)?.email;
+    // Nothing was lifted, so there is nothing to put back.
+    if (!email || (recorded.result as { removed?: boolean })?.removed !== true) return null;
+    return {
+      actionId: "email.suppressAddress",
+      input: { email, note: "Restored by undo" },
+      conflictCheck: "none" as const,
+    };
+  },
   async run(input, ctx) {
     if (!ctx.actor.orgId) throw notFound("Organization");
     const orgId = ctx.actor.orgId;

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { badRequest, conflict, notFound } from "../../api";
 import { discounts, sites } from "../../db";
 import { ownSites, siteScope } from "../../tenancy";
+import { patchInverse } from "../inverse";
 import { defineAction } from "../registry";
 import type { ActionContext } from "../types";
 
@@ -191,6 +192,8 @@ export const updateDiscount = defineAction({
   permission: "commerce.write",
   riskTier: "medium",
   undoable: true,
+  /** Dates round-trip because the input coerces them — the diff stores ISO strings. */
+  inverse: patchInverse({ actionId: "discounts.update", idField: "discountId" }),
   async run(input, ctx) {
     const { discountId, ...patch } = input;
     const existing = await ownedDiscount(ctx, discountId);

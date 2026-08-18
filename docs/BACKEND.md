@@ -195,6 +195,24 @@ defineAction({
 What waits for Phase D is only the **MCP server** and **builder-specific actions**. The registry
 itself, and routing every Phase C mutation through it, starts now. Contract: `docs/API.md` §22.
 
+> **Undo landed 2026-08-18** — `lib/actions/undo.ts`, `lib/actions/inverse.ts`, migration `0034`.
+> Three things to know before extending it:
+>
+> - **`inverse()` is pure and synchronous, and that is load-bearing.** It may read only the audit
+>   record — input, result, diff — never the database. That is what turns `undoable` from an
+>   assertion into a property: an action is undoable exactly when its own record contains enough to
+>   reverse it. `defineAction` now refuses `undoable: true` without an `inverse` and vice versa,
+>   which caught four actions claiming a way back they did not have.
+> - **Writing an inverse audits the action's diff, and that is where the bugs were.** Three diffs
+>   had to be fixed before their actions could be undone at all: a `before: null` that recorded
+>   nothing to restore, a reason stored under a path named `revokedAt`, and a `null` that could not
+>   distinguish "created" from "extended". If an inverse is awkward to write, suspect the diff.
+> - **`conflictCheck: "none"` is a decision, not an escape hatch.** Use it where the check is
+>   meaningless (state lives at Stripe or AWS, or the action's dry run returns early and produces no
+>   diff to compare) or actively wrong (`inventory.adjust` — an append-only ledger's inverse is
+>   correct whatever happened since). Everywhere else, leave it strict: silently discarding
+>   somebody's edit is worse than refusing.
+
 ### 2. Phase A — auth, orgs, tenancy
 
 Supabase Auth, model `Organization → Stores → Staff`, users may belong to several orgs. Contract:

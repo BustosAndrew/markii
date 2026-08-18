@@ -65,6 +65,49 @@ export type ActionContext = {
   effect(description: string, fn: () => Promise<void>): void;
 };
 
+/**
+ * A past invocation as the audit table holds it — everything an `inverse` is
+ * allowed to see.
+ *
+ * `input` is **post-redaction**: what `redactInput` let through is all that was
+ * ever stored, so an action that redacts the values its inverse would need
+ * cannot be undone. That is a deliberate ordering — the audit row is long-lived
+ * and widely readable, and keeping PII in it to enable undo would be the wrong
+ * trade.
+ */
+export type RecordedInvocation = {
+  invocationId: string;
+  actionId: string;
+  input: unknown;
+  result: unknown;
+  diff: DiffEntry[];
+};
+
+/** The forward invocation that reverses a recorded one. */
+export type ActionInverse = {
+  /**
+   * Usually the same action with the previous values, sometimes its opposite
+   * number — `email.suppressAddress` undoes with `email.unsuppressAddress`.
+   */
+  actionId: string;
+  input: unknown;
+  /**
+   * Whether the recorded `after` must still be the current value before the
+   * inverse is applied.
+   *
+   * `strict` (the default) dry-runs the inverse first and refuses when what is
+   * there now is not what this invocation left behind — otherwise undoing a
+   * price edit silently discards whatever someone changed in the meantime.
+   * It narrows that window; it does not lock the row.
+   *
+   * `none` is for actions where the check is meaningless or wrong: an
+   * append-only ledger (`inventory.adjust`, where the inverse entry is correct
+   * regardless of intervening sales), and anything whose truth lives at a third
+   * party rather than in a column we can compare.
+   */
+  conflictCheck?: "strict" | "none";
+};
+
 export type ActionDefinition<TInput = unknown, TResult = unknown> = {
   /** Dotted and stable — `catalog.updateProduct`. It is a public API name. */
   id: string;
@@ -92,8 +135,37 @@ export type ActionDefinition<TInput = unknown, TResult = unknown> = {
    * per-route check would leave exactly that gap.
    */
   requiresStepUp?: boolean;
-  /** Whether an inverse can be recorded. Undo itself arrives with Phase C's first undoable action. */
+  /**
+   * Whether this action can be undone (§22).
+   *
+   * **It is not a free-text claim.** `defineAction` refuses a definition that
+   * sets this without an `inverse`, and refuses an `inverse` without this — so
+   * the flag the registry publishes and the audit table stores cannot say
+   * "undoable" about something with no way back. It said exactly that on
+   * twenty-one actions before undo was built, four of which turned out not to
+   * be invertible at all.
+   */
   undoable?: boolean;
+  /**
+   * Build the forward invocation that reverses a past one (`lib/actions/undo.ts`).
+   *
+   * **Undo is a new forward action, never a rollback.** The returned invocation
+   * goes through `invokeAction` like any other, so it re-checks permissions and
+   * step-up, re-validates its input, and is itself audited. A merchant who has
+   * lost a permission since cannot undo their way around that.
+   *
+   * **It is pure and synchronous, and that is the point.** It may read only the
+   * audit record — input, result, and diff — and never the database. So an
+   * action is undoable exactly when its own record contains enough to reverse
+   * it, which is a property that can be tested rather than asserted. An action
+   * that redacts the values undo would need (`customers.update`) or records a
+   * `before` it cannot tell apart from absent is honestly not undoable.
+   *
+   * Return `null` when *this particular* invocation cannot be reversed even
+   * though the action generally can — `memberships.grant` extending an existing
+   * membership has no inverse, while the same action creating one does.
+   */
+  inverse?(recorded: RecordedInvocation): ActionInverse | null;
   /**
    * Strip secrets before the input reaches the audit table. The audit row is
    * long-lived and widely readable; a raw API key in it is a breach waiting.

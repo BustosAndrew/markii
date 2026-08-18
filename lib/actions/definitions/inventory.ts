@@ -75,6 +75,29 @@ export const adjustInventory = defineAction({
   riskTier: "low",
   /** The inverse entry is a plain adjustment, so undo needs no special path. */
   undoable: true,
+  inverse: (recorded) => {
+    const original = recorded.input as
+      | { variantId?: number; locationId?: number; delta?: number; reason?: string }
+      | null;
+    if (!original?.variantId || !original.locationId || !original.delta) return null;
+    return {
+      actionId: "inventory.adjust",
+      input: {
+        variantId: original.variantId,
+        locationId: original.locationId,
+        delta: -original.delta,
+        reason: `Undo: ${original.reason ?? "adjustment"}`.slice(0, 200),
+      },
+      /**
+       * **Never a conflict.** The level is the sum of an append-only ledger, so
+       * the opposite entry is the right correction whatever else has been sold
+       * or received since. Comparing the level against what this adjustment left
+       * behind would refuse to undo a mistake the moment anyone bought anything
+       * — which is exactly when a merchant reaches for undo.
+       */
+      conflictCheck: "none" as const,
+    };
+  },
   async run(input, ctx) {
     const { variant } = await ownedVariantAndLocation(ctx, input.variantId, input.locationId);
     const before = await levelFor(ctx, input.variantId, input.locationId);

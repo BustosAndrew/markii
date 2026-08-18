@@ -12,6 +12,7 @@ import {
 import { expiryFor } from "../../commerce/delivery";
 import { deleteFile, PRIVATE_BUCKET } from "../../storage";
 import { siteScope } from "../../tenancy";
+import { patchInverse } from "../inverse";
 import { defineAction } from "../registry";
 import type { ActionContext } from "../types";
 
@@ -66,6 +67,26 @@ export const attachDigitalAsset = defineAction({
   permission: "catalog.write",
   riskTier: "low",
   undoable: true,
+  /**
+   * Detaching is the inverse, and the attachment's id comes from the recorded
+   * *result* rather than the diff — the diff is about the product, since that
+   * is the entity a merchant recognises.
+   */
+  inverse: (recorded) => {
+    const attachmentId = (recorded.result as { id?: number } | null)?.id;
+    if (typeof attachmentId !== "number") return null;
+    return {
+      actionId: "delivery.detachAsset",
+      input: { attachmentId },
+      /**
+       * Detaching records `digitalAssets` on the product, which is a list, not
+       * the field this action wrote — there is no shared path to compare, so a
+       * strict check would only ever pass vacuously. Detaching an attachment
+       * that is already gone refuses on its own.
+       */
+      conflictCheck: "none" as const,
+    };
+  },
   async run(input, ctx) {
     await ownedProduct(ctx, input.productId);
     const asset = await ownedAsset(ctx, input.assetId);
@@ -209,6 +230,16 @@ export const setDownloadPolicy = defineAction({
   permission: "catalog.write",
   riskTier: "low",
   undoable: true,
+  /**
+   * Both fields are required on every call but only changed ones are recorded,
+   * so the unchanged one is taken from the original input — where "unchanged"
+   * means the value it still holds.
+   */
+  inverse: patchInverse({
+    actionId: "delivery.setDownloadPolicy",
+    idField: "productId",
+    carryFromInput: ["downloadLimit", "downloadExpiryDays"],
+  }),
   async run(input, ctx) {
     const product = await ownedProduct(ctx, input.productId);
 
@@ -333,19 +364,47 @@ export const revokeDownload = defineAction({
   permission: "commerce.write",
   riskTier: "medium",
   undoable: true,
+  /**
+   * Lifting the revocation is the exact inverse — and only that. `resetCount`
+   * is false because revoking never touched the counter, and an undo that
+   * quietly handed back a fresh set of downloads would give the buyer more than
+   * they had before it.
+   */
+  inverse: (recorded) => {
+    const grantId = (recorded.input as { grantId?: number } | null)?.grantId;
+    if (typeof grantId !== "number") return null;
+    return {
+      actionId: "delivery.reissueDownload",
+      input: { grantId, resetCount: false, unrevoke: true },
+    };
+  },
   async run(input, ctx) {
     const grant = await ownedGrant(ctx, input.grantId);
     if (grant.revokedAt != null) throw conflict("That download is already revoked");
 
+    const revokedAt = new Date();
     await ctx.db
       .update(downloadGrants)
-      .set({ revokedAt: new Date(), revokedReason: input.reason })
+      .set({ revokedAt, revokedReason: input.reason })
       .where(eq(downloadGrants.id, grant.id));
 
+    /**
+     * The recorded `after` is the timestamp, not the reason. It read
+     * `after: input.reason` on a path called `revokedAt` until undo was built,
+     * which made the field's own history unreadable — and made every undo of it
+     * look like a conflict, since what is actually in the column is a time.
+     */
     ctx.recordDiff({
       entity: "downloadGrant",
       entityId: String(grant.id),
       path: "revokedAt",
+      before: null,
+      after: revokedAt.toISOString(),
+    });
+    ctx.recordDiff({
+      entity: "downloadGrant",
+      entityId: String(grant.id),
+      path: "revokedReason",
       before: null,
       after: input.reason,
     });

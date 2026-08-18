@@ -1,0 +1,13 @@
+-- Action undo (§22).
+--
+-- One column. `undone_by_invocation_id` has existed since `0001` and was never
+-- written, because nothing could undo anything; this is its other direction —
+-- the undo's own record pointing back at what it reversed.
+--
+-- Both are stored rather than one being derived, because the audit log is read
+-- forwards. Finding out that a surprising change was somebody's undo should not
+-- require scanning later rows for a matching inverse.
+--
+-- Nullable with no default and no backfill: every invocation written before
+-- today was an original, not an undo, and null already says that.
+ALTER TABLE "action_invocations" ADD COLUMN "undo_of_invocation_id" text;

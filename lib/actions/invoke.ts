@@ -19,6 +19,15 @@ export type InvokeOptions = {
   actor: Actor;
   /** Produce the diff the invocation *would* write, then roll back (§22 rule 2). */
   dryRun?: boolean;
+  /**
+   * Set by `undoInvocation` alone: the invocation this one is reversing.
+   *
+   * Recorded so the audit log reads in both directions — the original carries
+   * `undoneByInvocationId`, and this carries the way back. A reader looking at
+   * a surprising change should not have to scan for a matching inverse to
+   * discover it was an undo. It grants nothing; it is a label.
+   */
+  undoOf?: string;
 };
 
 /**
@@ -36,7 +45,7 @@ export type InvokeOptions = {
 export async function invokeAction<TResult = unknown>(
   actionId: string,
   rawInput: unknown,
-  { actor, dryRun = false }: InvokeOptions,
+  { actor, dryRun = false, undoOf }: InvokeOptions,
 ): Promise<InvocationOutcome<TResult>> {
   const def = getAction(actionId);
   if (!def) throw notFound(`Action "${actionId}"`);
@@ -104,6 +113,7 @@ export async function invokeAction<TResult = unknown>(
         diff,
         ok: true,
         undoable: def.undoable ?? false,
+        undoOfInvocationId: undoOf ?? null,
       });
     });
   } catch (e) {
@@ -111,7 +121,7 @@ export async function invokeAction<TResult = unknown>(
       // The failure audit is written outside the rolled-back transaction — "who
       // tried what and was refused" is the half of an audit log that matters
       // during an incident.
-      await recordFailure(invocationId, def.id, actor, def.riskTier, auditInput, e);
+      await recordFailure(invocationId, def.id, actor, def.riskTier, auditInput, e, undoOf);
       throw e;
     }
   }
@@ -153,6 +163,7 @@ async function recordFailure(
   riskTier: "read" | "low" | "medium" | "high",
   input: unknown,
   error: unknown,
+  undoOf?: string,
 ) {
   try {
     await db.insert(actionInvocations).values({
@@ -169,6 +180,8 @@ async function recordFailure(
       errorCode: error instanceof ApiError ? error.code : "INTERNAL",
       errorMessage: error instanceof Error ? error.message : String(error),
       undoable: false,
+      // A failed undo is still worth pairing with what it tried to reverse.
+      undoOfInvocationId: undoOf ?? null,
     });
   } catch (e) {
     // Never let an audit-write failure mask the original error.

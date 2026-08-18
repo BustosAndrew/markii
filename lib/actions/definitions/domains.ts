@@ -61,6 +61,32 @@ export const connectCustomDomain = defineAction({
    */
   riskTier: "medium",
   undoable: true,
+  /**
+   * Undoing a *first* connection disconnects it. Undoing one that **replaced**
+   * another domain is refused, and that is not a gap in the plumbing:
+   * re-connecting the previous hostname would put it back as `pending`, because
+   * connecting always issues a fresh nonce and only a `verified` row resolves
+   * (`lib/domains/`). An undo that silently took a live storefront offline until
+   * someone re-published a TXT record would be worse than no undo. Nothing here
+   * can restore a verification, so nothing here pretends to.
+   */
+  inverse: (recorded) => {
+    const siteId = (recorded.input as { siteId?: number } | null)?.siteId;
+    if (typeof siteId !== "number") return null;
+
+    const entry = recorded.diff.find((d) => d.path === "customDomain");
+    if (!entry || entry.before !== null) return null;
+
+    return {
+      actionId: "domains.disconnect",
+      input: { siteId },
+      /**
+       * Disconnecting dry-runs without a diff, so a strict check could only
+       * pass vacuously. It refuses on its own when there is no domain left.
+       */
+      conflictCheck: "none" as const,
+    };
+  },
   async run(input, ctx) {
     const site = await ownedSite(ctx, input.siteId);
 

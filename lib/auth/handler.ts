@@ -38,10 +38,13 @@ export type OrgRouteCtx = RouteCtx & {
  * exact hole `PUT /api/integrations/:provider` had been converted to actions to
  * close. Every write route was gated on 2026-08-11.
  *
- * **Only two write routes may legitimately omit it**: `actions/[id]` and
- * `integrations/[provider]`, which pass their work to `invokeAction` and are
- * authorized there against the action's own permission (§22 rule 4). Anywhere
- * else, a missing `permission` on a mutating handler is a bug.
+ * **Only three write routes may legitimately omit it**: `actions/[id]`,
+ * `actions/[id]/undo`, and `integrations/[provider]`, which pass their work to
+ * `invokeAction` and are authorized there against the action's own permission
+ * (§22 rule 4). Undo is on the list for the same reason as the other two and no
+ * other — it invokes an action, so the inverse's own permission and step-up are
+ * what gate it. Anywhere else, a missing `permission` on a mutating handler is
+ * a bug.
  */
 export function orgHandler(
   fn: (req: Request, ctx: OrgRouteCtx) => Promise<Response>,

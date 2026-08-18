@@ -3,6 +3,7 @@ import { z } from "zod";
 import { badRequest, notFound } from "../../api";
 import { shippingRates, shippingZones, sites, taxSettings } from "../../db";
 import { ownSites, siteScope } from "../../tenancy";
+import { patchInverse } from "../inverse";
 import { defineAction } from "../registry";
 import type { ActionContext } from "../types";
 
@@ -98,6 +99,7 @@ export const updateShippingZone = defineAction({
   permission: "commerce.write",
   riskTier: "medium",
   undoable: true,
+  inverse: patchInverse({ actionId: "shipping.updateZone", idField: "zoneId" }),
   async run(input, ctx) {
     const { zoneId, ...patch } = input;
     const zone = await ownedZone(ctx, zoneId);
@@ -276,6 +278,7 @@ export const updateShippingRate = defineAction({
   permission: "commerce.write",
   riskTier: "medium",
   undoable: true,
+  inverse: patchInverse({ actionId: "shipping.updateRate", idField: "rateId" }),
   async run(input, ctx) {
     if (!ctx.actor.orgId) throw notFound("Shipping rate");
     const { rateId, ...patch } = input;
@@ -383,6 +386,23 @@ export const updateTaxSettings = defineAction({
    */
   riskTier: "high",
   undoable: true,
+  /**
+   * A `before` of null here means one of two things — the column was null, or
+   * there was no settings row at all, because this action upserts. Undo cannot
+   * restore "no row", so for the columns that are `NOT NULL DEFAULT` in the
+   * table it restores the default instead, which is the same behaviour a missing
+   * row produced. `defaultTaxCode` is genuinely nullable and passes through.
+   */
+  inverse: patchInverse({
+    actionId: "tax.updateSettings",
+    idField: "siteId",
+    map: {
+      provider: (before) => ({ provider: before ?? "none" }),
+      pricesIncludeTax: (before) => ({ pricesIncludeTax: before ?? false }),
+      manualRates: (before) => ({ manualRates: before ?? [] }),
+      registrations: (before) => ({ registrations: before ?? [] }),
+    },
+  }),
   async run(input, ctx) {
     const { siteId, ...patch } = input;
     await ownedSite(ctx, siteId);

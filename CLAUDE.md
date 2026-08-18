@@ -290,9 +290,39 @@ domains, so a bug there removes email rather than degrading it.
 > someone reading the warning. **Check the route before believing any "not built" claim here**, this
 > one included.
 
-**Still planned:** everything in §10–15 and §19–21, plus action **undo** and the **MCP server**
-(§22), and org **audit** and **sessions** (§16) — all four confirmed absent 2026-08-18: no route
-backs any of them.
+**Action undo is built as of 2026-08-18** (§22). `POST /api/actions/:id/undo` runs the inverse as a
+**new forward invocation** — the transaction committed long ago, so there is nothing to roll back —
+which means undo re-checks the action's permission, re-demands step-up, and is itself audited. It
+holds no authority of its own, which is the point.
+
+**`undoable` stopped being a claim.** It is now tied to an `inverse()` on the definition and
+`defineAction` refuses one declared without the other. `inverse` is pure and may read only the audit
+record, never the database, so an action is undoable exactly when its own record contains enough to
+reverse it — a property a test can check. **Four of the twenty-one actions claiming `undoable: true`
+were wrong** and now say false: `customers.update` (its own PII redaction destroys what an undo
+would restore — two correct rules colliding, not a missing feature), `memberships.revoke` (nothing
+clears `revokedAt`; re-granting would hand back a *different* membership), `readiness.updateIssues`
+(no prior status recorded, and one action covers 500 ids), and `catalog.setProductOptions`.
+
+Three diffs were **fixed rather than worked around**, because an inverse can only read what was
+recorded — `catalog.setCollectionProducts` stored `before: null`, `delivery.revokeDownload` stored a
+reason under a path named `revokedAt`, and `memberships.grant` could not tell "created" from
+"extended a perpetual membership", where revoking is the wrong answer.
+
+**A changed field is a conflict, not a silent overwrite** (`409`, `details.undo: "conflict"`, with
+the field names). The check dry-runs the inverse and compares against what the original left behind.
+`inventory.adjust` opts out on purpose: the level is a sum over an append-only ledger, so the
+opposite entry is right whatever sold in between, and refusing there would refuse exactly when a
+merchant reaches for undo.
+
+**Building it found `GET /api/actions` answering `500`** to every owner and admin, and had been
+since discounts landed: `z.coerce.date()` has no JSON Schema representation and zod throws on one by
+default, so a single field emptied the registry an agent discovers Markii through. Nothing watched
+it — the integration suite invoked actions by id and never listed them. Dates are now described as
+ISO strings; `lib/actions/registry.test.ts` describes every registered action.
+
+**Still planned:** everything in §10–15 and §19–21, the **MCP server** (§22), and org **audit** and
+**sessions** (§16) — confirmed absent 2026-08-18: no route backs any of them.
 
 **Authorization on the v1 REST surface was closed 2026-08-11.** `orgHandler` authorizes **every
 role** when `permission` is omitted — there is no default — and the §1–8 write routes predate roles,
@@ -366,9 +396,9 @@ and `tax-shipping.ts`). **Digital delivery screens have since landed** — verif
 `/dashboard/delivery`, `components/dashboard/digital-assets-panel.tsx`, and the product page's
 attachment editor. That entry said "screens still do not" for a week after they shipped, which is
 the same one-directional staleness this file warns about two paragraphs down. The discount, tax, and
-inventory-level previews are the ones still without a screen. The remaining `*_API_LIVE: false`
-constants (`ACTIONS_UNDO`, `ORG_AUDIT`, `ORG_SESSIONS`) were checked and are correct — no route
-backs any of them.
+inventory-level previews are the ones still without a screen. `ACTIONS_UNDO_API_LIVE` **flipped to
+`true` on 2026-08-18** in the same change that built the route. The remaining `*_API_LIVE: false`
+constants (`ORG_AUDIT`, `ORG_SESSIONS`) were checked and are correct — no route backs either.
 
 **Recurring membership billing came off this list** on 2026-08-10: it was listed as planned while
 being built and passing, which is the same staleness that had MFA's screens listed as missing after

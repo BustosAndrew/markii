@@ -42,7 +42,15 @@ export const updateReadinessIssues = defineAction({
    * dashboard, not a shopper or a payment.
    */
   riskTier: "low",
-  undoable: true,
+  /**
+   * **Not undoable, for two independent reasons.** The diff records
+   * `before: null` for every issue — the prior status is not kept — and the
+   * input carries one `action` for up to 500 ids, so even with it there is no
+   * single invocation that could restore issues which were in different states.
+   * `reopen` is the merchant-facing way back and is what the description points
+   * at; it is a decision, not a restore.
+   */
+  undoable: false,
   async run(input, ctx) {
     if (!ctx.actor.orgId) throw notFound("Organization");
     const orgId = ctx.actor.orgId;

@@ -71,6 +71,7 @@ API-independent work so you don't outrun the backend") no longer applies to A, B
 | Readiness | §9 | ✅ LIVE | Score, issues, triage |
 | **Billing & metering** | §17 | ✅ **LIVE — newly** | See below. This changed most recently and most sharply |
 | Card checkout (Stripe) | §18.4 | ✅ LIVE | Elements mount with a publishable key the server hands you |
+| **Action undo** | §22 | ✅ **LIVE — newly (2026-08-18)** | `undoInvocation()` in `lib/api/actions.ts` is no longer gated off. See below before you render an Undo button |
 | Add-on **purchase** | §17 | ⛔ Refuses `409` | Agent Ops / Chargeback Assist do not exist. Show them as unavailable — never as "coming soon with a buy button" |
 | Email delivery | §24 | 🟡 Plumbed, sends nothing | Every send records `not_configured`. Surfaces must say so, not imply mail went out |
 | Site builder, Channels, Test Lab, Agent Ops chat | §19–21 | ⛔ Deferred | Out of launch scope — do not start |
@@ -408,6 +409,39 @@ are per site and a merchant acting on them needs that site in front of them. The
 **nothing on that page is a live reading.** `getOrgDomains` reads no DNS, so a domain whose DNS broke
 an hour ago still shows `verified` there. The page says so in as many words; do not add a "reachable"
 tick to it, and do not treat a missing `pointsToMarkii` as `false`.
+
+### 🔴 Action undo is live (2026-08-18) — and the Undo button has one honest shape
+
+`undoInvocation(actionId, invocationId)` is unblocked. Four things decide whether the UI built on it
+tells the truth:
+
+**Gate the button on `outcome.undoable`, and trust it.** It used to be a hand-set boolean on the
+action definition that nothing read, and it was wrong on four actions. It is now derived from the
+action's `inverse()` and `defineAction` refuses a definition where the two disagree — so a `true`
+means there is a real way back. Do not render Undo when it is `false`, and do not offer it as a
+disabled control with a tooltip promising it later.
+
+**Undo runs the inverse as a new invocation, so it can challenge.** A `403 MFA_REQUIRED` from an
+undo is normal — `MfaStepUpProvider` already turns that into the modal. It can also `403` on
+permission: undo holds no authority of its own, so a role that has since lost `catalog.write` is
+refused.
+
+**`conflict` is a question, never a retry.** All five refusals are `409`, distinguished by
+`error.details.undo`. Four of them (`already_undone`, `no_inverse`, `not_representable`,
+`failed_invocation`) are terminal — say so plainly and remove the button. `conflict` is the only one
+that means "ask the human": `error.details.conflicts` names each field with `expected` and
+`current`, because somebody edited the same row since and undoing would discard their change.
+Show what would be overwritten. **Never auto-retry it** — the whole point of the refusal is that a
+person has not seen the other edit yet.
+
+**Report `undoneWith`, not the id you sent.** Undoing `email.suppressAddress` runs
+`email.unsuppressAddress`; undoing a first `domains.connect` runs `domains.disconnect`. A toast
+saying "suppress address undone" when the log will show an unsuppress is the kind of small lie that
+makes an audit trail untrustworthy.
+
+The audit list carries both directions now — `undoneBy` on the original row, `undoOf` on the undo —
+so a history screen can strike through a reversed change and label its reversal without a second
+query. Both are `string | null` on `ActionInvocation`.
 
 ### 🔴 Two frontend jobs left over from the backend work — for whoever picks up screens next
 
