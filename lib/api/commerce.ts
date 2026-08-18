@@ -64,7 +64,17 @@ export type Collection = {
   imageUrl: string | null;
   type: "manual" | "automated";
   rules?: {
-    field: "title" | "tag" | "price" | "stock" | "vendor" | "type";
+    /**
+     * Corrected 2026-08-18, and it was wrong in **both** directions.
+     *
+     * It offered `tag`, `vendor`, and `type`, which the server rejects by name
+     * (`UNSUPPORTED_RULE_FIELDS` in `lib/commerce/collections.ts`) because the
+     * product model has no such columns — a rule builder populated from this
+     * type offered three options that could only ever fail. And it **omitted
+     * `sku`**, which the server does support, so TypeScript forbade building a
+     * rule on a field that works. A stale type is worse than a missing one.
+     */
+    field: "title" | "price" | "stock" | "sku";
     op: "eq" | "contains" | "gt" | "lt" | "starts_with";
     value: string;
   }[];

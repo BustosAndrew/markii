@@ -279,6 +279,14 @@ values, copied onto the wrong type, so any screen branching on that union matche
 through its default for every cart. It is `"calculated" | "none" | "not_configured"`, and
 `not_configured` is the one that blocks checkout.
 
+**`Collection["rules"][].field` was wrong in both directions** (corrected 2026-08-18). It offered
+`tag`, `vendor`, and `type` — which the server rejects **by name**
+(`UNSUPPORTED_RULE_FIELDS`, `lib/commerce/collections.ts`), because the product model has no such
+columns — and it **omitted `sku`**, which the server does support. So a rule builder populated
+from this type would have offered three options that could only ever fail, while TypeScript forbade
+the one extra field that works. It is now `"title" | "price" | "stock" | "sku"`. No screen was
+affected: nothing builds a field picker from it yet. Build one from the type, not from memory.
+
 **There is a component test suite now: `pnpm test:components`** (`vitest --project components`,
 happy-dom, ~1.5s). It exists because the two worst bugs in the storefront cart were invisible to
 every other check — not type errors, and not reachable from an integration test, because the
