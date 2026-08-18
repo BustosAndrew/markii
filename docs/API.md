@@ -2316,6 +2316,14 @@ product code. The manual path has never honoured it and still does not: one rate
 nowhere to express a per-line exemption. That asymmetry is real — a store with non-taxable variants
 gets a different answer from the two providers, and the Stripe one is the correct one.
 
+**Reviewed and deliberately kept (D46).** Honouring the flag under manual rates would fix only the
+case where exempt items sit at exactly 0%, while two different non-zero rates — clothing against
+food — stay just as wrong, so it would make the manual path look more capable than it is. A merchant
+needing per-item tax treatment has outgrown a single flat rate; moving them to Stripe Tax is the
+answer, and the variant editor tells them so at the point they set the flag. **That disclosure is
+load-bearing** — remove it and the decision has to be revisited. Pinned by an integration test: the
+obvious "fix" cuts collected tax by 83% on a mixed basket, silently, on every live manual-rate store.
+
 **The cart's `tax` component carries a `breakdown`** — `{ name, rateBps, amountMinor }[]`, empty
 rather than absent. Both engines produce one (a manual rate has a name and a rate; Stripe Tax returns
 a row per jurisdiction) and `priceCart` was discarding it until 2026-08-17. Zero-amount rows are

@@ -291,6 +291,101 @@ describeMaybe("Stripe Tax against real Stripe", () => {
     expect(third.tax_calculation_id).not.toBe(first.tax_calculation_id);
   }, 180_000);
 
+  /**
+   * The status surface, against a real account (§18.6, D45).
+   *
+   * Nothing tested this before: `stripeTax` reports three facts that fail
+   * independently, and every one of them was only ever exercised by reading the
+   * code. Here they are asserted against an account whose true state is known,
+   * because it was set up above.
+   */
+  describe("GET /api/settings/tax", () => {
+    it("reports the merchant's real Stripe Tax state, un-merged", async () => {
+      const r = await merchant.get(`/api/settings/tax?siteId=${site.id}`);
+      expect(r.status).toBe(200);
+      expect(r.json.provider).toBe("stripe");
+
+      const f = r.json.stripeTax;
+      expect(f).toBeTruthy();
+      // Markii's credentials, the merchant's connection, and their Tax
+      // activation are three separate answers and each is stated.
+      expect(f.platform).toBe(true);
+      expect(f.connected).toBe(true);
+      expect(f.status).toBe("active");
+      expect(f.missing).toEqual([]);
+      // The registration added in setup. Read live from Stripe, not from a
+      // flag Markii stored when the account was connected.
+      expect(f.activeRegistrations).toBeGreaterThanOrEqual(1);
+
+      expect(r.json.operational.ok).toBe(true);
+    }, 120_000);
+
+    /**
+     * **The dangerous state**: Stripe Tax active, registered nowhere.
+     *
+     * Stripe answers a legitimate zero everywhere, so the store looks configured,
+     * charges nothing, and the merchant finds out when they file. It is the one
+     * failure that produces no error anywhere, which is exactly why it is
+     * reported as `operational.ok: false` rather than shown as a tick.
+     */
+    it("refuses to call an account with no registrations operational", async () => {
+      const bare = await stripe<{ id: string }>("/accounts", {
+        method: "POST",
+        form: {
+          type: "standard",
+          country: "US",
+          email: `markii-tax-bare+${Date.now()}@example.test`,
+        },
+      });
+      await stripe("/tax/settings", {
+        method: "POST",
+        account: bare.id,
+        form: {
+          "head_office[address][country]": "US",
+          "head_office[address][state]": "CO",
+          "head_office[address][city]": "Denver",
+          "head_office[address][postal_code]": "80202",
+          "head_office[address][line1]": "1 Test St",
+          "defaults[tax_code]": "txcd_99999999",
+        },
+      });
+      // Deliberately no registration.
+
+      await sql`update integrations set config = ${sql.json({ accountId: bare.id, chargesEnabled: "true" })}
+        where org_id = ${orgId} and provider = 'stripe'`;
+      try {
+        const r = await merchant.get(`/api/settings/tax?siteId=${site.id}`);
+        expect(r.status).toBe(200);
+        expect(r.json.stripeTax.status).toBe("active");
+        expect(r.json.stripeTax.activeRegistrations).toBe(0);
+
+        // Active-but-unregistered is not a tick, and the reason says why.
+        expect(r.json.operational.ok).toBe(false);
+        expect(r.json.operational.reason).toMatch(/registration/i);
+        expect(r.json.operational.reason).toMatch(/zero tax/i);
+      } finally {
+        await sql`update integrations set config = ${sql.json({ accountId, chargesEnabled: "true" })}
+          where org_id = ${orgId} and provider = 'stripe'`;
+      }
+    }, 180_000);
+
+    it("says nothing about Stripe on a store that does not use it", async () => {
+      // A `manual` store must not pay for a round trip about a service it does
+      // not use, and must not be shown a Stripe verdict it cannot act on.
+      await sql`update tax_settings set provider = 'manual',
+        manual_rates = ${sql.json([{ country: "US", province: "CO", rateBps: 875, name: "CO" }])}
+        where site_id = ${site.id}`;
+      try {
+        const r = await merchant.get(`/api/settings/tax?siteId=${site.id}`);
+        expect(r.json.provider).toBe("manual");
+        expect(r.json.stripeTax).toBeNull();
+        expect(r.json.operational.ok).toBe(true);
+      } finally {
+        await sql`update tax_settings set provider = 'stripe' where site_id = ${site.id}`;
+      }
+    }, 60_000);
+  });
+
   it("files the sale as a real Stripe Tax transaction, and reverses it on refund", async () => {
     const token = await taxedCart(1);
     const priced = await shopper.get(cart(`/${token}`));

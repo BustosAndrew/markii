@@ -276,6 +276,21 @@ values, copied onto the wrong type, so any screen branching on that union matche
 through its default for every cart. It is `"calculated" | "none" | "not_configured"`, and
 `not_configured` is the one that blocks checkout.
 
+**The storefront cart island was leaking internal state names to shoppers, and that is fixed**
+(`components/storefront/cart-checkout.tsx`, 2026-08-17). It rendered `Tax ({cart.tax.state})` and
+`Shipping ({cart.shipping.state})` — so a customer saw literally **"Tax (not_configured)"**. Three
+things changed, and they are worth knowing if you touch that block:
+
+- The raw enum is gone. `not_configured` now renders an em dash plus the component's own `note`,
+  because that state **refuses the sale** — a shopper who is not told why meets a checkout that
+  simply will not proceed.
+- The **tax breakdown renders**, one indented line per jurisdiction with its rate.
+- **Tax-inclusive stores no longer show "Tax £0.00".** `amountMinor` is zero by design there, so
+  the label becomes "Tax (included)" and the figure comes from summing the breakdown. It is still
+  **not** added to the total — it is already inside the line prices.
+
+New CSS class `.sf-component-note` in `components/storefront/cart-island.css` for those sub-lines.
+
 **Two stale types in `lib/api/tax-shipping.ts` were corrected in the same change**, and one of them
 was actively wrong on screen: `TaxPreview["state"]` was typed `"calculated" | "not_configured" |
 "address_required"`. The route has never returned `"address_required"` (a missing address is

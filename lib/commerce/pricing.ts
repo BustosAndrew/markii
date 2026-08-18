@@ -383,9 +383,11 @@ export async function priceCart(cart: Cart): Promise<PricedCart> {
    * missing from the transaction that backs the merchant's filing.
    *
    * The manual path has no equivalent: one rate over one base has nowhere to
-   * express a per-line exemption, and it has never honoured this flag. That
-   * asymmetry is real and documented in `docs/API.md` §18.6 rather than papered
-   * over here.
+   * express a per-line exemption, and it has never honoured this flag. **That
+   * asymmetry was reviewed and kept** (D46) — it is documented in `docs/API.md`
+   * §18.6, disclosed to the merchant in the variant editor at the point they set
+   * the flag, and pinned by an integration test, because the obvious "fix" cuts
+   * what every live manual-rate store collects without anyone asking.
    */
   const taxableLines: TaxableLine[] = priced.map((l, i) => {
     const variant = l.variantId != null ? byVariant.get(l.variantId) : null;

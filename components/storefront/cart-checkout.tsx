@@ -262,6 +262,40 @@ export function CartCheckout({
     );
   }
 
+  /**
+   * What the shopper is actually waiting on when the total is provisional.
+   *
+   * This used to read \"Complete shipping to continue\" for **every** provisional
+   * total, but `totalState` goes provisional when shipping *or* tax cannot be
+   * calculated. On a store whose tax provider cannot answer — Stripe Tax
+   * selected but not connected, say — that sent the shopper back to an
+   * address form that was already correct, with nothing they could do to make
+   * the button work. Tax became a much more reachable blocker when Stripe Tax
+   * shipped, which is what made the misdirection worth fixing.
+   *
+   * Tax is named first: a shopper can *act* on a missing shipping selection, and
+   * cannot act on a store's tax configuration at all, so if both are unresolved
+   * the one that needs the merchant is the honest thing to surface.
+   */
+  const blockedLabel =
+    cart.tax.state === "not_configured"
+      ? "Tax unavailable — checkout is on hold"
+      : "Complete shipping to continue";
+
+  /**
+   * Tax that is already inside the listed prices, or null when it is added on top.
+   *
+   * On a tax-inclusive store `tax.amountMinor` is zero **by design** — the
+   * money is in the line prices — so the only record of what was charged is
+   * the breakdown. Showing the zero alone would tell a shopper no tax applied.
+   */
+  const includedTaxMinor =
+    cart.tax.state === "calculated" &&
+    cart.tax.amountMinor === 0 &&
+    cart.tax.breakdown.length > 0
+      ? cart.tax.breakdown.reduce((sum, row) => sum + row.amountMinor, 0)
+      : null;
+
   const availableRails = (
     [
       rails.stripe ? ("stripe" as const) : null,
@@ -310,13 +344,57 @@ export function CartCheckout({
             <dd>{formatMinor(cart.discount.amountMinor, cart.currency)}</dd>
           </div>
           <div>
-            <dt>Shipping ({cart.shipping.state})</dt>
-            <dd>{formatMinor(cart.shipping.amountMinor, cart.currency)}</dd>
+            <dt>Shipping</dt>
+            <dd>
+              {cart.shipping.state === "not_configured"
+                ? "—"
+                : formatMinor(cart.shipping.amountMinor, cart.currency)}
+            </dd>
           </div>
+          {cart.shipping.note ? (
+            <div className="sf-component-note">
+              <dt />
+              <dd className="sf-muted">{cart.shipping.note}</dd>
+            </div>
+          ) : null}
           <div>
-            <dt>Tax ({cart.tax.state})</dt>
-            <dd>{formatMinor(cart.tax.amountMinor, cart.currency)}</dd>
+            {/*
+              Tax-inclusive stores charge nothing extra, so `amountMinor` is zero
+              by design and the real figure lives only in the breakdown. Printing
+              the zero on its own would tell a shopper no tax was charged when it
+              was — already inside the price they can see.
+            */}
+            <dt>{includedTaxMinor != null ? "Tax (included)" : "Tax"}</dt>
+            <dd>
+              {cart.tax.state === "not_configured"
+                ? "—"
+                : formatMinor(includedTaxMinor ?? cart.tax.amountMinor, cart.currency)}
+            </dd>
           </div>
+          {/*
+            One line per jurisdiction. A single "Tax" figure hides a state rate, a
+            city rate, and a district rate that several jurisdictions require to
+            be itemised on the receipt.
+          */}
+          {cart.tax.breakdown.map((row) => (
+            <div key={`${row.name}-${row.rateBps}`} className="sf-component-note">
+              <dt className="sf-muted">
+                {row.name} ({(row.rateBps / 100).toFixed(2)}%)
+              </dt>
+              <dd className="sf-muted">{formatMinor(row.amountMinor, cart.currency)}</dd>
+            </div>
+          ))}
+          {/*
+            `not_configured` is the state that refuses the sale, so the reason has
+            to be visible — otherwise the shopper meets a checkout that simply
+            will not proceed and cannot tell why.
+          */}
+          {cart.tax.state === "not_configured" && cart.tax.note ? (
+            <div className="sf-component-note">
+              <dt />
+              <dd className="sf-muted">{cart.tax.note}</dd>
+            </div>
+          ) : null}
           <div className="sf-total">
             <dt>Total</dt>
             <dd>
@@ -569,9 +647,7 @@ export function CartCheckout({
               })()
             }
           >
-            {cart.totalState !== "final"
-              ? "Complete shipping to continue"
-              : "Continue to payment"}
+            {cart.totalState !== "final" ? blockedLabel : "Continue to payment"}
           </button>
         ) : null}
 

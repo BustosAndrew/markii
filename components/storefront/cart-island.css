@@ -68,6 +68,20 @@
   justify-content: space-between;
   gap: 1rem;
 }
+/*
+ * A sub-line under a total: one tax jurisdiction, or the reason a component
+ * could not be calculated. Indented and smaller so it reads as detail belonging
+ * to the line above rather than as another charge being added.
+ */
+.sf-component-note {
+  font-size: 0.85rem;
+  gap: 1rem;
+  padding-left: 0.75rem;
+}
+.sf-component-note dt:empty {
+  display: none;
+}
+
 .sf-total {
   font-weight: 600;
   padding-top: 0.5rem;

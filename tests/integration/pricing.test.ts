@@ -220,6 +220,42 @@ describe("pricing", () => {
     });
 
     /**
+     * **`variants.taxable: false` is ignored under manual rates, on purpose.**
+     *
+     * This pins a decision (2026-08-17), not an accident. Stripe Tax honours the
+     * flag; one manual rate over one base has nowhere to express a per-line
+     * exemption, and the variant editor says exactly that at the point a merchant
+     * sets it.
+     *
+     * The test exists because the asymmetry looks like a bug to anyone who finds
+     * it later. Without something asserting the current behaviour, the obvious
+     * "fix" silently reduces what every live manual-rate store collects in tax —
+     * the kind of change to money that is noticed late and painfully.
+     */
+    it("taxes a non-taxable variant under manual rates, deliberately", async () => {
+      const rate = [{ country: "US", province: "CO", rateBps: 875, name: "CO" }];
+      await sql`insert into tax_settings (site_id, provider, prices_include_tax, manual_rates)
+        values (${site.id}, 'manual', false, ${sql.json(rate)})
+        on conflict (site_id) do update set provider = 'manual', prices_include_tax = false,
+          manual_rates = ${sql.json(rate)}`;
+      await sql`update variants set taxable = false where id = ${shipVariant.id}`;
+
+      try {
+        const { token, rates } = await shippableCart(2); // 4000 + 800 shipping
+        await client.patch(cart(`/${token}`), {
+          shippingRateId: rates.rates.find((r: any) => r.name === "Standard").id,
+        });
+
+        const g = await client.get(cart(`/${token}`));
+        expect(g.json.tax.state).toBe("calculated");
+        // The whole base, exemption and all — identical to the taxable case above.
+        expect(g.json.tax.amountMinor).toBe(Math.floor((4800 * 875 + 5000) / 10000));
+      } finally {
+        await sql`update variants set taxable = true where id = ${shipVariant.id}`;
+      }
+    });
+
+    /**
      * Stripe Tax on a store that cannot reach it (§18.6).
      *
      * This test org has no connected Stripe account, which is the *specific*
