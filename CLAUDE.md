@@ -196,8 +196,9 @@ would be silent, and the SES-scoped key cannot check. Re-verify in the console a
 
 **Membership gating and storefront shopper login are built** (§18.9, D34). Tiers gate products;
 buying a granting product confers one inside the order transaction. **Membership status is derived
-per request, never stored** — nothing here schedules jobs, so a stored status would keep granting
-access after it expired. A refund revokes them, mirroring digital delivery — closing *buy, use,
+per request, never stored** — **nothing expires a membership on a schedule** (the two crons that
+exist bill and chase carts; neither sweeps access), so a stored status would keep granting access
+after it ran out. A refund revokes them, mirroring digital delivery — closing *buy, use,
 refund, keep it* for files but not for memberships would only move the hole.
 
 **Recurring memberships are half built, and the built half is the renewal machinery.** A product may
@@ -277,8 +278,21 @@ membership taxed once and silently never again. Before this they were untaxed on
 rate over one base has nowhere to express a per-line exemption. The asymmetry is real and documented
 rather than papered over.
 
-**Still planned:** shopper auth mail via Supabase's Send Email Hook. Everything in §10–15 and §19–21
-is untouched.
+**Shopper auth mail via Supabase's Send Email Hook is built too** —
+`app/api/webhooks/supabase-email/route.ts` and `lib/email/auth-hook.ts`, signature-verified, routing
+staff mail to Resend and shopper mail to the merchant's SES sender. **Enabling the hook is a cutover,
+not a toggle**: Supabase stops sending auth mail project-wide the instant it is on, for both identity
+domains, so a bug there removes email rather than degrading it.
+
+> This line said "still planned" until 2026-08-18, written **in the same edit that correctly removed
+> two other finished items** — the two were verified and the third was carried forward unchecked.
+> That is the one-directional staleness this file warns about three paragraphs down, committed by
+> someone reading the warning. **Check the route before believing any "not built" claim here**, this
+> one included.
+
+**Still planned:** everything in §10–15 and §19–21, plus action **undo** and the **MCP server**
+(§22), and org **audit** and **sessions** (§16) — all four confirmed absent 2026-08-18: no route
+backs any of them.
 
 **Authorization on the v1 REST surface was closed 2026-08-11.** `orgHandler` authorizes **every
 role** when `permission` is omitted — there is no default — and the §1–8 write routes predate roles,

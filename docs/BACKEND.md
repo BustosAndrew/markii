@@ -122,7 +122,7 @@ this is a driver and services swap. Full task list in `docs/DECISIONS.md` §"Dat
 > `customDomain` is refused by name on the site routes and moves through `domains.*`. Note the
 > import boundary: `lib/domains/index.ts` is in the **proxy bundle** and must never import
 > `node:dns` — the lookups live in `lib/domains/verification.ts`. Verification is a **pull**:
-> nothing here schedules jobs, so the merchant's "check" is what advances a claim, and there is no
+> nothing re-reads DNS on a schedule, so the merchant's "check" is what advances a claim, and there is no
 > sweep that could un-verify a live storefront on a resolver blip.
 > ✅ Seed script closes its connection; `.env.example` rewritten to match what the code reads.
 >
@@ -538,31 +538,41 @@ malformed.
 Three things shape the design, and each is a rule rather than a preference:
 
 - **No fallback to Resend, ever.** A merchant's order confirmation leaving from `markii.shop` puts
-  their bounces on Markii's sending reputation. Without a verified domain, merchant mail does not
-  send — it is not quietly rerouted, and it is not sent from a "test mode" Markii address either.
+  their bounces on Markii's sending reputation. **Amended by D44 (2026-08-16):** without a verified
+  domain merchant mail *does* send, from the storefront's own `accounts@{slug}.{ROOT_DOMAIN}` —
+  still SES, still the store's name, never bare `markii.shop` and never Resend. A store that takes
+  an order and sends nothing is broken, and for a digital product the missing email *is* the
+  product. The verified domain always wins when it exists.
 - **Suppression is checked before every send**, and it is what keeps the SES account alive: AWS
   suspends above ~5% bounce or 0.1% complaint, measured **across the whole account**, so one
   merchant mailing a dead address can cut off every merchant on the platform.
 - **The bounce webhook is signature-verified, and the certificate URL is host-checked before it is
   fetched.** An unverified endpoint is a remote suppression button.
 
+Done since this section was written (verified 2026-08-18):
+
+- ~~SES **sandbox escape**~~ — production access granted in **`us-west-2`**. Everything in SES is
+  per-region, so `AWS_REGION` must name that region or sending is still sandboxed.
+- ~~An SES **configuration set** with an SNS destination~~ — `my-first-configuration-set` →
+  `markii-suppression-feed` → topic `markii-ses-feedback` → `/api/webhooks/ses`, **Confirmed**, and
+  it has since carried a real bounce end to end.
+- ~~Shopper auth mail through Supabase's **Send Email Hook**~~ — built:
+  `app/api/webhooks/supabase-email/route.ts` + `lib/email/auth-hook.ts`. **Enabling the hook is a
+  cutover, not a toggle**: Supabase stops sending auth mail project-wide the moment it is on, for
+  both identity domains, so a bug there removes email rather than degrading it.
+- ~~Abandoned-cart mail~~ — built (D27): hourly cron, opt-in per storefront, one reminder per cart.
+
 Still outstanding, and none of it is code:
 
-- Merchant mail requires a **verified sending domain to go live** — blocking item on the publish
-  checklist.
-- SES **sandbox escape** needs AWS approval — **start that early**, it is not instant and it is
-  refusable.
-- An SES **configuration set** with an SNS destination pointed at `/api/webhooks/ses`
-  (`SES_CONFIGURATION_SET`). Without it SES still sends, nothing is suppressed, and the account
-  drifts toward a suspension unseen.
+- A merchant's **own verified sending domain** is still what a *branded* sender requires. It is no
+  longer a blocker on sending itself (D44) — `UNVERIFIED_SENDING_DOMAIN` nags until it is done.
 
 Not built:
 
-- Shopper auth mail through Supabase's **Send Email Hook** → your handler → SES, reading `store_id`
-  from user metadata to pick the sender. Supabase's built-in SMTP allows only one from-address per
-  project, which is why the hook is required.
 - Secure Email Change, which requires sending **two** emails with specific token/hash pairings.
-- Abandoned-cart mail and any broadcast/campaign sending.
+- Broadcast/campaign sending — **deferred until further notice (D43)**, and the blocking
+  prerequisite is reputation isolation: SES suspends on account-wide rates, so one merchant's
+  campaign can cost every merchant their order confirmations.
 
 ---
 
