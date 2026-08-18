@@ -5,8 +5,9 @@ Two suites, separated by what they need to run.
 ```bash
 pnpm test              # unit — fast, no dependencies. Run this constantly
 pnpm test:watch        # unit, watching
+pnpm test:components   # React renders against a DOM, network mocked. Also fast, also no deps
 pnpm test:integration  # needs a database and a running dev server (see below)
-pnpm test:all          # both
+pnpm test:all          # all three
 ```
 
 ## `pnpm test` — unit
@@ -19,6 +20,28 @@ These cover **the arithmetic that decides what a shopper is charged**. Every
 amount is integer minor units and every rate is basis points — the tests assert
 that no float ever reaches a total, since that is a rule the type system cannot
 enforce (`docs/DECISIONS.md` D31).
+
+## `pnpm test:components` — component renders
+
+`components/**/*.test.tsx` renders React against `happy-dom` with the network mocked. No database, no
+server, no browser download.
+
+**It exists for one specific gap.** The storefront cart shipped two bugs that nothing else here could
+have caught: `Tax ({cart.tax.state})` printed a raw internal enum to customers, and a tax-inclusive
+store displayed `Tax $0.00` while charging real tax. Neither is a type error. Neither is reachable
+from an integration test, because the island renders in a browser and the suite only sees JSON. Both
+were found by a person looking at the rendered page.
+
+**Two rules keep it useful rather than ceremonial:**
+
+1. **Mock only the network.** The component's own logic — which label, which figure, which rows — is
+   the thing under test. Mocking more of it is testing the mock.
+2. **Use payloads captured from the live API**, not invented ones. Hand-written fixtures drift into
+   shapes the server never produces; that is exactly how `"not_applicable"` sat in
+   `MoneyComponent["state"]` for months while no route ever returned it.
+
+It is not a mandate to test every component. It covers renders where being wrong misstates money or
+blocks a sale.
 
 ## `pnpm test:integration` — integration
 

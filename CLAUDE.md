@@ -20,6 +20,7 @@ pnpm dev              # dev server (Turbopack)
 pnpm build            # production build — run before considering work done
 pnpm lint             # the RLS deny-by-default check, then eslint — in that order
 pnpm test             # unit tests — pure money/rule functions, ~1s, no deps
+pnpm test:components  # React renders against a DOM, network mocked, ~2s, no deps
 pnpm test:integration # real HTTP + real DB; needs a dev server (see tests/README.md)
 pnpm db:push          # push Drizzle schema (dev only — see docs/DECISIONS.md D6)
 pnpm db:migrate       # apply generated migrations (needs session-mode DIRECT_URL)
@@ -46,6 +47,13 @@ dependency of typescript-eslint, so there is no dependency edge a pnpm override
 can redirect — it always resolves to the root copy. The exact pin is so a
 `^`-range does not silently walk back onto 7. **Unpin once typescript-eslint
 ships TS 7 support**, and re-run `pnpm lint` to confirm before trusting it.
+
+**`pnpm test:components` exists because a whole class of bug was invisible to everything else.**
+Two shipped in the storefront cart: a raw state enum printed to shoppers (`Tax (not_configured)`),
+and a tax-inclusive store showing `Tax $0.00` while genuinely charging tax. Neither is a type error;
+neither is reachable from an integration test, because the island renders in a browser. Both were
+found by a person looking at the page. It is **not** a mandate to test every component — it covers
+renders where being wrong misstates money or blocks a sale.
 
 **Run `pnpm test` freely — it is a second and touches nothing.** `pnpm
 test:integration` **writes to the real database** and is opt-in behind a guard;

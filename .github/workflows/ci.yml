@@ -44,6 +44,13 @@ jobs:
       - name: Unit tests
         run: pnpm test
 
+      # Renders React against a DOM with the network mocked. Belongs in the fast
+      # job: no database, no server, ~2s. A suite that is not in CI is
+      # decoration — the same lesson the RLS check taught when it silently
+      # stopped running behind eslint.
+      - name: Component tests
+        run: pnpm test:components
+
       # `pnpm lint` also runs the RLS deny-by-default check, which needs a
       # database. Split here so the eslint half still gates every push.
       - name: Lint

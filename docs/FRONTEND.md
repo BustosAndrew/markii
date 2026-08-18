@@ -256,9 +256,12 @@ checkout's `409`.
    merchant finds out when they file. `null` means the count could not be read — *not* that there
    are none, so never render `null` as zero. `operational.reason` already says all of this in one
    sentence if you would rather show one line.
-3. **`previewTax` on a `stripe` store is a real Stripe call the merchant is billed for.** Do not fire
-   it on keystroke — put it behind an explicit "Preview" button, or debounce hard. It also takes
-   `shippingMinor`, `taxCode`, and `currency` now, and returns `currency`.
+3. **`previewTax` on a `stripe` store is a real Stripe call the merchant is billed for.** The screen
+   already handles this correctly — `components/dashboard/tax-preview.tsx` fires it from a form
+   `onSubmit`, so one click is one call and **no debouncing is needed**. (An earlier revision of this
+   note asked for debouncing; that was wrong, checked 2026-08-18.) Keep it that way: if this ever
+   moves to an `onChange` or an effect, every keystroke becomes a charge on the merchant's Stripe
+   account. It also takes `shippingMinor`, `taxCode`, and `currency` now, and returns `currency`.
 
 **The cart's `tax` component now carries a `breakdown`, and two more stale types were corrected.**
 
@@ -275,6 +278,15 @@ figure appears at all. Never read a zero there as "no tax".
 values, copied onto the wrong type, so any screen branching on that union matched nothing and fell
 through its default for every cart. It is `"calculated" | "none" | "not_configured"`, and
 `not_configured` is the one that blocks checkout.
+
+**There is a component test suite now: `pnpm test:components`** (`vitest --project components`,
+happy-dom, ~1.5s). It exists because the two worst bugs in the storefront cart were invisible to
+every other check — not type errors, and not reachable from an integration test, because the
+island renders in a browser. `components/storefront/cart-checkout.test.tsx` is the pattern: mock only
+the network, feed payloads **captured from the live API**, assert what the shopper reads.
+
+It is not a mandate to test every component. It covers renders where being wrong misstates money or
+blocks a sale. Add to it when you touch one of those; skip it otherwise.
 
 **The storefront cart island was leaking internal state names to shoppers, and that is fixed**
 (`components/storefront/cart-checkout.tsx`, 2026-08-17). It rendered `Tax ({cart.tax.state})` and

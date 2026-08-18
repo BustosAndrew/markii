@@ -1,7 +1,7 @@
 import { defineConfig } from "vitest/config";
 
 /**
- * Two suites, deliberately separated by what they need to run.
+ * Three suites, deliberately separated by what they need to run.
  *
  * **`unit`** covers the pure money and rule functions — discount amounts, tax
  * extraction, rate eligibility, zone resolution. No database, no server, no
@@ -15,9 +15,23 @@ import { defineConfig } from "vitest/config";
  * reachable from a unit test, because each lived in the wiring rather than the
  * arithmetic.
  *
+ * **`components`** renders React components against a DOM, with the network
+ * mocked. It exists because the two worst bugs found in the storefront cart were
+ * both invisible to everything else here: a raw state enum printed to shoppers
+ * ("Tax (not_configured)"), and a tax-inclusive store displaying "Tax $0.00"
+ * while really charging tax. Neither is a type error, neither is reachable from
+ * an integration test — the island renders in a browser — and both were found
+ * only by a human looking at the page. This suite is what makes them
+ * regressions instead of rediscoveries.
+ *
+ * It is **not** a general component-testing mandate. It covers surfaces where a
+ * wrong render misstates money or blocks a sale, which is a much smaller set
+ * than "every component".
+ *
  * They are separate projects rather than one suite because the integration
  * tests **write to a real database** and must never run by accident — see
- * `tests/integration/setup.ts`.
+ * `tests/integration/setup.ts` — and because the DOM suite needs an
+ * environment the other two must not pay for.
  */
 
 const shared = {
@@ -47,6 +61,19 @@ export default defineConfig({
           name: "unit",
           include: ["lib/**/*.test.ts"],
           environment: "node",
+        },
+      },
+      {
+        ...shared,
+        test: {
+          name: "components",
+          include: ["components/**/*.test.tsx"],
+          /**
+           * `happy-dom` rather than `jsdom`: it starts in a fraction of the
+           * time, and nothing here needs the corners of the DOM spec where the
+           * two differ. Swap it if a test ever does.
+           */
+          environment: "happy-dom",
         },
       },
       {
