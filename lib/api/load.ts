@@ -1,4 +1,5 @@
 import { ApiClientError } from "@/lib/api/types";
+import { isConfigurationRequired, isPlannedError } from "@/lib/api/planned";
 
 export async function loadOrError<T>(
   fn: () => Promise<T>,
@@ -14,6 +15,38 @@ export async function loadOrError<T>(
       return { data: null, error: err.message };
     }
     return { data: null, error: "Request failed." };
+  }
+}
+
+/**
+ * Same as {@link loadOrError}, plus the third billing/email state: the route is
+ * live but this deployment has no credential. Callers must not treat that as a
+ * generic load failure.
+ */
+export async function loadConfigured<T>(
+  fn: () => Promise<T>,
+): Promise<{
+  data: T | null;
+  error: string | null;
+  configurationRequired: boolean;
+}> {
+  try {
+    return { data: await fn(), error: null, configurationRequired: false };
+  } catch (caught) {
+    if (isPlannedError(caught)) {
+      return { data: null, error: caught.message, configurationRequired: false };
+    }
+    if (isConfigurationRequired(caught)) {
+      return {
+        data: null,
+        error: caught.message,
+        configurationRequired: true,
+      };
+    }
+    if (caught instanceof Error) {
+      return { data: null, error: caught.message, configurationRequired: false };
+    }
+    return { data: null, error: "Could not load.", configurationRequired: false };
   }
 }
 

@@ -8,9 +8,14 @@ const sections = [
     description: "Staff, invites, roles, and API tokens.",
   },
   {
+    href: "/dashboard/settings/subscription",
+    title: "Subscription",
+    description: "Plan, first-invoice payment, and the card on file.",
+  },
+  {
     href: "/dashboard/settings/billing",
     title: "Billing",
-    description: "Plan, threshold meter, payment method, and invoices.",
+    description: "Threshold meter, invoices, and fee assessments.",
   },
   {
     href: "/dashboard/payments",

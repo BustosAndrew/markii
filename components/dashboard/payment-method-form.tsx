@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import {
   Elements,
@@ -7,24 +8,14 @@ import {
   useElements,
   useStripe,
 } from "@stripe/react-stripe-js";
-import { loadStripe, type Stripe } from "@stripe/stripe-js";
+import { stripePromiseFor } from "@/components/dashboard/stripe-browser";
 import {
   createSetupIntent,
   setDefaultPaymentMethod,
   type Subscription,
 } from "@/lib/api/billing";
+import { publicErrorMessage } from "@/lib/api/public-copy";
 import { Button } from "@/components/ui/button";
-
-const stripeCache = new Map<string, Promise<Stripe | null>>();
-
-function stripePromiseFor(publishableKey: string) {
-  let cached = stripeCache.get(publishableKey);
-  if (!cached) {
-    cached = loadStripe(publishableKey);
-    stripeCache.set(publishableKey, cached);
-  }
-  return cached;
-}
 
 function CardForm({ onDone }: { onDone: () => void }) {
   const stripe = useStripe();
@@ -62,7 +53,7 @@ function CardForm({ onDone }: { onDone: () => void }) {
       }
       onDone();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Card could not be saved.");
+      setError(publicErrorMessage(err, "Card could not be saved."));
     } finally {
       setBusy(false);
     }
@@ -84,6 +75,7 @@ export function PaymentMethodForm({
 }: {
   paymentMethod: Subscription["paymentMethod"];
 }) {
+  const router = useRouter();
   const [setup, setSetup] = useState<{
     clientSecret: string;
     publishableKey: string;
@@ -98,7 +90,7 @@ export function PaymentMethodForm({
     setMessage(null);
     try {
       const outcome = await createSetupIntent();
-      if (!outcome.ok || !outcome.result) {
+      if (!outcome.ok || !outcome.result?.clientSecret || !outcome.result.publishableKey?.startsWith("pk_")) {
         setError("Could not start card collection.");
         return;
       }
@@ -107,7 +99,7 @@ export function PaymentMethodForm({
         publishableKey: outcome.result.publishableKey,
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not start card collection.");
+      setError(publicErrorMessage(err, "Could not start card collection."));
     } finally {
       setBusy(false);
     }
@@ -117,7 +109,7 @@ export function PaymentMethodForm({
     <section className="rounded-[var(--radius-card)] border border-border bg-surface p-5 shadow-[var(--shadow-sm)]">
       <h2 className="text-base font-medium text-foreground">Payment method</h2>
       <p className="mt-1 text-sm leading-6 text-muted">
-        Card details go to Stripe only. Markii never sees the number.
+        Card on file for renewals. Details go to Stripe only — Markii never sees the number.
       </p>
 
       {paymentMethod ? (
@@ -146,7 +138,7 @@ export function PaymentMethodForm({
               onDone={() => {
                 setSetup(null);
                 setMessage("Card saved and set as default.");
-                window.location.reload();
+                router.refresh();
               }}
             />
           </Elements>

@@ -1,61 +1,26 @@
 import {
   getBillingAddon,
-  getBillingSubscription,
   getBillingUsage,
   listBillingInvoices,
-  listBillingPlans,
 } from "@/lib/api/server";
-import { isConfigurationRequired, isPlannedError } from "@/lib/api/planned";
+import { loadConfigured } from "@/lib/api/load";
 import { sanitizePublicCopy } from "@/lib/api/public-copy";
 import type {
   AddonResponse,
   InvoicesResponse,
-  PlansResponse,
-  SubscriptionResponse,
   UsageResponse,
 } from "@/lib/api/billing";
 import { BillingInvoices } from "@/components/dashboard/billing-invoices";
-import { BillingPlanPicker } from "@/components/dashboard/billing-plan-picker";
-import { PaymentMethodForm } from "@/components/dashboard/payment-method-form";
 import { ThresholdMeter } from "@/components/dashboard/threshold-meter";
 import { SettingsShell } from "@/components/dashboard/settings-shell";
 
-async function loadSafe<T>(fn: () => Promise<T>): Promise<{
-  data: T | null;
-  error: string | null;
-  configurationRequired: boolean;
-}> {
-  try {
-    return { data: await fn(), error: null, configurationRequired: false };
-  } catch (caught) {
-    if (isPlannedError(caught)) {
-      return { data: null, error: caught.message, configurationRequired: false };
-    }
-    if (isConfigurationRequired(caught)) {
-      return {
-        data: null,
-        error: caught.message,
-        configurationRequired: true,
-      };
-    }
-    return {
-      data: null,
-      error: caught instanceof Error ? caught.message : "Could not load.",
-      configurationRequired: false,
-    };
-  }
-}
-
 export default async function SettingsBillingPage() {
-  const [plans, subscription, usage, invoices, agentOps, chargeback] =
-    await Promise.all([
-      loadSafe<PlansResponse>(() => listBillingPlans()),
-      loadSafe<SubscriptionResponse>(() => getBillingSubscription()),
-      loadSafe<UsageResponse>(() => getBillingUsage()),
-      loadSafe<InvoicesResponse>(() => listBillingInvoices({ limit: 20 })),
-      loadSafe<AddonResponse>(() => getBillingAddon("agentOps")),
-      loadSafe<AddonResponse>(() => getBillingAddon("chargebackAssist")),
-    ]);
+  const [usage, invoices, agentOps, chargeback] = await Promise.all([
+    loadConfigured<UsageResponse>(() => getBillingUsage()),
+    loadConfigured<InvoicesResponse>(() => listBillingInvoices({ limit: 20 })),
+    loadConfigured<AddonResponse>(() => getBillingAddon("agentOps")),
+    loadConfigured<AddonResponse>(() => getBillingAddon("chargebackAssist")),
+  ]);
 
   const addons = [agentOps.data, chargeback.data].filter(
     (a): a is AddonResponse => a != null,
@@ -64,53 +29,17 @@ export default async function SettingsBillingPage() {
   return (
     <SettingsShell
       title="Billing"
-      description="Your plan, threshold meter, payment method, and invoices."
+      description="Threshold meter, invoices, and fee assessments. Plan and card live under Subscription."
     >
       <div className="space-y-8">
-        {subscription.configurationRequired || plans.configurationRequired ? (
+        {usage.configurationRequired ? (
           <p className="rounded-[var(--radius-control)] border border-border bg-surface-elevated p-4 text-sm text-muted">
             Billing is not configured on this deployment yet
-            {subscription.error ? `: ${subscription.error}` : "."}
+            {usage.error ? `: ${usage.error}` : "."}
           </p>
-        ) : null}
-
-        {plans.data && subscription.data ? (
-          <BillingPlanPicker
-            plans={plans.data.items}
-            currency={plans.data.currency}
-            /**
-             * The fallback is only reached when the API's own note is empty or
-             * sanitized away. It used to say prices were "proposed and not
-             * final", which stopped being true when the §3 schedule was signed
-             * off (D42) — a stale caveat undersells a settled price.
-             */
-            pricingNote={
-              sanitizePublicCopy(plans.data.note) ||
-              "Markii charges no transaction fee below your plan threshold, on any payment provider."
-            }
-            subscription={subscription.data}
-          />
-        ) : plans.error && !plans.configurationRequired ? (
-          <p className="text-sm text-error-text">
-            {sanitizePublicCopy(plans.error)}
-          </p>
-        ) : null}
-
-        <ThresholdMeter
-          usage={usage.data}
-          planned={false}
-          error={
-            usage.configurationRequired
-              ? usage.error
-              : usage.error
-          }
-        />
-
-        {subscription.data ? (
-          <PaymentMethodForm
-            paymentMethod={subscription.data.subscription?.paymentMethod ?? null}
-          />
-        ) : null}
+        ) : (
+          <ThresholdMeter usage={usage.data} planned={false} error={usage.error} />
+        )}
 
         {addons.length > 0 ? (
           <section className="rounded-[var(--radius-card)] border border-border bg-surface p-5 shadow-[var(--shadow-sm)]">

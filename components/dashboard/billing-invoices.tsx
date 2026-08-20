@@ -1,8 +1,30 @@
 import Link from "next/link";
 import type { FeeAssessment, Invoice, InvoicesResponse } from "@/lib/api/billing";
 import { formatMinor } from "@/lib/api/money";
+import { Badge } from "@/components/ui/badge";
+
+function invoiceStatus(status: string): {
+  label: string;
+  variant: "success" | "warning" | "neutral";
+} {
+  switch (status) {
+    case "paid":
+      return { label: "Paid", variant: "success" };
+    case "open":
+      return { label: "Due", variant: "warning" };
+    case "void":
+      return { label: "Voided — never collected", variant: "neutral" };
+    case "uncollectible":
+      return { label: "Uncollectible", variant: "warning" };
+    case "draft":
+      return { label: "Draft", variant: "neutral" };
+    default:
+      return { label: status.replace(/_/g, " "), variant: "neutral" };
+  }
+}
 
 function InvoiceRow({ invoice }: { invoice: Invoice }) {
+  const status = invoiceStatus(invoice.status);
   return (
     <tr className="border-t border-border">
       <td className="py-3 pr-4 text-sm text-foreground">
@@ -13,7 +35,9 @@ function InvoiceRow({ invoice }: { invoice: Invoice }) {
           {invoice.number ?? invoice.id}
         </Link>
       </td>
-      <td className="py-3 pr-4 text-sm capitalize text-muted">{invoice.status}</td>
+      <td className="py-3 pr-4">
+        <Badge variant={status.variant}>{status.label}</Badge>
+      </td>
       <td className="py-3 pr-4 text-sm tabular-nums text-foreground">
         {formatMinor(invoice.totalMinor, invoice.currency)}
       </td>

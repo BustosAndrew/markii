@@ -183,6 +183,13 @@ What moved:
   preview and writes nothing; send `confirm: true` to apply what the merchant just saw. Do not skip
   the preview — the amount is Stripe's arithmetic, and a locally computed estimate will sometimes
   disagree with the real charge.
+- **A first subscription is not done at `confirm: true`.** That response carries `clientSecret` and
+  `publishableKey`. Mount Payment Element and `confirmPayment` — this is the first invoice, not a
+  SetupIntent, and **there is no Stripe Checkout redirect**. Throwing the secret away and reloading
+  is how a merchant ends up looking subscribed with no card collected (`incomplete` grants nothing,
+  but Starter is also the floor so the copy can still say "Subscription active").
+- Plan, card, and cancel live at **`/dashboard/settings/subscription`**. Usage, invoices, and
+  assessments stay on `/dashboard/settings/billing`.
 - `POST /api/billing/payment-method` returns a real SetupIntent `clientSecret` **and** a
   `publishableKey`. Mount Elements with the key the server returns — never one hardcoded or read
   from a different env var, because the server refuses when the two are in different Stripe modes
@@ -668,11 +675,13 @@ from a component, no `createBrowserClient`, no client-side session read; identit
 Start with the **threshold meter** — it is the most important component in the product and the one
 most easily made dishonest. Read `docs/PRICING.md` §6 before writing it. Contract: §17.
 
-Then, in the order a merchant meets them: plan comparison → **proration preview → confirm** (two
-calls, never one) → card collection via Elements → `setDefaultPaymentMethod` → invoice history →
-invoice detail. Dunning banners key off `subscriptionState.code === "inactive"` and the `past_due`
-status, which **still grants access** — do not lock a merchant out of their dashboard over a card
-Stripe is still retrying.
+Then, in the order a merchant meets them: **Subscription** (`/dashboard/settings/subscription`) —
+plan comparison → **proration preview → confirm** (two calls, never one) → **first-invoice Payment
+Element** (`confirmPayment` with the `clientSecret` from confirm) → card on file via
+`setDefaultPaymentMethod` → **Billing** (`/dashboard/settings/billing`) for the threshold meter,
+invoice history, and invoice detail. Dunning banners key off `subscriptionState.code === "inactive"`
+and the `past_due` status, which **still grants access** — do not lock a merchant out of their
+dashboard over a card Stripe is still retrying.
 
 Two screens that need care rather than effort:
 
