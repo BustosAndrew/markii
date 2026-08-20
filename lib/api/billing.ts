@@ -319,6 +319,18 @@ export type PlanChangeResult = {
   /** Present when a first subscription needs confirming in Stripe Elements. */
   clientSecret?: string | null;
   publishableKey?: string | null;
+  /**
+   * True when the `clientSecret` reopens the invoice on a subscription that
+   * already existed but was never paid, rather than opening a new one. Nothing
+   * extra is charged — say "resume", not "subscribe again", or the merchant
+   * will reasonably fear a second bill.
+   */
+  resumed?: boolean;
+  /**
+   * The id of a dead subscription (expired, or gone from Stripe) that was
+   * discarded to make room for this one. Present only when that happened.
+   */
+  replaced?: string | null;
 };
 
 /**
@@ -333,6 +345,14 @@ export type PlanChangeResult = {
  * `organizations.planId` moves only once Stripe says the subscription is paid,
  * so a `confirmed` response with an `incomplete` status has **not** granted the
  * plan yet.
+ *
+ * **An unpaid subscription is not a dead end and must not be rendered as one.**
+ * Calling this for the plan it is already on reopens that subscription's own
+ * invoice and returns its `clientSecret` with `resumed: true`; calling it for a
+ * different plan discards it and starts the chosen one. A subscription Stripe
+ * has expired or lost is cleared automatically and this behaves as a first
+ * subscription. So the button for a pending plan is a live "Resume payment",
+ * never a disabled "Payment pending".
  */
 export function updateSubscription(
   body: { planId: PlanId; interval?: BillingInterval; confirm?: boolean },
@@ -366,16 +386,31 @@ export function getInvoice(id: string, init?: RequestInit) {
 }
 
 /**
- * Cancel at period end. **Never immediate** — the merchant paid through the end
- * of the period, so a consequence summary should say what they keep and until
- * when (`subscription.currentPeriodEnd`).
+ * Cancel at period end. **Never immediate for paid access** — the merchant paid
+ * through the end of the period, so a consequence summary should say what they
+ * keep and until when (`subscription.currentPeriodEnd`).
+ *
+ * **One case ends immediately, and the response says so.** A subscription that
+ * never granted a plan — `incomplete`, expired, or already gone from Stripe —
+ * is *discarded* rather than scheduled: there is no paid period to run out.
+ * Branch on `result.discarded` and tell the merchant nothing was charged,
+ * because "cancellation scheduled — you keep access until…" is simply false
+ * there and names a date that does not exist.
+ *
+ * This is also the only exit from that state, so render the control whenever a
+ * subscription exists — **not** only when `entitlesPlan` is true.
  */
 export function cancelSubscription(init?: RequestInit) {
   return callWhenLive(BILLING_API_LIVE, BILLING_SECTION, () =>
-    apiDelete<ActionOutcome<{ cancelAtPeriodEnd: boolean; endsAt: string | null }>>(
-      "/api/billing/subscription",
-      init,
-    ),
+    apiDelete<
+      ActionOutcome<{
+        cancelAtPeriodEnd: boolean;
+        endsAt: string | null;
+        /** True when the subscription was ended outright because it granted nothing. */
+        discarded?: boolean;
+        note?: string;
+      }>
+    >("/api/billing/subscription", init),
   );
 }
 

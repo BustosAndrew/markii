@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 import { allActions } from "../actions";
 import { planPricing } from "../plans";
 import { statusGrantsPlan, isSubscriptionStatus, FLOOR_PLAN } from "./mirror";
-import { expectedUnitAmountMinor, priceLookupKey, toSnapshot } from "./stripe-billing";
+import {
+  classifySubscription,
+  expectedUnitAmountMinor,
+  priceLookupKey,
+  toSnapshot,
+} from "./stripe-billing";
 
 /**
  * The pure half of Markii's own subscription billing (§17).
@@ -153,6 +158,47 @@ describe("isSubscriptionStatus", () => {
     expect(isSubscriptionStatus("incomplete_expired")).toBe(true);
     expect(isSubscriptionStatus("paused")).toBe(true);
     expect(isSubscriptionStatus("nonsense")).toBe(false);
+  });
+});
+
+/**
+ * The distinction that decides whether a merchant can act on the subscription
+ * they have. `statusGrantsPlan` answers "is this entitled"; this answers "is
+ * there anything left to pay, change, or cancel" — and the gap between them is
+ * where two orgs got stuck holding a subscription id they could neither pay nor
+ * discard, because every path keyed off entitlement.
+ */
+describe("classifySubscription", () => {
+  it("calls an unpaid first invoice payable, not finished", () => {
+    expect(classifySubscription("incomplete")).toBe("unpaid");
+    /** It grants nothing, which is a separate question from being actionable. */
+    expect(statusGrantsPlan("incomplete")).toBe(false);
+  });
+
+  /**
+   * `incomplete_expired` is where Stripe puts a first invoice nobody paid within
+   * 23 hours, and it arrives as a `customer.subscription.updated` — never a
+   * `deleted` — so nothing downstream clears the stored id unless this says the
+   * subscription is over.
+   */
+  it("calls the terminal states dead so the stored id can be dropped", () => {
+    expect(classifySubscription("incomplete_expired")).toBe("dead");
+    expect(classifySubscription("canceled")).toBe("dead");
+  });
+
+  it("treats everything Stripe still bills or retries as live", () => {
+    for (const status of ["active", "trialing", "past_due", "unpaid", "paused"]) {
+      expect(classifySubscription(status)).toBe("live");
+    }
+  });
+
+  /**
+   * An unknown status must not be discarded. Guessing "dead" would delete a
+   * paying merchant's subscription id the day Stripe adds a word to its
+   * vocabulary — the same reasoning that makes `mirrorSubscription` refuse one.
+   */
+  it("leaves an unrecognised status alone rather than discarding it", () => {
+    expect(classifySubscription("something_new")).toBe("live");
   });
 });
 

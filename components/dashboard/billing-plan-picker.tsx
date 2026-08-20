@@ -59,6 +59,14 @@ export function BillingPlanPicker({
     subscription.subscription != null &&
     subscription.subscription.entitlesPlan !== true;
   const unpaidPlanId = unpaid ? subscription.subscription?.planId ?? null : null;
+  /**
+   * An unpaid subscription is still cancellable — it is in fact the state most
+   * in need of a way out. Gating the button on `entitlesPlan` left a merchant
+   * with an `incomplete` subscription no button on this page could clear.
+   */
+  const showCancel =
+    subscription.subscription != null &&
+    (unpaid || !subscription.subscription.cancelAtPeriodEnd);
 
   async function requestPreview(planId: PlanId) {
     setBusyPlan(planId);
@@ -137,10 +145,16 @@ export function BillingPlanPicker({
         setError("Cancellation could not be scheduled.");
         return;
       }
-      const ends = outcome.result?.endsAt
-        ? new Date(outcome.result.endsAt).toLocaleDateString()
-        : "the end of the billing period";
-      setMessage(`Cancellation scheduled. You keep access until ${ends}.`);
+      if (outcome.result?.discarded) {
+        setMessage(
+          "Discarded the unpaid subscription. Nothing was charged for it — you can subscribe again.",
+        );
+      } else {
+        const ends = outcome.result?.endsAt
+          ? new Date(outcome.result.endsAt).toLocaleDateString()
+          : "the end of the billing period";
+        setMessage(`Cancellation scheduled. You keep access until ${ends}.`);
+      }
       setCancelOpen(false);
       router.refresh();
     } catch (err) {
@@ -168,16 +182,17 @@ export function BillingPlanPicker({
         </p>
         {unpaid ? (
           <p className="mt-3 rounded-[var(--radius-control)] bg-warning-bg px-3 py-2 text-sm leading-6 text-warning-text">
-            This subscription is not paid, so it does not grant a plan. After you
-            confirm a plan, enter the card on that card — there is no separate
-            Stripe Checkout page.
+            This subscription is not paid, so it does not grant a plan. Use{" "}
+            <strong>Resume payment</strong> on that plan to reopen its invoice — the
+            card form appears on the plan card itself, and no second subscription
+            is created. Picking a different plan replaces it. If you would rather
+            start over, discard it below; nothing has been charged.
           </p>
         ) : null}
-        {subscription.subscription?.entitlesPlan &&
-        !subscription.subscription.cancelAtPeriodEnd ? (
+        {showCancel ? (
           <div className="mt-4">
             <Button type="button" variant="secondary" onClick={() => setCancelOpen(true)}>
-              Cancel at period end
+              {unpaid ? "Discard unpaid subscription" : "Cancel at period end"}
             </Button>
           </div>
         ) : null}
@@ -217,7 +232,13 @@ export function BillingPlanPicker({
           const price =
             interval === "year" ? plan.annualPerMonthMinor : plan.monthlyPriceMinor;
           const isCurrent = current === planId;
-          const retryBlocked = unpaidPlanId === planId;
+          /**
+           * This used to disable the button as "Payment pending", which is the
+           * one plan the merchant most wanted to act on — the invoice is open
+           * and payable, and the only other exit was to wait 23 hours for Stripe
+           * to expire it.
+           */
+          const isUnpaidPlan = unpaidPlanId === planId;
           const showingPreview = preview?.planId === planId;
           const showingPay = pay?.planId === planId;
           return (
@@ -331,16 +352,16 @@ export function BillingPlanPicker({
                 <Button
                   type="button"
                   className="mt-5 w-full"
-                  variant={isCurrent || retryBlocked ? "secondary" : "primary"}
-                  disabled={isCurrent || retryBlocked || busyPlan !== null || pay !== null}
+                  variant={isCurrent ? "secondary" : "primary"}
+                  disabled={isCurrent || busyPlan !== null || pay !== null}
                   onClick={() => void requestPreview(planId)}
                 >
                   {busyPlan === planId
                     ? "Loading preview…"
                     : isCurrent
                       ? "Current plan"
-                      : retryBlocked
-                        ? "Payment pending"
+                      : isUnpaidPlan
+                        ? "Resume payment"
                         : current
                           ? "Switch plan"
                           : "Subscribe"}
@@ -356,13 +377,15 @@ export function BillingPlanPicker({
 
       <ConfirmDialog
         open={cancelOpen}
-        title="Cancel subscription?"
+        title={unpaid ? "Discard this subscription?" : "Cancel subscription?"}
         description={
-          subscription.subscription?.currentPeriodEnd
-            ? `You keep access until ${new Date(subscription.subscription.currentPeriodEnd).toLocaleDateString()}. Cancellation never ends immediately.`
-            : "You keep access until the end of the current billing period. Cancellation never ends immediately."
+          unpaid
+            ? "This subscription was never paid, so it grants nothing and nothing has been charged for it. Discarding it frees the organization to subscribe again."
+            : subscription.subscription?.currentPeriodEnd
+              ? `You keep access until ${new Date(subscription.subscription.currentPeriodEnd).toLocaleDateString()}. Cancellation never ends immediately.`
+              : "You keep access until the end of the current billing period. Cancellation never ends immediately."
         }
-        confirmLabel="Schedule cancellation"
+        confirmLabel={unpaid ? "Discard subscription" : "Schedule cancellation"}
         danger
         busy={cancelBusy}
         onConfirm={() => void onCancel()}

@@ -1767,8 +1767,8 @@ interface UsageRecord {            // immutable; written at event time, never de
 |---|---|---|
 | `GET` | `/api/billing/plans` | ✅ Public plan catalog + prices. Competitor comparisons are **data with a `verifiedAt`**, never hardcoded copy |
 | `GET` | `/api/billing/subscription` | ✅ Current subscription + entitlements. Reads the mirror, not Stripe — except the card, fetched live because a card removed in Stripe's portal emits no reliable event |
-| `POST` | `/api/billing/subscription` | ✅ Create/change plan. **Returns Stripe's proration preview and writes nothing unless `confirm: true`.** Delegates to `billing.changePlan` (§22) |
-| `DELETE` | `/api/billing/subscription` | ✅ Cancel at period end — never immediately; the merchant paid through the period. Delegates to `billing.setCancellation` |
+| `POST` | `/api/billing/subscription` | ✅ Create/change plan. **Returns Stripe's proration preview and writes nothing unless `confirm: true`.** Resolves the stored subscription against Stripe first, so an `incomplete` one is **reopened** (`resumed: true`, same invoice, no second charge) and an expired or missing one is cleared and replaced. Delegates to `billing.changePlan` (§22) |
+| `DELETE` | `/api/billing/subscription` | ✅ Cancel at period end — never immediately **when there is paid access to protect**. A subscription that granted nothing (`incomplete`, expired, or gone from Stripe) is *discarded* outright instead and answers `discarded: true`; there is no paid period to run out. Delegates to `billing.setCancellation` |
 | `GET` | `/api/billing/usage` | ✅ **The threshold meter** — see below. Measured, still not invoiced |
 | `GET` | `/api/billing/invoices` | ✅ Stripe invoices **and** the assessment ledger, under separate keys. Each assessment carries `invoiced`, `invoicedAt`, and `stripeInvoiceItemId` — a null item id on an invoiced row means *settled, nothing owed*, which `invoiced` alone cannot express |
 | `GET` | `/api/billing/invoices/:id` | ✅ One invoice, line-itemized. **The id is caller-supplied and `in_…` is a shared namespace**, so the invoice's customer is checked against the org's own and a mismatch answers `404`, not `403` — "forbidden" would confirm it exists. Threshold-fee lines carry the assessment that produced them |
@@ -1798,6 +1798,14 @@ money, on the platform account):
 | `charge.refund.updated` | A previously `pending` refund that failed. Flags it on the timeline; never silently reverses the refund record |
 | `customer.subscription.created` · `.updated` | **The authoritative signal for what a merchant is entitled to.** Mirrors Stripe onto the org through `mirrorSubscription` |
 | `customer.subscription.deleted` | Drops the org to the floor plan and clears the subscription id. **The only place a merchant loses access** — never when they click cancel |
+
+> **`incomplete_expired` never arrives as a `deleted`.** Stripe expires an unpaid first invoice
+> after 23 hours by *updating* the subscription, so the mirror keeps the id and nothing here clears
+> it. That is by design — this endpoint must not invent a deletion Stripe did not send — but it means
+> **the stored id can outlive the subscription**, and every caller that acts on one must resolve it
+> against Stripe rather than trust it. `billing.changePlan` and `billing.setCancellation` do
+> (`classifySubscription` in `lib/billing/stripe-billing.ts`); before they did, an org holding an
+> expired subscription could neither subscribe nor cancel from any screen.
 | `invoice.paid` · `invoice.payment_failed` | Re-reads the subscription and mirrors it. `paid` is what turns an `incomplete` signup into a paying customer |
 
 **The billing handlers refuse any event carrying a connected account** (`platformOnly`). A

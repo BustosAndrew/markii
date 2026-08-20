@@ -410,6 +410,13 @@ export async function createSubscription(input: {
   customerId: string;
   priceId: string;
   orgId: string;
+  /**
+   * The dead subscription this one replaces, when there is one. It varies only
+   * the idempotency key: a retry after discarding an expired subscription is a
+   * genuinely new attempt, and reusing the key inside Stripe's 24-hour window
+   * would hand back the very object that was just discarded.
+   */
+  replacing?: string | null;
 }): Promise<{ ok: true; snapshot: SubscriptionSnapshot; clientSecret: string | null } | StripeFailure> {
   const body = new URLSearchParams({
     customer: input.customerId,
@@ -429,7 +436,9 @@ export async function createSubscription(input: {
      * subscription rather than opening a second one the merchant would be
      * billed for twice.
      */
-    idempotencyKey: `markii_sub_${input.orgId}_${input.priceId}`,
+    idempotencyKey: input.replacing
+      ? `markii_sub_${input.orgId}_${input.priceId}_${input.replacing}`
+      : `markii_sub_${input.orgId}_${input.priceId}`,
   });
   if (!res.ok) return res;
   const snapshot = toSnapshot(res.data);
@@ -495,6 +504,81 @@ export async function cancelAtPeriodEnd(
   if (!res.ok) return res;
   const snapshot = toSnapshot(res.data);
   if (!snapshot) return { ok: false, code: "unavailable", message: "Stripe returned an unusable subscription." };
+  return { ok: true, snapshot };
+}
+
+/**
+ * What a mirrored subscription can still *do* — a different question from what
+ * it grants.
+ *
+ * `statusGrantsPlan` answers "is this merchant entitled"; this answers "is there
+ * anything here left to pay, change, or cancel". They diverge exactly at
+ * `incomplete` — no entitlement, but a payable invoice — and conflating them is
+ * what stranded orgs holding a subscription id they could neither pay nor
+ * discard.
+ *
+ * `dead` is the pair of terminal states. `incomplete_expired` is where Stripe
+ * puts a first invoice nobody paid within 23 hours, and it arrives as a
+ * `customer.subscription.updated`, **not** a `deleted` — so the mirror keeps the
+ * id and nothing downstream ever clears it.
+ */
+export function classifySubscription(status: string): "live" | "unpaid" | "dead" {
+  if (status === "incomplete") return "unpaid";
+  if (status === "incomplete_expired" || status === "canceled") return "dead";
+  return "live";
+}
+
+/**
+ * A subscription plus the secret that pays its open first invoice.
+ *
+ * Separate from `retrieveSubscription` because the expansion costs nothing to
+ * ask for and everything to omit: without it there is no route back to an
+ * `incomplete` subscription, and a merchant's only way to pay the plan they
+ * already chose is to wait 23 hours for Stripe to expire it.
+ */
+export async function retrievePayableSubscription(
+  subscriptionId: string,
+): Promise<
+  { ok: true; snapshot: SubscriptionSnapshot; clientSecret: string | null } | StripeFailure
+> {
+  const res = await call<
+    StripeSubscription & { latest_invoice?: { confirmation_secret?: { client_secret?: string } } }
+  >(
+    `/subscriptions/${encodeURIComponent(subscriptionId)}?expand[]=latest_invoice.confirmation_secret`,
+    { method: "GET" },
+  );
+  if (!res.ok) return res;
+  const snapshot = toSnapshot(res.data);
+  if (!snapshot) {
+    return { ok: false, code: "unavailable", message: "Stripe returned an unusable subscription." };
+  }
+  return {
+    ok: true,
+    snapshot,
+    clientSecret: res.data.latest_invoice?.confirmation_secret?.client_secret ?? null,
+  };
+}
+
+/**
+ * Ends a subscription immediately — the one case where that is the kind thing.
+ *
+ * `cancelAtPeriodEnd` protects access the merchant already paid for. An
+ * `incomplete` subscription has none to protect, and often no period end to
+ * schedule against, so flagging it would leave a dead row on the org forever.
+ * Call this **only** where `classifySubscription` says nothing is being granted.
+ */
+export async function cancelSubscriptionNow(
+  subscriptionId: string,
+): Promise<{ ok: true; snapshot: SubscriptionSnapshot } | StripeFailure> {
+  const res = await call<StripeSubscription>(
+    `/subscriptions/${encodeURIComponent(subscriptionId)}`,
+    { method: "DELETE" },
+  );
+  if (!res.ok) return res;
+  const snapshot = toSnapshot(res.data);
+  if (!snapshot) {
+    return { ok: false, code: "unavailable", message: "Stripe returned an unusable subscription." };
+  }
   return { ok: true, snapshot };
 }
 

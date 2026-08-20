@@ -188,6 +188,26 @@ What moved:
   SetupIntent, and **there is no Stripe Checkout redirect**. Throwing the secret away and reloading
   is how a merchant ends up looking subscribed with no card collected (`incomplete` grants nothing,
   but Starter is also the floor so the copy can still say "Subscription active").
+- **An unpaid subscription is a state with two exits, and both must be on screen** (2026-08-20).
+  `incomplete` grants nothing, so gating the plan buttons and the cancel button on `entitlesPlan`
+  left a merchant unable to pay for the plan they picked *or* to get rid of it — the only other
+  route out was to wait 23 hours for Stripe to expire the invoice. So:
+  - The pending plan's button is a live **"Resume payment"**, never a disabled "Payment pending".
+    `POST /api/billing/subscription` for that same plan reopens the *existing* invoice and returns
+    its `clientSecret` with **`resumed: true`** — no second subscription and no second charge, so
+    say "resume", not "subscribe again". Picking a *different* plan discards it and starts the new
+    one.
+  - **Render the cancel control whenever `subscription` is non-null**, not only when
+    `entitlesPlan` is true. For an unpaid one, `DELETE` answers **`discarded: true`** with a null
+    `endsAt`: it ended immediately because there was no paid period to protect. Branch on it —
+    "cancellation scheduled, you keep access until…" is false there and names a date that does not
+    exist. Say nothing was charged.
+- **A stored subscription id can outlive the subscription**, and the API now repairs that rather
+  than erroring: Stripe expires an unpaid first invoice by *updating* it to `incomplete_expired`,
+  not deleting it, so the webhook that clears the id never fires. `POST`/`DELETE` resolve the id
+  against Stripe, clear the mirror when it is dead or gone, and behave as a first subscription. A
+  screen needs no special case for it — but do not assume `subscription != null` means Stripe still
+  has one.
 - Plan, card, and cancel live at **`/dashboard/settings/subscription`**. Usage, invoices, and
   assessments stay on `/dashboard/settings/billing`.
 - `POST /api/billing/payment-method` returns a real SetupIntent `clientSecret` **and** a
