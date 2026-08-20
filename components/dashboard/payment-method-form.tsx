@@ -8,13 +8,17 @@ import {
   useElements,
   useStripe,
 } from "@stripe/react-stripe-js";
-import { stripePromiseFor } from "@/components/dashboard/stripe-browser";
+import {
+  markiiStripeAppearance,
+  stripePromiseFor,
+} from "@/components/dashboard/stripe-browser";
 import {
   createSetupIntent,
   setDefaultPaymentMethod,
   type Subscription,
 } from "@/lib/api/billing";
 import { publicErrorMessage } from "@/lib/api/public-copy";
+import { CreditCard } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 function CardForm({ onDone }: { onDone: () => void }) {
@@ -113,13 +117,25 @@ export function PaymentMethodForm({
       </p>
 
       {paymentMethod ? (
-        <p className="mt-4 text-sm text-foreground">
-          <span className="capitalize">{paymentMethod.brand}</span> ending in{" "}
-          <span className="tabular-nums">{paymentMethod.last4}</span>, expires{" "}
-          <span className="tabular-nums">
-            {paymentMethod.expMonth}/{paymentMethod.expYear}
+        <div className="mt-4 flex items-center gap-3 rounded-[var(--radius-control)] border border-border bg-surface-elevated px-4 py-3">
+          <span
+            aria-hidden
+            className="flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-hover text-foreground"
+          >
+            <CreditCard className="size-4" strokeWidth={1.75} />
           </span>
-        </p>
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-foreground">
+              <span className="capitalize">{paymentMethod.brand}</span>
+              <span className="text-muted"> ···· </span>
+              <span className="tabular-nums">{paymentMethod.last4}</span>
+            </p>
+            <p className="mt-0.5 text-xs text-muted tabular-nums">
+              Expires {String(paymentMethod.expMonth).padStart(2, "0")}/
+              {paymentMethod.expYear}
+            </p>
+          </div>
+        </div>
       ) : (
         <p className="mt-4 text-sm text-muted">No default card on file.</p>
       )}
@@ -129,10 +145,13 @@ export function PaymentMethodForm({
           {busy ? "Preparing…" : paymentMethod ? "Replace card" : "Add card"}
         </Button>
       ) : (
-        <div className="mt-4">
+        <div className="mt-4 max-w-lg">
           <Elements
             stripe={stripePromiseFor(setup.publishableKey)}
-            options={{ clientSecret: setup.clientSecret }}
+            options={{
+              clientSecret: setup.clientSecret,
+              appearance: markiiStripeAppearance,
+            }}
           >
             <CardForm
               onDone={() => {

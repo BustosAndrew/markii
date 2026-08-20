@@ -8,7 +8,10 @@ import {
   useStripe,
 } from "@stripe/react-stripe-js";
 import { publicErrorMessage } from "@/lib/api/public-copy";
-import { stripePromiseFor } from "@/components/dashboard/stripe-browser";
+import {
+  markiiStripeAppearance,
+  stripePromiseFor,
+} from "@/components/dashboard/stripe-browser";
 import { Button } from "@/components/ui/button";
 
 function PayForm({ onDone }: { onDone: () => void }) {
@@ -62,7 +65,7 @@ export function SubscriptionPayForm({
   return (
     <Elements
       stripe={stripePromiseFor(publishableKey)}
-      options={{ clientSecret }}
+      options={{ clientSecret, appearance: markiiStripeAppearance }}
     >
       <PayForm onDone={onDone} />
     </Elements>

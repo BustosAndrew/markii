@@ -1,6 +1,21 @@
 "use client";
 
-import { loadStripe, type Stripe } from "@stripe/stripe-js";
+import { loadStripe, type Appearance, type Stripe } from "@stripe/stripe-js";
+
+/** Shared Elements look — matches Operate tokens so the card form is not Stripe's default blue. */
+export const markiiStripeAppearance: Appearance = {
+  theme: "stripe",
+  variables: {
+    colorPrimary: "#C9184A",
+    colorBackground: "#FFFFFF",
+    colorText: "#16161D",
+    colorDanger: "#C9184A",
+    colorTextSecondary: "#6B7280",
+    fontFamily: "var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif",
+    borderRadius: "12px",
+    spacingUnit: "4px",
+  },
+};
 
 const stripeCache = new Map<string, Promise<Stripe | null>>();
 

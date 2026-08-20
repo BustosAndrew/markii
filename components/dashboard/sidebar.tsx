@@ -36,10 +36,10 @@ export const nav = [
   { href: "/dashboard/memberships", label: "Memberships", icon: KeyRound },
   { href: "/dashboard/websites", label: "Websites", icon: Globe },
   { href: "/dashboard/analytics", label: "Analytics", icon: BarChart3 },
-  { href: "/dashboard/settings", label: "Settings", icon: Settings },
   { href: "/dashboard/payments", label: "Payments", icon: CreditCard },
   { href: "/dashboard/health", label: "Health", icon: ShieldCheck },
   { href: "/dashboard/integrations", label: "Integrations", icon: Plug },
+  { href: "/dashboard/settings", label: "Settings", icon: Settings },
 ] as const;
 
 export function isActive(pathname: string, href: string) {

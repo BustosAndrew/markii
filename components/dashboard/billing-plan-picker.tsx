@@ -223,7 +223,11 @@ export function BillingPlanPicker({
           return (
             <article
               key={planId}
-              className="rounded-[var(--radius-card)] border border-border bg-surface p-5 shadow-[var(--shadow-sm)]"
+              className={`rounded-[var(--radius-card)] border bg-surface p-5 shadow-[var(--shadow-sm)] ${
+                showingPay
+                  ? "border-brand/40 lg:col-span-3"
+                  : "border-border"
+              }`}
             >
               <div className="flex items-center justify-between gap-2">
                 <h3 className="text-base font-semibold capitalize text-foreground">
@@ -255,8 +259,8 @@ export function BillingPlanPicker({
               </ul>
 
               {showingPay && pay ? (
-                <div className="mt-5 space-y-3">
-                  <p className="text-sm text-muted">
+                <div className="mt-5 max-w-lg space-y-3">
+                  <p className="text-sm leading-6 text-muted">
                     Enter a card to pay the first invoice. Card details go to Stripe
                     only.
                   </p>

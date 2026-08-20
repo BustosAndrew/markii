@@ -27,7 +27,7 @@ export function SettingsSubnav() {
   return (
     <nav
       aria-label="Settings sections"
-      className="mb-6 flex flex-wrap gap-2 rounded-[var(--radius-card)] border border-border bg-surface p-2"
+      className="-mx-1 mb-6 flex gap-1 overflow-x-auto border-b border-border px-1"
     >
       {settingsLinks.map((link) => {
         const active = linkIsActive(pathname, link.href);
@@ -36,11 +36,12 @@ export function SettingsSubnav() {
           <Link
             key={link.href}
             href={link.href}
+            aria-current={active ? "page" : undefined}
             className={cn(
-              "cursor-pointer rounded-[var(--radius-control)] px-3 py-2 text-sm font-medium transition-colors",
+              "shrink-0 border-b-2 px-3 py-2.5 text-sm font-medium whitespace-nowrap transition-colors",
               active
-                ? "bg-hover text-foreground hover:bg-hover"
-                : "text-muted hover:bg-hover-soft hover:text-foreground",
+                ? "border-brand text-foreground"
+                : "border-transparent text-muted hover:border-border hover:text-foreground",
             )}
           >
             {link.label}

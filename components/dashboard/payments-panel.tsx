@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { CreditCard, ExternalLink, Wallet, type LucideIcon } from "lucide-react";
+import { cn } from "@/lib/utils";
 import {
   connectRail,
   disconnectRail,
@@ -13,7 +14,7 @@ import {
 } from "@/lib/api/payments";
 import { publicErrorMessage } from "@/lib/api/public-copy";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, ButtonLink } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { FieldError, Input, Label } from "@/components/ui/field";
 
@@ -147,62 +148,47 @@ export function PaymentsPanel({
         icon={CreditCard}
         rail={stripe}
       >
-        {stripe.status === "connected" && stripe.accountId ? (
-          <>
-            <p className="mb-1 text-sm text-muted">Account {stripe.accountId}</p>
-            <p className="mb-3 text-sm text-muted">
-              {stripe.canAcceptPayments
-                ? "Card payments are enabled on your account."
-                : "Stripe has not enabled charges yet — card checkout stays off until it does." +
-                  (stripe.requirementsDue?.length
-                    ? ` Outstanding: ${stripe.requirementsDue.join(", ")}.`
-                    : "")}
-            </p>
-            <a
-              href="https://dashboard.stripe.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mb-3 inline-flex items-center gap-1.5 text-sm font-medium text-brand hover:text-brand-hover"
-            >
-              Open Stripe dashboard
-              <ExternalLink className="size-3.5" strokeWidth={1.75} />
-            </a>
-          </>
-        ) : (
-          <p className="mb-3 text-sm text-muted">
-            You will be sent to Stripe to authorise. Markii never asks for your secret key.
-          </p>
-        )}
-
-        <Button
-          type="button"
-          disabled={busy}
-          onClick={async () => {
-            setBusy(true);
-            setError(null);
-            try {
-              const { url } = await startStripeConnect();
-              window.location.href = url;
-            } catch (err) {
-              setError(publicErrorMessage(err, "Could not start the Stripe connection."));
-              setBusy(false);
-            }
-          }}
-        >
-          {stripe.status === "connected" ? "Reconnect Stripe" : "Connect with Stripe"}
-        </Button>
-
         {stripe.status === "connected" ? (
-          <Button
-            type="button"
-            variant="ghost"
-            className="mt-3 text-error-text"
-            disabled={busy}
-            onClick={() => setDisconnectTarget("stripe")}
-          >
-            Disconnect
-          </Button>
-        ) : null}
+          <StripeConnectedBody
+            stripe={stripe}
+            busy={busy}
+            onReconnect={async () => {
+              setBusy(true);
+              setError(null);
+              try {
+                const { url } = await startStripeConnect();
+                window.location.href = url;
+              } catch (err) {
+                setError(publicErrorMessage(err, "Could not start the Stripe connection."));
+                setBusy(false);
+              }
+            }}
+            onDisconnect={() => setDisconnectTarget("stripe")}
+          />
+        ) : (
+          <>
+            <p className="mb-3 text-sm leading-6 text-muted">
+              You will be sent to Stripe to authorise. Markii never asks for your secret key.
+            </p>
+            <Button
+              type="button"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true);
+                setError(null);
+                try {
+                  const { url } = await startStripeConnect();
+                  window.location.href = url;
+                } catch (err) {
+                  setError(publicErrorMessage(err, "Could not start the Stripe connection."));
+                  setBusy(false);
+                }
+              }}
+            >
+              Connect with Stripe
+            </Button>
+          </>
+        )}
       </RailCard>
 
       {initial.stores.length > 0 ? (
@@ -302,6 +288,101 @@ export function PaymentsPanel({
   );
 }
 
+function StripeConnectedBody({
+  stripe,
+  busy,
+  onReconnect,
+  onDisconnect,
+}: {
+  stripe: RailStatus;
+  busy: boolean;
+  onReconnect: () => void;
+  onDisconnect: () => void;
+}) {
+  const ready = stripe.canAcceptPayments;
+  return (
+    <div className="space-y-4">
+      <div
+        className={cn(
+          "rounded-[var(--radius-control)] px-4 py-3",
+          ready ? "bg-success-bg" : "bg-warning-bg",
+        )}
+      >
+        <p
+          className={cn(
+            "text-sm font-medium",
+            ready ? "text-success-text" : "text-warning-text",
+          )}
+        >
+          {ready
+            ? "Card payments are live"
+            : "Connected — charges are not enabled yet"}
+        </p>
+        <p
+          className={cn(
+            "mt-1 text-sm leading-6",
+            ready ? "text-success-text" : "text-warning-text",
+          )}
+        >
+          {ready
+            ? "Checkout can take cards. Money settles to your Stripe account — Markii never holds it."
+            : "Card checkout stays off on every storefront until Stripe enables charges on this account."}
+        </p>
+        {stripe.requirementsDue && stripe.requirementsDue.length > 0 ? (
+          <p className="mt-2 text-sm leading-6 text-warning-text">
+            Outstanding: {stripe.requirementsDue.join(", ")}.
+          </p>
+        ) : null}
+      </div>
+
+      <dl className="grid gap-3 sm:grid-cols-3">
+        <div className="rounded-[var(--radius-control)] border border-border bg-surface-elevated px-3 py-2.5">
+          <dt className="text-xs text-muted">Charges</dt>
+          <dd className="mt-0.5 text-sm font-medium text-foreground">
+            {stripe.chargesEnabled ? "Enabled" : "Not enabled"}
+          </dd>
+        </div>
+        <div className="rounded-[var(--radius-control)] border border-border bg-surface-elevated px-3 py-2.5">
+          <dt className="text-xs text-muted">Payouts</dt>
+          <dd className="mt-0.5 text-sm font-medium text-foreground">
+            {stripe.payoutsEnabled ? "Enabled" : "Not enabled"}
+          </dd>
+        </div>
+        <div className="rounded-[var(--radius-control)] border border-border bg-surface-elevated px-3 py-2.5">
+          <dt className="text-xs text-muted">Account</dt>
+          <dd className="mt-0.5 truncate font-mono text-xs text-foreground" title={stripe.accountId ?? undefined}>
+            {stripe.accountId ?? "—"}
+          </dd>
+        </div>
+      </dl>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <ButtonLink
+          href="https://dashboard.stripe.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          variant="secondary"
+        >
+          Open Stripe dashboard
+          <ExternalLink className="size-3.5" strokeWidth={1.75} />
+        </ButtonLink>
+        <Button type="button" variant="secondary" disabled={busy} onClick={onReconnect}>
+          Reconnect
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          className="text-error-text"
+          disabled={busy}
+          onClick={onDisconnect}
+        >
+          Disconnect
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function RailCard({
   title,
   description,
@@ -317,14 +398,20 @@ function RailCard({
 }) {
   const ready = rail.canAcceptPayments;
   return (
-    <section className="rounded-[var(--radius-card)] border border-border bg-surface p-5 shadow-[var(--shadow-sm)]">
+    <section
+      className={cn(
+        "rounded-[var(--radius-card)] border bg-surface p-5 shadow-[var(--shadow-sm)]",
+        ready ? "border-success-text/25" : "border-border",
+      )}
+    >
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 gap-3">
           <span
             aria-hidden
-            className={`flex size-10 shrink-0 items-center justify-center rounded-[var(--radius-control)] ${
-              ready ? "bg-brand/10 text-brand" : "bg-hover text-muted"
-            }`}
+            className={cn(
+              "flex size-10 shrink-0 items-center justify-center rounded-[var(--radius-control)]",
+              ready ? "bg-success-bg text-success-text" : "bg-hover text-muted",
+            )}
           >
             <Icon className="size-5" strokeWidth={1.75} />
           </span>
@@ -347,7 +434,7 @@ function RailCard({
                 : "Not connected"}
           </Badge>
           <Badge variant={ready ? "success" : "neutral"}>
-            {ready ? "Can accept payments" : "Not taking payments"}
+            {ready ? "Taking payments" : "Not taking payments"}
           </Badge>
         </div>
       </div>
