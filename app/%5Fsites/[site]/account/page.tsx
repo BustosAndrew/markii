@@ -6,7 +6,7 @@ import { ThemeRoot } from "@/components/storefront/theme-root";
 import { currentCustomer } from "@/lib/auth/shopper";
 import { membershipStatus } from "@/lib/commerce/memberships";
 import { customerMemberships, db, membershipTiers } from "@/lib/db";
-import { loadSite } from "@/lib/storefront";
+import { loadSite, storefrontHalted } from "@/lib/storefront";
 
 type Props = {
   params: Promise<{ site: string }>;
@@ -43,7 +43,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
   const data = await loadSite(siteSlug);
   if (!data) notFound();
   const { site, bundle, baseUrl } = data;
-  if (site.status === "paused") notFound();
+  if (storefrontHalted(data)) notFound();
 
   const customer = await currentCustomer(site.id);
 

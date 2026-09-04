@@ -28,6 +28,17 @@ export class ApiError extends Error {
        * `details.gate` says whether to enrol, challenge, or step up.
        */
       | "MFA_REQUIRED"
+      /**
+       * The free month ended and nothing was bought, so the account is out of
+       * standing (`lib/billing/standing.ts`).
+       *
+       * **Not `FORBIDDEN`, and paired with 402.** The caller's permissions are
+       * correct and a second factor would change nothing — what is missing is a
+       * payment. Sending `FORBIDDEN` would put the dashboard's step-up modal in
+       * front of a merchant who needs a subscribe button, and would tell an agent
+       * it lacks authority when it lacks a plan.
+       */
+      | "TRIAL_ENDED"
       | "INTERNAL",
     public status: number,
     message: string,

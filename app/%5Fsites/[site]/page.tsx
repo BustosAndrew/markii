@@ -6,7 +6,7 @@ import { SiteHeader } from "@/components/storefront/site-header";
 import { StorePaused } from "@/components/storefront/paused";
 import { ThemeRoot } from "@/components/storefront/theme-root";
 import { logTraffic } from "@/lib/agents";
-import { loadSite } from "@/lib/storefront";
+import { loadSite, storefrontHalted } from "@/lib/storefront";
 
 type Props = { params: Promise<{ site: string }> };
 
@@ -31,7 +31,13 @@ export default async function StorePage({ params }: Props) {
   const { site, bundle, baseUrl } = data;
   const themeId = site.themeId ?? "studio";
 
-  if (site.status === "paused") {
+  /**
+   * The one page that explains itself instead of 404ing — a shopper who followed
+   * a link deserves to know the store exists and is coming back. The reason is
+   * **not** disclosed: "this merchant did not pay" is Markii's business with the
+   * merchant, not something to publish to their customers.
+   */
+  if (storefrontHalted(data)) {
     return <StorePaused siteName={site.name} themeId={themeId} />;
   }
 

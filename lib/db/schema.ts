@@ -525,6 +525,29 @@ export const organizations = pgTable(
     currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
     trialEndsAt: timestamp("trial_ends_at", { withTimezone: true }),
     cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
+    /**
+     * **The free month, and deliberately not `trial_ends_at` above.** That one is
+     * a mirror of Stripe's `subscription.trial_end` — `mirrorSubscription`
+     * overwrites it on every webhook and `mirrorCancellation` nulls it — so
+     * storing the signup trial there would have it erased by the first
+     * subscription event, taking a merchant's store offline mid-trial.
+     *
+     * Markii's own trial has no Stripe object behind it at all: signup takes no
+     * card, so there is nothing for Stripe to schedule. That is also why this is
+     * a date rather than a status — **standing is derived per request**
+     * (`lib/billing/standing.ts`), never swept. Nothing in this codebase runs on
+     * a clock that could flip a stored flag at the right moment, and a stored
+     * "trialing" would keep granting access long after it ran out.
+     */
+    freeTrialEndsAt: timestamp("free_trial_ends_at", { withTimezone: true }),
+    /**
+     * When the "your trial is ending" mail went out, so it goes **once**.
+     *
+     * Claimed before the send, like the abandoned-cart reminder: a crash then
+     * costs one missed email rather than a daily repeat at the merchant's
+     * address and Markii's sending reputation.
+     */
+    trialReminderSentAt: timestamp("trial_reminder_sent_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

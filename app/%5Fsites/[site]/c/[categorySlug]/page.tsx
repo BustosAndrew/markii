@@ -5,7 +5,7 @@ import { SiteHeader } from "@/components/storefront/site-header";
 import { ThemeRoot } from "@/components/storefront/theme-root";
 import { logTraffic } from "@/lib/agents";
 import { formatPrice } from "@/lib/generators";
-import { loadSite } from "@/lib/storefront";
+import { loadSite, storefrontHalted } from "@/lib/storefront";
 
 type Props = { params: Promise<{ site: string; categorySlug: string }> };
 
@@ -26,7 +26,7 @@ export default async function CategoryPage({ params }: Props) {
   if (!data) notFound();
   const { site, cats, prods, bundle, baseUrl } = data;
   const category = cats.find((c) => c.slug === categorySlug && c.enabled);
-  if (!category || site.status === "paused") notFound();
+  if (!category || storefrontHalted(data)) notFound();
 
   await logTraffic({
     siteId: site.id,

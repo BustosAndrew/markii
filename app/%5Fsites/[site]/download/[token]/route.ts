@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { handler, notFound } from "@/lib/api";
 import { checkRedeemable } from "@/lib/commerce/delivery";
+import { siteHalted } from "@/lib/billing/standing-guard";
 import { db, digitalAssets, downloadEvents, downloadGrants, sites } from "@/lib/db";
 import { isStorageConfigured, signedDownloadUrl } from "@/lib/storage";
 
@@ -25,6 +26,34 @@ export const GET = handler(async (req, { params }) => {
 
   const [store] = await db.select().from(sites).where(eq(sites.slug, slug)).limit(1);
   if (!store) throw notFound("Store");
+
+  /**
+   * **A halted store serves no downloads**, by the same rule that stops it
+   * taking orders and renewing memberships.
+   *
+   * This one costs a buyer something they already paid for, which is why it says
+   * so plainly and promises the file back rather than implying it is gone: the
+   * grant, its remaining count and its expiry are all untouched, and redemption
+   * resumes the moment the store does. It is a **409, not a 404** — the link is
+   * valid and the shopper should keep it.
+   */
+  const halt = await siteHalted(store.id);
+  if (halt.halted) {
+    return NextResponse.json(
+      {
+        error: {
+          code: "CONFLICT",
+          message: "This store is temporarily unavailable, so downloads are paused.",
+          details: {
+            resolution:
+              "Your download has not been used up and this link still works. " +
+              "Try again once the store is back.",
+          },
+        },
+      },
+      { status: 409 },
+    );
+  }
 
   if (!isStorageConfigured()) {
     return NextResponse.json(

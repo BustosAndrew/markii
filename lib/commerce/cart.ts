@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { badRequest, conflict, notFound } from "../api";
 import { currentCustomerId } from "../auth/shopper";
+import { standingFor } from "../billing/standing-guard";
 import { cartLines, carts, db, sites, type Cart, type Site } from "../db";
 import { assertAccess } from "./memberships";
 import { priceCart, productOnSite, unitPriceOf, type PricedCart } from "./pricing";
@@ -35,10 +36,25 @@ export async function loadStore(slug: string): Promise<Site> {
   return site;
 }
 
-/** A store that is not accepting orders says so once, here. */
-export function assertPurchasable(site: Site): void {
+/**
+ * A store that is not accepting orders says so once, here.
+ *
+ * Every purchase path already calls this — cart, card checkout, x402 checkout
+ * and membership checkout alike — which is why the account-standing check lives
+ * here rather than in each route. A payment route added tomorrow inherits it.
+ *
+ * **The shopper is never told why.** All three refusals share one shape and one
+ * silence: "this merchant did not pay their bill" is Markii's business with the
+ * merchant, not something to publish to their customers.
+ */
+export async function assertPurchasable(site: Site): Promise<void> {
   if (site.status === "paused") throw conflict("This store is currently paused");
   if (!site.purchasesEnabled) throw conflict("Purchases are disabled on this store");
+
+  const standing = await standingFor(site.orgId);
+  if (standing?.state === "expired") {
+    throw conflict("This store is not currently accepting orders");
+  }
 }
 
 export async function createCart(site: Site): Promise<Cart> {

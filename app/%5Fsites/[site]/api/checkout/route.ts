@@ -17,7 +17,7 @@ import { cartLines, carts, checkoutSessions, db, orders, variants } from "@/lib/
 import { defaultWallet } from "@/lib/integrations";
 import { buildChallenge, decodePaymentHeader, verifyOnChain } from "@/lib/x402";
 import { checkoutSchema } from "@/lib/validation";
-import { loadSite } from "@/lib/storefront";
+import { loadSite, storefrontHalted } from "@/lib/storefront";
 
 /**
  * The x402 agent checkout — one shot: challenge, pay, present the hash.
@@ -42,7 +42,7 @@ async function checkout(req: Request, siteSlug: string, input: unknown) {
   if (!data) throw notFound("Site");
   const { site, baseUrl } = data;
 
-  if (site.status === "paused") {
+  if (storefrontHalted(data)) {
     return NextResponse.json({ error: "store is paused" }, { status: 403 });
   }
   if (!site.purchasesEnabled || !site.paymentProviders.x402) {

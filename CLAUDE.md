@@ -118,6 +118,42 @@ rest on system actors being "never reachable over HTTP"; `CRON_SECRET` now carri
 alone (`lib/cron/auth.ts` — refuses when unset, refuses under 32 chars, constant-time compare).
 Unset, nothing is billed at all: **it refuses rather than running open** (D41).
 
+**Every merchant account now gets one free month, and then the storefront stops** (D45,
+2026-09-04). This ended an accidental free tier: `organizations.planId` defaults to `starter` and
+`entitlementsFor` reads it directly, so an org that never subscribed kept a working store forever.
+**Standing is derived per request** (`lib/billing/standing.ts`) by comparing `freeTrialEndsAt` to
+now — nothing here runs on a clock that could flip a stored flag when a trial lapses, which is the
+same reason membership status stays derived (D34). The trial has **no Stripe object**: signup takes
+no card, so there is nothing for Stripe to schedule.
+
+**Enforcement is one check in `invokeAction`** — §22 rule 1 makes it the only mutation path, so it
+covers UI, HTTP API, agents and MCP at once. It answers **402 `TRIAL_ENDED`**, never 403: the
+caller's permissions are fine and a second factor cannot help. **`billing.*` is exempt** or the
+merchant is locked out of the only door, and **reads are never gated** — holding a store is a
+commercial measure, not grounds for holding their data. Storefronts halt through
+`storefrontHalted()`, which merges the billing hold with the merchant's own `paused` status at the
+moment of asking while keeping the two causes separate everywhere they are recorded; shoppers are
+told the store is unavailable and never why.
+
+**A halted store stops earning, not only selling.** `siteHalted` (`lib/billing/standing-guard.ts`)
+merges the billing hold with the merchant's own `paused` status and gates three things beyond
+rendering: new checkouts, **membership renewals**, and **digital downloads**. **The charge is stopped before it happens**: `invoice.created`
+on the connected account is the pre-charge hook, and a halted store's member subscriptions go into
+`pause_collection[behavior]=void` so no invoice is ever charged. **Paused, never cancelled** — a
+cancellation would destroy a merchant's recurring revenue irreversibly over a lapsed trial.
+`syncMembershipCollection` (`lib/commerce/membership-holds.ts`) reconciles both directions in one
+idempotent pass, run when the merchant's plan changes and when they pause or un-pause a store. The
+`invoice.paid` refusal remains as the fallback for anything slipping that window: it declines to
+extend, records why, and does **not** meter — Markii will not count revenue toward a threshold for
+access it refused. **This requires `invoice.created` on the Connect webhook endpoint**; without it
+the pre-charge stop never fires and only the fallback runs.
+
+**A third job is scheduled: trial reminders** (`0 9 * * *`). It mails merchants whose month ends
+within three days and who hold no subscription that *grants* a plan — an `incomplete` one sets
+`stripeSubscriptionId` while granting nothing, so the narrower test would skip exactly the merchant
+about to go dark. **It enforces nothing**: if the cron never runs, merchants lose a warning rather
+than their store.
+
 **A second job is scheduled now: abandoned-cart recovery** (`0 * * * *`, D27). It holds *less*
 authority than the billing cron on purpose — it authenticates with the same `CRON_SECRET` and then
 mints no actor at all, because all it does is send email. **Opt-in per storefront and off by

@@ -357,6 +357,74 @@ export async function cancelMembershipRenewal(
 }
 
 /**
+ * Stop a shopper's subscription **billing** without ending it — the pre-charge
+ * half of a halted store.
+ *
+ * `pause_collection[behavior]=void` is the mechanism, and it is chosen over the
+ * two obvious alternatives on purpose:
+ *
+ * - **Not `cancel`.** Cancelling is irreversible for the merchant: when they
+ *   subscribe again they do not get their subscribers back, and Markii would
+ *   have destroyed a book of recurring revenue over a lapsed trial. Pausing is
+ *   undone by `resumeMembershipCollection` with one call.
+ * - **Not voiding each invoice as it appears.** That is a race against Stripe's
+ *   finalisation window and has to win every month; pausing is a standing
+ *   instruction that holds until it is lifted.
+ *
+ * `void` rather than `keep_as_draft` so nothing accumulates to be collected
+ * later: a merchant who returns after three months must not have Stripe hand
+ * their members three back-dated invoices at once.
+ *
+ * **The shopper is never charged**, which is the whole point — this is what
+ * makes the halt honest, rather than taking a payment and refusing the access it
+ * bought.
+ */
+export async function pauseMembershipCollection(
+  accountId: string,
+  subscriptionId: string,
+): Promise<{ ok: true; alreadyPaused: boolean } | MembershipBillingFailure> {
+  const current = await call<{ pause_collection?: { behavior?: string } | null }>(
+    accountId,
+    `/subscriptions/${encodeURIComponent(subscriptionId)}`,
+    { method: "GET" },
+  );
+  if (!current.ok) return current;
+  /** Idempotent: Stripe raises `invoice.created` monthly and this must not thrash. */
+  if (current.data.pause_collection?.behavior === "void") {
+    return { ok: true, alreadyPaused: true };
+  }
+
+  const res = await call(accountId, `/subscriptions/${encodeURIComponent(subscriptionId)}`, {
+    method: "POST",
+    body: new URLSearchParams({ "pause_collection[behavior]": "void" }),
+  });
+  if (!res.ok) return res;
+  return { ok: true, alreadyPaused: false };
+}
+
+/**
+ * Lift the pause. Sending the field empty is Stripe's documented way to clear
+ * it; there is no `resume` verb.
+ *
+ * Billing restarts on the subscription's own schedule — Stripe does **not**
+ * back-bill the paused periods, because they were voided rather than kept as
+ * drafts. The member simply resumes paying from the next cycle, which is the
+ * right answer: they got no access while the store was dark and should not be
+ * charged for it retroactively.
+ */
+export async function resumeMembershipCollection(
+  accountId: string,
+  subscriptionId: string,
+): Promise<{ ok: true } | MembershipBillingFailure> {
+  const res = await call(accountId, `/subscriptions/${encodeURIComponent(subscriptionId)}`, {
+    method: "POST",
+    body: new URLSearchParams({ pause_collection: "" }),
+  });
+  if (!res.ok) return res;
+  return { ok: true };
+}
+
+/**
  * How long one billing interval is worth of access, in days.
  *
  * Deliberately generous at the boundaries (31 and 366). `ends_at` is extended

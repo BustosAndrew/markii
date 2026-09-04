@@ -1766,7 +1766,7 @@ interface UsageRecord {            // immutable; written at event time, never de
 | Method | Route | Notes |
 |---|---|---|
 | `GET` | `/api/billing/plans` | ✅ Public plan catalog + prices. Competitor comparisons are **data with a `verifiedAt`**, never hardcoded copy |
-| `GET` | `/api/billing/subscription` | ✅ Current subscription + entitlements. Reads the mirror, not Stripe — except the card, fetched live because a card removed in Stripe's portal emits no reliable event |
+| `GET` | `/api/billing/subscription` | ✅ Current subscription + entitlements, **plus `standing`** (D45): `subscribed` · `trialing` (with `endsAt`, `daysLeft`) · `expired` · `ungated`. Reads the mirror, not Stripe — except the card, fetched live because a card removed in Stripe's portal emits no reliable event |
 | `POST` | `/api/billing/subscription` | ✅ Create/change plan. **Returns Stripe's proration preview and writes nothing unless `confirm: true`.** Resolves the stored subscription against Stripe first, so an `incomplete` one is **reopened** (`resumed: true`, same invoice, no second charge) and an expired or missing one is cleared and replaced. Delegates to `billing.changePlan` (§22) |
 | `DELETE` | `/api/billing/subscription` | ✅ Cancel at period end — never immediately **when there is paid access to protect**. A subscription that granted nothing (`incomplete`, expired, or gone from Stripe) is *discarded* outright instead and answers `discarded: true`; there is no paid period to run out. Delegates to `billing.setCancellation` |
 | `GET` | `/api/billing/usage` | ✅ **The threshold meter** — see below. Measured, still not invoiced |
@@ -3060,6 +3060,16 @@ enabled in the Supabase dashboard** — see below.
 **Opt-in per storefront** (`sites.abandonedCartEmails`, default **false**). This mail leaves from the
 merchant's own sending domain to their own customers and lands on their reputation, so switching it
 on for every store because the feature shipped would be sending on their behalf unasked.
+
+> **`GET /api/cron/trial-reminders`** (§25, `0 9 * * *`) is the third scheduled job. It mails the
+> merchants whose free month ends within three days and who have no subscription that *grants* a
+> plan — **not** merely those with a null `stripe_subscription_id`, because an `incomplete`
+> subscription leaves that id set while granting nothing, and would silently exclude the merchant
+> heading for a dark storefront who most needs telling. It claims `trial_reminder_sent_at` before
+> sending, so one reminder goes out per org, ever. **It enforces nothing**: standing is derived from
+> `free_trial_ends_at` on every request, so a store goes quiet at the right second whether or not
+> this job ran. If the cron is broken, merchants lose a warning — never their store, and nobody is
+> blocked by a job that failed to run.
 
 Swept hourly by `GET /api/cron/abandoned-carts` (§25). A cart qualifies when **all** of these hold,
 and each clause stops a specific way this becomes spam:

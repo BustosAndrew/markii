@@ -65,7 +65,7 @@ function refuse(failure: MembershipBillingFailure) {
 export const POST = handler(async (req, { params }) => {
   const { site: slug } = await params;
   const site = await loadStore(slug);
-  assertPurchasable(site);
+  await assertPurchasable(site);
 
   const raw = await req.text();
   const input = bodySchema.parse(raw ? JSON.parse(raw) : {});

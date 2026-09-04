@@ -10,7 +10,7 @@ import { levelsForVariants } from "@/lib/commerce/queries";
 import { membershipGateFor } from "@/lib/commerce/memberships";
 import { db, productOptions, variants } from "@/lib/db";
 import { formatPrice, productJsonLd } from "@/lib/generators";
-import { loadSite } from "@/lib/storefront";
+import { loadSite, storefrontHalted } from "@/lib/storefront";
 
 type Props = { params: Promise<{ site: string; productSlug: string }> };
 
@@ -40,7 +40,7 @@ export default async function ProductPage({ params }: Props) {
   const { site, bundle, cats, prods, baseUrl } = data;
   const dbProduct = prods.find((p) => p.slug === productSlug && p.enabled);
   const product = bundle.products.find((p) => p.slug === productSlug);
-  if (!dbProduct || !product || site.status === "paused") notFound();
+  if (!dbProduct || !product || storefrontHalted(data)) notFound();
 
   await logTraffic({
     siteId: site.id,

@@ -208,6 +208,18 @@ What moved:
   against Stripe, clear the mirror when it is dead or gone, and behave as a first subscription. A
   screen needs no special case for it — but do not assume `subscription != null` means Stripe still
   has one.
+- **Every account now has a free month, and it ends hard** (D45, 2026-09-04). `GET /api/me` and
+  `GET /api/billing/subscription` both carry `standing`: `subscribed` · `trialing`
+  (`endsAt`, `daysLeft`) · `expired` · `ungated`.
+  - `TrialBanner` renders from `me.standing` in the dashboard layout, so it is on every page.
+    **`ungated` and `subscribed` render nothing** — a permanent band telling a paying merchant
+    they are paying is the noise that makes people stop reading the banner that matters.
+  - **Every mutating call can now answer `402` with code `TRIAL_ENDED`.** Handle it like a
+    payment wall, not an auth error: it is **not** `403`, so it must not reach the MFA step-up
+    modal — the permissions are fine and a second factor changes nothing. Send them to
+    `/dashboard/settings/subscription`. `details.endedAt` says when it lapsed.
+  - **Reads keep working when expired.** Catalog, orders and customers stay listable and
+    exportable by design; do not blank those screens on `expired`.
 - Plan, card, and cancel live at **`/dashboard/settings/subscription`**. Usage, invoices, and
   assessments stay on `/dashboard/settings/billing`.
 - `POST /api/billing/payment-method` returns a real SetupIntent `clientSecret` **and** a

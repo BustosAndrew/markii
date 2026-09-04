@@ -17,6 +17,13 @@ import {
 } from "@/lib/commerce/memberships";
 import { membershipSubscriptionOwner } from "@/lib/commerce/membership-billing";
 import { mirrorCancellation, mirrorSubscription } from "@/lib/billing/mirror";
+import {
+  siteForCustomer,
+  siteForMembershipSubscription,
+  siteHalted,
+} from "@/lib/billing/standing-guard";
+import { syncMembershipCollection } from "@/lib/commerce/membership-holds";
+import { pauseMembershipCollection } from "@/lib/commerce/membership-billing";
 import { retrieveSubscription, toSnapshot } from "@/lib/billing/stripe-billing";
 import { upsertIntegration } from "@/lib/integrations";
 import {
@@ -255,6 +262,68 @@ const HANDLERS: Record<string, (event: StripeEventEnvelope) => Promise<HandlerRe
    * from the subscription's price, and reading it back is what keeps one
    * derivation of that instead of two.
    */
+  /**
+   * **The pre-charge gate.** Stripe raises this when it drafts a subscription's
+   * next invoice, roughly an hour before finalising and charging it — the only
+   * moment at which a payment can still be prevented rather than regretted.
+   *
+   * On a connected account it is a *shopper* about to be billed by a merchant.
+   * If that merchant's store is halted, collection is paused here so the charge
+   * never happens; `invoice.paid` refusing to extend `ends_at` is the fallback
+   * for anything that slips past, not the intended path.
+   */
+  "invoice.created": async (event) => {
+    if (!event.account) {
+      return {
+        changed: false,
+        detail: "Platform invoice.created — Markii billing a merchant; nothing to hold.",
+      };
+    }
+
+    const invoice = event.data.object as {
+      id?: string;
+      subscription?: string | { id?: string };
+      parent?: { subscription_details?: { subscription?: string | { id?: string } } };
+    };
+    const raw = invoice.parent?.subscription_details?.subscription ?? invoice.subscription ?? null;
+    const subscriptionId = typeof raw === "string" ? raw : (raw?.id ?? null);
+    if (!subscriptionId) {
+      return { changed: false, detail: "Connected-account invoice is not for a subscription." };
+    }
+
+    const siteId = await siteForMembershipSubscription(subscriptionId);
+    if (siteId == null) {
+      /** A subscription the merchant runs outside Markii. Not ours to pause. */
+      return {
+        changed: false,
+        detail: `No Markii membership for subscription ${subscriptionId}; left alone.`,
+      };
+    }
+
+    const halt = await siteHalted(siteId);
+    if (!halt.halted) {
+      return { changed: false, detail: `Store ${siteId} is trading; invoice left to bill.` };
+    }
+
+    const paused = await pauseMembershipCollection(event.account, subscriptionId);
+    if (!paused.ok) {
+      return {
+        changed: false,
+        detail:
+          `Store ${siteId} is halted (${halt.cause}) but collection could not be paused for ` +
+          `${subscriptionId}: ${paused.message}`,
+      };
+    }
+    return {
+      changed: !paused.alreadyPaused,
+      detail: paused.alreadyPaused
+        ? `Store ${siteId} halted (${halt.cause}); collection already paused for ${subscriptionId}.`
+        : `Store ${siteId} halted (${halt.cause}); paused collection for ${subscriptionId} so the ` +
+          "shopper is not charged. Voided by Stripe rather than kept as a draft, so nothing " +
+          "back-bills when the store returns.",
+    };
+  },
+
   "invoice.paid": invoiceSettled,
 
   /**
@@ -543,10 +612,33 @@ async function subscriptionChanged(event: StripeEventEnvelope): Promise<HandlerR
 
   const result = await mirrorSubscription(db, orgId, snapshot, { guardAgainstStale: true });
   if ("stale" in result) return { changed: false, detail: result.reason };
+
+  /**
+   * **This is where a merchant's own storefronts come back.** Paying restores
+   * standing, so their shoppers' memberships must start billing again — and
+   * losing standing must stop them. Reconciled rather than toggled, so the
+   * outcome is the same whichever direction this event moved.
+   *
+   * Only on `planChanged`, because Stripe raises `customer.subscription.updated`
+   * for changes that touch nothing here — a card swap, a metadata edit — and
+   * walking every member's subscription on each of those would spend hundreds of
+   * Stripe calls to make no change.
+   */
+  let holds = "";
+  if (result.planChanged) {
+    const sync = await syncMembershipCollection(orgId);
+    if (sync.considered > 0) {
+      holds =
+        ` Membership collection: ${sync.paused} paused, ${sync.resumed} resumed, ` +
+        `${sync.unchanged} unchanged${sync.failed ? `, ${sync.failed} failed` : ""}.`;
+    }
+  }
+
   return {
     detail:
       `Subscription ${snapshot.subscriptionId} is ${result.status}; ` +
-      `${orgId} on ${result.planId}${result.planChanged ? " (changed)" : ""}.`,
+      `${orgId} on ${result.planId}${result.planChanged ? " (changed)" : ""}.` +
+      holds,
   };
 }
 
@@ -653,6 +745,38 @@ async function membershipRenewed(event: StripeEventEnvelope): Promise<HandlerRes
   }
 
   /**
+   * **A halted store does not renew.** Whether the merchant paused it themselves
+   * or their own trial lapsed, the storefront is not serving — so the access
+   * this payment would buy is unreachable, and extending `ends_at` would record
+   * a period the member cannot use.
+   *
+   * **The shopper has already been charged when this arrives.** `invoice.paid`
+   * is Stripe reporting money that moved on the *merchant's* account, and Markii
+   * is never in that flow (D4) — so nothing here can undo it. That payment is
+   * the merchant's to refund, and this refusal is recorded in
+   * `stripe_webhook_events` precisely so it is discoverable rather than silent.
+   * The genuinely clean fix is to stop the subscription before it bills, which
+   * needs a pre-charge hook that does not exist yet.
+   *
+   * Not metered either: Markii does not recognise revenue against a threshold
+   * for access it just refused to grant.
+   */
+  const renewalSiteId = await siteForMembershipSubscription(subscriptionId);
+  if (renewalSiteId != null) {
+    const halt = await siteHalted(renewalSiteId);
+    if (halt.halted) {
+      return {
+        changed: false,
+        detail:
+          `Store ${renewalSiteId} is halted (${halt.cause}), so membership subscription ` +
+          `${subscriptionId} was not renewed and invoice ${invoice.id} was not metered. ` +
+          "The shopper was charged on the merchant's own account; that payment is the " +
+          "merchant's to refund.",
+      };
+    }
+  }
+
+  /**
    * The period Stripe actually billed, rather than a nominal 31 or 366 days.
    * Using Stripe's own bounds keeps `ends_at` in step with what the shopper was
    * charged for, including a proration or a trial that made this period an
@@ -679,6 +803,27 @@ async function membershipRenewed(event: StripeEventEnvelope): Promise<HandlerRes
    */
   if (!result.ok && event.account) {
     const owner = await membershipSubscriptionOwner(event.account, subscriptionId);
+    /**
+     * The first payment has no membership row to join through, so the halt check
+     * above found no site. Reach it through the customer instead — otherwise a
+     * checkout begun moments before a store halted would still create a
+     * membership on it.
+     */
+    if (owner.ok && owner.customerId) {
+      const firstSiteId = await siteForCustomer(owner.customerId);
+      if (firstSiteId != null) {
+        const halt = await siteHalted(firstSiteId);
+        if (halt.halted) {
+          return {
+            changed: false,
+            detail:
+              `Store ${firstSiteId} is halted (${halt.cause}), so no membership was created for ` +
+              `subscription ${subscriptionId}. The shopper was charged on the merchant's own ` +
+              "account; that payment is the merchant's to refund.",
+          };
+        }
+      }
+    }
     if (owner.ok && owner.customerId && owner.productId) {
       const granted = await grantSubscriptionMembership(db, {
         customerId: owner.customerId,
@@ -820,12 +965,12 @@ async function integrationForAccount(accountId: string) {
 const EXPECTED_TYPES = new Set([
   "checkout.session.completed",
   "charge.dispute.created",
-  "invoice.created",
   "invoice.finalized",
   "customer.subscription.trial_will_end",
   "payment_method.attached",
   "payment_method.detached",
   /** Handled today — listed so the expected/unexpected split stays complete. */
+  "invoice.created",
   "customer.subscription.created",
   "customer.subscription.updated",
   "customer.subscription.deleted",

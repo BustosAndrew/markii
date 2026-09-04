@@ -1,5 +1,6 @@
 import { ApiError, forbidden, notFound } from "../api";
 import { assertStepUp } from "../auth/mfa";
+import { assertAccountStanding } from "../billing/standing-guard";
 import { actionInvocations, db, type DiffEntry } from "../db";
 import { authorize, getAction } from "./registry";
 import type { ActionContext, Actor, InvocationOutcome } from "./types";
@@ -72,6 +73,27 @@ export async function invokeAction<TResult = unknown>(
    */
   if (def.requiresStepUp && !dryRun) {
     await assertStepUp(actor, def.id);
+  }
+
+  /**
+   * Account standing: the free month has to actually end somewhere.
+   *
+   * Here for the same reason step-up is here — §22 rule 1 makes this the only
+   * mutation path, so one check holds the dashboard, the HTTP API, agent tools
+   * and MCP at once. A per-route check would leave the agent path open, which is
+   * exactly the hole `PUT /api/integrations/:provider` turned out to be.
+   *
+   * **Billing actions are exempt, and that is the whole point.** "Subscribe to
+   * reinstate everything" is impossible if the act of subscribing is itself
+   * gated — the merchant would be locked out of the only door. Reads are
+   * untouched throughout: a merchant out of standing can still see and export
+   * their catalog, orders and customers, because holding a store is a commercial
+   * measure and must never look like holding their data hostage.
+   *
+   * Dry runs pass so an agent can still show a merchant what *would* happen.
+   */
+  if (!dryRun && !def.id.startsWith("billing.") && actor.orgId) {
+    await assertAccountStanding(actor.orgId, def.id);
   }
 
   const input = def.input.parse(rawInput) as never;

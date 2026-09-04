@@ -2,6 +2,7 @@ import "server-only";
 
 import { eq } from "drizzle-orm";
 import { slugify } from "../api";
+import { trialEndFrom } from "../billing/standing";
 import { db, organizations, staff, type Organization } from "../db";
 
 /** Prefixed ids, so a value in a log says what it is without a lookup. */
@@ -60,6 +61,15 @@ export async function ensureFirstOrg(
         slug,
         ownerId: userId,
         billingEmail: email,
+        /**
+         * The free month starts here, at the only place a merchant account is
+         * ever created — so there is no second path that mints an org with no
+         * trial and lands it in `expired` on its first request.
+         *
+         * No Stripe object backs it: signup takes no card, so there is nothing
+         * for Stripe to schedule, and `accountStanding` reads this date directly.
+         */
+        freeTrialEndsAt: trialEndFrom(),
       })
       .returning();
 

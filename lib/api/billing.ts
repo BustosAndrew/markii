@@ -163,7 +163,34 @@ export type SubscriptionResponse = {
     charging: boolean;
     thresholdFeesCharging?: boolean;
   };
+  /**
+   * Whether the account may transact at all — **a different question from which
+   * plan it is on**, and the one that decides whether the storefront serves.
+   *
+   * Every new merchant gets one free month, no card required. When it lapses
+   * with nothing bought the storefront stops serving and stops accepting orders,
+   * and every mutating action answers `402 TRIAL_ENDED` until a plan is bought.
+   * Reads keep working throughout — a merchant out of standing can still see and
+   * export their catalog, orders and customers.
+   *
+   * `ungated` is an org with no trial date recorded (pre-0035 rows). It is
+   * treated as good standing on purpose; do not render it as a warning.
+   */
+  standing: AccountStanding;
 };
+
+export type AccountStanding =
+  | { state: "subscribed"; message: string }
+  | {
+      state: "trialing";
+      message: string;
+      /** ISO. Show the date, not just the countdown — merchants plan against dates. */
+      endsAt: string;
+      /** Whole days, floored. 0 on the final day, never negative. */
+      daysLeft: number;
+    }
+  | { state: "expired"; message: string; endedAt: string }
+  | { state: "ungated"; message: string };
 
 export type Subscription = {
   planId: PlanId;

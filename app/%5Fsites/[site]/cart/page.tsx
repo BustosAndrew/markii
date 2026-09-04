@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { CartCheckout } from "@/components/storefront/cart-checkout";
 import { SiteHeader } from "@/components/storefront/site-header";
 import { ThemeRoot } from "@/components/storefront/theme-root";
-import { loadSite } from "@/lib/storefront";
+import { loadSite, storefrontHalted } from "@/lib/storefront";
 
 type Props = { params: Promise<{ site: string }> };
 
@@ -18,7 +18,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function CartPage({ params }: Props) {
   const data = await loadSite((await params).site);
-  if (!data || data.site.status === "paused") notFound();
+  if (!data || storefrontHalted(data)) notFound();
   const { site, bundle, baseUrl } = data;
   const themeId = site.themeId ?? "studio";
   const topCategories = bundle.categories.filter((c) => !c.parentSlug);

@@ -44,7 +44,7 @@ const schema = z.object({
 export const POST = handler(async (req, { params }) => {
   const { site: slug } = await params;
   const site = await loadStore(slug);
-  assertPurchasable(site);
+  await assertPurchasable(site);
 
   const input = schema.parse(JSON.parse((await req.text()) || "{}"));
   if (!site.paymentProviders[input.rail]) {

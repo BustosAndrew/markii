@@ -1,10 +1,10 @@
 import { logTraffic } from "@/lib/agents";
 import { generateLlmsTxt } from "@/lib/generators";
-import { loadSite } from "@/lib/storefront";
+import { loadSite, storefrontHalted } from "@/lib/storefront";
 
 export async function GET(req: Request, { params }: { params: Promise<{ site: string }> }) {
   const data = await loadSite((await params).site);
-  if (!data || !data.site.agentDiscovery || data.site.status === "paused") {
+  if (!data || !data.site.agentDiscovery || storefrontHalted(data)) {
     return new Response("Not found", { status: 404 });
   }
   await logTraffic({

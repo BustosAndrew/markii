@@ -58,7 +58,7 @@ export const GET = handler(async (_req, { params }) => {
 export const PATCH = handler(async (req, { params }) => {
   const { site: slug, token } = await params;
   const site = await loadStore(slug);
-  assertPurchasable(site);
+  await assertPurchasable(site);
 
   const input = patchSchema.parse(JSON.parse((await req.text()) || "{}"));
   if (Object.keys(input).length === 0) throw badRequest("No changes supplied");

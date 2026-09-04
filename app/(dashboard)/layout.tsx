@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { DashboardSidebar } from "@/components/dashboard/sidebar";
 import { MobileNav } from "@/components/dashboard/mobile-nav";
 import { MfaStepUpProvider } from "@/components/auth/mfa-step-up-provider";
+import { TrialBanner } from "@/components/dashboard/trial-banner";
 import { loadOrError } from "@/lib/api/load";
 import { mfaPathForGate } from "@/lib/api/mfa-errors";
 import { getMe, getMfaStatus } from "@/lib/api/server";
@@ -55,6 +56,11 @@ export default async function DashboardLayout({
         <MobileNav me={me.data} />
         <DashboardSidebar me={me.data} />
         <main className="min-w-0 flex-1 px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-6 sm:py-8">
+          {/*
+            Above the page, on every page. The reminder email can be unscheduled
+            or bounce; this cannot — it renders from state derived on the request.
+          */}
+          {me.data?.standing ? <TrialBanner standing={me.data.standing} /> : null}
           {children}
         </main>
       </div>

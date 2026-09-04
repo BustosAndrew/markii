@@ -2,6 +2,7 @@ import { eq, ne, and } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { conflict } from "@/lib/api";
 import { orgHandler } from "@/lib/auth/handler";
+import { syncMembershipCollection } from "@/lib/commerce/membership-holds";
 import { db, sites } from "@/lib/db";
 import { invalidateCustomDomain } from "@/lib/domains";
 import {
@@ -69,6 +70,37 @@ export const PATCH = orgHandler(
       const attached = await attachTenantHost(row.slug);
       if (!attached.ok) {
         console.error(`tenant host attach failed for ${row.slug}: ${attached.message}`);
+      }
+    }
+
+    /**
+     * **Pausing a store stops its members being billed; un-pausing starts them
+     * again.** A merchant who pauses is not trading, and charging their members
+     * for access to a dark storefront would be taking money for nothing.
+     *
+     * Only when `status` actually moved across the paused line — every other
+     * edit here (a rename, a theme change) leaves billing exactly as it was, and
+     * walking every member's Stripe subscription on those would spend hundreds
+     * of calls to change nothing.
+     *
+     * Failures are logged rather than thrown, like the host attach above: the
+     * status change itself committed, and turning a successful write into an
+     * error would leave the merchant unsure whether their store paused at all.
+     */
+    const pausedChanged = (row.status === "paused") !== (site.status === "paused");
+    if (pausedChanged) {
+      try {
+        const sync = await syncMembershipCollection(orgId);
+        if (sync.failed > 0) {
+          console.error(
+            `membership collection sync after ${site.status} -> ${row.status} on ${row.slug}: ` +
+              sync.problems.join("; "),
+          );
+        }
+      } catch (e) {
+        console.error(
+          `membership collection sync threw for ${row.slug}: ${e instanceof Error ? e.message : e}`,
+        );
       }
     }
 

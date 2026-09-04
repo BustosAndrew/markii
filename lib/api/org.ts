@@ -1,3 +1,4 @@
+import type { AccountStanding } from "./billing";
 import { apiDelete, apiGet, apiPatch, apiPost } from "./client";
 import { callWhenLive } from "./planned";
 
@@ -75,6 +76,16 @@ export type MeResponse = {
   /** Every org this user belongs to — render the switcher from this, no second call. */
   organizations: OrgMembership[];
   entitlements: Organization["entitlements"];
+  /**
+   * Whether the account may transact at all — carried here, rather than only on
+   * `GET /api/billing/subscription`, so the dashboard shell can render the trial
+   * banner on every page without a second round trip and without the live Stripe
+   * card lookup that endpoint performs.
+   *
+   * `ungated` means no trial date was recorded (pre-0035 rows) and is good
+   * standing; do not render it as a warning.
+   */
+  standing: AccountStanding;
 };
 
 export type OrgAuditEntry = {

@@ -6,6 +6,7 @@ import { orgHandler } from "@/lib/auth/handler";
 import { currentPeriod } from "@/lib/billing/meter";
 import { billingConfigured, defaultCard } from "@/lib/billing/stripe-billing";
 import { statusGrantsPlan } from "@/lib/billing/mirror";
+import { accountStanding } from "@/lib/billing/standing";
 import { db, organizations } from "@/lib/db";
 import { entitlementsFor, planPricing } from "@/lib/plans";
 
@@ -49,6 +50,14 @@ export const GET = orgHandler(
     }
 
     const subscribed = Boolean(org.stripeSubscriptionId && org.subscriptionStatus);
+
+    /**
+     * Account standing — whether the storefront serves at all, which is a
+     * different question from which plan is entitled. Derived here on the same
+     * row the rest of this response reads, so a screen cannot show "trialing,
+     * 3 days left" next to a subscription state computed from something else.
+     */
+    const standing = accountStanding(org);
 
     return NextResponse.json({
       planId: org.planId,
@@ -98,6 +107,27 @@ export const GET = orgHandler(
           ? { code: "unavailable" as const, message: paymentMethod.message }
           : null,
       subscriptionState: subscriptionState(org.subscriptionStatus, subscribed),
+      /**
+       * **Render this above the plan picker, not beside it.** A merchant whose
+       * free month is ending needs to see that before they see prices, and a
+       * merchant already out of standing needs to know their store is dark —
+       * that is not a footnote on a pricing table.
+       */
+      standing:
+        standing.state === "trialing"
+          ? {
+              state: standing.state,
+              message: standing.reason,
+              endsAt: standing.endsAt.toISOString(),
+              daysLeft: standing.daysLeft,
+            }
+          : standing.state === "expired"
+            ? {
+                state: standing.state,
+                message: standing.reason,
+                endedAt: standing.endedAt.toISOString(),
+              }
+            : { state: standing.state, message: standing.reason },
     });
   },
   { permission: "billing.read" },

@@ -54,8 +54,17 @@ export function isSubscriptionStatus(s: string): s is SubscriptionStatus {
  * free-upgrade hole the old `503` was protecting: a higher threshold and more
  * storefronts with nothing sold.
  */
+/**
+ * The same three statuses as a list, for callers that must express this rule in
+ * **SQL** rather than TypeScript — the trial-reminder sweep has to select on it.
+ * Exported from here so a query and `statusGrantsPlan` cannot drift apart; a
+ * hand-written `IN ('active', ...)` elsewhere is exactly the drift this module
+ * exists to prevent.
+ */
+export const GRANTING_SUBSCRIPTION_STATUSES = ["active", "trialing", "past_due"] as const;
+
 export function statusGrantsPlan(status: string): boolean {
-  return status === "active" || status === "trialing" || status === "past_due";
+  return (GRANTING_SUBSCRIPTION_STATUSES as readonly string[]).includes(status);
 }
 
 export type MirrorResult = {
