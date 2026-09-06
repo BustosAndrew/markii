@@ -150,6 +150,50 @@ describe("free trial standing", () => {
       });
       expect(cart.status).toBeGreaterThanOrEqual(400);
     });
+
+    /**
+     * The download route halts **before** it looks a token up, so any token
+     * answers the same way and no grant is needed to prove it. That ordering is
+     * deliberate: resolving first would let a halted store still confirm which
+     * tokens exist.
+     */
+    it("pauses digital downloads with 409, keeping the link valid", async () => {
+      const res = await fetch(`${BASE_URL}/_sites/${site.slug}/download/any-token`, {
+        redirect: "manual",
+      });
+      /**
+       * **409, not 404.** The buyer paid for this file and their link still
+       * works — telling them it does not exist would be false, and would send
+       * them to support over something that fixes itself.
+       */
+      expect(res.status).toBe(409);
+      const body = JSON.stringify(await res.json()).toLowerCase();
+      expect(body).toContain("temporarily unavailable");
+      /** Still no disclosure of whose bill went unpaid. */
+      for (const leak of ["trial", "unpaid", "billing"]) {
+        expect(body, `download refusal disclosed "${leak}"`).not.toContain(leak);
+      }
+    });
+
+    /**
+     * The §1-8 REST routes mutate **outside** the action registry, so the check
+     * inside `invokeAction` never sees them. Gating only the registry left an
+     * expired merchant able to edit their catalog through the older surface;
+     * this pins the second gate that closed it.
+     */
+    it("holds the v1 REST writes too, not just registry actions", async () => {
+      const created = await merchant.post("/api/products", {
+        siteId: site.id,
+        name: "Should not be creatable",
+        slug: `should-not-exist-${Date.now()}`,
+        priceCents: 1000,
+      });
+      expect(created.status).toBe(402);
+
+      /** And a read on the same surface is still fine. */
+      const listed = await merchant.get("/api/products");
+      expect(listed.status).toBe(200);
+    });
   });
 
   describe("once a plan is bought", () => {
@@ -182,6 +226,62 @@ describe("free trial standing", () => {
         quantity: 1,
       });
       expect(cart.status).toBeLessThan(400);
+    });
+  });
+
+  /**
+   * The merchant's **own** pause is a separate cause from a billing hold, and
+   * `siteHalted` merges them only at the moment of asking. Everything above
+   * exercised the billing branch; without this the paused branch — the one a
+   * merchant triggers deliberately, and far more often — would be untested.
+   */
+  describe("when the merchant pauses their own store", () => {
+    beforeAll(async () => {
+      await sql`update sites set status = 'paused' where id = ${site.id}`;
+    });
+    afterAll(async () => {
+      await sql`update sites set status = 'live' where id = ${site.id}`;
+    });
+
+    it("halts the storefront and checkout while standing is perfectly fine", async () => {
+      /** The trial is healthy — so anything held here is held by the pause. */
+      const me = await merchant.get("/api/me");
+      expect(me.json.standing.state).toBe("trialing");
+
+      const page = await fetch(`${BASE_URL}/_sites/${site.slug}/`);
+      expect((await page.text()).toLowerCase()).toContain("temporarily paused");
+
+      const cart = await merchant.post(`/_sites/${site.slug}/api/cart`, {
+        productId: products[0].id,
+        quantity: 1,
+      });
+      expect(cart.status).toBeGreaterThanOrEqual(400);
+
+      const dl = await fetch(`${BASE_URL}/_sites/${site.slug}/download/any-token`, {
+        redirect: "manual",
+      });
+      expect(dl.status).toBe(409);
+    });
+
+    it("leaves the dashboard alone — a paused store is not an unpaid account", async () => {
+      /**
+       * The distinction the two causes exist to preserve. Pausing a storefront
+       * is an ordinary merchant action; it must not lock them out of the
+       * product they are paying for.
+       */
+      const res = await merchant.get("/api/products");
+      expect(res.status).toBe(200);
+
+      const created = await merchant.post("/api/products", {
+        siteId: site.id,
+        name: "Editable while paused",
+        slug: `paused-ok-${Date.now()}`,
+        priceCents: 1200,
+      });
+      expect(created.status).toBeLessThan(400);
+      if (created.json?.id) {
+        await sql`delete from products where id = ${created.json.id}`;
+      }
     });
   });
 

@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { Cleanup, Client, createTestStore, signUpMerchant, sql } from "./helpers";
 import { BASE_URL } from "./setup";
 
@@ -224,6 +224,92 @@ describe.skipIf(!CONNECT_SECRET)("recurring membership renewal", () => {
 
     const after = await membership();
     expect(after.revoked_at).toBeNull();
+  });
+
+  /**
+   * A halted store does not renew (D45).
+   *
+   * Placed in this file because the fixture here is the only one in the suite
+   * carrying a real membership linked to a subscription id — the exact row the
+   * renewal gate joins through.
+   */
+  describe("when the store is halted", () => {
+    /** Restored after each case so the metering suite below is unaffected. */
+    afterEach(async () => {
+      await sql`update sites set status = 'live' where id = ${siteId}`;
+    });
+
+    it("refuses to extend the membership, and says the shopper was charged", async () => {
+      await sql`update sites set status = 'paused' where id = ${siteId}`;
+      const before = await membership();
+
+      const now = Math.floor(Date.now() / 1000);
+      const res = await invoicePaid({
+        invoiceId: `in_halted_${Date.now()}`,
+        periodStart: now,
+        periodEnd: now + 30 * DAY,
+      });
+
+      /**
+       * **200, not an error.** Stripe must not be told the delivery failed — a
+       * non-2xx would put this event into a three-day retry that can only
+       * produce the same refusal.
+       */
+      expect(res.status).toBe(200);
+      expect(res.json.handled).toBe(false);
+
+      const after = await membership();
+      /** The period was not granted... */
+      expect(after.ends_at.toISOString()).toBe(before.ends_at.toISOString());
+      expect(after.last_renewal_invoice_id).toBe(before.last_renewal_invoice_id);
+
+      /**
+       * ...and the refusal is *recorded*, not silent. Markii cannot refund a
+       * charge that moved on the merchant's own account (D4), so the only
+       * honest thing left is to make the fact discoverable.
+       */
+      const reason = String(res.json.reason ?? "").toLowerCase();
+      expect(reason).toContain("halted");
+      expect(reason).toContain("refund");
+    });
+
+    it("does not meter revenue for access it just refused", async () => {
+      await sql`update sites set status = 'paused' where id = ${siteId}`;
+      const before = await renewalUsage();
+
+      const now = Math.floor(Date.now() / 1000);
+      await invoicePaid({
+        invoiceId: `in_halted_meter_${Date.now()}`,
+        periodStart: now,
+        periodEnd: now + 30 * DAY,
+      });
+
+      /**
+       * Metering a refused renewal would push the merchant's threshold up on
+       * money they collected for access Markii declined to grant — an
+       * overcharge on a real invoice now that threshold fees are billed.
+       */
+      expect(await renewalUsage()).toHaveLength(before.length);
+    });
+
+    it("resumes renewing the moment the store is live again", async () => {
+      /**
+       * The reopening half. A gate that never lifts would pass both cases above
+       * and still be broken — the merchant un-pauses and their members silently
+       * stop renewing.
+       */
+      const before = await membership();
+      const now = Math.floor(Date.now() / 1000);
+      const res = await invoicePaid({
+        invoiceId: `in_resumed_${Date.now()}`,
+        periodStart: now,
+        periodEnd: now + 30 * DAY,
+      });
+
+      expect(res.status).toBe(200);
+      const after = await membership();
+      expect(after.ends_at.getTime()).toBeGreaterThan(before.ends_at.getTime());
+    });
   });
 
   describe("metering", () => {

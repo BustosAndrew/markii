@@ -5,9 +5,15 @@ import { callWhenLive } from "./planned";
 const ORG_SECTION = "API §16";
 
 /**
- * §16 is landing in pieces. `GET /api/me`, the org profile, and staff
- * management, scoped tokens, and org switching are live. Audit, sessions, and MFA
- * are not built yet, so they keep failing loudly rather than returning a shape
+ * §16 is landing in pieces. `GET /api/me`, the org profile, staff management,
+ * scoped tokens, org switching **and MFA** are live — MFA shipped with D40
+ * (`/api/auth/mfa/{enroll,challenge,recover}`), and this comment went on calling
+ * it unbuilt for weeks afterwards. That is the one-directional staleness
+ * `CLAUDE.md` warns about: work lands and the note does not move, so a "not
+ * built" claim here is worth checking before it is believed.
+ *
+ * **Audit and sessions are genuinely absent** — verified 2026-09-04, no route
+ * backs either — so those two keep failing loudly rather than returning a shape
  * nobody wrote.
  */
 const ME_API_LIVE = true;

@@ -415,13 +415,28 @@ export async function pauseMembershipCollection(
 export async function resumeMembershipCollection(
   accountId: string,
   subscriptionId: string,
-): Promise<{ ok: true } | MembershipBillingFailure> {
+): Promise<{ ok: true; alreadyActive: boolean } | MembershipBillingFailure> {
+  /**
+   * Read first, mirroring `pauseMembershipCollection`. That symmetry is what
+   * makes this safe to call speculatively — on every `invoice.created` for a
+   * healthy store, say — instead of only where a pause is known to exist. A
+   * blind write would be a needless mutation on a merchant's own subscription
+   * every billing cycle.
+   */
+  const current = await call<{ pause_collection?: { behavior?: string } | null }>(
+    accountId,
+    `/subscriptions/${encodeURIComponent(subscriptionId)}`,
+    { method: "GET" },
+  );
+  if (!current.ok) return current;
+  if (!current.data.pause_collection) return { ok: true, alreadyActive: true };
+
   const res = await call(accountId, `/subscriptions/${encodeURIComponent(subscriptionId)}`, {
     method: "POST",
     body: new URLSearchParams({ pause_collection: "" }),
   });
   if (!res.ok) return res;
-  return { ok: true };
+  return { ok: true, alreadyActive: false };
 }
 
 /**

@@ -37,6 +37,18 @@ export type CollectionSyncResult = {
   unchanged: number;
   failed: number;
   problems: string[];
+  /**
+   * True when the org has more live membership subscriptions than one pass
+   * covers.
+   *
+   * **Reported rather than silently dropped.** Without this a store with more
+   * than `BATCH` members would have the remainder left in whatever state they
+   * were already in — and in the resume direction that means paying members
+   * quietly never billing again, which is the kind of revenue loss nobody
+   * notices for a month. The lazy `invoice.created` path catches those at their
+   * next cycle; this makes the gap visible in the meantime.
+   */
+  truncated: boolean;
 };
 
 type Row = { subscriptionId: string; siteId: number };
@@ -60,6 +72,7 @@ export async function syncMembershipCollection(orgId: string): Promise<Collectio
     unchanged: 0,
     failed: 0,
     problems: [],
+    truncated: false,
   };
 
   /**
@@ -89,6 +102,7 @@ export async function syncMembershipCollection(orgId: string): Promise<Collectio
     .limit(BATCH) as Row[];
 
   result.considered = rows.length;
+  result.truncated = rows.length === BATCH;
   if (rows.length === 0) return result;
 
   /** One halt lookup per store, not per member. */
@@ -112,14 +126,16 @@ export async function syncMembershipCollection(orgId: string): Promise<Collectio
         }
       } else {
         /**
-         * Resume is sent unconditionally rather than after a read: clearing a
-         * pause that is not set is a no-op at Stripe, and the extra round trip
-         * per member would double the calls on the common path.
+         * `resumeMembershipCollection` reads before it writes, so the common
+         * case — a healthy store whose members were never paused — costs one
+         * request each and mutates nothing.
          */
         const res = await resumeMembershipCollection(accountId, row.subscriptionId);
         if (!res.ok) {
           result.failed += 1;
           result.problems.push(`${row.subscriptionId}: ${res.message}`);
+        } else if (res.alreadyActive) {
+          result.unchanged += 1;
         } else {
           result.resumed += 1;
         }

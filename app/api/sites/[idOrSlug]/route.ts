@@ -1,5 +1,5 @@
 import { eq, ne, and } from "drizzle-orm";
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { conflict } from "@/lib/api";
 import { orgHandler } from "@/lib/auth/handler";
 import { syncMembershipCollection } from "@/lib/commerce/membership-holds";
@@ -89,19 +89,28 @@ export const PATCH = orgHandler(
      */
     const pausedChanged = (row.status === "paused") !== (site.status === "paused");
     if (pausedChanged) {
-      try {
-        const sync = await syncMembershipCollection(orgId);
-        if (sync.failed > 0) {
+      /**
+       * Deferred for the same reason as the webhook's copy: this is one Stripe
+       * round trip per member, and a merchant clicking "pause" on a store with
+       * hundreds of them should not sit watching a spinner for it. The status
+       * change itself has already committed, which is what they asked for.
+       */
+      after(async () => {
+        try {
+          const sync = await syncMembershipCollection(orgId);
+          if (sync.failed > 0 || sync.truncated) {
+            console.error(
+              `membership collection sync after ${site.status} -> ${row.status} on ${row.slug}: ` +
+                `${sync.failed} failed${sync.truncated ? `, TRUNCATED at ${sync.considered}` : ""}` +
+                (sync.problems.length ? ` — ${sync.problems.join("; ")}` : ""),
+            );
+          }
+        } catch (e) {
           console.error(
-            `membership collection sync after ${site.status} -> ${row.status} on ${row.slug}: ` +
-              sync.problems.join("; "),
+            `membership collection sync threw for ${row.slug}: ${e instanceof Error ? e.message : e}`,
           );
         }
-      } catch (e) {
-        console.error(
-          `membership collection sync threw for ${row.slug}: ${e instanceof Error ? e.message : e}`,
-        );
-      }
+      });
     }
 
     return NextResponse.json(await serializeSite(row));

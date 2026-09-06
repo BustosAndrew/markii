@@ -1,6 +1,7 @@
 import "server-only";
 
 import { errorResponse, forbidden } from "../api";
+import { assertAccountStanding } from "../billing/standing-guard";
 import { roleHasPermission } from "./permissions";
 import { requireAuthContext, type AuthContext } from "./session";
 
@@ -56,6 +57,63 @@ export function orgHandler(
 
       if (options.permission && !roleHasPermission(session.role, options.permission)) {
         throw forbidden(`Your role (${session.role}) cannot ${options.permission}`);
+      }
+
+      /**
+       * Account standing (D45), for the **§1-8 routes that mutate outside the
+       * registry**.
+       *
+       * `invokeAction` already holds every action, and §22 rule 1 says that
+       * should be every mutation — but the v1 catalog, category, site, upload
+       * and import routes predate that rule and still write directly. Gating
+       * only the registry left an expired merchant able to create products and
+       * storefronts through the older surface, the same shape of hole that
+       * `PUT /api/integrations/:provider` turned out to be.
+       *
+       * **Keyed on the HTTP method, not a permission**, because the permission
+       * strings carry no reliable read/write split — and the method is exactly
+       * the question being asked: `GET` is a read, and reads are never held.
+       */
+      if (req.method !== "GET" && req.method !== "HEAD") {
+        const path = new URL(req.url).pathname;
+        /**
+         * Two exemptions, and the second one is not optional.
+         *
+         * `/api/billing/` — "subscribe to reinstate everything" cannot itself
+         * require standing, or the merchant is locked out of the only door.
+         *
+         * `/api/actions/` and `/api/integrations/` **delegate to
+         * `invokeAction`**, which runs this same check one layer down where it
+         * can see the action id and exempt `billing.*` precisely. Gating them
+         * here as well would refuse `POST /api/actions/billing.setCancellation`
+         * — a billing action that does not live under the billing path — and
+         * shut that door after all. Checking twice with less information than
+         * the inner check is strictly worse than not checking here at all.
+         */
+        const delegatesToRegistry =
+          path.startsWith("/api/actions/") || path.startsWith("/api/integrations/");
+
+        /**
+         * **Account administration is never held behind payment.**
+         *
+         * `/api/org/` carries staff removal and API-token revocation. Gating
+         * those would mean a merchant whose trial lapsed cannot revoke a leaked
+         * token or cut off a departing employee — turning an unpaid invoice into
+         * a security incident they are forbidden to contain. It also covers the
+         * org profile, which is where the address invoices are sent to is fixed.
+         *
+         * Withholding a storefront is a commercial measure; withholding the
+         * ability to secure the account is not one Markii should ever take.
+         */
+        const accountAdministration = path.startsWith("/api/org");
+
+        if (
+          !path.startsWith("/api/billing/") &&
+          !delegatesToRegistry &&
+          !accountAdministration
+        ) {
+          await assertAccountStanding(session.org.id, `${req.method} ${path}`);
+        }
       }
 
       return await fn(req, { ...ctx, session, orgId: session.org.id });

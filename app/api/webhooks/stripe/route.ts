@@ -1,5 +1,5 @@
 import { and, eq, sql } from "drizzle-orm";
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import {
   checkoutSessions,
   db,
@@ -23,7 +23,10 @@ import {
   siteHalted,
 } from "@/lib/billing/standing-guard";
 import { syncMembershipCollection } from "@/lib/commerce/membership-holds";
-import { pauseMembershipCollection } from "@/lib/commerce/membership-billing";
+import {
+  pauseMembershipCollection,
+  resumeMembershipCollection,
+} from "@/lib/commerce/membership-billing";
 import { retrieveSubscription, toSnapshot } from "@/lib/billing/stripe-billing";
 import { upsertIntegration } from "@/lib/integrations";
 import {
@@ -302,7 +305,35 @@ const HANDLERS: Record<string, (event: StripeEventEnvelope) => Promise<HandlerRe
 
     const halt = await siteHalted(siteId);
     if (!halt.halted) {
-      return { changed: false, detail: `Store ${siteId} is trading; invoice left to bill.` };
+      /**
+       * **The store is trading, so anything still paused must be released.**
+       *
+       * This is the self-healing half, and it exists because the bulk
+       * reconciler is not guaranteed to have run: `syncMembershipCollection`
+       * fires only on a plan change or a store pause/un-pause, caps at one
+       * batch, and can fail per-subscription. Anything it missed would otherwise
+       * stay paused indefinitely — a merchant back in good standing whose
+       * members silently never bill again.
+       *
+       * The read inside `resumeMembershipCollection` makes this a no-op for the
+       * overwhelming majority of invoices, which are for stores that were never
+       * halted at all.
+       */
+      const resumed = await resumeMembershipCollection(event.account, subscriptionId);
+      if (!resumed.ok) {
+        return {
+          changed: false,
+          detail:
+            `Store ${siteId} is trading, but collection state for ${subscriptionId} ` +
+            `could not be read or cleared: ${resumed.message}`,
+        };
+      }
+      return {
+        changed: !resumed.alreadyActive,
+        detail: resumed.alreadyActive
+          ? `Store ${siteId} is trading; invoice left to bill.`
+          : `Store ${siteId} is trading again; released the paused collection on ${subscriptionId}.`,
+      };
     }
 
     const paused = await pauseMembershipCollection(event.account, subscriptionId);
@@ -626,12 +657,43 @@ async function subscriptionChanged(event: StripeEventEnvelope): Promise<HandlerR
    */
   let holds = "";
   if (result.planChanged) {
-    const sync = await syncMembershipCollection(orgId);
-    if (sync.considered > 0) {
-      holds =
-        ` Membership collection: ${sync.paused} paused, ${sync.resumed} resumed, ` +
-        `${sync.unchanged} unchanged${sync.failed ? `, ${sync.failed} failed` : ""}.`;
-    }
+    /**
+     * **Scheduled after the response, not awaited inside it.**
+     *
+     * Stripe expects a webhook answered in seconds and treats a slow reply as a
+     * failed delivery, then retries it. Reconciling a store with hundreds of
+     * members is one Stripe round trip each, so awaiting it here would put the
+     * whole sweep inside that window — and the retry would run the same sweep
+     * again, compounding exactly the problem that caused it.
+     *
+     * Nothing is lost by deferring: the reconcile is idempotent, and every
+     * subscription it misses is corrected at its next `invoice.created`, which
+     * heals in both directions.
+     */
+    after(async () => {
+      try {
+        const sync = await syncMembershipCollection(orgId);
+        if (sync.failed > 0 || sync.truncated) {
+          console.error(
+            `[webhook] membership collection reconcile for ${orgId}: ` +
+              `${sync.paused} paused, ${sync.resumed} resumed, ${sync.failed} failed` +
+              `${sync.truncated ? `, TRUNCATED at ${sync.considered}` : ""}` +
+              (sync.problems.length ? ` — ${sync.problems.join("; ")}` : ""),
+          );
+        }
+      } catch (e) {
+        console.error(
+          `[webhook] membership collection reconcile threw for ${orgId}: ` +
+            `${e instanceof Error ? e.message : e}`,
+        );
+      }
+    });
+    /**
+     * Says what actually happened at the moment this row was written — the
+     * reconcile was *scheduled*. Reporting counts here would claim an outcome
+     * that has not been decided yet.
+     */
+    holds = " Membership collection reconcile scheduled.";
   }
 
   return {
@@ -997,6 +1059,14 @@ function secretFor(hasAccount: boolean): string | undefined {
     ? process.env.STRIPE_CONNECT_WEBHOOK_SECRET
     : process.env.STRIPE_WEBHOOK_SECRET;
 }
+
+/**
+ * Generous, because `after` runs inside this budget: the response goes back to
+ * Stripe immediately, but the deferred reconcile still needs room to finish.
+ * Without it the platform default could cut the sweep off mid-way — leaving
+ * some members paused and some not, with nothing recorded to say so.
+ */
+export const maxDuration = 300;
 
 export const POST = async (req: Request) => {
   /**
