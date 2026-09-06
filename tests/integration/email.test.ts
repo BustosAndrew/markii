@@ -93,16 +93,42 @@ describe("email", () => {
   // Honest state
   // -------------------------------------------------------------------------
 
-  it("reports that customer email cannot be sent, and whose problem it is", async () => {
+  it("reports whether customer email can be sent, and whose problem it is", async () => {
     const res = await merchant.get("/api/settings/email");
     expect(res.status).toBe(200);
-    expect(res.json.customerEmail.canSend).toBe(false);
-    // Two different problems with two different owners: no AWS credentials is
-    // ours, no verified domain is theirs.
-    expect(["configuration_required", "domain_verification_required"]).toContain(
-      res.json.customerEmail.code,
-    );
-    expect(res.json.providerConfigured).toBe(false);
+    const { canSend, code } = res.json.customerEmail;
+
+    /**
+     * **Branching on the deployment, not assuming one.** This test used to
+     * assert `canSend: false` outright, which was only ever true on a machine
+     * with no AWS credentials — so it passed in CI and failed for anyone with a
+     * working `.env.local`, which is the least useful way for a test to fail.
+     *
+     * The invariant worth pinning is the pairing: whether mail can go out, and
+     * whose problem it is when it cannot.
+     */
+    if (res.json.providerConfigured === false) {
+      // Markii's problem — no SES credentials on this deployment, and no
+      // merchant action can fix it.
+      expect(canSend).toBe(false);
+      expect(code).toBe("configuration_required");
+    } else {
+      /**
+       * SES is connected and this org has verified no domain of its own, so
+       * mail sends from the storefront's `{slug}.{ROOT_DOMAIN}` address (D44).
+       * Reporting "not sending" while receipts actually arrive is the same
+       * class of lie as the reverse.
+       */
+      expect(canSend).toBe(true);
+      expect(code).toBe("unverified_sender");
+    }
+
+    /**
+     * The pair this test originally asserted — `domain_verification_required`
+     * with `canSend: false` — describes a refusal that no longer happens, and
+     * the code is not in the union any more. Pinned so it cannot quietly return.
+     */
+    expect(code).not.toBe("domain_verification_required");
   });
 
   it("keeps the two email streams separate rather than reporting one status", async () => {
@@ -121,7 +147,23 @@ describe("email", () => {
     expect(res.json.suppressions).toEqual([]);
   });
 
-  it("refuses to register a sending domain rather than writing an unusable row", async () => {
+  it("refuses to register a sending domain rather than writing an unusable row", async (ctx) => {
+    const status = await merchant.get("/api/settings/email");
+    if (status.json.providerConfigured) {
+      /**
+       * **Skipped rather than inverted, because the success path has a real
+       * side effect.** With SES connected this action does not refuse — it
+       * registers `acme-test.example` as a genuine sending identity on the AWS
+       * account and returns DKIM tokens, which is correct behaviour and exactly
+       * what must not run on every suite invocation. One such identity was
+       * created and had to be deleted by hand on 2026-09-04.
+       *
+       * The refusal below is a claim about the *unconfigured* deployment, so it
+       * is asserted only there. CI has no AWS credentials and still runs it.
+       */
+      ctx.skip();
+    }
+
     // Without SES there are no DKIM tokens, so a row here would show the
     // merchant a verification step with no records to publish.
     const res = await merchant.invoke("email.addSendingDomain", { domain: "acme-test.example" });
@@ -155,7 +197,14 @@ describe("email", () => {
     expect(row.provider).toBe("none");
     expect(row.provider_message_id).toBeNull();
     expect(row.template).toBe("order_confirmation");
-    expect(row.reason).toMatch(/not configured|SES/i);
+    /**
+     * Widened for D44, which replaced "SES is not configured" with a reason
+     * naming the *sender* problem — "No verified sending domain, and no
+     * storefront to fall back to." The assertion that matters is that the row
+     * records **why** it did not send, not the exact wording, so all three
+     * shapes are accepted rather than pinning today's sentence.
+     */
+    expect(row.reason).toMatch(/not configured|SES|verified sending domain/i);
   });
 
   it("tells the merchant on the order timeline that the email did not go out", async () => {
