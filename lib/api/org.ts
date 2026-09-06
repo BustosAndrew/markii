@@ -12,14 +12,18 @@ const ORG_SECTION = "API §16";
  * `CLAUDE.md` warns about: work lands and the note does not move, so a "not
  * built" claim here is worth checking before it is believed.
  *
- * **Audit and sessions are genuinely absent** — verified 2026-09-04, no route
- * backs either — so those two keep failing loudly rather than returning a shape
+ * **The audit log is live as of 2026-09-06** — `GET /api/org/audit`, a read over
+ * the same `action_invocations` rows `/api/actions/invocations` serves. It
+ * waited on there being anything to audit, which the Phase C actions settled.
+ *
+ * **Sessions are genuinely absent** — verified 2026-09-06, no route backs
+ * either half — so those keep failing loudly rather than returning a shape
  * nobody wrote.
  */
 const ME_API_LIVE = true;
 const ORG_API_LIVE = true;
 const STAFF_API_LIVE = true;
-const ORG_AUDIT_API_LIVE = false;
+const ORG_AUDIT_API_LIVE = true;
 const ORG_SESSIONS_API_LIVE = false;
 const ORG_TOKENS_API_LIVE = true;
 
@@ -94,15 +98,72 @@ export type MeResponse = {
   standing: AccountStanding;
 };
 
-export type OrgAuditEntry = {
-  id: string;
-  actor: { id: string; name: string; type: "user" | "agent" | "token" };
-  action: string;
+export type AuditActorType = "user" | "agent" | "token" | "system";
+export type AuditRiskTier = "read" | "low" | "medium" | "high";
+
+/** What an action changed, one field at a time, as the action itself recorded it. */
+export type AuditChange = {
   entity: string;
+  entityId: string;
+  path: string;
   before: unknown;
   after: unknown;
+};
+
+/**
+ * One audited invocation.
+ *
+ * **This shape was wrong while it was planned**, in the way `CLAUDE.md` warns a
+ * stale type is worse than a missing one. It declared a flat
+ * `entity`/`before`/`after`, which cannot describe what the log actually holds:
+ * a single invocation records a field-level diff that may touch several fields
+ * across several entities, so a flat triple would have forced the screen to
+ * throw away everything but the first. It also promised `actor.name: string`
+ * for an actor whose staff row may since have been deleted.
+ */
+export type OrgAuditEntry = {
+  id: string;
+  actor: {
+    type: AuditActorType;
+    id: string | null;
+    /** Null when the staff row or token is gone — render the id, never a guess. */
+    name: string | null;
+    email: string | null;
+  };
+  action: string;
+  riskTier: AuditRiskTier;
+  /** False for a refused attempt. Those are audited too, and are the incident view. */
+  ok: boolean;
+  error: { code: string | null; message: string | null } | null;
+  /** Distinct entities touched, first-seen order. Empty for an action with no diff. */
+  entities: { type: string; id: string }[];
+  changes: AuditChange[];
+  /**
+   * **Null is common and correct**, not a loading state: only HTTP callers have
+   * an address, so the scheduled sweep and anything invoked from a shell record
+   * none. It is a lead during an incident, never proof of identity.
+   */
   ip: string | null;
+  userAgent: string | null;
+  undoable: boolean;
+  /** Set when this change was later reversed — `POST /api/actions/:id/undo` (§22). */
+  undoneBy: string | null;
+  /** Set when this entry *is* the reversal of another. */
+  undoOf: string | null;
   occurredAt: string;
+};
+
+export type OrgAuditFilters = {
+  actorType?: AuditActorType;
+  actorId?: string;
+  actionId?: string;
+  riskTier?: AuditRiskTier;
+  ok?: boolean;
+  /** ISO date or datetime; a date-only `to` covers the whole day. */
+  from?: string;
+  to?: string;
+  page?: number;
+  limit?: number;
 };
 
 export type SessionRecord = {
@@ -198,9 +259,21 @@ export function deleteStaff(id: string, init?: RequestInit) {
   );
 }
 
-export function listOrgAudit(init?: RequestInit) {
+/**
+ * The org's change history, newest first.
+ *
+ * Requires `org.audit`, which only `owner` and `administrator` hold — a `403`
+ * here is a role answer, not a bug. Reading everyone's activity, with the input
+ * each action was called with, is deliberately not part of a `viewer` seat.
+ */
+export function listOrgAudit(filters: OrgAuditFilters = {}, init?: RequestInit) {
   return callWhenLive(ORG_AUDIT_API_LIVE, ORG_SECTION, () =>
-    apiGet<{ items: OrgAuditEntry[] }>("/api/org/audit", undefined, init),
+    apiGet<{ items: OrgAuditEntry[]; total: number; page: number; limit: number }>(
+      "/api/org/audit",
+      // Every field is a QueryValue, and buildQuery drops the undefined ones.
+      filters,
+      init,
+    ),
   );
 }
 

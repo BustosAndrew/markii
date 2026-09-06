@@ -1111,12 +1111,33 @@ export const actionInvocations = pgTable(
      * having to scan for a matching inverse.
      */
     undoOfInvocationId: text("undo_of_invocation_id"),
+    /**
+     * Where the call came from (§16 requires an IP on the audit log).
+     *
+     * **Nullable, and null is a real answer** — a seed, a migration or the
+     * scheduled sweep has no client address, and a placeholder would make an
+     * absent fact look recorded. Stamped once in `requireAuthContext`, so every
+     * HTTP-invoked action carries it without a call site opting in.
+     *
+     * **A lead, never an identity.** `x-forwarded-for` is only as trustworthy
+     * as the proxy in front of the origin, so nothing authorizes on this; it is
+     * read by a human during an incident.
+     */
+    ipAddress: text("ip_address"),
+    userAgent: text("user_agent"),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index("action_invocations_occurred_idx").on(t.occurredAt),
     index("action_invocations_action_idx").on(t.actionId),
     index("action_invocations_actor_idx").on(t.actorType, t.actorId),
+    /**
+     * The audit log is always read newest-first within one org, and every other
+     * index here leads with a column the org filter does not use — so the
+     * planner had to sort the whole org's history to answer page 1. Composite,
+     * in the order the query asks.
+     */
+    index("action_invocations_org_occurred_idx").on(t.orgId, t.occurredAt),
   ],
 );
 

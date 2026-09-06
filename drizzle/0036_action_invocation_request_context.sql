@@ -1,0 +1,46 @@
+-- Where an audited action was invoked from (§16: the audit log carries an IP).
+--
+-- `action_invocations` has recorded *who* since migration 0001 and never *from
+-- where*, so `/api/org/audit` could not have answered the question §16 asks of
+-- it. Both columns are stamped in `requireAuthContext` — the one function both
+-- authenticated entry points share — so every action invoked over HTTP is
+-- attributed without a call site opting in, and a route added later cannot
+-- quietly omit it.
+--
+-- **Nullable on purpose, and backfilled with nothing.** A seed, a migration and
+-- the scheduled billing sweep have no client address, and neither do the rows
+-- already in this table. Writing `'unknown'` over them would turn "never
+-- recorded" into a value a reader could mistake for one, which is exactly the
+-- fabrication the audit log exists to rule out.
+--
+-- **A lead, not an identity.** `x-forwarded-for` is trustworthy only because
+-- Vercel overwrites it at the edge; behind a different proxy, or none, a caller
+-- can write whatever they like into it. Nothing authorizes on these columns —
+-- they are read by a human during an incident, which caps a spoofed value at a
+-- misleading log line rather than a bypass.
+--
+-- ---------------------------------------------------------------------------
+-- **`drizzle-kit generate` also emitted two `organizations` ALTERs here, and
+-- they were removed by hand.** `0035_free_trial.sql` was written by hand and
+-- never had a snapshot generated (`drizzle/meta/0035_snapshot.json` does not
+-- exist, and neither does 0024's), so drizzle's snapshot chain does not know
+-- `free_trial_ends_at` or `trial_reminder_sent_at` were ever added. It proposed
+-- re-adding columns the database already has, which fails outright on `ALTER
+-- TABLE ... ADD COLUMN`.
+--
+-- The `0036_snapshot.json` written alongside this file *does* record them, so
+-- the chain is repaired from here and the next `generate` will not propose them
+-- again. **The lesson for the next hand-written migration: generate it, then
+-- edit the SQL — a hand-written file with no snapshot leaves the next author to
+-- discover the drift.**
+-- ---------------------------------------------------------------------------
+ALTER TABLE "action_invocations" ADD COLUMN "ip_address" text;--> statement-breakpoint
+ALTER TABLE "action_invocations" ADD COLUMN "user_agent" text;--> statement-breakpoint
+
+-- The audit log's actual access path: one org's history, newest first.
+--
+-- Every existing index leads with a column the org filter does not use
+-- (`occurred_at`, `action_id`, `actor_*`), so answering page 1 of
+-- `/api/org/audit` meant sorting the org's whole history. Composite, in the
+-- order the query asks for it.
+CREATE INDEX "action_invocations_org_occurred_idx" ON "action_invocations" USING btree ("org_id","occurred_at");

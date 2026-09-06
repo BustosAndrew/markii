@@ -65,6 +65,7 @@ API-independent work so you don't outrun the backend") no longer applies to A, B
 |---|---|---|---|
 | Auth, orgs, staff, roles | §16 | ✅ LIVE | Build it. Forms post to `/api/auth/*`, identity from `GET /api/me` |
 | MFA (merchants) | §16 | ✅ LIVE, screens built | Enrol/challenge/recover ship; step-up retries inline via `MfaStepUpProvider` |
+| Org audit log | §16 | ✅ LIVE, **no screen** | `GET /api/org/audit` via `listOrgAudit(filters)`. `ORG_AUDIT_API_LIVE` flipped 2026-09-06. Owner/administrator only — a `403` is a role answer, not a bug |
 | Payment rails | §8 | ✅ LIVE, screen built | `/dashboard/payments`. Rails split from catalog feeds — different authority, see below |
 | Commerce core | §18.1–18.8 | ✅ LIVE | Variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping, order ops, digital delivery |
 | Membership gating | §18.9 | ✅ LIVE | Tiers gate products; buying a granting product confers one |
@@ -481,6 +482,38 @@ makes an audit trail untrustworthy.
 The audit list carries both directions now — `undoneBy` on the original row, `undoOf` on the undo —
 so a history screen can strike through a reversed change and label its reversal without a second
 query. Both are `string | null` on `ActionInvocation`.
+
+### 🟢 New 2026-09-06 — the org audit log is live, and its planned type was wrong
+
+`listOrgAudit(filters)` in `lib/api/org.ts` now calls a real `GET /api/org/audit`.
+`ORG_AUDIT_API_LIVE` is `true`. There is **no screen yet** — `/dashboard/settings/team` is the
+natural home, beside staff and tokens.
+
+**`OrgAuditEntry` changed shape, and the old one would not have compiled against the real
+response.** It declared a flat `entity: string` with a single `before`/`after`, which cannot
+describe what the log holds: one invocation records a field-level diff that may touch several
+fields across several entities. It is now `entities: { type, id }[]` plus the full
+`changes: AuditChange[]`. A bulk edit renders as one entry listing every row it touched.
+
+Three things to render honestly:
+
+- **`actor.name` is `string | null`.** Null means the staff row or token is gone — show `actor.id`,
+  never a placeholder name. `system` names itself.
+- **`ip` and `userAgent` are `string | null`, and null is common and correct** — not a loading
+  state. Only HTTP callers have an address; the scheduled sweep and anything run from a shell
+  record none. Show "—", and never present an IP as proof of who someone was.
+- **`ok: false` entries are refused attempts, not failures to hide.** They are the incident view;
+  `?ok=false` filters to them, and `error.code` / `error.message` say why. Style them as refusals
+  rather than errors — nothing broke.
+
+Filters: `actorType`, `actorId`, `actionId`, `riskTier`, `ok`, `from`, `to`, `page`, `limit`. An
+unknown `actorType` or `riskTier` is a `400` by design, so drive those from the exported unions
+rather than free text. The response carries `total` counted under the same filters, so
+"showing 20 of 340" is honest.
+
+**Permission:** `org.audit`, held only by `owner` and `administrator`. Gate the nav entry on the
+role from `GET /api/me` so a `viewer` is not shown a tab that will 403. This is deliberate — the
+audit log carries every action's input, which is not part of a reporting seat.
 
 ### 🔴 Two frontend jobs left over from the backend work — for whoever picks up screens next
 

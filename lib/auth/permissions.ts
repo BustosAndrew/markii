@@ -30,6 +30,24 @@ export const PERMISSIONS = [
   "org.staff",
   /** Create and revoke scoped API/MCP tokens (§22 rule 6). */
   "tokens.manage",
+  /**
+   * Read the org's audit log — who invoked what, with the input they sent
+   * (§16, §22 rule 5).
+   *
+   * **Deliberately not `org.read`.** `org.read` is in `READ_ONLY`, so every
+   * role including `viewer` holds it, and the audit log is not a read of the
+   * merchant's own data — it is a read of *everyone's activity*, carrying each
+   * invocation's validated input. That is where a payout address change, a
+   * discount's configuration, and a customer record's fields are visible in one
+   * place, which is a reasonable thing for an owner to see and not something an
+   * `analyst` seat should come with.
+   *
+   * Granting it to `owner` and `administrator` needs no entry below: both
+   * resolve to the whole `PERMISSIONS` array, while every other role is an
+   * explicit list. So a permission added here is admin-only until someone
+   * deliberately widens it.
+   */
+  "org.audit",
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];

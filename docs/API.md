@@ -33,7 +33,7 @@ carry an explicit status — **never call a `PLANNED` endpoint and never fake it
 | 13 | Orders (promoted) | ✅ LIVE — list, export, `GET /api/orders/:id` (lines, refunds, fulfillments, timeline), and the §18.7 order actions. The extended entity's speculative fields are not built | C |
 | 14 | Analytics v2 (funnel, channels, failures) | 🟡 PLANNED | E |
 | 15 | Automations, activity, notifications, team | 🟡 PLANNED | E |
-| 16 | Accounts, organizations, staff | partial — `/api/auth/*`, `/api/me`, `/api/org`, `/api/org/staff*`, `/api/org/tokens*`, `/api/org/switch`, **org scoping of §1–8**, and **MFA** (`/api/auth/mfa*`, enrol · challenge · recover, D40) are ✅ LIVE; **audit and sessions** remain PLANNED — no route backs either, and `ORG_AUDIT_API_LIVE` / `ORG_SESSIONS_API_LIVE` are correctly `false`. (Tokens and org switching were listed as planned until 2026-08-03, and **MFA until 2026-08-18** — all three were already routed.) Frontend: `/dashboard/settings/team`, the sidebar org switcher, `/mfa/*` | **A** |
+| 16 | Accounts, organizations, staff | partial — `/api/auth/*`, `/api/me`, `/api/org`, `/api/org/staff*`, `/api/org/tokens*`, `/api/org/switch`, **org scoping of §1–8**, and **MFA** (`/api/auth/mfa*`, enrol · challenge · recover, D40) are ✅ LIVE; the **audit log** (`/api/org/audit`, 2026-09-06) are ✅ LIVE; **sessions** remain PLANNED — no route backs it, and `ORG_SESSIONS_API_LIVE` is correctly `false`. (Tokens and org switching were listed as planned until 2026-08-03, and **MFA until 2026-08-18** — all three were already routed.) Frontend: `/dashboard/settings/team`, the sidebar org switcher, `/mfa/*` | **A** |
 | 17 | Billing, plans, metering, threshold fees | ✅ **LIVE, and merchants are charged** (corrected 2026-08-18 — this row claimed "nothing is charged" long after it did). Usage ledger, threshold fee engine, meter, plan catalog, entitlements, period-close assessments, the **Stripe webhook** (verified + idempotent, platform **and** Connect handlers), subscriptions, plan changes with a Stripe-computed proration preview, cancellation at period end, payment methods, invoice history, and **threshold-fee invoicing onto the same invoice**. Scheduled monthly (§25). Add-on *purchase* alone refuses `409` — Agent Ops and Chargeback Assist are Phase F and do not exist | B |
 | 18 | Commerce core (variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping, **memberships**) | partial — §18.1–18.6 ✅ LIVE, including the §18.4 card rail (Stripe Connect direct charges) and **§18.6 Stripe Tax** (2026-08-17); §18.5 gift cards are ⛔ **deferred** (D33). §18.7 order operations (incl. **processor-executed card refunds**), §18.8 digital delivery, and §18.9 membership gating + shopper login ✅ LIVE — **including recurring/auto-renewing membership billing** (Stripe Subscriptions on the merchant's own Connect account; this row claimed otherwise until 2026-08-18). It needs `STRIPE_CONNECT_WEBHOOK_SECRET` set, which is credentials rather than code | C |
 | 19 | Site builder & content | 🟡 PLANNED | D |
@@ -1486,7 +1486,7 @@ delivered when no mail service is wired.
 
 ---
 
-## 16. Accounts, organizations, staff — ✅ LIVE (Phase A complete; audit + sessions still planned)
+## 16. Accounts, organizations, staff — ✅ LIVE (Phase A complete; audit live, sessions still planned)
 
 > ### ✅ MFA is LIVE and mandatory for merchants (D40, 2026-08-08)
 >
@@ -1571,11 +1571,47 @@ delivered when no mail service is wired.
 > one call. Membership is re-checked server-side on every switch and every request, which is why the
 > active-org cookie is a preference rather than a credential.
 >
-> 🟡 **Still PLANNED:** `/api/org/audit`, `/api/org/sessions*`, and MFA.
+> 🟡 **Still PLANNED:** `/api/org/sessions*`. MFA is live (D40, above); the audit log is live
+> (2026-09-06, below).
 >
-> ⚠️ **`/api/org/audit` is blocked on there being anything to audit.** The `action_invocations`
-> table exists (§22), but no route mutation is defined as an action yet, so the log would be
-> permanently empty. It lands with the first Phase C actions rather than as an empty endpoint.
+> ✅ **`GET /api/org/audit` is LIVE (2026-09-06).** It was blocked on there being anything to
+> audit — `action_invocations` existed but nothing was defined as an action, so the log would have
+> been permanently empty. The Phase C actions settled that.
+>
+> **It is a view over `action_invocations`, not a second table.** §22 rule 5 already records every
+> invocation, so an audit log with its own writes would drift from the registry's the first time
+> someone updated one and not the other. `/api/actions/invocations` is the same rows from the
+> registry's side; this route resolves actor names, lifts the touched entities out of the diff,
+> reports where the call came from, and filters the way a person reviewing a history asks.
+>
+> **Migration 0036 added the "where".** The table had recorded *who* since 0001 and never the
+> caller's address, so §16's own contract line ("actor, action, entity, before/after, IP") could not
+> have been answered. `ip_address` and `user_agent` are stamped in `requireAuthContext` — the one
+> function both authenticated entry points share — so every action invoked over HTTP is attributed
+> without a call site opting in, and a route added later cannot quietly omit it. **Null is a real
+> answer**: a seed, a migration, and the scheduled sweep have no client address, and the rows
+> written before 0036 were not backfilled with a placeholder. It is a **lead, never an identity** —
+> `x-forwarded-for` is only as trustworthy as the proxy in front of the origin, and nothing
+> authorizes on it.
+>
+> ⚠️ **The gate is `org.audit`, not `org.read`** — and tightening it **closed a live hole**.
+> `org.read` is in `READ_ONLY`, so every role including `viewer` held it, and
+> `/api/actions/invocations` was serving the org's entire change history — with each invocation's
+> validated input — to an `analyst` seat. `org.audit` is new in `lib/auth/permissions.ts` and
+> resolves only for `owner` and `administrator` (both take the whole `PERMISSIONS` array; every
+> other role is an explicit list). **Both routes moved together**: two endpoints over one table
+> cannot hold two permissions, or the looser one is the real permission.
+>
+> **Query:** `actorType` · `actorId` · `actionId` · `riskTier` · `ok` · `from` · `to` · `page` ·
+> `limit`. An unrecognised `actorType` or `riskTier` is a **400, never a silent no-op**. `?ok=false`
+> is the incident view — refused attempts are audited, and "who tried what and was refused" is the
+> half that matters during one. `total` is counted under the same filters as the page.
+>
+> **Entity is plural on the response.** §16's sketch said `entity`, `before`, `after`; the table
+> holds a field-level diff that may touch several fields across several entities, so the response
+> carries `entities[]` (distinct, first-seen order) alongside the full `changes[]`. A flat triple
+> would have made a bulk action report only its first row. `actor.name` is `string | null` for the
+> same honesty: a staff row deleted after the fact leaves an id nobody can name.
 
 **Blocking dependency for §17–21.** Tenancy model: `Organization → Stores → Staff`. An org owns
 billing; stores are the existing `sites`. Recommend a managed auth provider (see `docs/PLAN.md` §4).
@@ -1616,7 +1652,7 @@ interface StaffMember {
 | `GET` | `/api/org/staff` | List staff |
 | `POST` | `/api/org/staff/invite` | `{ email, role, storeIds }` → `201`, `status: "invited"` |
 | `PATCH`/`DELETE` | `/api/org/staff/:id` | Change role/scope, remove |
-| `GET` | `/api/org/audit` | Audit log: actor, action, entity, before/after, IP, `occurredAt` |
+| `GET` | `/api/org/audit` | ✅ Audit log: actor (resolved to a name), action, `entities[]`, `changes[]`, IP, `occurredAt`. Requires `org.audit` — owner/administrator only |
 | `GET` | `/api/org/sessions` · `DELETE /api/org/sessions/:id` | Active sessions, revoke |
 | `GET`/`POST` | `/api/org/tokens` · `DELETE /api/org/tokens/:id` | Scoped API/MCP tokens (§22) |
 
@@ -2861,7 +2897,7 @@ defineAction({
 | `POST` | `/api/actions/:id` | Invoke. Same validation, permissions, and audit for every caller |
 | `POST` | `/api/actions/:id?dryRun=1` | Return the diff an invocation *would* produce, without writing. A **query flag on the invoke route**, not a `/dry-run` sub-path — one handler, so the preview cannot drift from the execution |
 | `POST` | `/api/actions/:id/undo` | ✅ Invert a prior invocation by `invocationId`, when `undoable`. Runs the inverse as a **new** invocation — same permission, same step-up, its own audit row |
-| `GET` | `/api/actions/invocations` | Audit trail: actor (`user` \| `agent` \| `token`), input, result, `occurredAt` |
+| `GET` | `/api/actions/invocations` | Audit trail: actor (`user` \| `agent` \| `token`), input, result, `occurredAt`. Requires **`org.audit`** — same gate as `/api/org/audit`, since both read one table |
 | `ALL` | `/api/mcp` | MCP server: registry as tools, store/page context as resources |
 
 Invocation response:

@@ -357,8 +357,33 @@ default, so a single field emptied the registry an agent discovers Markii throug
 it — the integration suite invoked actions by id and never listed them. Dates are now described as
 ISO strings; `lib/actions/registry.test.ts` describes every registered action.
 
-**Still planned:** everything in §10–15 and §19–21, the **MCP server** (§22), and org **audit** and
-**sessions** (§16) — confirmed absent 2026-08-18: no route backs any of them.
+**The org audit log is built as of 2026-09-06** (§16). `GET /api/org/audit` is a **view over
+`action_invocations`, not a second table** — §22 rule 5 already records every invocation, so a log
+with its own writes would drift from the registry's the first time someone updated one and not the
+other. It resolves actor names, lifts the touched entities out of the diff, and filters by actor,
+action, outcome and date; `?ok=false` is the incident view, because refused attempts are audited and
+"who tried what and was refused" is the half that matters during one.
+
+**Migration 0036 added the part §16 asked for and the table never had: where the call came from.**
+`ip_address` and `user_agent` are stamped in `requireAuthContext` — the one function both
+authenticated entry points share — so every HTTP-invoked action is attributed without a call site
+opting in, and a route added later cannot quietly omit it. That choke point is the whole design:
+threading it through `invokeAction`'s options at each of the nine current call sites records nothing
+on the tenth. **Null is a real answer** — a seed, a migration and the scheduled sweep have no client
+address, and pre-0036 rows were deliberately not backfilled with a placeholder. It is a **lead, never
+an identity**: `x-forwarded-for` is trustworthy only because Vercel overwrites it at the edge, so
+nothing authorizes on it.
+
+**Building it found a live authorization hole.** `/api/actions/invocations` was gated on `org.read`,
+which is in `READ_ONLY` — so **every role including `viewer` could read the org's entire change
+history**, with each invocation's validated input: payout-address changes, discount configuration,
+customer fields. A new `org.audit` permission now gates it, resolving only for `owner` and
+`administrator`. **Both routes moved in the same change**, because two endpoints over one table
+cannot hold two permissions — the looser one is the real permission, and tightening only the new
+route would have left the old one as the way around it.
+
+**Still planned:** everything in §10–15 and §19–21, the **MCP server** (§22), and org **sessions**
+(§16) — confirmed absent 2026-09-06: no route backs either half.
 
 **Authorization on the v1 REST surface was closed 2026-08-11.** `orgHandler` authorizes **every
 role** when `permission` is omitted — there is no default — and the §1–8 write routes predate roles,
@@ -433,8 +458,11 @@ and `tax-shipping.ts`). **Digital delivery screens have since landed** — verif
 attachment editor. That entry said "screens still do not" for a week after they shipped, which is
 the same one-directional staleness this file warns about two paragraphs down. The discount, tax, and
 inventory-level previews are the ones still without a screen. `ACTIONS_UNDO_API_LIVE` **flipped to
-`true` on 2026-08-18** in the same change that built the route. The remaining `*_API_LIVE: false`
-constants (`ORG_AUDIT`, `ORG_SESSIONS`) were checked and are correct — no route backs either.
+`true` on 2026-08-18** in the same change that built the route, and **`ORG_AUDIT_API_LIVE` on
+2026-09-06** in the same change that built `/api/org/audit` — which also corrected that constant's
+`OrgAuditEntry`, a planned type whose flat `entity`/`before`/`after` could not have described the
+field-level diff the log actually holds. `ORG_SESSIONS_API_LIVE` is the last one left and is
+correct — no route backs it.
 
 **Recurring membership billing came off this list** on 2026-08-10: it was listed as planned while
 being built and passing, which is the same staleness that had MFA's screens listed as missing after

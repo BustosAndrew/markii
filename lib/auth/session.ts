@@ -16,6 +16,7 @@ import {
 import { getSupabaseServerClient } from "../supabase/server";
 import { bearerFrom, hashesMatch, hashToken } from "./tokens";
 import { assertMfaSatisfied } from "./mfa";
+import { requestContextFrom } from "./request-context";
 import { isStaffUser } from "./user-kind";
 
 /**
@@ -218,9 +219,26 @@ async function contextFromToken(req: Request): Promise<AuthContext | null> {
  */
 export async function requireAuthContext(req: Request): Promise<AuthContext> {
   const viaToken = await contextFromToken(req);
-  if (viaToken) return viaToken;
+  if (viaToken) return withRequestContext(viaToken, req);
 
   const session = await getSession();
   if (!session) throw unauthorized();
-  return contextFromSession(session);
+  return withRequestContext(contextFromSession(session), req);
+}
+
+/**
+ * Stamps the caller's address and user agent onto the actor, for the audit log
+ * (§16).
+ *
+ * **Here, and only here.** This is the one function both authenticated paths
+ * pass through, so every action invoked over HTTP is attributed without a
+ * single call site having to opt in — and a route added tomorrow cannot forget.
+ * The alternative, threading it through `invokeAction`'s options at each of the
+ * nine current call sites, records nothing on the tenth.
+ *
+ * Non-HTTP callers never reach this, so their invocations carry a null address,
+ * which is the honest answer rather than a missing one.
+ */
+function withRequestContext(ctx: AuthContext, req: Request): AuthContext {
+  return { ...ctx, actor: { ...ctx.actor, request: requestContextFrom(req) } };
 }

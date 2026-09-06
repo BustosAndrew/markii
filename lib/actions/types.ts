@@ -18,7 +18,23 @@ export type Permission = string;
  */
 export type RiskTier = "read" | "low" | "medium" | "high";
 
-export type Actor =
+/**
+ * Transport metadata carried alongside the actor's identity, recorded on the
+ * invocation for the audit log (§16).
+ *
+ * **Optional, and absent is a real answer.** A seed, a migration, or the
+ * scheduled sweep has no client address; only the HTTP entry points can supply
+ * one. Attaching it to the actor rather than passing it to `invokeAction`
+ * separately is deliberate — the actor is built in exactly one place per
+ * request (`requireAuthContext`), so every present and future call site records
+ * it without having to remember to, and a new route cannot silently omit it.
+ *
+ * It grants nothing. Authorization reads `type`, `id` and `orgId`; this is
+ * written to the log and never consulted by a check.
+ */
+export type ActorRequest = { ip: string | null; userAgent: string | null };
+
+export type ActorIdentity =
   | { type: "user"; id: string; orgId: string | null }
   | { type: "agent"; id: string; orgId: string | null; onBehalfOfUserId: string }
   | { type: "token"; id: string; orgId: string | null }
@@ -33,6 +49,12 @@ export type Actor =
    * request. Adding a second such caller means re-arguing both bypasses below.
    */
   | { type: "system"; id: string; orgId: string | null };
+
+/**
+ * An actor as everything downstream sees it. The intersection keeps `type`
+ * discriminating, so narrowing on it still works everywhere it did before.
+ */
+export type Actor = ActorIdentity & { request?: ActorRequest };
 
 /**
  * A Drizzle handle — either the root client or a transaction. Actions receive

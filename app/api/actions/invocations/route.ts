@@ -50,6 +50,14 @@ export const GET = orgHandler(
       limit,
     });
   },
-  // Reading who changed what is an org-administration concern, not a catalog one.
-  { permission: "org.read" },
+  /**
+   * **`org.audit`, and it must stay the same gate `/api/org/audit` uses.**
+   *
+   * This was `org.read`, which is in `READ_ONLY` — so every role including
+   * `viewer` could read the org's whole change history, with each invocation's
+   * validated input. Tightening only the §16 route would have left this one as
+   * the way around it: two endpoints over one table cannot hold two different
+   * permissions, or the looser one is the real permission.
+   */
+  { permission: "org.audit" },
 );

@@ -136,6 +136,8 @@ export async function invokeAction<TResult = unknown>(
         ok: true,
         undoable: def.undoable ?? false,
         undoOfInvocationId: undoOf ?? null,
+        ipAddress: actor.request?.ip ?? null,
+        userAgent: actor.request?.userAgent ?? null,
       });
     });
   } catch (e) {
@@ -204,6 +206,14 @@ async function recordFailure(
       undoable: false,
       // A failed undo is still worth pairing with what it tried to reverse.
       undoOfInvocationId: undoOf ?? null,
+      /**
+       * **Recorded on failures especially.** A refused attempt is the row an
+       * incident is reconstructed from, and the address it came from is most of
+       * what makes it useful — "someone tried and was denied" without a where is
+       * a much weaker signal than the same line with one.
+       */
+      ipAddress: actor.request?.ip ?? null,
+      userAgent: actor.request?.userAgent ?? null,
     });
   } catch (e) {
     // Never let an audit-write failure mask the original error.

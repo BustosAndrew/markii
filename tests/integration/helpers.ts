@@ -48,12 +48,23 @@ export class Client {
     this.cookie = [...jar].map(([k, v]) => `${k}=${v}`).join("; ");
   }
 
-  async call<T = any>(method: string, path: string, body?: unknown): Promise<ApiResult<T>> {
+  /**
+   * `headers` is for the few tests that need to shape the request itself rather
+   * than its body — the audit log records `x-forwarded-for`, and a direct fetch
+   * to a dev server has no proxy in front of it to set one.
+   */
+  async call<T = any>(
+    method: string,
+    path: string,
+    body?: unknown,
+    headers?: Record<string, string>,
+  ): Promise<ApiResult<T>> {
     const res = await fetch(`${BASE_URL}${path}`, {
       method,
       headers: {
         "content-type": "application/json",
         ...(this.cookie ? { cookie: this.cookie } : {}),
+        ...headers,
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
