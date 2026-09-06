@@ -508,7 +508,10 @@ Three things to render honestly:
 
 Filters: `actorType`, `actorId`, `actionId`, `riskTier`, `ok`, `from`, `to`, `page`, `limit`. An
 unknown `actorType` or `riskTier` is a `400` by design, so drive those from the exported unions
-rather than free text. The response carries `total` counted under the same filters, so
+rather than free text. **There is no entity filter** — you cannot ask for "every change to product
+42". Each row carries the `entities[]` it touched, so a per-entity history means filtering client
+side over a page, which is wrong for anything but a small org. If a screen needs it, say so and the
+backend adds it with an index; do not fake it with a large `limit`. The response carries `total` counted under the same filters, so
 "showing 20 of 340" is honest.
 
 **Permission:** `org.audit`, held only by `owner` and `administrator`. Gate the nav entry on the

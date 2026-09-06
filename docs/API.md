@@ -1607,6 +1607,12 @@ delivered when no mail service is wired.
 > is the incident view — refused attempts are audited, and "who tried what and was refused" is the
 > half that matters during one. `total` is counted under the same filters as the page.
 >
+> 🟡 **There is no entity filter, deliberately.** Each row reports the `entities[]` it touched, but
+> "every change to product 42" is not a query this route answers. The entity lives inside the `diff`
+> jsonb rather than in a column, so filtering on it means a containment query and an expression
+> index to keep it off a sequential scan — worth building when a screen asks for it, and not worth
+> guessing at now. **Filter by `actionId` and read the entities off the rows** until then.
+>
 > **Entity is plural on the response.** §16's sketch said `entity`, `before`, `after`; the table
 > holds a field-level diff that may touch several fields across several entities, so the response
 > carries `entities[]` (distinct, first-seen order) alongside the full `changes[]`. A flat triple
