@@ -1,6 +1,7 @@
 import { ApiClientError, type ApiErrorBody } from "./types";
 import { isMfaRequired, mfaErrorDetails } from "./mfa-errors";
 import { sanitizePublicCopy, sanitizePublicValue } from "./public-copy";
+import { isTrialEnded } from "./trial-errors";
 
 export type QueryValue = string | number | boolean | null | undefined;
 
@@ -150,6 +151,18 @@ export async function apiFetch<T>(
         if (retry.status === 204) return undefined as T;
         return (await retry.json()) as T;
       }
+    }
+    /**
+     * Reads are never gated on the trial. A mutation that answers 402 is a
+     * payment wall — send them to the plan page, never the MFA modal.
+     */
+    if (
+      isTrialEnded(error) &&
+      typeof window !== "undefined" &&
+      (requestInit.method ?? "GET").toUpperCase() !== "GET" &&
+      !window.location.pathname.startsWith("/dashboard/settings/subscription")
+    ) {
+      window.location.assign("/dashboard/settings/subscription");
     }
     throw error;
   }

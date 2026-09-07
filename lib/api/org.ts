@@ -36,6 +36,11 @@ export type StaffRole =
   | "developer"
   | "viewer";
 
+/** `org.audit` resolves only for these two roles — gate the nav on this. */
+export function canReadOrgAudit(role: StaffRole | null | undefined): boolean {
+  return role === "owner" || role === "administrator";
+}
+
 export type Organization = {
   id: string;
   name: string;
@@ -98,8 +103,11 @@ export type MeResponse = {
   standing: AccountStanding;
 };
 
-export type AuditActorType = "user" | "agent" | "token" | "system";
-export type AuditRiskTier = "read" | "low" | "medium" | "high";
+export const AUDIT_ACTOR_TYPES = ["user", "agent", "token", "system"] as const;
+export const AUDIT_RISK_TIERS = ["read", "low", "medium", "high"] as const;
+
+export type AuditActorType = (typeof AUDIT_ACTOR_TYPES)[number];
+export type AuditRiskTier = (typeof AUDIT_RISK_TIERS)[number];
 
 /** What an action changed, one field at a time, as the action itself recorded it. */
 export type AuditChange = {

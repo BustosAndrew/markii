@@ -9,9 +9,9 @@ import { FetchError } from "@/components/dashboard/fetch-error";
 /**
  * Settings → Team (§16).
  *
- * Staff, invites, roles, and scoped API tokens are live. **Audit and sessions
- * are not** and are shown as such rather than omitted — a team page with no
- * mention of them reads as "there is no audit log", which is a different claim
+ * Staff, invites, roles, tokens, and the audit log are live. **Sessions are
+ * not** — shown as such rather than omitted, because a team page with no
+ * mention of them reads as "there are no sessions", which is a different claim
  * from "it is not built yet".
  */
 export default async function SettingsTeamPage() {
@@ -51,8 +51,8 @@ export default async function SettingsTeamPage() {
         )}
 
         <ComingSoon
-          title="Audit log and sessions aren’t ready yet"
-          description="Staff actions are already recorded. A searchable audit history and per-device session management will appear here when ready."
+          title="Sessions aren’t ready yet"
+          description="Per-device session management will appear here when it is built. Sign out from the sidebar ends this session."
         />
       </div>
     </SettingsShell>

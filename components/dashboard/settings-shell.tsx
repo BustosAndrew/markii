@@ -1,7 +1,10 @@
 import { PageHeader } from "@/components/ui/page-header";
 import { SettingsSubnav } from "@/components/dashboard/settings-subnav";
+import { loadOrError } from "@/lib/api/load";
+import { canReadOrgAudit } from "@/lib/api/org";
+import { getMe } from "@/lib/api/server";
 
-export function SettingsShell({
+export async function SettingsShell({
   title,
   description,
   children,
@@ -10,10 +13,12 @@ export function SettingsShell({
   description: string;
   children: React.ReactNode;
 }) {
+  const me = await loadOrError(() => getMe());
+
   return (
     <div>
       <PageHeader title={title} description={description} />
-      <SettingsSubnav />
+      <SettingsSubnav showAudit={canReadOrgAudit(me.data?.role)} />
       {children}
     </div>
   );

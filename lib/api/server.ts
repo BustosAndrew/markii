@@ -31,6 +31,7 @@ import { GET as customerGET } from "@/app/api/customers/[id]/route";
 import { GET as customerOrdersGET } from "@/app/api/customers/[id]/orders/route";
 import { GET as customerMembershipsGET } from "@/app/api/customers/[id]/memberships/route";
 import { GET as meGET } from "@/app/api/me/route";
+import { GET as orgAuditGET } from "@/app/api/org/audit/route";
 import { GET as staffGET } from "@/app/api/org/staff/route";
 import { GET as tokensGET } from "@/app/api/org/tokens/route";
 import { GET as membershipTiersGET } from "@/app/api/memberships/tiers/route";
@@ -60,7 +61,13 @@ import type { InventoryLevelRow, VariantMatrix } from "./commerce";
 import type { EmailSettings } from "./email";
 import type { CustomerMembership, MembershipTier } from "./memberships";
 import type { Collection, Customer, Discount, DiscountDetail } from "./commerce";
-import type { MeResponse, ScopedToken, StaffMember } from "./org";
+import type {
+  MeResponse,
+  OrgAuditEntry,
+  OrgAuditFilters,
+  ScopedToken,
+  StaffMember,
+} from "./org";
 import type { OrderDetail, OrdersQuery, OrdersResponse } from "./orders";
 import type { ReadinessIssue, ReadinessReport } from "./readiness";
 import type { AnalyticsOverview, AnalyticsQuery, AnalyticsSiteDetail } from "./analytics";
@@ -331,6 +338,13 @@ export const listMembershipTiers = (query?: { siteId?: number }) =>
 export const getMe = () => call<MeResponse>(meGET, "/api/me");
 
 export const listStaff = () => call<{ items: StaffMember[] }>(staffGET, "/api/org/staff");
+
+export const listOrgAudit = (filters?: OrgAuditFilters) =>
+  call<{ items: OrgAuditEntry[]; total: number; page: number; limit: number }>(
+    orgAuditGET,
+    "/api/org/audit",
+    filters as Record<string, QueryValue>,
+  );
 
 export const listTokens = () => call<{ items: ScopedToken[] }>(tokensGET, "/api/org/tokens");
 

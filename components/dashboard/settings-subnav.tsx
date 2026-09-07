@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 
 const settingsLinks = [
   { href: "/dashboard/settings/team", label: "Team" },
+  { href: "/dashboard/settings/audit", label: "Audit", audit: true },
   { href: "/dashboard/settings/subscription", label: "Subscription" },
   { href: "/dashboard/settings/billing", label: "Billing" },
   { href: "/dashboard/settings/tax", label: "Tax" },
@@ -21,7 +22,7 @@ function linkIsActive(pathname: string, href: string) {
   return pathname === href;
 }
 
-export function SettingsSubnav() {
+export function SettingsSubnav({ showAudit = false }: { showAudit?: boolean }) {
   const pathname = usePathname();
 
   return (
@@ -30,6 +31,7 @@ export function SettingsSubnav() {
       className="-mx-1 mb-6 flex gap-1 overflow-x-auto border-b border-border px-1"
     >
       {settingsLinks.map((link) => {
+        if ("audit" in link && link.audit && !showAudit) return null;
         const active = linkIsActive(pathname, link.href);
 
         return (

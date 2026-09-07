@@ -7,15 +7,24 @@ import { cn } from "@/lib/utils";
 
 export function ListFilters({
   searchPlaceholder = "Search…",
+  search = true,
   filters,
+  textFilters,
   dateRange = false,
   className,
 }: {
   searchPlaceholder?: string;
+  /** Hide the `q` box when the route has no search parameter. */
+  search?: boolean;
   filters?: {
     key: string;
     label: string;
     options: { value: string; label: string }[];
+  }[];
+  textFilters?: {
+    key: string;
+    label: string;
+    placeholder?: string;
   }[];
   /**
    * Adds `from`/`to` inputs beside the selects. Kept here rather than in a
@@ -48,19 +57,21 @@ export function ListFilters({
         className,
       )}
     >
-      <Input
-        key={searchParams.get("q") ?? ""}
-        name="q"
-        defaultValue={searchParams.get("q") ?? ""}
-        placeholder={searchPlaceholder}
-        className="sm:max-w-xs"
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            update("q", (e.target as HTMLInputElement).value.trim());
-          }
-        }}
-        onBlur={(e) => update("q", e.target.value.trim())}
-      />
+      {search ? (
+        <Input
+          key={searchParams.get("q") ?? ""}
+          name="q"
+          defaultValue={searchParams.get("q") ?? ""}
+          placeholder={searchPlaceholder}
+          className="sm:max-w-xs"
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              update("q", (e.target as HTMLInputElement).value.trim());
+            }
+          }}
+          onBlur={(e) => update("q", e.target.value.trim())}
+        />
+      ) : null}
       {filters?.map((f) => (
         <Select
           key={f.key}
@@ -76,6 +87,21 @@ export function ListFilters({
             </option>
           ))}
         </Select>
+      ))}
+      {textFilters?.map((f) => (
+        <Input
+          key={`${f.key}-${searchParams.get(f.key) ?? ""}`}
+          aria-label={f.label}
+          defaultValue={searchParams.get(f.key) ?? ""}
+          placeholder={f.placeholder ?? f.label}
+          className="sm:max-w-[220px]"
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              update(f.key, (e.target as HTMLInputElement).value.trim());
+            }
+          }}
+          onBlur={(e) => update(f.key, e.target.value.trim())}
+        />
       ))}
       {dateRange ? (
         <>

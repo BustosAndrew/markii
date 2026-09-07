@@ -32,8 +32,8 @@ backend could be swapped without touching a screen.
 **Built and working** (2026-08-09): the marketing landing page; auth including the full **MFA** flow
 (`/mfa/enroll · challenge · recover`) with step-up handled centrally; and a dashboard covering
 overview, catalog, categories, products, collections, customers, orders + settlements, discounts,
-memberships, **payments**, websites, analytics, health, and settings (billing, team, tax, shipping,
-domains, email). All against **LIVE** endpoints.
+memberships, **payments**, websites, analytics, health, and settings (billing, subscription, team,
+audit, tax, shipping, domains, email). All against **LIVE** endpoints.
 
 **See "What is left" below before picking anything up** — most of what remains is finishing screens
 against real response shapes, plus the one genuine gap: storefront themes.
@@ -65,7 +65,7 @@ API-independent work so you don't outrun the backend") no longer applies to A, B
 |---|---|---|---|
 | Auth, orgs, staff, roles | §16 | ✅ LIVE | Build it. Forms post to `/api/auth/*`, identity from `GET /api/me` |
 | MFA (merchants) | §16 | ✅ LIVE, screens built | Enrol/challenge/recover ship; step-up retries inline via `MfaStepUpProvider` |
-| Org audit log | §16 | ✅ LIVE, **no screen** | `GET /api/org/audit` via `listOrgAudit(filters)`. `ORG_AUDIT_API_LIVE` flipped 2026-09-06. Owner/administrator only — a `403` is a role answer, not a bug |
+| Org audit log | §16 | ✅ LIVE, screen built | `/dashboard/settings/audit` via `listOrgAudit(filters)`. Owner/administrator only — the tab is gated on role so a `viewer` is not sent to a 403 |
 | Payment rails | §8 | ✅ LIVE, screen built | `/dashboard/payments`. Rails split from catalog feeds — different authority, see below |
 | Commerce core | §18.1–18.8 | ✅ LIVE | Variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping, order ops, digital delivery |
 | Membership gating | §18.9 | ✅ LIVE | Tiers gate products; buying a granting product confers one |
@@ -74,7 +74,7 @@ API-independent work so you don't outrun the backend") no longer applies to A, B
 | Card checkout (Stripe) | §18.4 | ✅ LIVE | Elements mount with a publishable key the server hands you |
 | **Action undo** | §22 | ✅ **LIVE — newly (2026-08-18)** | `undoInvocation()` in `lib/api/actions.ts` is no longer gated off. See below before you render an Undo button |
 | Add-on **purchase** | §17 | ⛔ Refuses `409` | Agent Ops / Chargeback Assist do not exist. Show them as unavailable — never as "coming soon with a buy button" |
-| Email delivery | §24 | 🟡 Plumbed, sends nothing | Every send records `not_configured`. Surfaces must say so, not imply mail went out |
+| Email delivery | §24 | ✅ LIVE, screen built | SES sends; `/dashboard/settings/email`. Unverified domains still send via the storefront fallback (D44) — do not say mail is not going out |
 | Site builder, Channels, Test Lab, Agent Ops chat | §19–21 | ⛔ Deferred | Out of launch scope — do not start |
 
 ### MFA (D40) — built. What to preserve when touching it
@@ -217,8 +217,10 @@ What moved:
     they are paying is the noise that makes people stop reading the banner that matters.
   - **Every mutating call can now answer `402` with code `TRIAL_ENDED`.** Handle it like a
     payment wall, not an auth error: it is **not** `403`, so it must not reach the MFA step-up
-    modal — the permissions are fine and a second factor changes nothing. Send them to
-    `/dashboard/settings/subscription`. `details.endedAt` says when it lapsed.
+    modal — the permissions are fine and a second factor changes nothing. `apiFetch`
+    (`lib/api/client.ts`) already sends a browser mutation there —
+    `/dashboard/settings/subscription` — and never treats it as MFA. Reads stay on the
+    page; do not blank them. `details.endedAt` says when it lapsed.
   - **Reads keep working when expired.** Catalog, orders and customers stay listable and
     exportable by design; do not blank those screens on `expired`.
 - Plan, card, and cancel live at **`/dashboard/settings/subscription`**. Usage, invoices, and
@@ -486,8 +488,9 @@ query. Both are `string | null` on `ActionInvocation`.
 ### 🟢 New 2026-09-06 — the org audit log is live, and its planned type was wrong
 
 `listOrgAudit(filters)` in `lib/api/org.ts` now calls a real `GET /api/org/audit`.
-`ORG_AUDIT_API_LIVE` is `true`. There is **no screen yet** — `/dashboard/settings/team` is the
-natural home, beside staff and tokens.
+`ORG_AUDIT_API_LIVE` is `true`. The screen is `/dashboard/settings/audit` — next to Team,
+gated on `owner` / `administrator`. Undo hangs on `outcome.undoable` here; that is the
+honest home for it, because the audit row is what an inverse can read.
 
 **`OrgAuditEntry` changed shape, and the old one would not have compiled against the real
 response.** It declared a flat `entity: string` with a single `before`/`after`, which cannot
@@ -574,7 +577,7 @@ real state. These are the open items, recorded so they are not rediscovered late
 | ~~§24 email had no client or screen~~ ✅ **fixed 2026-08-02** | `lib/api/email.ts`, `/dashboard/settings/email` | The route and its five actions shipped 2026-08-02 with nothing calling them, while `lib/email/` told merchants to go to a page that did not exist |
 | ~~Invoices screen stubbed on `configuration_required`~~ ⚠️ **unblocked 2026-08-07** | `/dashboard/settings/billing` | §17 is LIVE in full. `lib/api/billing.ts` was corrected in the same change — it had `subscription: null` and `invoices: never[]` pinned from the refusing era, which made TypeScript *forbid* reading data the API now returns. Real types, plus `getInvoice`, `cancelSubscription`, `setDefaultPaymentMethod`, and `getAddon`, are there now |
 | ~~Org switcher was a placeholder~~ ✅ **built 2026-08-03** | `components/dashboard/sidebar.tsx` | The sidebar card said "org switching is coming soon with Phase A auth" long after `POST /api/org/switch` shipped. Now a real switcher, shown only when the user belongs to more than one org. Identity is resolved **once in the layout** and passed to both shells, so the rail and the mobile drawer cannot disagree about which org is active |
-| ~~Team settings was a stub~~ ✅ **built 2026-08-03** | `/dashboard/settings/team` | Staff with inline role changes, invites against the plan's seat limit, and scoped API tokens. Only **audit and sessions** were missing from §16, not staff/invite/tokens — this table previously said otherwise |
+| ~~Team settings was a stub~~ ✅ **built 2026-08-03** | `/dashboard/settings/team` | Staff with inline role changes, invites against the plan's seat limit, and scoped API tokens. **Audit** is now its own screen (`/dashboard/settings/audit`, 2026-09-06). **Sessions** remain the only missing half of §16 |
 | ~~Orders list is genuinely blocked~~ ✅ **unblocked** | `/dashboard/orders` | `GET /api/orders` ships; the screen exists. Settlements live at `/dashboard/orders/settlements` |
 | ~~Collections tab and discounts were stubs~~ ✅ **built 2026-08-03** | `/dashboard/catalog?tab=collections`, `/dashboard/discounts` | Both read-only lists against live routes. Discounts show derived `status`, redemption counts, and a **Fully redeemed** badge — an exhausted code still reads as active by its dates and only fails when a shopper tries it |
 | ~~Customers screen was a stub~~ ✅ **built 2026-08-03** | `/dashboard/customers` + `/dashboard/customers/[id]` | List with search, store filter and pagination; detail with memberships, orders and addresses. Money formats from `org.currency` via `formatMinor` (**D31**), never a hardcoded `/100` |
@@ -638,7 +641,7 @@ The team is two people, so launch is a deliberate subset of the full plan
 
 | Area | Screens |
 |---|---|
-| **Auth & org** (Phase A) | Sign-up, sign-in, reset, org switcher, staff list, invites, role management, settings shell |
+| **Auth & org** (Phase A) | Sign-up, sign-in, reset, org switcher, staff list, invites, role management, **audit log**, settings shell |
 | **Billing** (Phase B) | Plan & subscription, invoices, payment method, **threshold meter**, upgrade flow, dunning banners |
 | **Commerce** (Phase C) | Products **with variants**, inventory, collections, customers, orders + timeline + refunds, discounts, tax & shipping settings, digital delivery |
 | **Storefront** | Cart, variant picker, checkout — plus **3–4 polished themes** |
