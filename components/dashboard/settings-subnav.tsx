@@ -7,8 +7,6 @@ import { cn } from "@/lib/utils";
 const settingsLinks = [
   { href: "/dashboard/settings/team", label: "Team" },
   { href: "/dashboard/settings/audit", label: "Audit", audit: true },
-  { href: "/dashboard/settings/subscription", label: "Subscription" },
-  { href: "/dashboard/settings/billing", label: "Billing" },
   { href: "/dashboard/settings/tax", label: "Tax" },
   { href: "/dashboard/settings/shipping", label: "Shipping" },
   { href: "/dashboard/settings/email", label: "Email" },
@@ -16,9 +14,6 @@ const settingsLinks = [
 ] as const;
 
 function linkIsActive(pathname: string, href: string) {
-  if (href === "/dashboard/settings/billing") {
-    return pathname === href || pathname.startsWith(`${href}/`);
-  }
   return pathname === href;
 }
 

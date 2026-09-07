@@ -18,24 +18,6 @@ const sections = [
     audit: true,
   },
   {
-    href: "/dashboard/settings/subscription",
-    title: "Subscription",
-    description: "Plan, first-invoice payment, and the card on file.",
-    audit: false,
-  },
-  {
-    href: "/dashboard/settings/billing",
-    title: "Billing",
-    description: "Threshold meter, invoices, and fee assessments.",
-    audit: false,
-  },
-  {
-    href: "/dashboard/payments",
-    title: "Payments",
-    description: "Stripe and x402 rails — where storefront money is paid.",
-    audit: false,
-  },
-  {
     href: "/dashboard/settings/tax",
     title: "Tax",
     description: "Tax rates and how prices include tax at checkout.",
@@ -69,7 +51,7 @@ export default async function SettingsIndexPage() {
   return (
     <SettingsShell
       title="Settings"
-      description="Account, billing, and store configuration."
+      description="Account and store configuration."
     >
       <ul className="grid gap-3 sm:grid-cols-2">
         {sections

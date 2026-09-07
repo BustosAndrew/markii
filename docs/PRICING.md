@@ -308,7 +308,7 @@ that month, every month, with no threshold at all. That contrast is the product.
 
 ## 6. Merchant-facing UI
 
-**Billing page** (`/dashboard/settings/billing`):
+**Billing page** (`/dashboard/billing`):
 - Current plan, renewal date, payment method, invoice history.
 - **Threshold meter** — the centerpiece. Trailing-12-month net sales against the plan threshold, a
   projection to period end, and, once past it, fees accrued this period with the formula expanded.

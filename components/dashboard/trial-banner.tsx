@@ -27,7 +27,7 @@ export function TrialBanner({ standing }: { standing: AccountStanding }) {
         month ended on {new Date(standing.endedAt).toLocaleDateString()}, so your stores
         have stopped serving and cannot take orders. Your products, orders and customers
         are untouched.{" "}
-        <Link href="/dashboard/settings/subscription" className="underline underline-offset-2">
+        <Link href="/dashboard/billing" className="underline underline-offset-2">
           Choose a plan
         </Link>{" "}
         to bring everything back online.
@@ -61,7 +61,7 @@ export function TrialBanner({ standing }: { standing: AccountStanding }) {
       {/* Stated plainly: the consequence is a stop, not a downgrade. */}
       When it ends your storefronts stop serving and stop accepting orders until you
       subscribe.{" "}
-      <Link href="/dashboard/settings/subscription" className="underline underline-offset-2">
+      <Link href="/dashboard/billing" className="underline underline-offset-2">
         Choose a plan
       </Link>
       .
