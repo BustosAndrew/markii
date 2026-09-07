@@ -2962,11 +2962,22 @@ reason in the transcript where it can read "high-risk, dry-run it" and do that. 
 failures go the same way — that is the most common thing a model gets wrong, and reporting it as a
 transport fault hides the field name it needs.
 
-⚠️ **No read tools.** The registry holds mutations only (rule 1), and no action carries
-`riskTier: "read"` — so an agent can change a variant's price and cannot list variants. Reads belong
-on `resources/*` backed by the existing GET handlers, **not** on new read actions: every invocation
-writes an `action_invocations` row, and pouring list calls into the audit table degrades the thing
-that makes it useful in an incident.
+**Read tools are live** (`lib/mcp/reads.ts`): `read_store` · `read_sites` · `read_products` ·
+`read_product` · `read_categories` · `read_collections` · `read_customers` · `read_orders` ·
+`read_order` · `read_readiness`. They are **not registry actions** — every invocation through the
+registry writes an `action_invocations` row, and a browsing agent would bury the audit log. Each
+forwards to the real `GET` handler **with the caller's own `Authorization` header**, so org scoping,
+the permission check and the serializer are the dashboard's own and a read tool can never see more
+than the same token would over HTTP. Reads are listed **first** and carry `readOnlyHint: true`; they
+take no `_dryRun`, and a test asserts they write no audit row.
+
+`read_store` is backed by **`/api/org`, not `/api/me`** — `/api/me` calls `requireSession()` rather
+than `requireAuthContext` and so answers **401 to every API token**, which is worth knowing before
+reaching for it anywhere else.
+
+🟡 **`resources/*` is still not built** and `initialize` does not advertise the capability. Resources
+are for stable context a client pins into a conversation, not for querying — which is what the read
+tools above do.
 
 ---
 

@@ -156,10 +156,16 @@ describe("MCP server", () => {
       expect(tools.map((t) => t.name)).toContain("catalog_updateVariant");
     }, 60_000);
 
-    it("advertises the dry-run flag on every tool", async () => {
+    /**
+     * Only the action-backed tools take a dry run. A read has nothing to
+     * propose, and advertising the flag there would invite an agent to "safely
+     * preview" a call that was never going to write anything.
+     */
+    it("advertises the dry-run flag on the write tools and not the reads", async () => {
       const { json } = await rpc("tools/list");
       for (const tool of json.result.tools) {
-        expect(tool.inputSchema.properties._dryRun).toBeDefined();
+        const hasFlag = tool.inputSchema.properties._dryRun !== undefined;
+        expect(hasFlag, tool.name).toBe(!tool.name.startsWith("read_"));
       }
     }, 60_000);
   });
@@ -237,6 +243,90 @@ describe("MCP server", () => {
       expect(json.error).toBeUndefined();
       expect(json.result.isError).toBe(true);
       expect(json.result.content[0].text).toContain("tools/list");
+    }, 60_000);
+  });
+
+  /**
+   * Read tools (`lib/mcp/reads.ts`). These forward to the real GET handlers, so
+   * what is being proven is that the token is re-presented and the handler
+   * authorizes it — not that a serializer works, which its own route already
+   * covers.
+   */
+  describe("read tools", () => {
+    it("are listed, marked read-only, and come before the write tools", async () => {
+      const { json } = await rpc("tools/list");
+      const tools = json.result.tools as {
+        name: string;
+        annotations: { readOnlyHint: boolean };
+      }[];
+
+      const names = tools.map((t) => t.name);
+      expect(names).toContain("read_store");
+      expect(names).toContain("read_products");
+
+      // Reads lead the list, so an agent scanning from the top sees them first.
+      expect(tools[0].name.startsWith("read_")).toBe(true);
+
+      for (const tool of tools) {
+        expect(tool.annotations.readOnlyHint).toBe(tool.name.startsWith("read_"));
+      }
+    }, 60_000);
+
+    it("reads the store through the real /api/org handler", async () => {
+      const { json } = await callTool("read_store", {});
+      expect(json.result.isError).toBe(false);
+      const org = json.result.structuredContent;
+      expect(org.id).toBe(orgId);
+      // What an agent needs before touching money: currency and plan limits.
+      expect(org.currency).toBeTruthy();
+      expect(org.entitlements).toBeDefined();
+    }, 60_000);
+
+    it("lists products and forwards query arguments", async () => {
+      const { json } = await callTool("read_products", { limit: 1 });
+      expect(json.result.isError).toBe(false);
+      expect(json.result.structuredContent.items).toHaveLength(1);
+    }, 60_000);
+
+    it("reads one product, including the variant ids the write tools take", async () => {
+      const list = await callTool("read_products", { limit: 1 });
+      const id = list.json.result.structuredContent.items[0].id;
+
+      const { json } = await callTool("read_product", { idOrSlug: String(id) });
+      expect(json.result.isError).toBe(false);
+      expect(json.result.structuredContent.id).toBe(id);
+    }, 60_000);
+
+    it("reads orders and readiness without error", async () => {
+      for (const name of ["read_orders", "read_readiness", "read_sites", "read_customers"]) {
+        const { json } = await callTool(name, {});
+        expect(json.result.isError, `${name} failed: ${JSON.stringify(json.result)}`).toBe(false);
+      }
+    }, 90_000);
+
+    /**
+     * A read must never write. Asserted against the audit table directly,
+     * because the whole reason these are not registry actions is that a
+     * browsing agent would otherwise bury the log.
+     */
+    it("writes no audit row", async () => {
+      const [{ n: before }] = await sql`select count(*)::int as n from action_invocations
+        where org_id = ${orgId}`;
+
+      await callTool("read_products", {});
+      await callTool("read_store", {});
+      await callTool("read_orders", {});
+
+      const [{ n: after }] = await sql`select count(*)::int as n from action_invocations
+        where org_id = ${orgId}`;
+      expect(after).toBe(before);
+    }, 90_000);
+
+    /** The handler's own refusal shape is passed through, not re-worded. */
+    it("passes a handler refusal through as a tool error", async () => {
+      const { json } = await callTool("read_product", { idOrSlug: "no-such-product-xyz" });
+      expect(json.error).toBeUndefined();
+      expect(json.result.isError).toBe(true);
     }, 60_000);
   });
 });

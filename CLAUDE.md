@@ -391,8 +391,12 @@ would otherwise inherit the merchant's entire session with nothing scoped to rev
 underscores in tool names (several clients reject a dot) — reversible only while no action id
 contains an underscore, which a test asserts. **An action's refusal is a tool error, never a
 JSON-RPC error**: a protocol error tells a model the transport broke, a tool error tells it what to
-do instead. **No read tools yet** — the registry is mutations only, so reads belong on `resources/*`
-over the existing GET handlers rather than as read actions that would flood the audit table.
+do instead. **Read tools are live and are deliberately not registry actions** (`lib/mcp/reads.ts`): ten `read_*`
+tools forward to the real `GET` handlers carrying the caller's own `Authorization` header, so org
+scoping and permissions are the dashboard's and nothing is reimplemented — registering them as
+actions would write an `action_invocations` row per list call and bury the audit log. A test asserts
+they write none. `read_store` is backed by **`/api/org`, not `/api/me`**, because `/api/me` uses
+`requireSession()` and answers 401 to every API token. **MCP `resources/*` is still unbuilt.**
 
 **Building it forced §22 rule 3 to become real.** "A `high` action always requires human approval
 and cannot auto-run" had been enforced by nothing — `describeAction` *advertised*

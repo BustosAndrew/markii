@@ -180,3 +180,45 @@ describe("listing is filtered by the same permission that would refuse the call"
     }
   });
 });
+
+describe("read tools coexist with action tools", () => {
+  /**
+   * The two namespaces are populated from unrelated places — one from the
+   * registry, one from a hand-written table — so nothing but this stops a
+   * future action from shadowing a read tool. A collision would be silent:
+   * `tools/call` checks reads first, so the action would simply stop being
+   * reachable.
+   */
+  it("never collides with an action's tool name", async () => {
+    const { readToolNames } = await import("./reads");
+    const actionNames = new Set(allActions().map((d) => toolNameFor(d.id)));
+    for (const name of readToolNames()) {
+      expect(actionNames.has(name)).toBe(false);
+    }
+  });
+
+  it("keeps every read tool under the read_ prefix, which is what guarantees that", async () => {
+    const { readToolNames } = await import("./reads");
+    for (const name of readToolNames()) expect(name).toMatch(/^read_[A-Za-z0-9_]+$/);
+  });
+
+  it("declares no action id starting with read_, the other half of the guarantee", () => {
+    expect(allActions().filter((d) => toolNameFor(d.id).startsWith("read_"))).toEqual([]);
+  });
+
+  /** Only the read tools may claim to be read-only. */
+  it("marks read tools readOnlyHint and non-destructive", async () => {
+    const { readTools } = await import("./reads");
+    for (const tool of readTools()) {
+      expect(tool.annotations.readOnlyHint).toBe(true);
+      expect(tool.annotations.destructiveHint).toBe(false);
+      expect(tool.inputSchema.type).toBe("object");
+    }
+  });
+
+  it("gives every read tool a distinct name", async () => {
+    const { readToolNames } = await import("./reads");
+    const names = readToolNames();
+    expect(new Set(names).size).toBe(names.length);
+  });
+});

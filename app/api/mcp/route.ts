@@ -35,6 +35,7 @@ import {
   type JsonRpcId,
   type JsonRpcRequest,
 } from "@/lib/mcp/jsonrpc";
+import { callReadTool, findReadTool, readTools } from "@/lib/mcp/reads";
 import {
   actionIdFor,
   negotiateProtocolVersion,
@@ -65,7 +66,12 @@ import {
 /** Generous: a tool call runs a real action, including its post-commit effects. */
 export const maxDuration = 300;
 
-type Ctx = { session: AuthContext };
+/**
+ * The raw `Authorization` header rides along because the read tools re-present
+ * it to the route handlers they call, so those re-authorize on their own terms
+ * rather than trusting a session this layer already resolved.
+ */
+type Ctx = { session: AuthContext; authorization: string };
 
 export async function POST(req: Request) {
   const session = await mcpAuthContext(req);
@@ -86,6 +92,9 @@ export async function POST(req: Request) {
     );
   }
 
+  /** Non-null: `mcpAuthContext` only succeeds when a bearer token was present. */
+  const authorization = req.headers.get("authorization") ?? "";
+
   let body: unknown;
   try {
     body = await req.json();
@@ -101,14 +110,14 @@ export async function POST(req: Request) {
   if (Array.isArray(body)) {
     const replies = [];
     for (const msg of body) {
-      const reply = await handleMessage(msg, { session });
+      const reply = await handleMessage(msg, { session, authorization });
       if (reply) replies.push(reply);
     }
     // An all-notification batch is answered with no body, per JSON-RPC.
     return replies.length ? NextResponse.json(replies) : new Response(null, { status: 202 });
   }
 
-  const reply = await handleMessage(body, { session });
+  const reply = await handleMessage(body, { session, authorization });
   return reply ? NextResponse.json(reply) : new Response(null, { status: 202 });
 }
 
@@ -164,13 +173,15 @@ async function dispatch(msg: JsonRpcRequest, ctx: Ctx): Promise<unknown> {
     case "initialize":
       return {
         protocolVersion: negotiateProtocolVersion(params.protocolVersion),
-        /** Tools only for now — see the resources note at the bottom of this file. */
+        /** Tools only — `resources/*` is still unbuilt; see the note below. */
         capabilities: { tools: { listChanged: false } },
         serverInfo: { name: "markii", version: "1.0.0" },
         instructions:
-          "Markii commerce platform. Every tool is a registry action, validated and audited " +
-          "identically to a dashboard click. High-risk tools refuse to run unattended: call " +
-          'them with "_dryRun": true and hand the resulting diff to a person to approve.',
+          "Markii commerce platform. `read_*` tools query the store; every other tool is a " +
+          "registry action, validated and audited identically to a dashboard click. Start with " +
+          "read_store, and read before you write — the write tools take ids that only a read " +
+          "produces. High-risk tools refuse to run unattended: call them with \"_dryRun\": true " +
+          "and hand the resulting diff to a person to approve.",
       };
 
     /** Notifications: acknowledged by returning, answered by nothing. */
@@ -182,10 +193,18 @@ async function dispatch(msg: JsonRpcRequest, ctx: Ctx): Promise<unknown> {
       return {};
 
     case "tools/list":
+      /**
+       * **Reads first.** An agent picks from the top of a list it may not read
+       * in full, and every write tool here needs an id that only a read
+       * produces — so leading with the mutations invites guessing at ids.
+       */
       return {
-        tools: await visibleTools(allActions(), describeAction, (permission) =>
-          authorize(ctx.session.actor, permission),
-        ),
+        tools: [
+          ...readTools(),
+          ...(await visibleTools(allActions(), describeAction, (permission) =>
+            authorize(ctx.session.actor, permission),
+          )),
+        ],
       };
 
     case "tools/call":
@@ -200,6 +219,35 @@ async function callTool(params: Record<string, unknown>, ctx: Ctx) {
   const name = params.name;
   if (typeof name !== "string") {
     throw new ApiError("VALIDATION_ERROR", 400, "tools/call requires a tool name");
+  }
+
+  /**
+   * Read tools are checked first and are **not** registry actions — see
+   * `lib/mcp/reads.ts` for why listing a catalog must not write an audit row.
+   * The `read_` prefix keeps the two namespaces from ever colliding, which a
+   * test asserts rather than assumes.
+   */
+  const read = findReadTool(name);
+  if (read) {
+    const authorization = ctx.authorization;
+    const { status, body } = await callReadTool(
+      read,
+      (params.arguments ?? {}) as Record<string, unknown>,
+      authorization,
+    );
+    /**
+     * A refused or failed read is a **tool error carrying the route's own body**
+     * — the handler already answered in Markii's error shape, and rewriting it
+     * here would give the agent a second vocabulary for the same failure.
+     */
+    if (status >= 400) {
+      return toolError(JSON.stringify(body, null, 2));
+    }
+    return {
+      content: [{ type: "text", text: JSON.stringify(body, null, 2) }],
+      structuredContent: body as Record<string, unknown>,
+      isError: false,
+    };
   }
 
   const actionId = actionIdFor(name);
@@ -273,17 +321,17 @@ function toolError(text: string) {
 }
 
 /**
- * **Not built yet, and named so it is not mistaken for finished:** MCP
- * *resources*, and read tools generally.
+ * **Read tools are live (`lib/mcp/reads.ts`); MCP *resources* are not.**
  *
- * The registry holds mutations only — §22 rule 1 puts reads on plain REST
- * routes, and there is not one action with `riskTier: "read"`. So this server
- * currently lets an agent change a variant's price and gives it no way to list
- * variants first, which is half a product.
+ * `read_*` covers what an agent needs to act — find a product, find an order,
+ * read the store's plan and readiness — by forwarding to the existing `GET`
+ * handlers, so org scoping and permissions are the dashboard's own and nothing
+ * is reimplemented. Deliberately not registry actions: every invocation writes
+ * an `action_invocations` row, and a browsing agent would bury the audit log.
  *
- * The fix is deliberately *not* to register read actions: every invocation
- * writes an `action_invocations` row, and pouring list calls into the audit
- * table degrades the one thing that makes it useful in an incident. Reads
- * belong on `resources/*`, backed by the existing GET handlers the way
- * `lib/api/server.ts` already calls them in-process.
+ * `resources/*` remains unbuilt, and `initialize` does not advertise the
+ * capability. Resources are for stable context a *client* attaches — the store
+ * as a document — rather than for querying, which is what these tools do. Worth
+ * adding when a client wants to pin store context into a conversation; not a
+ * substitute for anything above.
  */
