@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { Client, Cleanup, enrollMfa, refused, signUpMerchant, sql, totpCode } from "./helpers";
+import { BASE_URL } from "./setup";
 
 /**
  * Mandatory merchant MFA (§16, D40).
@@ -253,24 +254,80 @@ describe("what MFA does not apply to", () => {
    * already satisfied MFA. Refusing it would break every server-to-server
    * integration without protecting anything its holder could not already reach.
    */
+  /**
+   * **This test asserted nothing until 2026-09-07.** It posted to `/api/tokens`
+   * — the real route is `/api/org/tokens` — and then `if (refused(created))
+   * return`, so every run took the early exit and passed without exercising a
+   * token at all. Two rules this suite exists to hold were unverified behind a
+   * green check.
+   *
+   * It also probed `/api/me`, which would have failed had it ever run: that
+   * route is **cookie-only by design** (see below). The probe is `/api/org`,
+   * which goes through `orgHandler` and accepts either credential.
+   */
   it("lets an API token through without a factor", async () => {
     const client = new Client();
     const m = await signUpMerchant(client, "mfatoken");
     cleanup.merchantEmails.push(m.email);
 
-    const created = await client.post("/api/tokens", {
+    const created = await client.post("/api/org/tokens", {
       label: "mfa-test",
       role: "administrator",
     });
-    if (refused(created)) return; // token route shape differs — covered in tenancy
+    expect(created.status, JSON.stringify(created.json)).toBeLessThan(300);
+    const token: string = created.json.token;
+    expect(token).toMatch(/^mk_live_/);
 
-    const token: string | undefined = created.json?.token ?? created.json?.result?.token;
-    if (!token) return;
-
-    const res = await fetch(`${process.env.MARKII_TEST_BASE_URL ?? "http://localhost:3000"}/api/me`, {
+    /**
+     * A bare `fetch` carrying **only** the bearer header — no cookie jar, so no
+     * session and no factor stands behind it. That is the whole claim: a scoped
+     * token is its own credential, and refusing it would break every
+     * server-to-server integration while protecting nothing its holder could
+     * not already reach.
+     */
+    const res = await fetch(`${BASE_URL}/api/org`, {
       headers: { authorization: `Bearer ${token}` },
     });
     expect(res.status).toBe(200);
+    expect((await res.json()).id).toBeTruthy();
+  }, 120_000);
+
+  /**
+   * **`/api/me` is cookie-only, and that is deliberate rather than an oversight.**
+   *
+   * It calls `requireSession()` instead of `requireAuthContext`, so it answers
+   * `401` to every API token. The shape is the reason: `/api/me` returns a
+   * `user`, the list of `organizations` they may switch between, and the active
+   * role — a dashboard bootstrap. A token has no user and no switcher; the
+   * token-facing equivalent is `GET /api/org`.
+   *
+   * Pinned here because this has now been rediscovered three times — by the
+   * audit log's permission probe, by the MCP `read_store` tool, and by the test
+   * above. An asserted property is cheaper than a fourth rediscovery.
+   */
+  it("does not accept an API token on /api/me, which is the dashboard bootstrap", async () => {
+    const client = new Client();
+    const m = await signUpMerchant(client, "mfatokenme");
+    cleanup.merchantEmails.push(m.email);
+
+    const created = await client.post("/api/org/tokens", {
+      label: "me-probe",
+      role: "administrator",
+    });
+    expect(created.status).toBeLessThan(300);
+    const token: string = created.json.token;
+
+    // Live on the route that does take a token, so the 401 below is about
+    // `/api/me` and not about a dead credential.
+    const org = await fetch(`${BASE_URL}/api/org`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(org.status).toBe(200);
+
+    const me = await fetch(`${BASE_URL}/api/me`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(me.status).toBe(401);
   }, 120_000);
 
   /** Shoppers are never subject to MFA — guest checkout would bypass it anyway. */

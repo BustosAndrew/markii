@@ -12,6 +12,18 @@ import { entitlementsFor } from "@/lib/plans";
  *
  * `401` is not an error state for the dashboard — it means "redirect to
  * sign-in".
+ *
+ * **Cookie-only, deliberately: this route answers `401` to every API token.**
+ * It calls `requireSession()` rather than `requireAuthContext`, and the response
+ * shape is why — a `user`, the `organizations` they may switch between, and the
+ * role active in this browser. A token has no user and no switcher, so there is
+ * nothing coherent to return; `GET /api/org` is the token-facing equivalent and
+ * carries the plan, entitlements and currency a programmatic caller needs.
+ *
+ * Worth stating because it has been rediscovered three times — by the org audit
+ * log's permission probe, by the MCP `read_store` tool, and by an MFA test that
+ * had been silently passing without ever reaching it. Pinned by
+ * `tests/integration/mfa.test.ts`.
  */
 export const GET = handler(async () => {
   const { user, org, role } = await requireSession();

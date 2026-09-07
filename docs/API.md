@@ -1653,7 +1653,7 @@ interface StaffMember {
 | `POST` | `/api/auth/reset-password` | `{ email }` → sends the reset mail. Always `200`, even for an unknown address — never confirm whether an account exists |
 | `POST` | `/api/auth/update-password` | `{ password }`, authorized by the recovery session |
 | `GET` | `/api/auth/callback` | Exchanges the emailed code for a session, then redirects. Confirmation, recovery, and any future OAuth land here |
-| `GET` | `/api/me` | Current user, org, role, entitlements — one call to boot the dashboard |
+| `GET` | `/api/me` | Current user, org, role, entitlements — one call to boot the dashboard. **Cookie-only: answers `401` to an API token**, since a token has no user and no org switcher. Programmatic callers want `GET /api/org` |
 | `GET`/`PATCH` | `/api/org` | Org profile, billing email, currency |
 | `GET` | `/api/org/staff` | List staff |
 | `POST` | `/api/org/staff/invite` | `{ email, role, storeIds }` → `201`, `status: "invited"` |
