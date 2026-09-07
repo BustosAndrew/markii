@@ -127,9 +127,25 @@ export function pagination(sp: URLSearchParams) {
   return { page, limit, offset: (page - 1) * limit };
 }
 
+/**
+ * A `true`/`false` filter, absent when not supplied.
+ *
+ * **An unrecognised value is a 400, for the same reason `enumParam` refuses
+ * one.** This used to read `v === "true"`, so anything that was not exactly
+ * `true` — `1`, `yes`, a typo, or an empty `?ok=` — silently became `false`.
+ * That is worse than ignoring the filter: `?enabled=yes` returned the list of
+ * *disabled* products, which looks like a real answer and is the opposite of
+ * what was asked for. A caller reading that screen has no way to tell.
+ *
+ * An empty value means **no filter**, matching `enumParam` and `buildQuery`,
+ * which drops empty params rather than sending them.
+ */
 export function boolParam(sp: URLSearchParams, name: string): boolean | undefined {
   const v = sp.get(name);
-  return v == null ? undefined : v === "true";
+  if (v == null || v === "") return undefined;
+  if (v === "true") return true;
+  if (v === "false") return false;
+  throw badRequest(`invalid ${name}: expected true or false`);
 }
 
 export function intParam(sp: URLSearchParams, name: string): number | undefined {

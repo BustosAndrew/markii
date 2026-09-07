@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { GET as analyticsOverviewGET } from "@/app/api/analytics/overview/route";
 import { GET as analyticsSiteGET } from "@/app/api/analytics/sites/[idOrSlug]/route";
 import { GET as billingUsageGET } from "@/app/api/billing/usage/route";
@@ -334,8 +335,24 @@ export const listMembershipTiers = (query?: { siteId?: number }) =>
     query as Record<string, QueryValue>,
   );
 
-/** The caller's identity and org. `org.currency` is what money formatters need (D31). */
-export const getMe = () => call<MeResponse>(meGET, "/api/me");
+/**
+ * The caller's identity and org. `org.currency` is what money formatters need (D31).
+ *
+ * **Memoized per render pass**, which is not an optimization so much as a
+ * correction. `SettingsShell` resolves the role to decide whether the Audit tab
+ * is shown, and the pages inside it — team, tax, shipping, audit, and the
+ * settings index — each resolve it again for their own reasons. That is two
+ * full session resolutions per settings page, and `meGET` is not cheap: it
+ * makes a Supabase `getUser()` round trip and then reads the org, the staff row
+ * and the user's memberships.
+ *
+ * `cache()` dedupes within one request, so the shell and the page it wraps share
+ * a single lookup while still re-resolving on the next navigation. It is scoped
+ * to this one helper deliberately — `call()` itself must not be cached, because
+ * it is how every list screen reads data that a mutation on the same page has
+ * just changed.
+ */
+export const getMe = cache(() => call<MeResponse>(meGET, "/api/me"));
 
 export const listStaff = () => call<{ items: StaffMember[] }>(staffGET, "/api/org/staff");
 
