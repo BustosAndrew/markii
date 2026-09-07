@@ -409,6 +409,17 @@ absent and only the permission check stood. A `token` or `agent` invoking a `hig
 actor is mintable from one `CRON_SECRET`-gated caller reading a clock, not merchant content. **Dry
 runs always pass**, because rule 2 makes proposing the point: the agent proposes, a person approves.
 
+**Refusals reach the audit log as of 2026-09-07, and most of them did not before.** The pre-flight
+checks — permission, `HUMAN_APPROVAL_REQUIRED`, step-up, account standing — and the zod parse all
+threw *above* the block that recorded failures, so `action_invocations` held failures raised inside
+an action's `run` and no others. A permission denial, the exact event `?ok=false` exists to surface,
+left no trace. Survivable when every caller was a dashboard click; not once MCP shipped, because an
+agent refused a high-risk action over and over was invisible. A refusal raised **before** validation
+stores no input — `redactInput` works on the parsed shape and cannot strip a secret from raw input,
+so a marker records why the payload is absent. **Dry runs still record nothing, and now that is
+actually true**: a dry run that threw inside `run` used to be audited while one refused earlier was
+not, which logged the same proposal or not depending on where it failed.
+
 **Still planned:** everything in §10–15 and §19–21, MCP **resources** (§22), and org **sessions**
 (§16) — confirmed absent 2026-09-06: no route backs either half.
 
@@ -571,6 +582,7 @@ campaigns. Rationale in `docs/DECISIONS.md` §G10.
 | `docs/PRICING.md` | Plans, threshold fee engine, GMV definition, billing UX |
 | `docs/COMPETITORS.md` | **Verified** competitor pricing with sources and dates |
 | `docs/BUILDER.md` | Agent-native site builder: actions, node model, registry, MCP, custom code |
+| `docs/MCP.md` | **Connecting an MCP client** — token role vs. toolset size, client config, the dry-run approval flow, troubleshooting |
 | `docs/AGENT-OPS.md` | Chat ops add-on: safety model, risk tiers (**chat ships last**) |
 | `DESIGN.md` · `PRODUCT.md` | Visual system · users, positioning, principles |
 

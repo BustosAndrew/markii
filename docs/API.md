@@ -2934,13 +2934,24 @@ Invocation response:
 4. **Identical permissions for humans, agents, and tokens.** An agent can never do something the
    staff member behind it could not.
 5. **Every invocation is audited** with actor identity, whether it came from a click, a chat turn,
-   an MCP client, or CI.
+   an MCP client, or CI. ✅ **Including the refusals, as of 2026-09-07** — permission denials,
+   `HUMAN_APPROVAL_REQUIRED`, step-up, account standing and rejected input all threw above the block
+   that wrote failure rows, so until then the log held failures from inside an action's `run` and
+   nothing else. A refusal raised before validation records **no input**: `redactInput` is written
+   against the parsed shape, so raw input cannot be safely stripped of a secret, and a marker says
+   why the payload is absent. **Dry runs record nothing at all**, refusal included — a proposal
+   changed nothing, and filling `?ok=false` with proposals would bury the real refusals.
 6. **MCP tokens are scoped and role-bound** (§16), never a user's session cookie. Enforced by
    `mcpAuthContext`, which reads a bearer token only — `requireAuthContext` accepts either and is
    deliberately *not* used here, because a cookie is ambient and anything running in the merchant's
    browser would inherit their whole session with nothing scoped to revoke.
 
 ### MCP server — ✅ LIVE (tools), 2026-09-07
+
+**Connecting a client is documented in `docs/MCP.md`** — token roles, Claude Code and Cursor config,
+the dry-run approval flow, and troubleshooting. The role a token is minted with decides how many
+tools the client sees (10 for `analyst`, 26 for `catalog_manager`, 68 for `administrator`), so the
+narrowest workable role is both the safer and the more usable choice.
 
 Stateless Streamable HTTP: one `POST /api/mcp` speaking JSON-RPC 2.0 (`initialize`, `ping`,
 `tools/list`, `tools/call`, notifications, and batches). No session id and no SSE stream, which fits

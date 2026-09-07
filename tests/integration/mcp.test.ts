@@ -329,4 +329,75 @@ describe("MCP server", () => {
       expect(json.result.isError).toBe(true);
     }, 60_000);
   });
+
+  /**
+   * Refusals must reach the audit log, not just the caller.
+   *
+   * Every one of these used to write nothing: the pre-flight checks and the zod
+   * parse all threw above the block that recorded failures, so the log held
+   * failures raised inside an action's `run` and no others. "An agent kept
+   * trying to delete customers" was invisible, which is the opposite of what
+   * `?ok=false` is for.
+   */
+  describe("refusals are audited", () => {
+    const auditRow = (id: string) =>
+      sql`select ok, error_code, action_id, actor_type, input from action_invocations
+          where org_id = ${orgId} and action_id = ${id} and ok = false
+          order by occurred_at desc limit 1`;
+
+    it("records a high-risk refusal against the token that attempted it", async () => {
+      await sql`delete from action_invocations
+        where org_id = ${orgId} and action_id = 'customers.delete'`;
+
+      const { json } = await callTool("customers_delete", { customerId: 1 });
+      expect(json.result.isError).toBe(true);
+
+      const [row] = await auditRow("customers.delete");
+      expect(row, "the refusal wrote no audit row").toBeDefined();
+      expect(row.ok).toBe(false);
+      expect(row.error_code).toBe("HUMAN_APPROVAL_REQUIRED");
+      expect(row.actor_type).toBe("token");
+    }, 90_000);
+
+    it("records a validation failure without storing the rejected payload", async () => {
+      await sql`delete from action_invocations
+        where org_id = ${orgId} and action_id = 'catalog.updateVariant' and ok = false`;
+
+      await callTool("catalog_updateVariant", { variantId: "not-a-number" });
+
+      const [row] = await auditRow("catalog.updateVariant");
+      expect(row).toBeDefined();
+      expect(row.error_code).toBeTruthy();
+      /**
+       * The payload is deliberately absent: `redactInput` works on the parsed
+       * shape, so raw input could not be stripped of a secret before writing.
+       */
+      expect(row.input).toEqual({ unrecorded: "input rejected before validation" });
+    }, 90_000);
+
+    /** "Nothing happened" stays true for a dry run, refusal included. */
+    it("records nothing for a refused dry run", async () => {
+      const [{ n: before }] = await sql`select count(*)::int as n from action_invocations
+        where org_id = ${orgId}`;
+
+      await callTool("customers_delete", { customerId: 1, _dryRun: true });
+
+      const [{ n: after }] = await sql`select count(*)::int as n from action_invocations
+        where org_id = ${orgId}`;
+      expect(after).toBe(before);
+    }, 90_000);
+
+    /** And the refusals are reachable through the surface built to read them. */
+    it("surfaces them in the org audit log's incident view", async () => {
+      await callTool("customers_delete", { customerId: 1 });
+
+      const res = await merchant.get("/api/org/audit?ok=false");
+      expect(res.status).toBe(200);
+      const refusal = res.json.items.find(
+        (i: any) => i.action === "customers.delete" && i.actor.type === "token",
+      );
+      expect(refusal).toBeDefined();
+      expect(refusal.error.code).toBe("HUMAN_APPROVAL_REQUIRED");
+    }, 90_000);
+  });
 });

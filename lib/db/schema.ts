@@ -1071,9 +1071,20 @@ export const apiTokens = pgTable(
  * Audit trail for the action registry (`docs/API.md` §22 rule 5): every
  * invocation, whether it came from a click, an agent turn, an MCP client, or CI.
  *
- * Dry runs are not recorded — nothing happened. Failures are, because "who tried
- * what and was refused" is the half of an audit log that matters during an
- * incident.
+ * Dry runs are not recorded — nothing happened, and that now holds for a dry run
+ * that *failed* too. It used to depend on where the failure landed: one refused
+ * by a pre-flight check wrote nothing, one that threw inside `run` was audited.
+ *
+ * Failures on a real invocation are recorded, because "who tried what and was
+ * refused" is the half of an audit log that matters during an incident — and
+ * that now includes the refusals raised **before** the action runs: permission
+ * denials, `HUMAN_APPROVAL_REQUIRED`, step-up, account standing, and a rejected
+ * input. Every one of those escaped unlogged until 2026-09-07, so the log held
+ * failures from inside `run` and nothing else.
+ *
+ * A refusal raised before validation stores **no input**: `redactInput` is
+ * written against the parsed shape and cannot strip a secret from raw input, so
+ * the payload is replaced by a marker saying why it is absent.
  */
 export const actionInvocations = pgTable(
   "action_invocations",

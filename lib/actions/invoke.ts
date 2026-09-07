@@ -51,10 +51,33 @@ export async function invokeAction<TResult = unknown>(
   const def = getAction(actionId);
   if (!def) throw notFound(`Action "${actionId}"`);
 
-  // Permission first: an unauthorized caller learns nothing about the input shape.
-  if (!(await authorize(actor, def.permission))) {
-    throw forbidden(`Missing permission "${def.permission}" for action "${def.id}"`);
-  }
+  const invocationId = newInvocationId();
+  const diff: DiffEntry[] = [];
+  const effects: { description: string; fn: () => Promise<void> }[] = [];
+  let result: TResult | undefined;
+  let input: never;
+  let auditInput: unknown;
+
+  /**
+   * **Everything that can refuse the call happens inside this block, so that a
+   * refusal is audited rather than vanishing.**
+   *
+   * Until now the pre-flight checks — permission, human approval, step-up,
+   * account standing — and the zod parse all threw *above* the transaction's
+   * `try`, which is the only thing that wrote a failure row. So the audit log
+   * recorded failures raised inside `run` and nothing else: a permission denial,
+   * the exact event `?ok=false` exists to show, left no trace at all.
+   *
+   * That was survivable while the callers were dashboard clicks. It stopped
+   * being survivable when MCP shipped: an agent refused a high-risk action, over
+   * and over, was invisible — and "an agent kept trying to delete customers" is
+   * precisely what a merchant needs to be able to see afterwards.
+   */
+  try {
+    // Permission first: an unauthorized caller learns nothing about the input shape.
+    if (!(await authorize(actor, def.permission))) {
+      throw forbidden(`Missing permission "${def.permission}" for action "${def.id}"`);
+    }
 
   /**
    * **§22 rule 3, finally enforced: a `high` action never auto-runs.**
@@ -144,14 +167,28 @@ export async function invokeAction<TResult = unknown>(
     await assertAccountStanding(actor.orgId, def.id);
   }
 
-  const input = def.input.parse(rawInput) as never;
-
-  const invocationId = newInvocationId();
-  const diff: DiffEntry[] = [];
-  const effects: { description: string; fn: () => Promise<void> }[] = [];
-  let result: TResult | undefined;
-
-  const auditInput = def.redactInput ? def.redactInput(input) : input;
+    input = def.input.parse(rawInput) as never;
+    auditInput = def.redactInput ? def.redactInput(input) : input;
+  } catch (e) {
+    /**
+     * **Dry runs stay unrecorded, refusal included.** "Nothing happened" is the
+     * table's invariant, and a proposal that was turned away still wrote
+     * nothing; recording it would put rows in the log for changes that were
+     * never going to be made.
+     */
+    if (!dryRun) {
+      /**
+       * **`auditInput` is deliberately undefined when the parse itself failed.**
+       * `redactInput` is written against the *parsed* shape, so it cannot be run
+       * over raw input — and storing raw input unredacted would write into a
+       * long-lived table exactly the secret the action takes care to strip. The
+       * actor and the action are what an incident needs; the rejected payload is
+       * not worth that risk.
+       */
+      await recordFailure(invocationId, def.id, actor, def.riskTier, auditInput, e, undoOf);
+    }
+    throw e;
+  }
 
   try {
     await db.transaction(async (tx) => {
@@ -190,10 +227,23 @@ export async function invokeAction<TResult = unknown>(
     });
   } catch (e) {
     if (!(e instanceof DryRunRollback)) {
-      // The failure audit is written outside the rolled-back transaction — "who
-      // tried what and was refused" is the half of an audit log that matters
-      // during an incident.
-      await recordFailure(invocationId, def.id, actor, def.riskTier, auditInput, e, undoOf);
+      /**
+       * The failure audit is written outside the rolled-back transaction — "who
+       * tried what and was refused" is the half of an audit log that matters
+       * during an incident.
+       *
+       * **Except on a dry run, which records nothing at all.** That is the
+       * table's stated invariant and it was only half true: a dry run whose
+       * action threw inside `run` was audited here, while one refused by a
+       * pre-flight check was not — the same proposal logged or not depending on
+       * where it happened to fail. Recording nothing is the coherent half to
+       * keep. A dry run provably changed nothing, proposing is the *sanctioned*
+       * agent path (rule 2), and filling `?ok=false` with proposals would bury
+       * the real refusals it exists to show.
+       */
+      if (!dryRun) {
+        await recordFailure(invocationId, def.id, actor, def.riskTier, auditInput, e, undoOf);
+      }
       throw e;
     }
   }
@@ -263,7 +313,14 @@ async function recordFailure(
       actorId: actor.id,
       orgId: actor.orgId,
       riskTier,
-      input,
+      /**
+       * **`input` is `NOT NULL`, and undefined here means the parse never
+       * succeeded** — so there is no redacted copy to store and raw input must
+       * not be written. A marker records that honestly: the field says *why*
+       * there is no payload rather than leaving a reader to wonder whether the
+       * action really was called with nothing.
+       */
+      input: input === undefined ? { unrecorded: "input rejected before validation" } : input,
       result: null,
       diff: [],
       ok: false,

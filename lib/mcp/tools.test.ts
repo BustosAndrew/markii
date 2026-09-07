@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import "../actions/index";
 import { allActions, describeAction } from "../actions/registry";
+import { permissionsForRole } from "../auth/permissions";
 import {
   actionIdFor,
   DRY_RUN_ARG,
@@ -220,5 +221,39 @@ describe("read tools coexist with action tools", () => {
     const { readToolNames } = await import("./reads");
     const names = readToolNames();
     expect(new Set(names).size).toBe(names.length);
+  });
+});
+
+describe("a scoped token narrows the toolset, which is the ergonomic answer too", () => {
+  /**
+   * A model choosing among 68 tools chooses worse than one choosing among 26,
+   * and the fix is the same thing security already wants: mint the narrowest
+   * role that can do the job. This pins that the scoping actually bites, so
+   * nobody "simplifies" the permission filter and quietly hands every token the
+   * full surface.
+   */
+  const countFor = async (role: Parameters<typeof permissionsForRole>[0]) => {
+    const perms = new Set<string>(permissionsForRole(role));
+    const writes = await visibleTools(allActions(), describeAction, async (p) => perms.has(p));
+    return writes.length;
+  };
+
+  it("gives a read-only role no write tools at all", async () => {
+    expect(await countFor("analyst")).toBe(0);
+    expect(await countFor("viewer")).toBe(0);
+  });
+
+  it("gives a catalog manager markedly fewer than an administrator", async () => {
+    const admin = await countFor("administrator");
+    const catalog = await countFor("catalog_manager");
+
+    expect(catalog).toBeGreaterThan(0);
+    // Not a precise count — that moves whenever an action is added. The property
+    // worth holding is that narrowing the role really does narrow the surface.
+    expect(catalog).toBeLessThan(admin / 2);
+  });
+
+  it("gives an administrator every registered action", async () => {
+    expect(await countFor("administrator")).toBe(allActions().length);
   });
 });
