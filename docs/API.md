@@ -39,7 +39,7 @@ carry an explicit status — **never call a `PLANNED` endpoint and never fake it
 | 19 | Site builder & content | 🟡 PLANNED | D |
 | 20 | Disputes & chargebacks | 🟡 PLANNED | F |
 | 21 | Agent Ops add-on | 🟡 PLANNED | F (last) |
-| 22 | **Action registry & MCP** — agent-native architecture | ✅ LIVE (registry, invoke, dry-run, audit, **and undo** — 2026-08-18). MCP server PLANNED. `undoable` is now derived from an `inverse()` and refused if declared without one, which corrected four actions that claimed it falsely | **Registry: C · MCP: D** |
+| 22 | **Action registry & MCP** — agent-native architecture | ✅ LIVE (registry, invoke, dry-run, audit, **undo** — 2026-08-18, and the **MCP server** — 2026-09-07, tools only; `resources/*` still PLANNED). `undoable` is now derived from an `inverse()` and refused if declared without one, which corrected four actions that claimed it falsely | **Registry: C · MCP: D** |
 | 24 | Email — sending domains, deliverability, suppression | ✅ LIVE — SES transport, templates, suppression list, bounce webhook, `/api/settings/email`, §22 actions. **Sending works as of 2026-08-11** (production access in `us-west-2`, verified by a live send). **Customer mail sends even before a merchant verifies a domain** (D44, 2026-08-16): without one it leaves from the storefront's own `accounts@{slug}.{ROOT_DOMAIN}` — still SES, still the store's name, **never bare `markii.shop` and never Resend**. A verified domain always wins when it exists. **The SNS → webhook hop has carried a real bounce end to end as of 2026-08-16** (`tests/integration/ses-suppression.test.ts`, gated on `MARKII_SES_TESTS=1`): a suppression row was written and **the next send to that address was refused**. This row claimed "never carried a real event" until 2026-08-18 | **C** |
 
 **v3 note.** Markii is now a full commerce platform (`docs/PLAN.md` v3). §16 was a **breaking change
@@ -2904,7 +2904,7 @@ defineAction({
 | `POST` | `/api/actions/:id?dryRun=1` | Return the diff an invocation *would* produce, without writing. A **query flag on the invoke route**, not a `/dry-run` sub-path — one handler, so the preview cannot drift from the execution |
 | `POST` | `/api/actions/:id/undo` | ✅ Invert a prior invocation by `invocationId`, when `undoable`. Runs the inverse as a **new** invocation — same permission, same step-up, its own audit row |
 | `GET` | `/api/actions/invocations` | Audit trail: actor (`user` \| `agent` \| `token`), input, result, `occurredAt`. Requires **`org.audit`** — same gate as `/api/org/audit`, since both read one table |
-| `ALL` | `/api/mcp` | MCP server: registry as tools, store/page context as resources |
+| `ALL` | `/api/mcp` | ✅ MCP server (tools). Stateless JSON-RPC over `POST`; `GET`/`DELETE` are `405`. **Token-only auth** (rule 6) — a session cookie is refused. 🟡 `resources/*` not built, so there are no read tools yet |
 
 Invocation response:
 
@@ -2923,12 +2923,50 @@ Invocation response:
    `dry-run` → render diff → human approves → invoke. No separate proposal engine.
 3. **Risk tier governs execution, not the caller's confidence.** `high` actions (publishing,
    pricing, discounts, custom code, bulk edits) always require human approval and cannot be
-   configured to auto-run.
+   configured to auto-run. ✅ **Enforced in `invokeAction` as of 2026-09-07** — until then this was
+   only *advertised* (`describeAction` publishes `requiresHumanApproval`) and nothing refused the
+   call, which was survivable while the money-moving subset also demanded step-up and became
+   untenable the moment MCP made a token the front door: **tokens are exempt from step-up**, so both
+   gates were absent for exactly the caller this rule is about. A `token` or `agent` invoking a
+   `high` action now gets **402-shaped `HUMAN_APPROVAL_REQUIRED` (403)**; `system` is exempt because
+   the billing sweep runs `billing.invoiceAssessments`, which is `high`, at 03:00 with nobody to
+   approve it. **Dry runs always pass** — rule 2 makes proposing the point.
 4. **Identical permissions for humans, agents, and tokens.** An agent can never do something the
    staff member behind it could not.
 5. **Every invocation is audited** with actor identity, whether it came from a click, a chat turn,
    an MCP client, or CI.
-6. **MCP tokens are scoped and role-bound** (§16), never a user's session cookie.
+6. **MCP tokens are scoped and role-bound** (§16), never a user's session cookie. Enforced by
+   `mcpAuthContext`, which reads a bearer token only — `requireAuthContext` accepts either and is
+   deliberately *not* used here, because a cookie is ambient and anything running in the merchant's
+   browser would inherit their whole session with nothing scoped to revoke.
+
+### MCP server — ✅ LIVE (tools), 2026-09-07
+
+Stateless Streamable HTTP: one `POST /api/mcp` speaking JSON-RPC 2.0 (`initialize`, `ping`,
+`tools/list`, `tools/call`, notifications, and batches). No session id and no SSE stream, which fits
+a deployment with no persistent process; `GET` answers `405` rather than an empty stream a client
+would wait on forever. Hand-rolled rather than taking `@modelcontextprotocol/sdk`, whose transport is
+written against Node's `http.ServerResponse` — revisit that if sessions or sampling are ever wanted.
+
+**Tool names replace dots with underscores** (`catalog.updateVariant` → `catalog_updateVariant`),
+because several clients reject a dot. The mapping is reversible only while no action id contains an
+underscore, which is asserted by a test rather than assumed.
+
+**`_dryRun: true` is a reserved argument** injected into every tool's schema — dry run is a property
+of how an action is invoked, not of what it takes, which is why it is a query flag on the HTTP route
+too.
+
+**An action's refusal is a tool error (`isError: true`), never a JSON-RPC error.** A protocol error
+says "the server could not process your message", which a model cannot act on; a tool error puts the
+reason in the transcript where it can read "high-risk, dry-run it" and do that. Zod validation
+failures go the same way — that is the most common thing a model gets wrong, and reporting it as a
+transport fault hides the field name it needs.
+
+⚠️ **No read tools.** The registry holds mutations only (rule 1), and no action carries
+`riskTier: "read"` — so an agent can change a variant's price and cannot list variants. Reads belong
+on `resources/*` backed by the existing GET handlers, **not** on new read actions: every invocation
+writes an `action_invocations` row, and pouring list calls into the audit table degrades the thing
+that makes it useful in an incident.
 
 ---
 

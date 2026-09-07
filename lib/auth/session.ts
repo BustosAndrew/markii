@@ -167,7 +167,7 @@ function contextFromSession(session: Session): AuthContext {
  * carrying an explicit `Authorization` header is asking to be treated as that
  * token, and silently preferring an ambient cookie would be surprising.
  */
-async function contextFromToken(req: Request): Promise<AuthContext | null> {
+export async function contextFromToken(req: Request): Promise<AuthContext | null> {
   const plaintext = bearerFrom(req);
   if (!plaintext) return null;
 
@@ -241,4 +241,24 @@ export async function requireAuthContext(req: Request): Promise<AuthContext> {
  */
 function withRequestContext(ctx: AuthContext, req: Request): AuthContext {
   return { ...ctx, actor: { ...ctx.actor, request: requestContextFrom(req) } };
+}
+
+/**
+ * Token-only authentication, for the MCP server (§22 rule 6).
+ *
+ * **A session cookie is deliberately not accepted here.** `requireAuthContext`
+ * takes either, which is right for the dashboard's own API — but rule 6 says an
+ * MCP client authenticates with a scoped, role-bound token and *never* a user's
+ * session. The reason is concrete: cookies are ambient. A browser-based MCP
+ * client, or anything running on a page the merchant has open, would otherwise
+ * inherit the full authority of whoever is signed in, with no token to scope it
+ * and nothing to revoke afterwards. A token is chosen, narrowed to a role, and
+ * revocable on its own.
+ *
+ * Returns null rather than throwing so the caller can answer in the protocol's
+ * own error shape instead of an HTTP error page.
+ */
+export async function mcpAuthContext(req: Request): Promise<AuthContext | null> {
+  const ctx = await contextFromToken(req);
+  return ctx ? withRequestContext(ctx, req) : null;
 }

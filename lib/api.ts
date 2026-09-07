@@ -39,6 +39,18 @@ export class ApiError extends Error {
        * it lacks authority when it lacks a plan.
        */
       | "TRIAL_ENDED"
+      /**
+       * A `high` risk-tier action was invoked by a non-human actor (§22 rule 3).
+       *
+       * **Not `FORBIDDEN`, though it shares the 403.** The caller's permissions
+       * are not the problem — a token minted from an `administrator` seat holds
+       * every one of them. What is missing is a *person*, and no amount of
+       * re-authenticating as the same token supplies one. An agent reading
+       * `FORBIDDEN` would reasonably retry with a broader credential, which is
+       * exactly the wrong lesson; this code tells it to dry-run and hand the
+       * diff to a human instead.
+       */
+      | "HUMAN_APPROVAL_REQUIRED"
       | "INTERNAL",
     public status: number,
     message: string,

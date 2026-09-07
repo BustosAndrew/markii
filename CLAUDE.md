@@ -382,7 +382,30 @@ customer fields. A new `org.audit` permission now gates it, resolving only for `
 cannot hold two permissions — the looser one is the real permission, and tightening only the new
 route would have left the old one as the way around it.
 
-**Still planned:** everything in §10–15 and §19–21, the **MCP server** (§22), and org **sessions**
+**The MCP server is built as of 2026-09-07** (§22). `POST /api/mcp` is stateless JSON-RPC — the
+registry as tools, so Claude Code or Cursor drives a store through the *same* validation,
+permissions, step-up, standing and audit as a dashboard click. It adds a **surface, never a
+capability**, which is the whole reason `defineAction` exists. **Token-only** (rule 6):
+`mcpAuthContext` refuses a session cookie, because a cookie is ambient and a browser-based client
+would otherwise inherit the merchant's entire session with nothing scoped to revoke. Dots become
+underscores in tool names (several clients reject a dot) — reversible only while no action id
+contains an underscore, which a test asserts. **An action's refusal is a tool error, never a
+JSON-RPC error**: a protocol error tells a model the transport broke, a tool error tells it what to
+do instead. **No read tools yet** — the registry is mutations only, so reads belong on `resources/*`
+over the existing GET handlers rather than as read actions that would flood the audit table.
+
+**Building it forced §22 rule 3 to become real.** "A `high` action always requires human approval
+and cannot auto-run" had been enforced by nothing — `describeAction` *advertised*
+`requiresHumanApproval` and `invokeAction` never checked it. That was survivable while the
+money-moving subset also demanded step-up, and untenable the moment a token became the front door,
+because **tokens are exempt from step-up**: for exactly the caller the rule is about, both gates were
+absent and only the permission check stood. A `token` or `agent` invoking a `high` action now gets
+`HUMAN_APPROVAL_REQUIRED` (403). **`system` is exempt and must be** — the billing sweep runs
+`billing.invoiceAssessments`, which is `high`, at 03:00 with nobody awake to approve it; a system
+actor is mintable from one `CRON_SECRET`-gated caller reading a clock, not merchant content. **Dry
+runs always pass**, because rule 2 makes proposing the point: the agent proposes, a person approves.
+
+**Still planned:** everything in §10–15 and §19–21, MCP **resources** (§22), and org **sessions**
 (§16) — confirmed absent 2026-09-06: no route backs either half.
 
 **Authorization on the v1 REST surface was closed 2026-08-11.** `orgHandler` authorizes **every

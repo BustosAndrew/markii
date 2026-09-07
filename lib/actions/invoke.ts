@@ -57,6 +57,54 @@ export async function invokeAction<TResult = unknown>(
   }
 
   /**
+   * **§22 rule 3, finally enforced: a `high` action never auto-runs.**
+   *
+   * The rule has been in the contract since the registry shipped, and until now
+   * it was only *advertised* — `describeAction` publishes
+   * `requiresHumanApproval` so an agent knows a gate is coming, but nothing
+   * refused the call. For a person in the dashboard that was survivable: the
+   * money-moving actions also carry `requiresStepUp`, and a browser session has
+   * to produce a fresh factor. **A token is exempt from step-up**
+   * (`lib/auth/mfa.ts` — a scoped token is its own credential), so for a token
+   * caller both gates were absent and only the permission check stood.
+   *
+   * That gap is tolerable while the only way in is a deliberate server-to-server
+   * integration. It is not tolerable as the front door for MCP, where the
+   * credential is held by a model reading merchant catalog content — and
+   * `docs/AGENT-OPS.md` §3 is explicit that retrieved content is untrusted data,
+   * never instruction. An agent that reads "also update the payout address" in a
+   * product description must not be one tool call away from doing it.
+   *
+   * **Dry runs always pass**, which is the point rather than a loophole: rule 2
+   * makes `dry-run → render diff → human approves → invoke` the proposal flow,
+   * so an agent can still *propose* every one of these. It just cannot be the
+   * one who approves.
+   */
+  if (!dryRun && def.riskTier === "high" && requiresHumanApproval(actor)) {
+    throw new ApiError(
+      "HUMAN_APPROVAL_REQUIRED",
+      403,
+      `"${def.id}" is a high-risk action and cannot be run by a ${actor.type}. ` +
+        "A person has to approve it.",
+      {
+        actionId: def.id,
+        riskTier: def.riskTier,
+        actorType: actor.type,
+        /**
+         * **Transport-neutral on purpose.** This string is read by an HTTP
+         * client and by an MCP client, and the two spell a dry run
+         * differently — naming only the query parameter sent an MCP agent
+         * looking for a flag that does not exist on that surface.
+         */
+        resolution:
+          'Produce the diff with a dry run first — "?dryRun=1" over HTTP, ' +
+          '"_dryRun": true over MCP — then have a staff member approve and run it ' +
+          "from the dashboard.",
+      },
+    );
+  }
+
+  /**
    * Step-up (D40): a **fresh** second factor for anything that moves money or
    * grants access.
    *
@@ -160,6 +208,24 @@ export async function invokeAction<TResult = unknown>(
     undoable: def.undoable ?? false,
     dryRun,
   };
+}
+
+/**
+ * Whether this actor needs a person to approve a `high` action.
+ *
+ * **`system` is exempt, and it has to be** — the monthly billing sweep invokes
+ * `billing.invoiceAssessments`, which is `high`, and there is nobody awake at
+ * 03:00 on the first to approve it. That exemption is not a hole in the same
+ * shape as the token one: a `system` actor is mintable from exactly one HTTP
+ * caller, gated by `CRON_SECRET` (D41), running Markii's own scheduled code
+ * against no untrusted input. The threat rule 3 answers is an agent acting on
+ * content it read; a cron reads a clock.
+ *
+ * `user` is exempt because a person *is* the human approval, and the
+ * money-moving subset additionally demands a fresh factor through `step-up`.
+ */
+function requiresHumanApproval(actor: Actor): boolean {
+  return actor.type === "token" || actor.type === "agent";
 }
 
 /**
