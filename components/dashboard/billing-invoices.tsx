@@ -29,7 +29,7 @@ function InvoiceRow({ invoice }: { invoice: Invoice }) {
     <tr className="border-t border-border">
       <td className="py-3 pr-4 text-sm text-foreground">
         <Link
-          href={`/dashboard/settings/billing/invoices/${invoice.id}`}
+          href={`/dashboard/billing/invoices/${invoice.id}`}
           className="underline-offset-2 hover:underline"
         >
           {invoice.number ?? invoice.id}

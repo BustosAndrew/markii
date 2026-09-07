@@ -202,6 +202,10 @@ export function BillingPlanPicker({
         <div>
           <h2 className="text-base font-medium text-foreground">Plans</h2>
           <p className="mt-1 text-sm leading-6 text-muted">{pricingNote}</p>
+          <p className="mt-2 text-sm leading-6 text-foreground">
+            Changing a plan requires MFA. After you confirm, you will be asked for a
+            fresh authenticator code.
+          </p>
         </div>
         <div className="flex rounded-[var(--radius-control)] border border-border p-0.5 text-sm">
           {(["month", "year"] as const).map((value) => (
@@ -245,7 +249,7 @@ export function BillingPlanPicker({
             <article
               key={planId}
               className={`rounded-[var(--radius-card)] border bg-surface p-5 shadow-[var(--shadow-sm)] ${
-                showingPay
+                showingPay || showingPreview
                   ? "border-brand/40 lg:col-span-3"
                   : "border-border"
               }`}
@@ -281,7 +285,7 @@ export function BillingPlanPicker({
 
               {showingPay && pay ? (
                 <div className="mt-5 max-w-lg space-y-3">
-                  <p className="text-sm leading-6 text-muted">
+                  <p className="text-sm leading-6 text-foreground">
                     Enter a card to pay the first invoice. Card details go to Stripe
                     only.
                   </p>
@@ -302,14 +306,18 @@ export function BillingPlanPicker({
                     disabled={busyPlan !== null}
                     onClick={() => setPay(null)}
                   >
-                    Cancel
+                    Back to plans
                   </Button>
                 </div>
               ) : showingPreview && preview ? (
-                <div className="mt-5 space-y-3">
+                <div className="mt-5 max-w-lg space-y-3">
                   <h4 className="text-sm font-semibold text-foreground">
                     Confirm plan
                   </h4>
+                  <p className="text-sm leading-6 text-foreground">
+                    Changing a plan requires MFA. Confirming will ask for a fresh
+                    authenticator code, then apply this amount.
+                  </p>
                   <p className="text-sm text-muted">
                     Amount due now:{" "}
                     <span className="font-medium text-foreground tabular-nums">
@@ -336,7 +344,7 @@ export function BillingPlanPicker({
                       disabled={busyPlan !== null}
                       onClick={() => void confirmChange()}
                     >
-                      {busyPlan ? "Applying…" : "Confirm"}
+                      {busyPlan ? "Confirming…" : "Confirm plan change"}
                     </Button>
                     <Button
                       type="button"

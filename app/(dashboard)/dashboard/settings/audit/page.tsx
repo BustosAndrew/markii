@@ -57,7 +57,7 @@ export default async function SettingsAuditPage({
   return (
     <SettingsShell
       title="Audit"
-      description="Who did what in this organization. Refused attempts are listed too — that is the incident view, not a failure of the log."
+      description="Who did what in this organization. Refused attempts are listed too — that is the incident view. Dry runs never appear: they write nothing."
     >
       <ListFilters
         search={false}

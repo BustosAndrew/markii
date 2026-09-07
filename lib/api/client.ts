@@ -160,9 +160,9 @@ export async function apiFetch<T>(
       isTrialEnded(error) &&
       typeof window !== "undefined" &&
       (requestInit.method ?? "GET").toUpperCase() !== "GET" &&
-      !window.location.pathname.startsWith("/dashboard/settings/subscription")
+      !window.location.pathname.startsWith("/dashboard/billing")
     ) {
-      window.location.assign("/dashboard/settings/subscription");
+      window.location.assign("/dashboard/billing");
     }
     throw error;
   }

@@ -114,7 +114,7 @@ export async function assertAccountStanding(orgId: string, actionId: string): Pr
     `The free trial ended on ${standing.endedAt.toISOString().slice(0, 10)}, so "${actionId}" is on hold.`,
     {
       resolution:
-        "Subscribe at /dashboard/settings/subscription to bring the store back online. " +
+        "Subscribe at /dashboard/billing to bring the store back online. " +
         "Your catalog, orders and customers are untouched and still readable.",
       standing: standing.state,
       endedAt: standing.endedAt.toISOString(),

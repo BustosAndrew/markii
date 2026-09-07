@@ -32,8 +32,8 @@ backend could be swapped without touching a screen.
 **Built and working** (2026-08-09): the marketing landing page; auth including the full **MFA** flow
 (`/mfa/enroll · challenge · recover`) with step-up handled centrally; and a dashboard covering
 overview, catalog, categories, products, collections, customers, orders + settlements, discounts,
-memberships, **payments**, websites, analytics, health, and settings (billing, subscription, team,
-audit, tax, shipping, domains, email). All against **LIVE** endpoints.
+memberships, **payments**, **billing**, websites, analytics, health, and settings (team, audit, tax,
+shipping, domains, email). All against **LIVE** endpoints.
 
 **See "What is left" below before picking anything up** — most of what remains is finishing screens
 against real response shapes, plus the one genuine gap: storefront themes.
@@ -72,10 +72,11 @@ API-independent work so you don't outrun the backend") no longer applies to A, B
 | Readiness | §9 | ✅ LIVE | Score, issues, triage |
 | **Billing & metering** | §17 | ✅ **LIVE — newly** | See below. This changed most recently and most sharply |
 | Card checkout (Stripe) | §18.4 | ✅ LIVE | Elements mount with a publishable key the server hands you |
-| **Action undo** | §22 | ✅ **LIVE — newly (2026-08-18)** | `undoInvocation()` in `lib/api/actions.ts` is no longer gated off. See below before you render an Undo button |
+| **Action undo** | §22 | ✅ **LIVE** | `undoInvocation()` hangs on `/dashboard/settings/audit`. Gate on `outcome.undoable` |
+| **MCP server** | §22 | ✅ **LIVE (tools), no extra screen** | Token-only at `/api/mcp`. Settings → Team mints the token. Session cookies are refused. Connecting a client: `docs/MCP.md`. `resources/*` still unbuilt |
 | Add-on **purchase** | §17 | ⛔ Refuses `409` | Agent Ops / Chargeback Assist do not exist. Show them as unavailable — never as "coming soon with a buy button" |
 | Email delivery | §24 | ✅ LIVE, screen built | SES sends; `/dashboard/settings/email`. Unverified domains still send via the storefront fallback (D44) — do not say mail is not going out |
-| Site builder, Channels, Test Lab, Agent Ops chat | §19–21 | ⛔ Deferred | Out of launch scope — do not start |
+| Site builder, Channels, Test Lab, Agent Ops chat | §19–21 | ⛔ Deferred | Out of launch scope — do not start. MCP (§22) is live; do not confuse it with Agent Ops chat |
 
 ### MFA (D40) — built. What to preserve when touching it
 
@@ -219,12 +220,13 @@ What moved:
     payment wall, not an auth error: it is **not** `403`, so it must not reach the MFA step-up
     modal — the permissions are fine and a second factor changes nothing. `apiFetch`
     (`lib/api/client.ts`) already sends a browser mutation there —
-    `/dashboard/settings/subscription` — and never treats it as MFA. Reads stay on the
+    `/dashboard/billing` — and never treats it as MFA. Reads stay on the
     page; do not blank them. `details.endedAt` says when it lapsed.
   - **Reads keep working when expired.** Catalog, orders and customers stay listable and
     exportable by design; do not blank those screens on `expired`.
-- Plan, card, and cancel live at **`/dashboard/settings/subscription`**. Usage, invoices, and
-  assessments stay on `/dashboard/settings/billing`.
+- Plan, card, cancel, usage, invoices, and assessments live at **`/dashboard/billing`**.
+  Changing a plan requires MFA; the screen says so before Confirm. Old
+  `/dashboard/settings/subscription` and `/dashboard/settings/billing` URLs redirect here.
 - `POST /api/billing/payment-method` returns a real SetupIntent `clientSecret` **and** a
   `publishableKey`. Mount Elements with the key the server returns — never one hardcoded or read
   from a different env var, because the server refuses when the two are in different Stripe modes
@@ -575,7 +577,7 @@ real state. These are the open items, recorded so they are not rediscovered late
 | ~~No cart, variant picker, or checkout~~ ✅ **built** | `components/storefront/add-to-cart.tsx`, `cart-checkout.tsx` | The three sanctioned islands exist. Recurring-membership purchase is the remaining storefront flow |
 | ~~Every live endpoint gated off~~ ✅ **fixed 2026-08-02** | `lib/api/{readiness,billing,commerce}.ts` | Constants flipped per endpoint group against the routes that actually exist, and the drifted response types corrected. See the two-sided-flip note below |
 | ~~§24 email had no client or screen~~ ✅ **fixed 2026-08-02** | `lib/api/email.ts`, `/dashboard/settings/email` | The route and its five actions shipped 2026-08-02 with nothing calling them, while `lib/email/` told merchants to go to a page that did not exist |
-| ~~Invoices screen stubbed on `configuration_required`~~ ⚠️ **unblocked 2026-08-07** | `/dashboard/settings/billing` | §17 is LIVE in full. `lib/api/billing.ts` was corrected in the same change — it had `subscription: null` and `invoices: never[]` pinned from the refusing era, which made TypeScript *forbid* reading data the API now returns. Real types, plus `getInvoice`, `cancelSubscription`, `setDefaultPaymentMethod`, and `getAddon`, are there now |
+| ~~Invoices screen stubbed on `configuration_required`~~ ⚠️ **unblocked 2026-08-07** | `/dashboard/billing` | §17 is LIVE in full. Plan, card, meter, and invoices share this screen. Old `/dashboard/settings/billing` and `/dashboard/settings/subscription` redirect here |
 | ~~Org switcher was a placeholder~~ ✅ **built 2026-08-03** | `components/dashboard/sidebar.tsx` | The sidebar card said "org switching is coming soon with Phase A auth" long after `POST /api/org/switch` shipped. Now a real switcher, shown only when the user belongs to more than one org. Identity is resolved **once in the layout** and passed to both shells, so the rail and the mobile drawer cannot disagree about which org is active |
 | ~~Team settings was a stub~~ ✅ **built 2026-08-03** | `/dashboard/settings/team` | Staff with inline role changes, invites against the plan's seat limit, and scoped API tokens. **Audit** is now its own screen (`/dashboard/settings/audit`, 2026-09-06). **Sessions** remain the only missing half of §16 |
 | ~~Orders list is genuinely blocked~~ ✅ **unblocked** | `/dashboard/orders` | `GET /api/orders` ships; the screen exists. Settlements live at `/dashboard/orders/settlements` |
@@ -625,7 +627,9 @@ deployment. Add the endpoint to `lib/api/server.ts` in the same change as the fl
 components are unaffected — the browser attaches the cookie itself.
 
 `GET /api/me`'s response shape is now pinned in §16 to what `lib/api/org.ts` already assumes, so
-that one is settled rather than assumed.
+that one is settled rather than assumed. **It is cookie-only** (2026-09-06): an API token against
+`/api/me` is `401`. Identity for the dashboard comes from the session cookie; tokens authenticate
+`/api/mcp` and `/api/*` writes, not this boot call.
 
 **Themes are done end-to-end** — four defined in `lib/storefront/themes.ts`, wired through the
 create wizard, site controls, `PATCH /api/sites`, and the generators. They depend on the
@@ -746,11 +750,11 @@ from a component, no `createBrowserClient`, no client-side session read; identit
 Start with the **threshold meter** — it is the most important component in the product and the one
 most easily made dishonest. Read `docs/PRICING.md` §6 before writing it. Contract: §17.
 
-Then, in the order a merchant meets them: **Subscription** (`/dashboard/settings/subscription`) —
-plan comparison → **proration preview → confirm** (two calls, never one) → **first-invoice Payment
-Element** (`confirmPayment` with the `clientSecret` from confirm) → card on file via
-`setDefaultPaymentMethod` → **Billing** (`/dashboard/settings/billing`) for the threshold meter,
-invoice history, and invoice detail. Dunning banners key off `subscriptionState.code === "inactive"`
+Then, in the order a merchant meets them, all on **`/dashboard/billing`**: plan comparison →
+**proration preview → confirm** (two calls, never one; **changing a plan requires MFA**) →
+**first-invoice Payment Element** (`confirmPayment` with the `clientSecret` from confirm) → card on
+file via `setDefaultPaymentMethod` → threshold meter, invoice history, and invoice detail. Dunning
+banners key off `subscriptionState.code === "inactive"`
 and the `past_due` status, which **still grants access** — do not lock a merchant out of their
 dashboard over a card Stripe is still retrying.
 

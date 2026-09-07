@@ -2,6 +2,15 @@
 
 import { loadStripe, type Appearance, type Stripe } from "@stripe/stripe-js";
 
+/**
+ * Stripe Elements runs in an iframe and **cannot read this page's CSS variables**.
+ * `var(--font-geist-sans)` is invisible there, so the iframe falls back to the
+ * browser default — Times New Roman. A concrete system stack is what it can
+ * actually render.
+ */
+const STRIPE_FONT =
+  'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+
 /** Shared Elements look — matches Operate tokens so the card form is not Stripe's default blue. */
 export const markiiStripeAppearance: Appearance = {
   theme: "stripe",
@@ -11,9 +20,17 @@ export const markiiStripeAppearance: Appearance = {
     colorText: "#16161D",
     colorDanger: "#C9184A",
     colorTextSecondary: "#6B7280",
-    fontFamily: "var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif",
+    fontFamily: STRIPE_FONT,
     borderRadius: "12px",
     spacingUnit: "4px",
+  },
+  rules: {
+    ".Input": { fontFamily: STRIPE_FONT },
+    ".Label": { fontFamily: STRIPE_FONT },
+    ".Tab": { fontFamily: STRIPE_FONT },
+    ".TabLabel": { fontFamily: STRIPE_FONT },
+    ".Error": { fontFamily: STRIPE_FONT },
+    ".Block": { fontFamily: STRIPE_FONT },
   },
 };
 

@@ -14,6 +14,7 @@ import {
   LogOut,
   Percent,
   Plug,
+  Receipt,
   Settings,
   ShieldCheck,
   ShoppingBag,
@@ -39,6 +40,7 @@ export const nav = [
   { href: "/dashboard/payments", label: "Payments", icon: CreditCard },
   { href: "/dashboard/health", label: "Health", icon: ShieldCheck },
   { href: "/dashboard/integrations", label: "Integrations", icon: Plug },
+  { href: "/dashboard/billing", label: "Billing", icon: Receipt },
   { href: "/dashboard/settings", label: "Settings", icon: Settings },
 ] as const;
 

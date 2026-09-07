@@ -58,8 +58,10 @@ export function TokensPanel({
     <section className="rounded-[var(--radius-card)] border border-border bg-surface p-5 shadow-[var(--shadow-sm)]">
       <h2 className="text-base font-medium text-foreground">API tokens</h2>
       <p className="mt-1 text-sm leading-6 text-muted">
-        Scoped, role-bound credentials for agents, MCP clients, and CI — never a copy of someone&rsquo;s
-        session. A token can never do more than the role it carries.
+        Scoped, role-bound credentials for MCP clients, agents, and CI. Point a client at{" "}
+        <span className="font-mono text-foreground">/api/mcp</span> with the token as a
+        Bearer secret — a signed-in dashboard session is refused there. A token can never
+        do more than the role it carries.
       </p>
 
       {tokens.length === 0 ? (

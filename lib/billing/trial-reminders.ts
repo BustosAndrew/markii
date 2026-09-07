@@ -94,7 +94,7 @@ export async function sweepTrialReminders(now: Date = new Date()): Promise<Trial
   result.considered = candidates.length;
 
   const base = (process.env.NEXT_PUBLIC_APP_URL || "https://markii.shop").replace(/\/+$/, "");
-  const subscribeUrl = `${base}/dashboard/settings/subscription`;
+  const subscribeUrl = `${base}/dashboard/billing`;
 
   for (const org of candidates) {
     const endsAt = org.freeTrialEndsAt;
