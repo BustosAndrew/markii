@@ -2904,7 +2904,7 @@ defineAction({
 | `POST` | `/api/actions/:id?dryRun=1` | Return the diff an invocation *would* produce, without writing. A **query flag on the invoke route**, not a `/dry-run` sub-path — one handler, so the preview cannot drift from the execution |
 | `POST` | `/api/actions/:id/undo` | ✅ Invert a prior invocation by `invocationId`, when `undoable`. Runs the inverse as a **new** invocation — same permission, same step-up, its own audit row |
 | `GET` | `/api/actions/invocations` | Audit trail: actor (`user` \| `agent` \| `token`), input, result, `occurredAt`. Requires **`org.audit`** — same gate as `/api/org/audit`, since both read one table |
-| `ALL` | `/api/mcp` | ✅ MCP server — **tools** (58 registry actions + 10 `read_*`) and **prompts**. Stateless JSON-RPC over `POST`; `GET`/`DELETE` are `405`. **Token-only auth** (rule 6) — a session cookie is refused. Setup: `docs/MCP.md`. 🟡 `resources/*` not built |
+| `ALL` | `/api/mcp` | ✅ MCP server — **tools** (58 registry actions + 10 `read_*`) and **prompts**. Stateless JSON-RPC over `POST`; `GET`/`DELETE` are `405`. **Token-only auth** (rule 6) — a session cookie is refused. **Rate limited** at 120 req/min per token (`429` + `Retry-After`, fails open). Setup: `docs/MCP.md`. 🟡 `resources/*` not built |
 
 Invocation response:
 

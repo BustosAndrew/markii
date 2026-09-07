@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
-import { ZodError } from "zod";
 import { ApiError } from "@/lib/api";
+import { isReportableToolError, rpcErrorPayload, toolErrorPayload } from "@/lib/mcp/errors";
+import { MCP_RATE_LIMIT, rateLimitHeaders } from "@/lib/rate-limit";
+import { consumeRateLimit } from "@/lib/rate-limit-store";
 /**
  * **From the barrel, not from `./registry` and `./invoke` directly.**
  *
@@ -96,6 +98,39 @@ export async function POST(req: Request) {
   /** Non-null: `mcpAuthContext` only succeeds when a bearer token was present. */
   const authorization = req.headers.get("authorization") ?? "";
 
+  /**
+   * **Rate limited per token, and only after authentication.**
+   *
+   * Keyed on the token's id rather than the caller's address: MCP is
+   * token-authenticated, an IP is shared behind NAT and forgeable without a
+   * trusted proxy in front, and the token is the thing that can actually be
+   * revoked. It also keeps one merchant's runaway agent from spending another's
+   * allowance.
+   *
+   * After auth, so an unauthenticated flood cannot fill the counter table with
+   * keys nobody owns — an anonymous caller is already refused a line earlier and
+   * costs one indexed token lookup.
+   *
+   * This is an abuse control, not a security boundary. It **fails open** if the
+   * counter is unreachable, because the things that actually stand between a
+   * caller and the data — the permission check, the approval gate, the audit
+   * log — do not depend on it, and a degraded counter should not become an
+   * outage.
+   */
+  const limitKey = `mcp:${session.token?.id ?? session.actor.id}`;
+  const limit = await consumeRateLimit(limitKey, MCP_RATE_LIMIT);
+  if (!limit.allowed) {
+    return NextResponse.json(
+      rpcError(
+        null,
+        RPC_INVALID_REQUEST,
+        `Rate limit exceeded: ${MCP_RATE_LIMIT.limit} requests per minute for this token. ` +
+          `Retry in ${limit.retryAfterSeconds}s.`,
+      ),
+      { status: 429, headers: rateLimitHeaders(limit, MCP_RATE_LIMIT) },
+    );
+  }
+
   let body: unknown;
   try {
     body = await req.json();
@@ -115,11 +150,23 @@ export async function POST(req: Request) {
       if (reply) replies.push(reply);
     }
     // An all-notification batch is answered with no body, per JSON-RPC.
-    return replies.length ? NextResponse.json(replies) : new Response(null, { status: 202 });
+    const batchHeaders = rateLimitHeaders(limit, MCP_RATE_LIMIT);
+    return replies.length
+      ? NextResponse.json(replies, { headers: batchHeaders })
+      : new Response(null, { status: 202, headers: batchHeaders });
   }
 
+  /**
+   * The budget travels on every reply, not only the refusal — a client that can
+   * see `RateLimit-Remaining` falling can slow down before it is turned away,
+   * which is the entire point of publishing it.
+   */
+  const headers = rateLimitHeaders(limit, MCP_RATE_LIMIT);
+
   const reply = await handleMessage(body, { session, authorization });
-  return reply ? NextResponse.json(reply) : new Response(null, { status: 202 });
+  return reply
+    ? NextResponse.json(reply, { headers })
+    : new Response(null, { status: 202, headers });
 }
 
 /**
@@ -161,9 +208,16 @@ async function handleMessage(msg: unknown, ctx: Ctx) {
   } catch (e) {
     if (isNotification(msg)) return null;
     if (e instanceof ApiError) {
-      return rpcError(id, RPC_INVALID_PARAMS, e.message, { code: e.code, details: e.details });
+      const { message, data } = rpcErrorPayload(e);
+      return rpcError(id, RPC_INVALID_PARAMS, message, data);
     }
-    return rpcError(id, RPC_INTERNAL_ERROR, e instanceof Error ? e.message : String(e));
+    /**
+     * **Never echo raw exception text**, exactly as `errorResponse` does not —
+     * a driver error carries table and column names, and a config error can
+     * carry an env var name. Both are for logs, not for a model.
+     */
+    console.error("[mcp] unhandled error", e);
+    return rpcError(id, RPC_INTERNAL_ERROR, rpcErrorPayload(e).message);
   }
 }
 
@@ -299,45 +353,15 @@ async function callTool(params: Record<string, unknown>, ctx: Ctx) {
     };
   } catch (e) {
     /**
-     * **An action's refusal is a tool result, not a JSON-RPC error.** This is the
-     * distinction the spec draws and the easy one to get wrong: a protocol error
-     * says "this server could not process your message", which tells the model
-     * nothing it can act on. A tool error puts the reason in the transcript,
-     * where the model can read "high-risk, dry-run it and ask a human" and do
-     * exactly that.
+     * **An action's refusal is a tool result, not a JSON-RPC error.** A protocol
+     * error says "this server could not process your message", which tells the
+     * model nothing it can act on; a tool error puts the reason in the
+     * transcript, where it can read "high-risk, dry-run it and ask a human" and
+     * do exactly that. Bad arguments go the same way — that is the most frequent
+     * mistake a model makes, and calling it a transport fault hides the field
+     * name it needs.
      */
-    if (e instanceof ApiError) {
-      return toolError(
-        JSON.stringify({ code: e.code, message: e.message, details: e.details }, null, 2),
-      );
-    }
-    /**
-     * **Bad arguments are a tool error too, and this is the common case.**
-     *
-     * `def.input.parse()` throws a `ZodError`, which is not an `ApiError` — so
-     * this used to fall through to a JSON-RPC `-32603`, telling the client the
-     * *server* had failed. Getting an argument's type wrong is the single most
-     * frequent thing a model does, and reporting it as a transport fault hides
-     * the one thing that would let it recover: which field, and what was
-     * expected. Returned as a tool error, the issues land in the transcript and
-     * the next attempt is usually right.
-     */
-    if (e instanceof ZodError) {
-      return toolError(
-        JSON.stringify(
-          {
-            code: "VALIDATION_ERROR",
-            message: "The arguments did not match this tool's input schema.",
-            issues: e.issues.map((i) => ({
-              field: i.path.join(".") || "(root)",
-              message: i.message,
-            })),
-          },
-          null,
-          2,
-        ),
-      );
-    }
+    if (isReportableToolError(e)) return toolError(toolErrorPayload(e));
     throw e;
   }
 }

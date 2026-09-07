@@ -3,12 +3,41 @@
  * shown to merchants, shoppers, or agents. Backend/docs IDs belong in logs.
  */
 
-const INTERNAL_REF =
-  /\b(?:docs\/[A-Za-z0-9._/-]+|API\s*§\d+(?:\.\d+)?|§\d+(?:\.\d+)?(?:\s+rule\s+\d+)?|Phase\s+[A-F]|G\d{1,2}|D\d{2,3}|CLAUDE\.md|DECISIONS\.md|BACKEND\.md|FRONTEND\.md|PRICING\.md|PLAN\.md|AGENT-OPS\.md|COMPETITORS\.md|BUILDER\.md|DESIGN\.md|PRODUCT\.md)\b/gi;
+/**
+ * Section references are matched **outside** the `\b(...)\b` group, and that
+ * split is the whole point.
+ *
+ * They used to sit inside it, where they could never match: `\b` needs a
+ * word/non-word transition and `§` is itself a non-word character, so a leading
+ * boundary before `§` matches nothing at all. Only the `API §22` spelling
+ * worked, because there the boundary lands before the `A`. A bare `§6` — or a
+ * whole `§22 rule 3` — passed through untouched, on the HTTP surface as much as
+ * over MCP, since `errorResponse` shares this pattern.
+ */
+const SECTION_REF = /(?:\bAPI\s*)?§\d+(?:\.\d+)?(?:\s+rule\s+\d+)?/.source;
 
-/** Env var names and local-path hints that help attackers more than merchants. */
-const OPS_HINT =
-  /\b(?:STRIPE_SECRET_KEY|STRIPE_CONNECT_CLIENT_ID|STRIPE_CONNECT_REDIRECT_URI|SUPABASE_SERVICE_ROLE_KEY|DATABASE_URL|AWS_SECRET_ACCESS_KEY|AWS_ACCESS_KEY_ID|AWS_SESSION_TOKEN|RESEND_API_KEY|NEXT_PUBLIC_SUPABASE_URL|NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY|BASE_SEPOLIA_RPC_URL|CRON_SECRET|\.env(?:\.local|\.example)?|lib\/[A-Za-z0-9._/-]+\.ts)\b/g;
+const WORD_REF =
+  /\b(?:docs\/[A-Za-z0-9._/-]+|Phase\s+[A-F]|G\d{1,2}|D\d{2,3}|CLAUDE\.md|DECISIONS\.md|BACKEND\.md|FRONTEND\.md|PRICING\.md|PLAN\.md|AGENT-OPS\.md|COMPETITORS\.md|BUILDER\.md|DESIGN\.md|PRODUCT\.md)\b/
+    .source;
+
+const INTERNAL_REF = new RegExp(`${SECTION_REF}|${WORD_REF}`, "gi");
+
+/**
+ * Env var names and local-path hints that help attackers more than merchants.
+ *
+ * `.env` is split out for the same reason `§` is above, and it was broken the
+ * same way: a leading `\b` before a `.` never holds when the character before
+ * it is a space, so `.env.local` was only ever stripped when glued to a word.
+ * The space in front of it did disappear, which made it *look* handled — that
+ * is the punctuation tidy-up below, not this pattern.
+ */
+const ENV_FILE = /\.env(?:\.local|\.example|\.production)?\b/.source;
+
+const OPS_NAME =
+  /\b(?:STRIPE_SECRET_KEY|STRIPE_CONNECT_CLIENT_ID|STRIPE_CONNECT_REDIRECT_URI|SUPABASE_SERVICE_ROLE_KEY|DATABASE_URL|AWS_SECRET_ACCESS_KEY|AWS_ACCESS_KEY_ID|AWS_SESSION_TOKEN|RESEND_API_KEY|NEXT_PUBLIC_SUPABASE_URL|NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY|BASE_SEPOLIA_RPC_URL|CRON_SECRET|lib\/[A-Za-z0-9._/-]+\.ts)\b/
+    .source;
+
+const OPS_HINT = new RegExp(`${ENV_FILE}|${OPS_NAME}`, "g");
 
 const SAFE_CONFIG =
   "This deployment needs additional platform configuration. Contact your Markii admin.";

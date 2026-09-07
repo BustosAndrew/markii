@@ -136,7 +136,38 @@ worth deciding deliberately rather than discovering. Two practical mitigations, 
 `acceptsMarketing` on a customer is recorded consent for *marketing*, not permission to send that
 record anywhere else.
 
-## 7. Everything is audited
+## 7. Rate limits
+
+**120 requests per minute per token**, in a fixed window, configurable with `MCP_RATE_LIMIT`.
+
+Every reply carries the budget, so a well-behaved client can slow down before it is turned away:
+
+```
+RateLimit-Limit: 120
+RateLimit-Remaining: 87
+RateLimit-Reset: 34
+```
+
+Over the limit is a **`429`** with `Retry-After` in seconds and a JSON-RPC error explaining which
+limit was hit.
+
+**Per token, not per IP** — an IP is shared behind NAT and forgeable without a trusted proxy, while
+the token is the thing that can be revoked. It also means one merchant's runaway agent cannot spend
+another's allowance. A second token gets its own budget, which is another reason to mint a narrow one
+per client rather than sharing an administrator token around.
+
+Two properties worth knowing:
+
+- **The window is fixed, not sliding.** A caller can spend the full limit at the end of one minute
+  and again at the start of the next, so the true short-term ceiling is twice the nominal rate.
+  A sliding window would need a timestamp per request instead of a counter — more rows and more work
+  on every call, to be less wrong about a burst that is already survivable.
+- **It fails open.** If the counter is unreachable the request is allowed. This is an abuse control,
+  not a security boundary: the permission check, the approval gate and the audit log are what stand
+  between a caller and the data, and none of them depends on this. A degraded counter should not
+  become an outage.
+
+## 8. Everything is audited
 
 Every tool call writes an `action_invocations` row with the token as actor, visible at **Settings →
 Audit** or `GET /api/org/audit` (owner and administrator only). A refused attempt is recorded too —
@@ -145,7 +176,7 @@ Audit** or `GET /api/org/audit` (owner and administrator only). A refused attemp
 Reads are the exception and write nothing, deliberately: a browsing agent would otherwise bury the
 log under list calls, degrading the one surface that has to stay legible during an incident.
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 **`401` with `WWW-Authenticate: Bearer`** — no token, a malformed one, or a revoked one. The header
 must be `Authorization: Bearer mk_live_…`. A session cookie will never work here.
@@ -158,12 +189,19 @@ action. An `analyst` or `viewer` token legitimately shows only the ten read tool
 **`402 TRIAL_ENDED`** — the free month ended and no plan was bought. Reads keep working; writes are
 held until someone subscribes. Nothing about the store's data is withheld.
 
+**Every request 500s in dev, and the log says `Duplicate action id "..."`** — a hot-reload
+artifact, not your change. The registry is a module-level `Map` filled by side-effect imports, so
+when Turbopack re-evaluates `lib/actions/definitions/*` the ids register a second time and
+`defineAction` throws. It never recovers on its own and it takes **every** route that imports the
+registry with it, not just this one. **Restart the dev server.** A long-running dev server here is
+worth suspecting generally: one left up for hours also degrades into 500s with a dead worker pool.
+
 **A tool call returns `isError: true`** — that is an *action* refusing, not the transport failing,
 and the reason is in the message. Protocol-level problems come back as JSON-RPC errors instead. The
 distinction is deliberate: a protocol error tells a model the server broke, which it cannot act on;
 a tool error tells it what to do differently.
 
-## 9. Verifying a change to the server
+## 10. Verifying a change to the server
 
 Two suites cover this endpoint, and they answer different questions:
 
@@ -190,7 +228,7 @@ runs in the same process and calls `invokeAction` directly. Going out over HTTP 
 registry adds a network hop, a second authentication and a token to rotate, and turns a typed
 `InvocationOutcome` into JSON to re-parse. MCP is the surface for callers who are outside.
 
-## 10. What is not built
+## 11. What is not built
 
 **`resources/*`.** `initialize` does not advertise the capability. Resources are for stable context a
 client pins into a conversation — the store as a document — rather than for querying, which is what

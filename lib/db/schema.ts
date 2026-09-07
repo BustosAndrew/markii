@@ -1068,6 +1068,28 @@ export const apiTokens = pgTable(
 );
 
 /**
+ * Fixed-window request counters, for rate limiting.
+ *
+ * **In Postgres rather than in memory, because in memory would be a lie.** A
+ * `Map` in the module scope is per-instance and resets on every cold start, so
+ * on a serverless deployment it would refuse roughly nothing while looking
+ * exactly like protection — the shape of fabricated safety the house rules
+ * forbid. Shared state is the only version of this that is true, and Postgres
+ * is the shared state this project already has.
+ *
+ * One row per key per window, incremented atomically by an upsert. Rows are not
+ * swept: a key is reused on its next window rather than being deleted, so the
+ * table's size is bounded by the number of distinct callers, not by traffic.
+ */
+export const rateLimitCounters = pgTable("rate_limit_counters", {
+  /** Scope and subject, e.g. `mcp:tok_abc`. Never a raw secret — token *ids* only. */
+  key: text("key").primaryKey(),
+  /** Start of the window this count belongs to; a later `now` resets the count. */
+  windowStart: timestamp("window_start", { withTimezone: true }).notNull(),
+  count: integer("count").notNull().default(0),
+});
+
+/**
  * Audit trail for the action registry (`docs/API.md` §22 rule 5): every
  * invocation, whether it came from a click, an agent turn, an MCP client, or CI.
  *

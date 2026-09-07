@@ -197,4 +197,173 @@ describe("MCP protocol conformance", () => {
     // Nothing above invoked an action: a handshake and some listing only.
     expect(n).toBe(0);
   }, 60_000);
+
+  /**
+   * **Error output is sanitized, because an agent is an audience.**
+   *
+   * `lib/api/public-copy.ts` exists to keep internal planning refs, repo paths
+   * and env var names out of anything shown to "merchants, shoppers, or
+   * agents" — and `errorResponse` applies it on every HTTP reply. The MCP route
+   * did neither: it passed `ApiError.message` through unsanitized and echoed a
+   * raw exception's text on the internal-error path, which sends a driver error
+   * naming tables and columns to a model, and from there to whatever provider
+   * the client uses.
+   */
+  describe("error output does not leak internals", () => {
+    const INTERNAL = [
+      "DATABASE_URL",
+      "SUPABASE_SERVICE_ROLE_KEY",
+      "STRIPE_SECRET_KEY",
+      "CRON_SECRET",
+      /lib\/[A-Za-z0-9._/-]+\.ts/,
+      /docs\/[A-Za-z0-9._/-]+/,
+    ];
+
+    const assertClean = (text: string, label: string) => {
+      for (const needle of INTERNAL) {
+        if (typeof needle === "string") {
+          expect(text.includes(needle), `${label} leaked ${needle}`).toBe(false);
+        } else {
+          expect(needle.test(text), `${label} leaked ${needle}`).toBe(false);
+        }
+      }
+    };
+
+    it("keeps a validation refusal free of internal references", async () => {
+      const res = await request("tools/call", {
+        name: "catalog_updateVariant",
+        arguments: { variantId: "not-a-number" },
+      });
+      assertClean(res.text, "validation error");
+    }, 60_000);
+
+    it("keeps a not-found refusal free of internal references", async () => {
+      const res = await request("tools/call", {
+        name: "catalog_updateVariant",
+        arguments: { variantId: 999999999, priceMinor: 100 },
+      });
+      assertClean(res.text, "not-found error");
+    }, 60_000);
+
+    it("keeps a protocol error free of internal references", async () => {
+      const res = await request("prompts/get", { name: "no_such_prompt" });
+      assertClean(res.text, "protocol error");
+    }, 60_000);
+
+    /**
+     * Every reply in the handshake suite, swept in one pass — the leak this
+     * guards against is not specific to one code path.
+     */
+    it("keeps a full listing free of internal references", async () => {
+      const tools = await request("tools/list", {});
+      assertClean(tools.text, "tools/list");
+
+      const prompts = await request("prompts/list", {});
+      assertClean(prompts.text, "prompts/list");
+    }, 60_000);
+  });
+
+  /**
+   * Rate limiting (`lib/rate-limit.ts`).
+   *
+   * The arithmetic is unit-tested and needs no database. What only a real
+   * request can show is that the counter is shared and atomic — the reason it
+   * lives in Postgres rather than in a module-scope `Map`, which would reset on
+   * every cold start and refuse almost nothing while looking like protection.
+   *
+   * The limit is driven off `MCP_RATE_LIMIT`, so these drive the counter
+   * directly rather than sending hundreds of requests to discover the ceiling.
+   */
+  describe("rate limiting", () => {
+    /** A key nothing else uses, so the assertions cannot be disturbed. */
+    const probeKey = `mcp:conformance-probe-${Date.now()}`;
+
+    it("publishes the remaining budget on a successful reply", async () => {
+      const res = await request("ping", {});
+      expect(res.status).toBe(200);
+
+      expect(res.headers.get("ratelimit-limit")).toBeTruthy();
+      const remaining = Number(res.headers.get("ratelimit-remaining"));
+      expect(Number.isFinite(remaining)).toBe(true);
+      expect(remaining).toBeGreaterThanOrEqual(0);
+
+      /** Only a refusal carries Retry-After; on a 200 it would misread. */
+      expect(res.headers.get("retry-after")).toBeNull();
+    }, 60_000);
+
+    it("counts each request against the token, in one shared row", async () => {
+      const before = Number((await request("ping", {})).headers.get("ratelimit-remaining"));
+      const after = Number((await request("ping", {})).headers.get("ratelimit-remaining"));
+
+      /**
+       * Strictly decreasing across two separate HTTP requests is the property
+       * an in-memory counter could not provide on a serverless deployment.
+       */
+      expect(after).toBeLessThan(before);
+    }, 60_000);
+
+    /**
+     * The increment is a single upsert precisely so two concurrent requests
+     * cannot both read the same count and both decide they fit. Twenty at once
+     * must consume exactly twenty.
+     */
+    it("counts concurrent requests exactly once each", async () => {
+      const start = Number((await request("ping", {})).headers.get("ratelimit-remaining"));
+
+      const burst = await Promise.all(Array.from({ length: 20 }, () => request("ping", {})));
+      for (const r of burst) expect(r.status).toBe(200);
+
+      const end = Number((await request("ping", {})).headers.get("ratelimit-remaining"));
+      // 20 in the burst plus the one that read `end`.
+      expect(start - end).toBe(21);
+    }, 120_000);
+
+    /**
+     * **A small policy of its own, rather than spending the real one.**
+     *
+     * The first version of this looped `MCP_RATE_LIMIT.limit` times — 120
+     * sequential round trips — and was flaky for a reason that is the feature
+     * working: a run slow enough to cross a minute boundary reset the window
+     * mid-loop, and the count legitimately started again. `consumeRateLimit`
+     * takes the policy as an argument precisely so a test can use a ceiling it
+     * can reach in three calls.
+     */
+    it("refuses once the window is spent, and says how long to wait", async () => {
+      const { consumeRateLimit } = await import("@/lib/rate-limit-store");
+      const tiny = { limit: 3, windowMs: 60_000 };
+
+      expect((await consumeRateLimit(probeKey, tiny)).remaining).toBe(2);
+      expect((await consumeRateLimit(probeKey, tiny)).remaining).toBe(1);
+
+      const last = await consumeRateLimit(probeKey, tiny);
+      expect(last.allowed).toBe(true);
+      expect(last.remaining).toBe(0);
+
+      const over = await consumeRateLimit(probeKey, tiny);
+      expect(over.allowed).toBe(false);
+      expect(over.retryAfterSeconds).toBeGreaterThanOrEqual(1);
+
+      await sql`delete from rate_limit_counters where key = ${probeKey}`;
+    }, 90_000);
+
+    /**
+     * A stale row is reset in place rather than deleted, which is what keeps
+     * this table bounded by callers instead of by traffic — there is no
+     * scheduled sweeper here to rely on.
+     */
+    it("reuses a row from a previous window instead of accumulating", async () => {
+      const { consumeRateLimit } = await import("@/lib/rate-limit-store");
+      const tiny = { limit: 3, windowMs: 60_000 };
+
+      await consumeRateLimit(probeKey, tiny, new Date(Date.now() - 5 * 60_000));
+      const fresh = await consumeRateLimit(probeKey, tiny);
+      expect(fresh.remaining).toBe(tiny.limit - 1);
+
+      const [{ n }] = await sql`select count(*)::int as n from rate_limit_counters
+        where key = ${probeKey}`;
+      expect(n).toBe(1);
+
+      await sql`delete from rate_limit_counters where key = ${probeKey}`;
+    }, 90_000);
+  });
 });
