@@ -429,8 +429,22 @@ still `invokeAction`'s; the prompts only stop an agent learning the rules by bei
 `review_activity` says outright that it cannot read the audit log, because no token holds
 `org.audit` and a model narrating a change history it cannot see is a fabrication.
 
-**Still planned:** everything in §10–15 and §19–21, MCP **resources** (§22), and org **sessions**
-(§16) — confirmed absent 2026-09-06: no route backs either half.
+**Org sessions are built as of 2026-09-07, and §16 is finished** — `GET /api/org/sessions`,
+`DELETE /api/org/sessions/:id`. They read and delete **Supabase's own `auth.sessions`, not a
+mirror**: a mirror would be a second source of truth for whether someone is signed in, and the copy
+that drifted would be the one the revoke button writes to. That dependency on a schema Markii does
+not migrate is confined to `lib/auth/sessions.ts` — nothing in `getSession()` reads those rows, so
+an upgrade that moves a column breaks a settings screen and not the auth path. **The caller's own
+devices, never the org's**: offboarding is already `staff.status`, which `listMemberships` filters
+on, and what nothing answered was *which devices am I signed in on*. **Cookie-only** — `401` to an
+API token, like `/api/me`, so no `permission` is omitted; the route is user-scoped, not org-scoped.
+**Revoking the current session is allowed**, because refusing it would make the session an attacker
+is most likely to hold the only one that cannot be cut off. **The cascade is the revocation**:
+`auth.refresh_tokens` and `auth.mfa_amr_claims` are `ON DELETE CASCADE`, so a revoked session can
+never mint another token — but a JWT already issued is verified by signature and lives out its hour,
+which is stated rather than papered over.
+
+**Still planned:** everything in §10–15 and §19–21, and MCP **resources** (§22).
 
 **Authorization on the v1 REST surface was closed 2026-08-11.** `orgHandler` authorizes **every
 role** when `permission` is omitted — there is no default — and the §1–8 write routes predate roles,

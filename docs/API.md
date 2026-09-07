@@ -33,7 +33,7 @@ carry an explicit status — **never call a `PLANNED` endpoint and never fake it
 | 13 | Orders (promoted) | ✅ LIVE — list, export, `GET /api/orders/:id` (lines, refunds, fulfillments, timeline), and the §18.7 order actions. The extended entity's speculative fields are not built | C |
 | 14 | Analytics v2 (funnel, channels, failures) | 🟡 PLANNED | E |
 | 15 | Automations, activity, notifications, team | 🟡 PLANNED | E |
-| 16 | Accounts, organizations, staff | partial — `/api/auth/*`, `/api/me`, `/api/org`, `/api/org/staff*`, `/api/org/tokens*`, `/api/org/switch`, **org scoping of §1–8**, and **MFA** (`/api/auth/mfa*`, enrol · challenge · recover, D40) are ✅ LIVE; the **audit log** (`/api/org/audit`, 2026-09-06) are ✅ LIVE; **sessions** remain PLANNED — no route backs it, and `ORG_SESSIONS_API_LIVE` is correctly `false`. (Tokens and org switching were listed as planned until 2026-08-03, and **MFA until 2026-08-18** — all three were already routed.) Frontend: `/dashboard/settings/team`, `/dashboard/settings/audit`, the sidebar org switcher, `/mfa/*` | **A** |
+| 16 | Accounts, organizations, staff | partial — `/api/auth/*`, `/api/me`, `/api/org`, `/api/org/staff*`, `/api/org/tokens*`, `/api/org/switch`, **org scoping of §1–8**, and **MFA** (`/api/auth/mfa*`, enrol · challenge · recover, D40) are ✅ LIVE; the **audit log** (`/api/org/audit`, 2026-09-06) and **sessions** (`/api/org/sessions*`, 2026-09-07) are ✅ LIVE. **§16 is complete** — every `*_API_LIVE` constant in `lib/api/org.ts` is now `true`. (Tokens and org switching were listed as planned until 2026-08-03, and **MFA until 2026-08-18** — all three were already routed.) Frontend: `/dashboard/settings/team`, `/dashboard/settings/audit`, the sidebar org switcher, `/mfa/*` | **A** |
 | 17 | Billing, plans, metering, threshold fees | ✅ **LIVE, and merchants are charged** (corrected 2026-08-18 — this row claimed "nothing is charged" long after it did). Usage ledger, threshold fee engine, meter, plan catalog, entitlements, period-close assessments, the **Stripe webhook** (verified + idempotent, platform **and** Connect handlers), subscriptions, plan changes with a Stripe-computed proration preview, cancellation at period end, payment methods, invoice history, and **threshold-fee invoicing onto the same invoice**. Scheduled monthly (§25). Add-on *purchase* alone refuses `409` — Agent Ops and Chargeback Assist are Phase F and do not exist | B |
 | 18 | Commerce core (variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping, **memberships**) | partial — §18.1–18.6 ✅ LIVE, including the §18.4 card rail (Stripe Connect direct charges) and **§18.6 Stripe Tax** (2026-08-17); §18.5 gift cards are ⛔ **deferred** (D33). §18.7 order operations (incl. **processor-executed card refunds**), §18.8 digital delivery, and §18.9 membership gating + shopper login ✅ LIVE — **including recurring/auto-renewing membership billing** (Stripe Subscriptions on the merchant's own Connect account; this row claimed otherwise until 2026-08-18). It needs `STRIPE_CONNECT_WEBHOOK_SECRET` set, which is credentials rather than code | C |
 | 19 | Site builder & content | 🟡 PLANNED | D |
@@ -1486,7 +1486,7 @@ delivered when no mail service is wired.
 
 ---
 
-## 16. Accounts, organizations, staff — ✅ LIVE (Phase A complete; audit live, sessions still planned)
+## 16. Accounts, organizations, staff — ✅ LIVE (Phase A complete)
 
 > ### ✅ MFA is LIVE and mandatory for merchants (D40, 2026-08-08)
 >
@@ -1571,8 +1571,50 @@ delivered when no mail service is wired.
 > one call. Membership is re-checked server-side on every switch and every request, which is why the
 > active-org cookie is a preference rather than a credential.
 >
-> 🟡 **Still PLANNED:** `/api/org/sessions*`. MFA is live (D40, above); the audit log is live
-> (2026-09-06, below).
+> ✅ **`GET /api/org/sessions` and `DELETE /api/org/sessions/:id` are LIVE (2026-09-07)**, and
+> with them §16 has nothing left planned.
+>
+> **They are the caller's own browser sessions, not the org's.** The shape §16 pins carries no
+> user — `{ id, userAgent, ip, createdAt, lastActiveAt, current }` — and that is the right scope:
+> offboarding is already answered by `PATCH`/`DELETE /api/org/staff/:id`, since `listMemberships`
+> filters on `status = 'active'` and a disabled member is refused on their next request without a
+> session row being touched. What nothing answered was the other question — *which devices am I
+> signed in on, and can I cut one off?*
+>
+> **They read and delete Supabase's own `auth.sessions`, not a mirror** (`lib/auth/sessions.ts`).
+> A mirror would be a second source of truth for whether someone is signed in, and the copy that
+> drifted would be the one the revoke button writes to. The cost is a dependency on a schema Markii
+> does not migrate, confined to that one module so a Supabase upgrade breaks a settings screen
+> rather than the auth path — nothing in `getSession()` reads these rows.
+>
+> **Cookie-only: both answer `401` to an API token**, exactly as `GET /api/me` does and for the same
+> reason — a token has no browser session, and its equivalent list with its own revoke is
+> `/api/org/tokens`. They call `requireSession()` rather than `orgHandler`, which is also why they
+> carry no `permission`: this is not org data gated by a role, it is the caller reading their own
+> sessions, which every role may do and no role may do for anyone else.
+>
+> **Revoking the current session is allowed**, and is how a "sign out everywhere" control is built —
+> refusing it would make the session an attacker is most likely to be holding the only one that
+> cannot be cut off. The response carries `wasCurrent` so the dashboard redirects to `/sign-in`
+> instead of re-rendering against a dead cookie. A session that is not the caller's is a **404**,
+> never a 403: a 403 confirms the id names somebody's real session.
+>
+> ⚠️ **Revocation is not instantaneous, and the response does not claim it is.** Deleting the row
+> cascades `auth.refresh_tokens` and `auth.mfa_amr_claims` (`ON DELETE CASCADE`, verified against
+> the live schema), so the session can never mint another access token — but a JWT already issued is
+> verified by signature, not by a database lookup, and stays valid until it expires: **an hour on
+> Supabase's default**. Closing that window means a denylist consulted on every authenticated
+> request, which is a real cost on the hot auth path and a new way to lock every merchant out if it
+> misfires. Say "signed out", not "cut off instantly", in the UI.
+>
+> Two smaller decisions: `lastActiveAt` comes from `updated_at`, which moves when GoTrue refreshes a
+> session — **not** `refreshed_at`, which sounds better and is `timestamp without time zone` where
+> every neighbour is `timestamptz`, so folding it in would reinterpret it in the connection's
+> timezone. And `userAgent` is `string | null`, because a client may send no `User-Agent` at all;
+> `lib/api/org.ts` had it typed `string` while the route did not exist, which would have made
+> TypeScript promise a value the API can genuinely omit.
+>
+> MFA is live (D40, above); the audit log is live (2026-09-06, below).
 >
 > ✅ **`GET /api/org/audit` is LIVE (2026-09-06).** It was blocked on there being anything to
 > audit — `action_invocations` existed but nothing was defined as an action, so the log would have
@@ -1659,7 +1701,8 @@ interface StaffMember {
 | `POST` | `/api/org/staff/invite` | `{ email, role, storeIds }` → `201`, `status: "invited"` |
 | `PATCH`/`DELETE` | `/api/org/staff/:id` | Change role/scope, remove |
 | `GET` | `/api/org/audit` | ✅ Audit log: actor (resolved to a name), action, `entities[]`, `changes[]`, IP, `occurredAt`. Requires `org.audit` — owner/administrator only |
-| `GET` | `/api/org/sessions` · `DELETE /api/org/sessions/:id` | Active sessions, revoke |
+| `GET` | `/api/org/sessions` | ✅ The **caller's own** live sessions: `{ id, userAgent, ip, createdAt, lastActiveAt, current }`, most recently active first. Cookie-only — `401` to an API token |
+| `DELETE` | `/api/org/sessions/:id` | ✅ Sign that device out → `{ deleted, id, wasCurrent }`. The current session is a valid target. **404** for anyone else's, never 403. Kills the refresh chain immediately; an access token already issued lives out its hour |
 | `GET`/`POST` | `/api/org/tokens` · `DELETE /api/org/tokens/:id` | Scoped API/MCP tokens (§22) |
 
 `GET /api/me` — the shape the dashboard boots from, and the **only** way a screen learns who the

@@ -16,15 +16,21 @@ const ORG_SECTION = "API §16";
  * the same `action_invocations` rows `/api/actions/invocations` serves. It
  * waited on there being anything to audit, which the Phase C actions settled.
  *
- * **Sessions are genuinely absent** — verified 2026-09-06, no route backs
- * either half — so those keep failing loudly rather than returning a shape
- * nobody wrote.
+ * **Sessions landed 2026-09-07** — `GET /api/org/sessions` and
+ * `DELETE /api/org/sessions/:id`, the last of §16. They are **the caller's own
+ * browser sessions**, not the org's: staff offboarding is already answered by
+ * `PATCH`/`DELETE /api/org/staff/:id`, and what nothing answered was "which
+ * devices am I signed in on". Both are cookie-only and answer `401` to an API
+ * token, exactly as `GET /api/me` does.
+ *
+ * With that, every §16 constant here is `true` and none is left guarding a
+ * route that exists.
  */
 const ME_API_LIVE = true;
 const ORG_API_LIVE = true;
 const STAFF_API_LIVE = true;
 const ORG_AUDIT_API_LIVE = true;
-const ORG_SESSIONS_API_LIVE = false;
+const ORG_SESSIONS_API_LIVE = true;
 const ORG_TOKENS_API_LIVE = true;
 
 export type StaffRole =
@@ -174,9 +180,20 @@ export type OrgAuditFilters = {
   limit?: number;
 };
 
+/**
+ * One signed-in browser session.
+ *
+ * `userAgent` was typed `string` before the route existed and is `string | null`
+ * now, because a client may send no `User-Agent` header at all — the same reason
+ * the audit log's is nullable. A stale non-null type would have made TypeScript
+ * promise a value the API can genuinely omit.
+ *
+ * `lastActiveAt` moves when Supabase refreshes the session, so it tracks use
+ * rather than sign-in. `current` marks the session making the request.
+ */
 export type SessionRecord = {
   id: string;
-  userAgent: string;
+  userAgent: string | null;
   ip: string | null;
   createdAt: string;
   lastActiveAt: string;
@@ -285,15 +302,30 @@ export function listOrgAudit(filters: OrgAuditFilters = {}, init?: RequestInit) 
   );
 }
 
+/**
+ * The signed-in devices on **this user's** account, most recently active first.
+ *
+ * Not the org's sessions: no role can list anybody else's. Removing a colleague
+ * is `deleteStaff`, which ends their access on their next request.
+ */
 export function listSessions(init?: RequestInit) {
   return callWhenLive(ORG_SESSIONS_API_LIVE, ORG_SECTION, () =>
     apiGet<{ items: SessionRecord[] }>("/api/org/sessions", undefined, init),
   );
 }
 
+/**
+ * Ends one session. Revoking the **current** one is allowed and is how a "sign
+ * out everywhere" control is built — check `wasCurrent` and route to `/sign-in`
+ * rather than refetching the list against a cookie that no longer refreshes.
+ *
+ * An already-issued access token stays valid until it expires (an hour on
+ * Supabase's default), so do not tell the merchant the device was cut off
+ * *instantly* — "signed out" is the honest word.
+ */
 export function revokeSession(id: string, init?: RequestInit) {
   return callWhenLive(ORG_SESSIONS_API_LIVE, ORG_SECTION, () =>
-    apiDelete<{ deleted: boolean; id: string }>(
+    apiDelete<{ deleted: boolean; id: string; wasCurrent: boolean }>(
       `/api/org/sessions/${encodeURIComponent(id)}`,
       init,
     ),

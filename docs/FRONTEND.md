@@ -66,6 +66,7 @@ API-independent work so you don't outrun the backend") no longer applies to A, B
 | Auth, orgs, staff, roles | §16 | ✅ LIVE | Build it. Forms post to `/api/auth/*`, identity from `GET /api/me` |
 | MFA (merchants) | §16 | ✅ LIVE, screens built | Enrol/challenge/recover ship; step-up retries inline via `MfaStepUpProvider` |
 | Org audit log | §16 | ✅ LIVE, screen built | `/dashboard/settings/audit` via `listOrgAudit(filters)`. Owner/administrator only — the tab is gated on role so a `viewer` is not sent to a 403 |
+| Account sessions | §16 | ✅ LIVE, **screen not built** | `listSessions()` / `revokeSession(id)`. The caller's own devices, every role. `wasCurrent: true` means sign the user out |
 | Payment rails | §8 | ✅ LIVE, screen built | `/dashboard/payments`. Rails split from catalog feeds — different authority, see below |
 | Commerce core | §18.1–18.8 | ✅ LIVE | Variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping, order ops, digital delivery |
 | Membership gating | §18.9 | ✅ LIVE | Tiers gate products; buying a granting product confers one |
@@ -487,6 +488,35 @@ The audit list carries both directions now — `undoneBy` on the original row, `
 so a history screen can strike through a reversed change and label its reversal without a second
 query. Both are `string | null` on `ActionInvocation`.
 
+### 🟢 New 2026-09-07 — account sessions are live, and §16 is finished
+
+`listSessions()` and `revokeSession(id)` in `lib/api/org.ts` now call real routes;
+`ORG_SESSIONS_API_LIVE` is `true`. That was the **last** `*_API_LIVE` constant in §16 still
+`false`, so every §16 service is now callable.
+
+**They are the signed-in user's own devices, not the org's.** No role can list or revoke anybody
+else's — removing a colleague is `deleteStaff`, which ends their access on their next request.
+So this belongs on a personal-security surface, not under Team: a card on `/dashboard/settings`
+or an "Account" screen, visible to every role.
+
+**`SessionRecord.userAgent` is now `string | null`.** It was typed `string` while the route did
+not exist, which would have made TypeScript forbid handling the case the API really returns — a
+client may send no `User-Agent` at all. Render a fallback ("Unknown device"), and treat `ip` the
+same way; it was already nullable.
+
+`revokeSession` returns `{ deleted, id, wasCurrent }`. **`wasCurrent: true` means the user just
+signed themselves out** — redirect to `/sign-in` rather than refetching the list against a cookie
+that no longer refreshes. Revoking the current session is deliberately allowed, because that is
+how a "sign out everywhere" button is built.
+
+⚠️ **Do not label a revoke as instant.** Deleting the session kills its refresh chain immediately,
+but an access token already issued stays valid until it expires (an hour on Supabase's default).
+"Signed out" is accurate; "device cut off immediately" is not, and §16 explains why closing that
+window is not worth a denylist on every authenticated request.
+
+Both routes are **cookie-only** and answer `401` to an API token, like `GET /api/me`. Nothing in
+the dashboard hits them with a token, so this only matters if a screen is ever driven by one.
+
 ### 🟢 New 2026-09-06 — the org audit log is live, and its planned type was wrong
 
 `listOrgAudit(filters)` in `lib/api/org.ts` now calls a real `GET /api/org/audit`.
@@ -579,7 +609,7 @@ real state. These are the open items, recorded so they are not rediscovered late
 | ~~§24 email had no client or screen~~ ✅ **fixed 2026-08-02** | `lib/api/email.ts`, `/dashboard/settings/email` | The route and its five actions shipped 2026-08-02 with nothing calling them, while `lib/email/` told merchants to go to a page that did not exist |
 | ~~Invoices screen stubbed on `configuration_required`~~ ⚠️ **unblocked 2026-08-07** | `/dashboard/billing` | §17 is LIVE in full. Plan, card, meter, and invoices share this screen. Old `/dashboard/settings/billing` and `/dashboard/settings/subscription` redirect here |
 | ~~Org switcher was a placeholder~~ ✅ **built 2026-08-03** | `components/dashboard/sidebar.tsx` | The sidebar card said "org switching is coming soon with Phase A auth" long after `POST /api/org/switch` shipped. Now a real switcher, shown only when the user belongs to more than one org. Identity is resolved **once in the layout** and passed to both shells, so the rail and the mobile drawer cannot disagree about which org is active |
-| ~~Team settings was a stub~~ ✅ **built 2026-08-03** | `/dashboard/settings/team` | Staff with inline role changes, invites against the plan's seat limit, and scoped API tokens. **Audit** is now its own screen (`/dashboard/settings/audit`, 2026-09-06). **Sessions** remain the only missing half of §16 |
+| ~~Team settings was a stub~~ ✅ **built 2026-08-03** | `/dashboard/settings/team` | Staff with inline role changes, invites against the plan's seat limit, and scoped API tokens. **Audit** is now its own screen (`/dashboard/settings/audit`, 2026-09-06). **Sessions** went LIVE 2026-09-07 and are the one §16 surface with no screen — they belong on a personal account page, not Team |
 | ~~Orders list is genuinely blocked~~ ✅ **unblocked** | `/dashboard/orders` | `GET /api/orders` ships; the screen exists. Settlements live at `/dashboard/orders/settlements` |
 | ~~Collections tab and discounts were stubs~~ ✅ **built 2026-08-03** | `/dashboard/catalog?tab=collections`, `/dashboard/discounts` | Both read-only lists against live routes. Discounts show derived `status`, redemption counts, and a **Fully redeemed** badge — an exhausted code still reads as active by its dates and only fails when a shopper tries it |
 | ~~Customers screen was a stub~~ ✅ **built 2026-08-03** | `/dashboard/customers` + `/dashboard/customers/[id]` | List with search, store filter and pagination; detail with memberships, orders and addresses. Money formats from `org.currency` via `formatMinor` (**D31**), never a hardcoded `/100` |

@@ -248,6 +248,28 @@ requires**: every auth mutation runs server-side in `/api/auth/*` (`docs/API.md`
 Delete `lib/supabase/client.ts` as part of this. A browser client in the tree is how this decision
 gets quietly reversed later.
 
+> **Account sessions landed 2026-09-07, finishing Phase A.** `GET /api/org/sessions` and
+> `DELETE /api/org/sessions/:id` (`lib/auth/sessions.ts`). Three things to know before touching it:
+>
+> - **It reads and deletes Supabase's `auth.sessions` directly, not a mirror.** GoTrue owns those
+>   rows; a mirror would be a second source of truth for whether someone is signed in, and the copy
+>   that drifted would be the one the revoke button writes to. The cost is a dependency on a schema
+>   Markii does not migrate, so it is confined to that one module — **nothing in `getSession()`
+>   reads these rows**, and a Supabase upgrade that moves a column breaks a settings screen rather
+>   than the auth path.
+> - **Scoped to the caller, and cookie-only.** Both routes call `requireSession()` rather than
+>   `orgHandler`, so an API token gets a `401` (as on `/api/me`) and no `permission` is omitted —
+>   this is user-scoped, not org-scoped. Listing another staff member's sessions is deliberately
+>   not a capability: offboarding already works through `staff.status`, which `listMemberships`
+>   filters on.
+> - **The cascade is the revocation.** `auth.refresh_tokens` and `auth.mfa_amr_claims` are
+>   `ON DELETE CASCADE` from `auth.sessions` (checked against the live schema, and asserted in
+>   `tests/integration/org-sessions.test.ts` — a revoke that left the refresh tokens behind would
+>   pass every other assertion in that file and leave the session alive). What it does **not** do is
+>   invalidate an already-issued access token: those are verified by signature, so the session dies
+>   at its next refresh, within the hour. That window is documented in §16 rather than closed with a
+>   denylist on the hot auth path.
+
 ### 3. Phase B — billing and metering — subscriptions done, threshold-fee invoicing not
 
 > **Built.** `lib/billing/` — `fees.ts` (the marginal engine, pure), `meter.ts` (T12 and period net
