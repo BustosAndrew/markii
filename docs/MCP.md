@@ -234,6 +234,14 @@ registry adds a network hop, a second authentication and a token to rotate, and 
 client pins into a conversation — the store as a document — rather than for querying, which is what
 the read tools do. Worth adding when a client wants that; not a substitute for anything above.
 
+**Browser-based clients.** No CORS headers are sent, so an MCP client running in a page cannot
+reach this endpoint — only a desktop client or a server can. That is a limitation rather than a
+protection, but it is a comfortable one: the DNS-rebinding attack the MCP spec asks servers to guard
+against with `Origin` validation depends on a server that authenticates ambiently, and this one
+refuses cookies outright and requires a bearer token a rebinding page cannot obtain. If a browser
+client is ever needed, adding CORS is the change — and the `Origin` check has to arrive with it, not
+after.
+
 **Sessions, SSE, and sampling.** The server is stateless: `GET /api/mcp` returns `405` rather than
 opening a stream that would never emit. That fits a deployment with no persistent process, and it
 costs nothing currently used. It is also the point at which taking

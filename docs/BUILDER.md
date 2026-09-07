@@ -44,7 +44,7 @@ all landing with the builder:
 |---|---|---|
 | **`defineAction` primitive + registry** | **Phase C** (commerce) | ~a day of work. If Phase C's commerce mutations ship as plain route handlers they all get refactored later — the exact bolt-on failure this design prevents. See `docs/BACKEND.md` §1 |
 | Builder-specific actions | Phase D | Depend on the node model |
-| **MCP server** | Phase D | Cheap once the registry exists; validates parity early |
+| ~~**MCP server**~~ | ✅ **Shipped 2026-09-07, ahead of Phase D** | It was cheap once the registry existed, exactly as predicted — and it validated parity early, which is why it was worth pulling forward. See §10 |
 | Agent Ops chat UI | Phase F | Product packaging, not architecture |
 
 So the registry is in use from the first commerce mutation onward, and Phase D adds the builder's
@@ -241,19 +241,38 @@ Repeaters iterate a bound collection and render their child subtree per item. Co
 visibility supports a small whitelisted expression set (`product.stock > 0`,
 `customer.loggedIn`) — a safe evaluator, never `eval`.
 
-## 10. MCP server
+## 10. MCP server — ✅ BUILT (2026-09-07)
 
-"Protocol-ready by design" means a real MCP endpoint, not a promise. It exposes the action registry
-(read tools always; write tools gated by the connected credential's role), the block registry as
-discoverable capability, and store/page context resources.
+"Protocol-ready by design" means a real MCP endpoint, not a promise. `POST /api/mcp` is that
+endpoint. **Connecting a client is `docs/MCP.md`; the contract is `docs/API.md` §22.** This section
+is the architecture and what it deliberately does not do.
+
+It exposes the action registry as tools — read tools always, write tools gated by the connected
+credential's role, which held up exactly as written here. Auth is a scoped token tied to a staff
+role, and every call lands in the same audit log as a UI click, including the refusals.
 
 The pitch this unlocks: **a developer can point Claude Code or Cursor at their Markii store and
 build it conversationally**, while their non-technical colleague edits the same store visually, at
 the same time, with the same permissions and the same audit trail. Neither view is a second-class
 citizen — which is the whole point of agent-native.
 
-Auth via scoped tokens tied to a staff member and role; every MCP call lands in the same audit log
-as a UI click.
+**Two things this section used to promise that are not built**, called out rather than quietly
+dropped:
+
+- **The block registry as a discoverable capability.** There is no node model yet — that is Phase D,
+  and the builder actions it would advertise do not exist. Nothing to discover until they do.
+- **Store and page context as `resources/*`.** `initialize` does not advertise the capability. Page
+  context waits on the same node model; store context is served by the ten `read_*` tools instead,
+  which is the better fit for *querying* — resources are for context a client pins into a
+  conversation, not for lookups.
+
+**What building it early actually bought**, since "validates parity" was the stated reason: it
+forced §22 rule 3 to become real. "A `high` action always requires human approval" had been enforced
+by nothing — advertised in the registry, checked nowhere — which was survivable while every caller
+was a dashboard click and untenable the moment a token became the front door, because tokens are
+exempt from step-up. It also found that authorization refusals were never reaching the audit log at
+all. Both were pre-existing holes in the *registry*, not in MCP; the surface just made them
+load-bearing.
 
 ## 11. Editor UX
 
@@ -319,7 +338,7 @@ from reading products directly to reading the published tree plus catalog data.
 4. Component registry with the layout/content launch set
 5. Editor shell: layer tree, canvas, inspector, selection, undo/redo (over actions), autosave
 6. Drag-and-drop **plus** the keyboard equivalent, breakpoint switcher, style tokens
-7. **MCP server + agent tool exposure** — cheap once actions exist, and validates parity early
+7. ~~**MCP server + agent tool exposure**~~ — ✅ done 2026-09-07, pulled ahead of this list. Builder-specific tools join it automatically the day they are defined, since it renders whatever the registry holds
 8. Commerce blocks (depends on Phase C: variants, cart, checkout)
 9. Templates, data binding, repeaters, conditional visibility
 10. Custom code levels 1–4, sanitization, CSP, publish-time checks
