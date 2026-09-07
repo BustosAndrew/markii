@@ -39,7 +39,7 @@ carry an explicit status — **never call a `PLANNED` endpoint and never fake it
 | 19 | Site builder & content | 🟡 PLANNED | D |
 | 20 | Disputes & chargebacks | 🟡 PLANNED | F |
 | 21 | Agent Ops add-on | 🟡 PLANNED | F (last) |
-| 22 | **Action registry & MCP** — agent-native architecture | ✅ LIVE (registry, invoke, dry-run, audit, **undo** — 2026-08-18, and the **MCP server** — 2026-09-07, tools only; `resources/*` still PLANNED). `undoable` is now derived from an `inverse()` and refused if declared without one, which corrected four actions that claimed it falsely | **Registry: C · MCP: D** |
+| 22 | **Action registry & MCP** — agent-native architecture | ✅ LIVE (registry, invoke, dry-run, audit, **undo** — 2026-08-18, and the **MCP server** — 2026-09-07: tools, prompts **and resources**). `undoable` is now derived from an `inverse()` and refused if declared without one, which corrected four actions that claimed it falsely | **Registry: C · MCP: D** |
 | 24 | Email — sending domains, deliverability, suppression | ✅ LIVE — SES transport, templates, suppression list, bounce webhook, `/api/settings/email`, §22 actions. **Sending works as of 2026-08-11** (production access in `us-west-2`, verified by a live send). **Customer mail sends even before a merchant verifies a domain** (D44, 2026-08-16): without one it leaves from the storefront's own `accounts@{slug}.{ROOT_DOMAIN}` — still SES, still the store's name, **never bare `markii.shop` and never Resend**. A verified domain always wins when it exists. **The SNS → webhook hop has carried a real bounce end to end as of 2026-08-16** (`tests/integration/ses-suppression.test.ts`, gated on `MARKII_SES_TESTS=1`): a suppression row was written and **the next send to that address was refused**. This row claimed "never carried a real event" until 2026-08-18 | **C** |
 
 **v3 note.** Markii is now a full commerce platform (`docs/PLAN.md` v3). §16 was a **breaking change
@@ -2947,7 +2947,7 @@ defineAction({
 | `POST` | `/api/actions/:id?dryRun=1` | Return the diff an invocation *would* produce, without writing. A **query flag on the invoke route**, not a `/dry-run` sub-path — one handler, so the preview cannot drift from the execution |
 | `POST` | `/api/actions/:id/undo` | ✅ Invert a prior invocation by `invocationId`, when `undoable`. Runs the inverse as a **new** invocation — same permission, same step-up, its own audit row |
 | `GET` | `/api/actions/invocations` | Audit trail: actor (`user` \| `agent` \| `token`), input, result, `occurredAt`. Requires **`org.audit`** — same gate as `/api/org/audit`, since both read one table |
-| `ALL` | `/api/mcp` | ✅ MCP server — **tools** (58 registry actions + 10 `read_*`) and **prompts**. Stateless JSON-RPC over `POST`; `GET`/`DELETE` are `405`. **Token-only auth** (rule 6) — a session cookie is refused. **Rate limited** at 120 req/min per token (`429` + `Retry-After`, fails open). Setup: `docs/MCP.md`. 🟡 `resources/*` not built |
+| `ALL` | `/api/mcp` | ✅ MCP server — **tools** (58 registry actions + 10 `read_*`), **prompts**, and **resources** (`resources/list`, `resources/templates/list`, `resources/read`). Stateless JSON-RPC over `POST`; `GET`/`DELETE` are `405`. **Token-only auth** (rule 6) — a session cookie is refused. **Rate limited** at 120 req/min per token (`429` + `Retry-After`, fails open). Setup: `docs/MCP.md` |
 
 Invocation response:
 
@@ -3029,9 +3029,53 @@ take no `_dryRun`, and a test asserts they write no audit row.
 than `requireAuthContext` and so answers **401 to every API token**, which is worth knowing before
 reaching for it anywhere else.
 
-🟡 **`resources/*` is still not built** and `initialize` does not advertise the capability. Resources
-are for stable context a client pins into a conversation, not for querying — which is what the read
-tools above do.
+✅ **`resources/*` is LIVE (2026-09-07)** — `resources/list`, `resources/templates/list` and
+`resources/read`, with `resources: { subscribe: false, listChanged: false }` advertised at
+`initialize`.
+
+**A resource is context a client pins; a tool is a query a model runs.** Keeping the set small is
+what preserves that difference — mirroring every read tool as a resource would give a model two ways
+to ask one question and no rule for choosing. A unit test fails if the resource list ever grows past
+the read-tool list.
+
+| URI | | |
+|---|---|---|
+| `markii://store` | The org: plan, entitlements, **billing currency** | `application/json` |
+| `markii://sites` | The storefront index — the slugs the templates take | `application/json` |
+| `markii://conventions` | Minor units, read-before-write, and which refusals are by design | `text/markdown` |
+| `markii://site/{slug}/llms.txt` | What a shopper's agent reads at that store | `text/plain` |
+| `markii://site/{slug}/agent.md` | That store's agent protocol document | `text/markdown` |
+
+**The two org-level resources forward to the same handlers the read tools use**, carrying the
+caller's own `Authorization` — so `markii://store` and `read_store` are the same bytes and cannot
+disagree. **`markii://conventions` is the prompts' own preamble**, from one constant: a client that
+pins the document and a client that runs a prompt must not be told different rules.
+
+**The per-site documents render through `renderLlmsTxt` / `renderAgentMd`, the same functions the
+storefront routes call** (`lib/storefront-docs.ts`, extracted for this). An integration test asserts
+the resource is **byte for byte** what `/_sites/{slug}/llms.txt` serves — before the extraction they
+were two assemblies of the same options, and a resource that drifted would have shown a merchant a
+document their store does not publish. Neither renderer logs traffic: a merchant reading their own
+document is not an agent crawl, and counting it would inflate the analytics they use to judge
+whether agents find them.
+
+**They have no authenticated route to forward to, so they are scoped with `ownSitesForStaff`** — the
+same org-then-`storeIds` intersection `GET /api/sites` applies. A slug outside that scope answers
+**exactly as a slug that never existed does**, so the response cannot be used to discover whose store
+exists. **No permission beyond that scoping, deliberately**: the same bytes are served
+unauthenticated on the storefront's own domain, so a role gate here would imply a confidentiality the
+document does not have.
+
+**A store that publishes no agent documents is refused with the reason** — agent discovery off, or
+paused/on a billing hold — rather than rendered anyway. The storefront 404s in both cases, and
+handing over a document the store does not serve is the shape of claiming something happened when it
+did not.
+
+**An unknown URI answers `-32002`**, the code the MCP spec names for it, not the `NOT_FOUND` an
+unknown *prompt* raises — a client can then tell "no resource there" from "your request was
+malformed". **`subscribe` is advertised as `false` and that is a refusal to overclaim**: the server
+is stateless, holds no connection to push down, and would never send the notification a subscription
+promises.
 
 ---
 

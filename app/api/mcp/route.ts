@@ -34,11 +34,18 @@ import {
   RPC_INVALID_REQUEST,
   RPC_METHOD_NOT_FOUND,
   RPC_PARSE_ERROR,
+  RPC_RESOURCE_NOT_FOUND,
   type JsonRpcId,
   type JsonRpcRequest,
 } from "@/lib/mcp/jsonrpc";
 import { findPrompt, promptList, renderPrompt } from "@/lib/mcp/prompts";
 import { callReadTool, findReadTool, readTools } from "@/lib/mcp/reads";
+import {
+  readResource,
+  resourceList,
+  ResourceNotFound,
+  resourceTemplates,
+} from "@/lib/mcp/resources";
 import {
   actionIdFor,
   negotiateProtocolVersion,
@@ -207,6 +214,15 @@ async function handleMessage(msg: unknown, ctx: Ctx) {
     return rpcResult(id, result);
   } catch (e) {
     if (isNotification(msg)) return null;
+    /**
+     * The one place a code other than the JSON-RPC four is used: the MCP spec
+     * names `-32002` for a URI that does not resolve, and a client that can
+     * tell that apart from a malformed request gives a better message than one
+     * that cannot.
+     */
+    if (e instanceof ResourceNotFound) {
+      return rpcError(id, RPC_RESOURCE_NOT_FOUND, e.message, { uri: e.uri });
+    }
     if (e instanceof ApiError) {
       const { message, data } = rpcErrorPayload(e);
       return rpcError(id, RPC_INVALID_PARAMS, message, data);
@@ -228,10 +244,18 @@ async function dispatch(msg: JsonRpcRequest, ctx: Ctx): Promise<unknown> {
     case "initialize":
       return {
         protocolVersion: negotiateProtocolVersion(params.protocolVersion),
-        /** Tools and prompts. `resources/*` is still unbuilt; see the note below. */
+        /**
+         * **`subscribe: false` on resources, and that is a claim not to be
+         * inflated.** Advertising it would tell a client it may call
+         * `resources/subscribe` and be notified when a store changes; this
+         * server is stateless, holds no connection to push down, and would
+         * simply never send the notification. `listChanged` is false for the
+         * same reason on all three.
+         */
         capabilities: {
           tools: { listChanged: false },
           prompts: { listChanged: false },
+          resources: { subscribe: false, listChanged: false },
         },
         serverInfo: { name: "markii", version: "1.0.0" },
         instructions:
@@ -239,7 +263,9 @@ async function dispatch(msg: JsonRpcRequest, ctx: Ctx): Promise<unknown> {
           "registry action, validated and audited identically to a dashboard click. Start with " +
           "read_store, and read before you write — the write tools take ids that only a read " +
           "produces. High-risk tools refuse to run unattended: call them with \"_dryRun\": true " +
-          "and hand the resulting diff to a person to approve.",
+          "and hand the resulting diff to a person to approve. Resources carry the standing " +
+          "context: markii://store for the currency every amount is in, and markii://conventions " +
+          "for the rules this server enforces.",
       };
 
     /** Notifications: acknowledged by returning, answered by nothing. */
@@ -267,6 +293,27 @@ async function dispatch(msg: JsonRpcRequest, ctx: Ctx): Promise<unknown> {
 
     case "tools/call":
       return await callTool(params, ctx);
+
+    case "resources/list":
+      return { resources: resourceList() };
+
+    case "resources/templates/list":
+      return { resourceTemplates: resourceTemplates() };
+
+    case "resources/read": {
+      const uri = params.uri;
+      if (typeof uri !== "string") {
+        throw new ApiError("VALIDATION_ERROR", 400, "resources/read requires a uri");
+      }
+      /**
+       * **Not a tool result.** A tool error is the right answer when a model
+       * picked the wrong thing and could pick again; a resource URI was chosen
+       * by the *client* off a list it was handed, so a failure here is a
+       * protocol-level answer to the client, not material for a model to reason
+       * about.
+       */
+      return { contents: await readResource(uri, ctx) };
+    }
 
     case "prompts/list":
       return { prompts: promptList() };
@@ -379,9 +426,11 @@ function toolError(text: string) {
  * is reimplemented. Deliberately not registry actions: every invocation writes
  * an `action_invocations` row, and a browsing agent would bury the audit log.
  *
- * `resources/*` remains unbuilt, and `initialize` does not advertise the
- * capability. Resources are for stable context a *client* attaches — the store
- * as a document — rather than for querying, which is what these tools do. Worth
- * adding when a client wants to pin store context into a conversation; not a
- * substitute for anything above.
+ * **`resources/*` landed 2026-09-07** (`lib/mcp/resources.ts`) and the two do
+ * different jobs. A resource is stable context a *client* pins into a
+ * conversation — the org and its currency, the storefront index, the operating
+ * rules, and the `llms.txt` / `agent.md` a store actually publishes. A tool is a
+ * query a model runs when it needs an answer. Keeping the resource set small is
+ * what preserves that difference: mirroring every read tool as a resource would
+ * give a model two ways to ask one question and no rule for choosing.
  */

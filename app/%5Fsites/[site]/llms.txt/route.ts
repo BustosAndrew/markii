@@ -1,6 +1,6 @@
 import { logTraffic } from "@/lib/agents";
-import { generateLlmsTxt } from "@/lib/generators";
 import { loadSite, storefrontHalted } from "@/lib/storefront";
+import { renderLlmsTxt } from "@/lib/storefront-docs";
 
 export async function GET(req: Request, { params }: { params: Promise<{ site: string }> }) {
   const data = await loadSite((await params).site);
@@ -12,10 +12,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ site: st
     path: "/llms.txt",
     userAgent: req.headers.get("user-agent"),
   });
-  const body = generateLlmsTxt(data.bundle, data.baseUrl, {
-    rails: data.site.paymentProviders,
-    purchasesEnabled: data.site.purchasesEnabled,
-  });
+  const body = renderLlmsTxt(data);
   return new Response(body, {
     headers: {
       "content-type": "text/plain; charset=utf-8",

@@ -429,6 +429,26 @@ still `invokeAction`'s; the prompts only stop an agent learning the rules by bei
 `review_activity` says outright that it cannot read the audit log, because no token holds
 `org.audit` and a model narrating a change history it cannot see is a fabrication.
 
+**MCP resources are built as of 2026-09-07, which finishes §22** — `resources/list`,
+`resources/templates/list`, `resources/read`, and `resources: { subscribe: false }` at `initialize`.
+**A resource is context a client pins; a tool is a query a model runs**, and keeping the set small is
+what preserves the difference — a unit test fails if the resource list ever outgrows the read-tool
+list. Five: `markii://store` (the currency every amount is in), `markii://sites`,
+`markii://conventions`, and the templates `markii://site/{slug}/llms.txt` and `agent.md`. The two
+org-level ones **forward to the same handlers the read tools use** with the caller's own header, so
+`markii://store` and `read_store` are the same bytes; `markii://conventions` is the prompts' own
+preamble from one constant, because a pinned document and a prompt must not state different rules.
+
+**The site documents render through the same functions the storefront routes call**
+(`lib/storefront-docs.ts`, extracted for this) and a test asserts they are **byte for byte** what
+`/_sites/{slug}/llms.txt` serves — otherwise a merchant asking "what do agents see" could be shown a
+document their store does not publish. Neither renderer logs traffic: reading your own document is
+not an agent crawl. They are scoped with **`ownSitesForStaff`**, and a slug outside that scope
+answers exactly as one that never existed, so the response cannot be used to discover whose store
+exists. A store with agent discovery off, or paused, is **refused with the cause** rather than
+rendered anyway. An unknown URI answers **`-32002`**, the code the spec names, unlike an unknown
+prompt.
+
 **Org sessions are built as of 2026-09-07, and §16 is finished** — `GET /api/org/sessions`,
 `DELETE /api/org/sessions/:id`. They read and delete **Supabase's own `auth.sessions`, not a
 mirror**: a mirror would be a second source of truth for whether someone is signed in, and the copy
@@ -444,7 +464,7 @@ is most likely to hold the only one that cannot be cut off. **The cascade is the
 never mint another token — but a JWT already issued is verified by signature and lives out its hour,
 which is stated rather than papered over.
 
-**Still planned:** everything in §10–15 and §19–21, and MCP **resources** (§22).
+**Still planned:** everything in §10–15 and §19–21.
 
 **Authorization on the v1 REST surface was closed 2026-08-11.** `orgHandler` authorizes **every
 role** when `permission` is omitted — there is no default — and the §1–8 write routes predate roles,

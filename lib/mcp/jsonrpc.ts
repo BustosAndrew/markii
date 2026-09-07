@@ -27,6 +27,13 @@ export const RPC_INVALID_REQUEST = -32600;
 export const RPC_METHOD_NOT_FOUND = -32601;
 export const RPC_INVALID_PARAMS = -32602;
 export const RPC_INTERNAL_ERROR = -32603;
+/**
+ * MCP's own code for "no resource at that URI", outside JSON-RPC's reserved
+ * range. Named by the spec, so a client can distinguish a missing resource from
+ * a malformed request; an unknown *prompt* deliberately stays a plain
+ * `RPC_INVALID_PARAMS`, because the spec names no code for that one.
+ */
+export const RPC_RESOURCE_NOT_FOUND = -32002;
 
 export function rpcResult(id: JsonRpcId, result: unknown) {
   return { jsonrpc: "2.0" as const, id, result };

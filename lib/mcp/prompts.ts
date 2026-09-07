@@ -30,8 +30,15 @@ export type McpPrompt = {
   build: (args: Record<string, string>) => string;
 };
 
-/** Shared preamble: the facts an agent gets wrong when it has to guess them. */
-const GROUND_RULES = `Ground rules for this store:
+/**
+ * Shared preamble: the facts an agent gets wrong when it has to guess them.
+ *
+ * **Exported, because `markii://conventions` serves the same text** (§22
+ * resources). A client that pins the resource and a client that runs a prompt
+ * must not be told two different sets of rules - the second copy is the one
+ * that would quietly stop matching what `invokeAction` enforces.
+ */
+export const GROUND_RULES = `Ground rules for this store:
 - Call read_store first. Money is in minor units of that response's currency — never assume cents, and never divide by 100 to display it without checking the currency's exponent.
 - Read before you write. Every write tool takes ids that only a read produces; do not guess an id.
 - High-risk tools (deleting, refunding, payout and plan changes) refuse to run for you. That is deliberate, not a misconfiguration. Call them with "_dryRun": true and present the diff for a person to approve.

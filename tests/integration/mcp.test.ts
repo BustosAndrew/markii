@@ -129,9 +129,17 @@ describe("MCP server", () => {
     }, 60_000);
 
     it("reports an unknown method as a JSON-RPC error", async () => {
-      // `resources/*` is genuinely unimplemented, and `initialize` says so by
-      // not advertising the capability.
-      const { json } = await rpc("resources/list");
+      /**
+       * This used to probe `resources/list`, which was genuinely unimplemented.
+       * It is implemented now (`tests/integration/mcp-resources.test.ts`), and
+       * the test failing on the day that landed is the test working — a
+       * method-not-found assertion has to name something this server really
+       * does not have, or it silently stops testing anything the moment the
+       * method ships. `resources/subscribe` is the honest choice: the server
+       * advertises `subscribe: false`, being stateless with no connection to
+       * push down.
+       */
+      const { json } = await rpc("resources/subscribe", { uri: "markii://store" });
       expect(json.error.code).toBe(-32601);
     }, 60_000);
 

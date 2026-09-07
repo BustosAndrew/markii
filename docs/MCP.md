@@ -228,11 +228,38 @@ runs in the same process and calls `invokeAction` directly. Going out over HTTP 
 registry adds a network hop, a second authentication and a token to rotate, and turns a typed
 `InvocationOutcome` into JSON to re-parse. MCP is the surface for callers who are outside.
 
-## 11. What is not built
+## 10a. Resources — the context to pin
 
-**`resources/*`.** `initialize` does not advertise the capability. Resources are for stable context a
-client pins into a conversation — the store as a document — rather than for querying, which is what
-the read tools do. Worth adding when a client wants that; not a substitute for anything above.
+`resources/list`, `resources/templates/list` and `resources/read` are live. A resource is context a
+**client** attaches to a conversation and leaves there; a tool is a query a **model** runs when it
+needs an answer. The set is deliberately small, because mirroring every read tool as a resource would
+give a model two ways to ask one question and no rule for choosing.
+
+| URI | What it is |
+|---|---|
+| `markii://store` | The organization: plan, entitlements, and the **billing currency every amount is in** |
+| `markii://sites` | The storefront index — the slugs the two templates below take |
+| `markii://conventions` | The operating rules: minor units, read before write, and which refusals are by design |
+| `markii://site/{slug}/llms.txt` | The store summary a shopper's agent reads at that storefront |
+| `markii://site/{slug}/agent.md` | That storefront's agent protocol document |
+
+**Pin `markii://store` and `markii://conventions`.** The first is how a model knows the currency
+before it formats a price; the second is how it learns that a `HUMAN_APPROVAL_REQUIRED` refusal is
+the designed path rather than a broken server — without having to be refused once to find out.
+
+**The two site documents are byte for byte what the storefront publishes.** They are rendered by the
+same functions the public routes use, so this is the honest answer to "what do agents actually see
+about my store", and a test asserts the equality. A store with agent discovery off, or one that is
+paused or on a billing hold, is **refused with the reason** rather than handed a document it does not
+serve.
+
+Reading a resource writes **no audit row**, the same rule the `read_*` tools follow: a client pinning
+four resources must not put four rows in the log a merchant reads during an incident.
+
+`subscribe` is advertised as `false`. The server is stateless and has no connection to push a change
+down, so claiming otherwise would leave a client waiting for a notification that never comes.
+
+## 11. What is not built
 
 **Browser-based clients.** No CORS headers are sent, so an MCP client running in a page cannot
 reach this endpoint — only a desktop client or a server can. That is a limitation rather than a

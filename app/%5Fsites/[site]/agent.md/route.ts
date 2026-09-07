@@ -1,7 +1,6 @@
 import { logTraffic } from "@/lib/agents";
-import { generateAgentMd } from "@/lib/generators";
-import { defaultWallet } from "@/lib/integrations";
 import { loadSite, storefrontHalted } from "@/lib/storefront";
+import { renderAgentMd } from "@/lib/storefront-docs";
 
 export async function GET(req: Request, { params }: { params: Promise<{ site: string }> }) {
   const data = await loadSite((await params).site);
@@ -13,12 +12,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ site: st
     path: "/agent.md",
     userAgent: req.headers.get("user-agent"),
   });
-  const payTo = data.site.walletAddress ?? (await defaultWallet(data.site.orgId));
-  const body = generateAgentMd(data.bundle, data.baseUrl, {
-    payTo,
-    rails: data.site.paymentProviders,
-    purchasesEnabled: data.site.purchasesEnabled,
-  });
+  const body = await renderAgentMd(data);
   return new Response(body, {
     headers: {
       "content-type": "text/markdown; charset=utf-8",
