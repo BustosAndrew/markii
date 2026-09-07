@@ -163,7 +163,34 @@ and the reason is in the message. Protocol-level problems come back as JSON-RPC 
 distinction is deliberate: a protocol error tells a model the server broke, which it cannot act on;
 a tool error tells it what to do differently.
 
-## 9. What is not built
+## 9. Verifying a change to the server
+
+Two suites cover this endpoint, and they answer different questions:
+
+- `tests/integration/mcp.test.ts` — behaviour. Tools run, refusals are audited, reads write nothing,
+  declared filters actually filter.
+- `tests/integration/mcp-conformance.test.ts` — the wire format, driven the way a **client** drives
+  it: `Accept: application/json, text/event-stream`, an `MCP-Protocol-Version` header, the full
+  `initialize` → `notifications/initialized` → `tools/list` sequence, and request-id echo including
+  the `id: 0` that a `|| null` quietly turns into `null`.
+
+Neither is a substitute for pointing a real client at it once:
+
+```bash
+npx @modelcontextprotocol/inspector      # official harness, GUI
+claude mcp add --transport http markii http://localhost:3000/api/mcp   --header "Authorization: Bearer mk_live_…"
+```
+
+**Do not write an MCP client to test this server.** Two implementations by the same author mostly
+share the same misunderstanding; the Inspector and Claude Code were written by people who read the
+spec independently, which is the whole value.
+
+And Markii's own Agent Ops chat (`docs/AGENT-OPS.md`) should **not** speak MCP to this endpoint — it
+runs in the same process and calls `invokeAction` directly. Going out over HTTP to reach your own
+registry adds a network hop, a second authentication and a token to rotate, and turns a typed
+`InvocationOutcome` into JSON to re-parse. MCP is the surface for callers who are outside.
+
+## 10. What is not built
 
 **`resources/*`.** `initialize` does not advertise the capability. Resources are for stable context a
 client pins into a conversation — the store as a document — rather than for querying, which is what
