@@ -35,6 +35,7 @@ import {
   type JsonRpcId,
   type JsonRpcRequest,
 } from "@/lib/mcp/jsonrpc";
+import { findPrompt, promptList, renderPrompt } from "@/lib/mcp/prompts";
 import { callReadTool, findReadTool, readTools } from "@/lib/mcp/reads";
 import {
   actionIdFor,
@@ -173,8 +174,11 @@ async function dispatch(msg: JsonRpcRequest, ctx: Ctx): Promise<unknown> {
     case "initialize":
       return {
         protocolVersion: negotiateProtocolVersion(params.protocolVersion),
-        /** Tools only — `resources/*` is still unbuilt; see the note below. */
-        capabilities: { tools: { listChanged: false } },
+        /** Tools and prompts. `resources/*` is still unbuilt; see the note below. */
+        capabilities: {
+          tools: { listChanged: false },
+          prompts: { listChanged: false },
+        },
         serverInfo: { name: "markii", version: "1.0.0" },
         instructions:
           "Markii commerce platform. `read_*` tools query the store; every other tool is a " +
@@ -209,6 +213,28 @@ async function dispatch(msg: JsonRpcRequest, ctx: Ctx): Promise<unknown> {
 
     case "tools/call":
       return await callTool(params, ctx);
+
+    case "prompts/list":
+      return { prompts: promptList() };
+
+    case "prompts/get": {
+      const name = params.name;
+      if (typeof name !== "string") {
+        throw new ApiError("VALIDATION_ERROR", 400, "prompts/get requires a prompt name");
+      }
+      const prompt = findPrompt(name);
+      /**
+       * **A JSON-RPC error, unlike an unknown *tool*.** A missing prompt is a
+       * bad request from the client, which chose the name off a list it was
+       * given — there is no model in the loop to recover by choosing
+       * differently, which is the whole reason a bad tool name is a tool error
+       * instead.
+       */
+      if (!prompt) {
+        throw new ApiError("NOT_FOUND", 404, `No such prompt "${name}"`);
+      }
+      return renderPrompt(prompt, (params.arguments ?? {}) as Record<string, string>);
+    }
 
     default:
       return undefined;

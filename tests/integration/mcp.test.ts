@@ -129,6 +129,8 @@ describe("MCP server", () => {
     }, 60_000);
 
     it("reports an unknown method as a JSON-RPC error", async () => {
+      // `resources/*` is genuinely unimplemented, and `initialize` says so by
+      // not advertising the capability.
       const { json } = await rpc("resources/list");
       expect(json.error.code).toBe(-32601);
     }, 60_000);
@@ -399,5 +401,144 @@ describe("MCP server", () => {
       expect(refusal).toBeDefined();
       expect(refusal.error.code).toBe("HUMAN_APPROVAL_REQUIRED");
     }, 90_000);
+  });
+
+  /**
+   * **A declared filter must actually filter.**
+   *
+   * Every read tool names the query parameters it forwards, and those names have
+   * to be the route's own. They were not: `read_products` and `read_customers`
+   * declared `search` while the routes read `q`, and `read_orders` declared a
+   * `search` the route has no concept of. All three were accepted, forwarded and
+   * ignored — so an agent narrowing to one product received the entire catalogue
+   * and had no way to know the filter had done nothing.
+   *
+   * Structural checks cannot catch that; only calling the tool and watching the
+   * result narrow can.
+   */
+  describe("declared filters really filter", () => {
+    it("narrows products by q", async () => {
+      const all = await callTool("read_products", {});
+      /**
+       * `name`, not `title`. The first version of this test read `.title`, got
+       * `undefined`, sent no `q` at all, and then asserted the unfiltered list
+       * was smaller than itself — a test that would have passed just as happily
+       * against a filter that did nothing.
+       */
+      const items = all.json.result.structuredContent.items as { name: string }[];
+      expect(items.length).toBeGreaterThan(1);
+
+      const target = items[0].name;
+      expect(target, "fixture product has no name").toBeTruthy();
+
+      const filtered = await callTool("read_products", { q: target });
+      const got = filtered.json.result.structuredContent.items as { name: string }[];
+
+      expect(filtered.json.result.isError).toBe(false);
+      expect(got.length).toBeGreaterThan(0);
+      expect(got.length).toBeLessThan(items.length);
+      expect(got.every((p) => p.name.includes(target))).toBe(true);
+    }, 90_000);
+
+    it("narrows products to nothing for a term that matches nothing", async () => {
+      const { json } = await callTool("read_products", { q: "zzz-no-such-product-zzz" });
+      expect(json.result.isError).toBe(false);
+      expect(json.result.structuredContent.items).toEqual([]);
+    }, 60_000);
+
+    it("honours the paging arguments", async () => {
+      const { json } = await callTool("read_products", { limit: 1, page: 1 });
+      expect(json.result.structuredContent.items).toHaveLength(1);
+      expect(json.result.structuredContent.total).toBeGreaterThan(1);
+    }, 60_000);
+
+    /**
+     * The order enums are validated by the route, which answers 400 on a value
+     * outside them — so an agent reading the advertised `enum` is the only thing
+     * standing between it and a refused call.
+     */
+    it("accepts every advertised order status and refuses one outside the enum", async () => {
+      for (const status of ["pending", "success", "cancel", "failed"]) {
+        const { json } = await callTool("read_orders", { status });
+        expect(json.result.isError, `status=${status}`).toBe(false);
+      }
+
+      const bad = await callTool("read_orders", { status: "completed" });
+      expect(bad.json.result.isError).toBe(true);
+    }, 90_000);
+
+    it("forwards the customer search parameter the route actually reads", async () => {
+      const { json } = await callTool("read_customers", { q: "zzz-no-such-customer-zzz" });
+      expect(json.result.isError).toBe(false);
+      expect(json.result.structuredContent.items).toEqual([]);
+    }, 60_000);
+  });
+
+  /**
+   * Prompts. A client surfaces these as commands the *merchant* picks, so the
+   * text lands as the opening instruction of a turn with a live store
+   * credential attached — which makes what they say part of the behaviour.
+   */
+  describe("prompts", () => {
+    it("advertises the prompts capability", async () => {
+      const { json } = await rpc("initialize", {});
+      expect(json.result.capabilities.prompts).toBeDefined();
+    }, 60_000);
+
+    it("lists them with titles and argument descriptions", async () => {
+      const { json } = await rpc("prompts/list");
+      const prompts = json.result.prompts as {
+        name: string;
+        title: string;
+        arguments: { name: string; required: boolean }[];
+      }[];
+
+      expect(prompts.length).toBeGreaterThan(0);
+      expect(prompts.map((p) => p.name)).toContain("store_health");
+      for (const p of prompts) {
+        expect(p.title.length, p.name).toBeGreaterThan(0);
+        expect(Array.isArray(p.arguments), p.name).toBe(true);
+      }
+    }, 60_000);
+
+    it("renders one as a user message carrying the ground rules", async () => {
+      const { json } = await rpc("prompts/get", { name: "store_health", arguments: {} });
+      const message = json.result.messages[0];
+
+      expect(message.role).toBe("user");
+      expect(message.content.type).toBe("text");
+      expect(message.content.text).toMatch(/minor units/i);
+      expect(message.content.text).toMatch(/_dryRun/);
+    }, 60_000);
+
+    it("substitutes the arguments it was given", async () => {
+      const { json } = await rpc("prompts/get", {
+        name: "propose_change",
+        arguments: { request: "discount every hoodie by 15%" },
+      });
+      expect(json.result.messages[0].content.text).toContain("discount every hoodie by 15%");
+    }, 60_000);
+
+    it("renders with no arguments rather than failing", async () => {
+      const { json } = await rpc("prompts/get", { name: "propose_change" });
+      expect(json.error).toBeUndefined();
+      expect(json.result.messages[0].content.text.length).toBeGreaterThan(50);
+    }, 60_000);
+
+    /**
+     * Unlike an unknown *tool*, this is a JSON-RPC error: the client picked the
+     * name off a list it was handed, so there is no model in the loop to recover
+     * by choosing differently.
+     */
+    it("refuses an unknown prompt as a protocol error", async () => {
+      const { json } = await rpc("prompts/get", { name: "no_such_prompt" });
+      expect(json.error).toBeDefined();
+      expect(json.result).toBeUndefined();
+    }, 60_000);
+
+    it("requires a prompt name", async () => {
+      const { json } = await rpc("prompts/get", {});
+      expect(json.error).toBeDefined();
+    }, 60_000);
   });
 });

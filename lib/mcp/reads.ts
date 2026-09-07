@@ -94,12 +94,19 @@ export const READ_TOOLS: ReadTool[] = [
       "catalog tool that changes one.",
     handler: productsGET,
     path: () => "/api/products",
-    query: ["search", "siteId", "categoryId", "enabled", "page", "limit"],
+    /**
+     * **`q`, not `search`.** The route reads `sp.get("q")`; a `search` argument
+     * was accepted by the schema, forwarded, and silently ignored — so an agent
+     * looking for one product got the whole unfiltered catalog back with no way
+     * to tell. Every name here is the route's own.
+     */
+    query: ["q", "siteId", "categoryId", "enabled", "inStock", "page", "limit"],
     properties: {
-      search: { type: "string", description: "Free-text match on title." },
+      q: { type: "string", description: "Free-text match on title." },
       ...SITE,
       categoryId: { type: "integer" },
       enabled: { type: "boolean", description: "Filter by published state." },
+      inStock: { type: "boolean", description: "Only products with stock remaining." },
       ...PAGING,
     },
   },
@@ -123,8 +130,9 @@ export const READ_TOOLS: ReadTool[] = [
     description: "Category tree for a storefront.",
     handler: categoriesGET,
     path: () => "/api/categories",
-    query: ["siteId", "parentId", "enabled", "page", "limit"],
+    query: ["q", "siteId", "parentId", "enabled", "page", "limit"],
     properties: {
+      q: { type: "string", description: "Free-text match on name." },
       ...SITE,
       parentId: { type: "integer", description: 'Children of one category; "null" for top level.' },
       enabled: { type: "boolean" },
@@ -136,8 +144,13 @@ export const READ_TOOLS: ReadTool[] = [
     description: "Merchandising collections and their published state.",
     handler: collectionsGET,
     path: () => "/api/collections",
-    query: ["siteId", "published", "page", "limit"],
-    properties: { ...SITE, published: { type: "boolean" }, ...PAGING },
+    query: ["q", "siteId", "published", "page", "limit"],
+    properties: {
+      q: { type: "string", description: "Free-text match on title." },
+      ...SITE,
+      published: { type: "boolean" },
+      ...PAGING,
+    },
   },
   {
     name: "read_customers",
@@ -146,11 +159,14 @@ export const READ_TOOLS: ReadTool[] = [
       "absence as permission to contact someone.",
     handler: customersGET,
     path: () => "/api/customers",
-    query: ["search", "siteId", "acceptsMarketing", "page", "limit"],
+    query: ["q", "siteId", "acceptsMarketing", "page", "limit"],
     properties: {
-      search: { type: "string", description: "Match on email or name." },
+      q: { type: "string", description: "Match on email, first name or last name." },
       ...SITE,
-      acceptsMarketing: { type: "boolean" },
+      acceptsMarketing: {
+        type: "boolean",
+        description: "Filter on recorded marketing consent.",
+      },
       ...PAGING,
     },
   },
@@ -159,13 +175,40 @@ export const READ_TOOLS: ReadTool[] = [
     description: "Orders, newest first. Use this to find an order id before refunding or cancelling.",
     handler: ordersGET,
     path: () => "/api/orders",
-    query: ["status", "siteId", "search", "from", "to", "page", "limit"],
+    /**
+     * **There is no free-text search on orders**, and a `search` argument used
+     * to be declared here and quietly dropped. The filters below are the ones
+     * `orderListFilters` actually reads; the enums are its own, and it answers
+     * `400` on a value outside them rather than ignoring it — so listing them
+     * is what stops an agent guessing "completed" and getting an error.
+     */
+    query: [
+      "status",
+      "financialStatus",
+      "fulfillmentStatus",
+      "provider",
+      "customerId",
+      "siteId",
+      "from",
+      "to",
+      "page",
+      "limit",
+    ],
     properties: {
-      status: { type: "string", description: "Order status filter." },
+      status: { type: "string", enum: ["pending", "success", "cancel", "failed"] },
+      financialStatus: {
+        type: "string",
+        enum: ["pending", "paid", "partially_refunded", "refunded", "voided"],
+      },
+      fulfillmentStatus: {
+        type: "string",
+        enum: ["unfulfilled", "partially_fulfilled", "fulfilled", "not_required"],
+      },
+      provider: { type: "string", enum: ["x402", "stripe"], description: "Payment rail." },
+      customerId: { type: "integer", description: "Orders belonging to one customer." },
       ...SITE,
-      search: { type: "string" },
       from: { type: "string", description: "ISO date, inclusive." },
-      to: { type: "string", description: "ISO date, inclusive." },
+      to: { type: "string", description: "ISO date, inclusive (date-only covers the day)." },
       ...PAGING,
     },
   },
@@ -186,8 +229,11 @@ export const READ_TOOLS: ReadTool[] = [
       "Read this when asked how to improve a store rather than guessing at fixes.",
     handler: readinessGET,
     path: () => "/api/readiness/overview",
-    query: ["siteId"],
-    properties: { ...SITE },
+    query: ["siteId", "productId"],
+    properties: {
+      ...SITE,
+      productId: { type: "integer", description: "Narrow the report to one product." },
+    },
   },
 ];
 
