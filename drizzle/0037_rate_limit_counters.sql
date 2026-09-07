@@ -10,10 +10,16 @@
 -- One row per key per window, incremented by a single upsert so two concurrent
 -- requests cannot both read the same count and both decide they fit.
 --
--- **Nothing sweeps this table, and nothing needs to.** A key whose window has
--- passed is reset in place on its next request rather than deleted, so the row
--- count is bounded by the number of distinct callers rather than by traffic —
--- which matters because there is no job runner here to sweep with (D41).
+-- **Nothing sweeps this table, and nothing needs to** — there is no job runner
+-- here to sweep with (D41). A key whose window has passed is reset in place on
+-- its next request rather than deleted, so the row count is bounded by the
+-- number of distinct callers rather than by traffic.
+--
+-- Be precise about what that bound is: a key that never returns is never
+-- reclaimed either, so the true ceiling is every credential that has *ever*
+-- called. For real merchants that is a handful of tokens. The integration suite
+-- is the exception, minting one per fixture, so `tests/integration/helpers.ts`
+-- sweeps rows whose token no longer exists.
 --
 -- Keys hold token *ids*, never token plaintext or hashes: this table is not a
 -- credential store and must never become one by accident.

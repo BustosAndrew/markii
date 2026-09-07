@@ -411,6 +411,26 @@ export class Cleanup {
     }
 
     /**
+     * **Rate-limit counters do not cascade** — `rate_limit_counters.key` is a
+     * text scope like `mcp:tok_abc`, not a foreign key, so deleting an org takes
+     * its tokens and leaves the counters pointing at ids that no longer exist.
+     * The suite mints a token per MCP fixture, so that is a fresh orphan every
+     * run, which is the same unbounded growth `mfa_recovery_codes` already
+     * accumulated here before anyone noticed.
+     *
+     * Swept by *reachability* rather than by tracking ids: the rows are inert
+     * once their token is gone, so anything pointing at a token that no longer
+     * exists can go — which also reclaims whatever earlier runs left behind,
+     * without a test having to have remembered to register it.
+     */
+    await attempt(
+      "rate-limit counters",
+      () => sql`delete from rate_limit_counters r
+        where r.key like 'mcp:%'
+          and not exists (select 1 from api_tokens t where r.key = 'mcp:' || t.id)`,
+    );
+
+    /**
      * Shoppers last: sites (and the customer rows beneath them) are gone by now,
      * so nothing still points at the auth row being removed.
      */

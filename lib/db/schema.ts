@@ -1079,7 +1079,10 @@ export const apiTokens = pgTable(
  *
  * One row per key per window, incremented atomically by an upsert. Rows are not
  * swept: a key is reused on its next window rather than being deleted, so the
- * table's size is bounded by the number of distinct callers, not by traffic.
+ * table's size is bounded by the number of distinct callers, not by traffic —
+ * though a caller that never returns is never reclaimed either, so the true
+ * ceiling is every credential that has ever called. A handful of tokens for a
+ * real merchant; the integration suite mints one per fixture and sweeps its own.
  */
 export const rateLimitCounters = pgTable("rate_limit_counters", {
   /** Scope and subject, e.g. `mcp:tok_abc`. Never a raw secret — token *ids* only. */

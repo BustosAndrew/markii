@@ -366,4 +366,111 @@ describe("MCP protocol conformance", () => {
       await sql`delete from rate_limit_counters where key = ${probeKey}`;
     }, 90_000);
   });
+
+  /**
+   * Branches of the transport that nothing else reaches.
+   *
+   * Batching was **removed** from MCP in the 2025-06-18 revision, but this
+   * server accepts `2024-11-05` and `2025-03-26` too, where it still existed —
+   * so the branch is reachable by a client on an older version and had no test
+   * at all. Dead-looking code that is actually reachable is the worst of both.
+   */
+  describe("transport branches", () => {
+    it("answers a batch with one reply per request, in order", async () => {
+      const res = await send([
+        { jsonrpc: "2.0", id: 1, method: "ping" },
+        { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
+      ]);
+
+      expect(res.status).toBe(200);
+      const replies = JSON.parse(res.text);
+      expect(Array.isArray(replies)).toBe(true);
+      expect(replies).toHaveLength(2);
+      expect(replies[0].id).toBe(1);
+      expect(replies[1].id).toBe(2);
+      expect(replies[1].result.tools.length).toBeGreaterThan(0);
+    }, 60_000);
+
+    /** Notifications draw no reply, so a mixed batch returns only the requests. */
+    it("omits notifications from a batch reply", async () => {
+      const res = await send([
+        { jsonrpc: "2.0", method: "notifications/initialized" },
+        { jsonrpc: "2.0", id: 7, method: "ping" },
+      ]);
+
+      const replies = JSON.parse(res.text);
+      expect(replies).toHaveLength(1);
+      expect(replies[0].id).toBe(7);
+    }, 60_000);
+
+    /** A batch of nothing but notifications has no body to return at all. */
+    it("answers an all-notification batch with 202 and no body", async () => {
+      const res = await send([
+        { jsonrpc: "2.0", method: "notifications/initialized" },
+        { jsonrpc: "2.0", method: "notifications/cancelled" },
+      ]);
+      expect(res.status).toBe(202);
+      expect(res.text).toBe("");
+    }, 60_000);
+
+    /**
+     * An unknown *notification* must be swallowed, not answered — replying to
+     * something with no id is the classic JSON-RPC violation, and strict
+     * clients treat an unexpected response as a protocol failure.
+     */
+    it("silently ignores an unknown notification", async () => {
+      const res = await send({ jsonrpc: "2.0", method: "notifications/progress" });
+      expect(res.status).toBe(202);
+      expect(res.text).toBe("");
+    }, 60_000);
+
+    it("rejects a body that is not a JSON-RPC request", async () => {
+      const res = await send({ hello: "world" });
+      expect(JSON.parse(res.text).error.code).toBe(-32600);
+    }, 60_000);
+
+    it("requires a tool name on tools/call", async () => {
+      const res = await request("tools/call", { arguments: {} });
+      expect(JSON.parse(res.text).error).toBeDefined();
+    }, 60_000);
+
+    it("refuses DELETE, which a stateless server has no session to end", async () => {
+      const res = await fetch(`${BASE_URL}/api/mcp`, {
+        method: "DELETE",
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(res.status).toBe(405);
+      expect(res.headers.get("allow")).toBe("POST");
+    }, 60_000);
+
+    /**
+     * Revocation is a soft delete so past audit entries stay attributable — but
+     * it must stop the credential working immediately, which is the only reason
+     * "revoke the token" is the answer to a leak.
+     */
+    it("stops accepting a token the moment it is revoked", async () => {
+      const created = await merchant.post("/api/org/tokens", {
+        label: "revoke-probe",
+        role: "analyst",
+      });
+      const doomed: string = created.json.token;
+
+      const before = await fetch(`${BASE_URL}/api/mcp`, {
+        method: "POST",
+        headers: { ...CLIENT_HEADERS, authorization: `Bearer ${doomed}` },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
+      });
+      expect(before.status).toBe(200);
+
+      const del = await merchant.del(`/api/org/tokens/${created.json.id}`);
+      expect(del.status).toBeLessThan(300);
+
+      const after = await fetch(`${BASE_URL}/api/mcp`, {
+        method: "POST",
+        headers: { ...CLIENT_HEADERS, authorization: `Bearer ${doomed}` },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
+      });
+      expect(after.status).toBe(401);
+    }, 90_000);
+  });
 });
