@@ -36,6 +36,32 @@ describe("digital delivery", () => {
   const cart = (p = "") => `/_sites/${slug}/api/cart${p}`;
   const checkout = (p = "") => `/_sites/${slug}/api/checkout${p}`;
 
+  /**
+   * Points a returned download link at the server under test.
+   *
+   * The API hands back the storefront's **public** address —
+   * `https://{slug}.{ROOT_DOMAIN}/download/{token}` — because that is what a real
+   * receipt has to contain, and asserting that is a separate test above. But
+   * fetching it here leaves the machine: `createTestStore` inserts the site with
+   * raw SQL and never goes through `sites.goLive`, which is what registers the
+   * hostname with Vercel and gets it a certificate. So the request died at the
+   * TLS handshake with `ECONNRESET`, and five tests failed for a reason that had
+   * nothing to do with digital delivery.
+   *
+   * It only bit where `ROOT_DOMAIN` is a real domain. With `localhost:3000` the
+   * same URL resolves locally and everything passed, which is why this sat
+   * unnoticed — the suite was environment-dependent without saying so.
+   *
+   * The path is kept and the origin swapped, plus the `/_sites/{slug}` prefix
+   * the proxy adds for a subdomain. What these tests are about is the route:
+   * that it 302s to storage rather than proxying (G5), that the limit holds
+   * against a real counter, and that a refund revokes.
+   */
+  const localDownload = (publicUrl: string) => {
+    const { pathname, search } = new URL(publicUrl);
+    return `${BASE_URL}/_sites/${slug}${pathname}${search}`;
+  };
+
   beforeAll(async () => {
     const { email } = await signUpMerchant(merchant, "delivery");
     cleanup.merchantEmails.push(email);
@@ -108,7 +134,7 @@ describe("digital delivery", () => {
 
   it("redirects to storage rather than serving the bytes itself", async () => {
     const paid = await buy();
-    const url = paid.delivery.downloads[0].url;
+    const url = localDownload(paid.delivery.downloads[0].url);
 
     const res = await fetch(url, { redirect: "manual" });
     // G5: proxying would pay egress twice and time out on a large file.
@@ -122,7 +148,7 @@ describe("digital delivery", () => {
 
   it("counts each redemption and meters the bytes for G5", async () => {
     const paid = await buy();
-    const url = paid.delivery.downloads[0].url;
+    const url = localDownload(paid.delivery.downloads[0].url);
 
     await fetch(url, { redirect: "manual" });
     await fetch(url, { redirect: "manual" });
@@ -146,7 +172,7 @@ describe("digital delivery", () => {
     });
 
     const paid = await buy();
-    const url = paid.delivery.downloads[0].url;
+    const url = localDownload(paid.delivery.downloads[0].url);
     expect(paid.delivery.downloads[0].downloadLimit).toBe(2);
 
     expect((await fetch(url, { redirect: "manual" })).status).toBe(302);
@@ -173,7 +199,7 @@ describe("digital delivery", () => {
       downloadExpiryDays: null,
     });
     const paid = await buy();
-    const url = paid.delivery.downloads[0].url;
+    const url = localDownload(paid.delivery.downloads[0].url);
     await fetch(url, { redirect: "manual" });
     expect((await fetch(url, { redirect: "manual" })).status).toBe(410);
 
@@ -191,7 +217,7 @@ describe("digital delivery", () => {
 
   it("a refund takes the file back", async () => {
     const paid = await buy();
-    const url = paid.delivery.downloads[0].url;
+    const url = localDownload(paid.delivery.downloads[0].url);
     expect((await fetch(url, { redirect: "manual" })).status).toBe(302);
 
     const detail = await merchant.get(`/api/orders/${paid.orderId}`);

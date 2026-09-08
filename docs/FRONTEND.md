@@ -488,6 +488,35 @@ The audit list carries both directions now — `undoneBy` on the original row, `
 so a history screen can strike through a reversed change and label its reversal without a second
 query. Both are `string | null` on `ActionInvocation`.
 
+### 🟢 New 2026-09-08 — `billing.invoiceAssessments` accounts for every assessment
+
+If a screen invokes `billing.invoiceAssessments` and renders the outcome, **`skipped` means
+something wider than it used to.**
+
+The action stops at the first Stripe failure rather than working down the list — the next call would
+fail identically. What changed is that the assessments it never reached used to appear in **neither**
+`billed` nor `skipped`: they simply vanished from the response. A run reported as `3 billed, 1
+skipped` against ten outstanding periods gave no hint that six were untouched. They are now named in
+`skipped` with a reason saying so.
+
+So `skipped` now mixes two kinds of entry, and the `reason` string is what tells them apart:
+
+- **Refused** — nothing owed, no subscription for the line to ride on, a currency mismatch with no FX
+  provider. These are decisions, and re-running changes nothing until the cause is fixed.
+- **Not attempted** — the run stopped before reaching it. Still unbilled, and the next monthly sweep
+  retries it.
+
+**Render the reason rather than a count.** "4 skipped" now covers both, and they call for different
+merchant action — one needs them to do something, the other needs them to do nothing.
+
+`billed` also carries zero-fee periods, which are *settled* rather than charged: `feeMinor: 0` with
+`invoiceItemId: null`. That is the same distinction `FeeAssessment.stripeInvoiceItemId` documents —
+an invoiced row with no item means "under the threshold, nothing owed", not "unpaid".
+
+Nothing else in this change is visible to a screen. The Stripe API version moved to
+`2026-07-29.dahlia` and MCP gained `resources/*`, both server-side only; no response shape moved and
+no `lib/api/*` type changed.
+
 ### 🟢 New 2026-09-07 — account sessions are live, and §16 is finished
 
 `listSessions()` and `revokeSession(id)` in `lib/api/org.ts` now call real routes;
