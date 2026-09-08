@@ -14,11 +14,20 @@ import { BASE_URL } from "./setup";
 /**
  * Merchant email (§6).
  *
- * AWS SES is not configured in this environment and will not be — so what these
- * tests can prove is the part that matters most: **that an email nobody sent is
- * never reported as sent**. The order timeline, the delivery log, and the
- * settings surface each have to say "not configured", and none of them may fall
- * back to Markii's own sending domain to make the failure go away (G1).
+ * **The invariant is that the record matches reality** — an email nobody sent is
+ * never reported as sent, and one that did send is never reported as failed.
+ * The order timeline, the delivery log, and the settings surface all have to
+ * agree with what actually happened, and none of them may fall back to Markii's
+ * own sending domain to make a failure go away (G1).
+ *
+ * This file used to state that SES "is not configured in this environment and
+ * will not be", and asserted `not_configured` unconditionally. SES went live on
+ * 2026-08-11 and those assertions kept passing until credentials reached a
+ * machine that ran the suite — at which point two of them failed for the most
+ * misleading reason available: **the feature had started working**. The sending
+ * assertions now branch on `providerConfigured` from `GET /api/settings/email`
+ * and pin the honest outcome on each side, so the same property is proved
+ * whether or not this deployment can send.
  *
  * The suppression list is exercised for real, because it is enforced entirely in
  * our own code and is what keeps one merchant's dead addresses from getting the
@@ -183,7 +192,10 @@ describe("email", () => {
   // Sending: recorded, never claimed
   // -------------------------------------------------------------------------
 
-  it("records an unsent confirmation as not_configured, never as sent", async () => {
+  it("records what actually happened to the confirmation, never a false success", async () => {
+    const status = await merchant.get("/api/settings/email");
+    const configured = Boolean(status.json.providerConfigured);
+
     const res = await merchant.invoke("orders.resendConfirmation", { orderId });
     expect(res.json.ok).toBe(true);
     // The action reports it queued. Whether it *sent* is a separate fact.
@@ -193,29 +205,92 @@ describe("email", () => {
       where org_id = ${orgId} and order_id = ${orderId}
       order by created_at desc limit 1`;
     expect(row).toBeTruthy();
-    expect(row.status).toBe("not_configured");
-    expect(row.provider).toBe("none");
-    expect(row.provider_message_id).toBeNull();
     expect(row.template).toBe("order_confirmation");
+
     /**
-     * Widened for D44, which replaced "SES is not configured" with a reason
-     * naming the *sender* problem — "No verified sending domain, and no
-     * storefront to fall back to." The assertion that matters is that the row
-     * records **why** it did not send, not the exact wording, so all three
-     * shapes are accepted rather than pinning today's sentence.
+     * **Never Resend, on either branch.** Merchant mail leaving from
+     * `markii.shop` puts this merchant's bounces on Markii's own sending
+     * reputation, which G1 forbids outright — and D44's fallback is still SES,
+     * from the storefront's own address.
      */
-    expect(row.reason).toMatch(/not configured|SES|verified sending domain/i);
+    expect(row.provider).not.toBe("resend");
+
+    if (!configured) {
+      expect(row.status).toBe("not_configured");
+      expect(row.provider).toBe("none");
+      expect(row.provider_message_id).toBeNull();
+      /**
+       * Widened for D44, which replaced "SES is not configured" with a reason
+       * naming the *sender* problem — "No verified sending domain, and no
+       * storefront to fall back to." The assertion that matters is that the row
+       * records **why** it did not send, not the exact wording, so all three
+       * shapes are accepted rather than pinning today's sentence.
+       */
+      expect(row.reason).toMatch(/not configured|SES|verified sending domain/i);
+      return;
+    }
+
+    /**
+     * Configured: the row must describe a real outcome rather than the absence
+     * of one. `not_configured` here would be the mirror of the bug this file
+     * guards — a delivery that actually happened, recorded as impossible.
+     */
+    expect(row.status).not.toBe("not_configured");
+    expect(["sent", "suppressed", "bounced", "failed"]).toContain(row.status);
+    if (row.status === "sent") {
+      expect(row.provider).toBe("ses");
+      // The provider's own id is what makes a later bounce traceable back to
+      // this send — `lib/email/sns.ts` maps it to find the org.
+      expect(row.provider_message_id).toBeTruthy();
+    }
   });
 
-  it("tells the merchant on the order timeline that the email did not go out", async () => {
+  it("tells the merchant on the order timeline what actually happened to the email", async () => {
+    const status = await merchant.get("/api/settings/email");
+    const configured = Boolean(status.json.providerConfigured);
+
     const detail = await merchant.get(`/api/orders/${orderId}`);
     const mailEvents = (detail.json.timeline ?? []).filter((e: any) =>
       e.type?.startsWith("email_"),
     );
     expect(mailEvents.length).toBeGreaterThan(0);
-    // A success entry here would be the exact failure `CLAUDE.md` forbids: a
-    // merchant believing their customer was contacted.
-    expect(mailEvents.every((e: any) => e.type === "email_failed")).toBe(true);
+    // There is no third state — anything else is a status a merchant cannot act
+    // on.
+    expect(
+      mailEvents.every((e: any) => ["email_sent", "email_failed"].includes(e.type)),
+    ).toBe(true);
+
+    if (!configured) {
+      // A success entry here would be the exact failure `CLAUDE.md` forbids: a
+      // merchant believing their customer was contacted.
+      expect(mailEvents.every((e: any) => e.type === "email_failed")).toBe(true);
+      return;
+    }
+
+    /**
+     * Configured: the timeline must agree with the delivery log about **whether
+     * the message ever reached the provider** — which is not the same as the
+     * log's current status.
+     *
+     * The timeline is history: it records what happened when the send was
+     * attempted. The delivery row is current state, and the SNS feedback loop
+     * moves it afterwards. A message SES accepted and later bounced is
+     * therefore `email_sent` on the timeline and `bounced` in the log, and both
+     * are correct — this test asserted they must match and failed on exactly
+     * that case (`buyer@example.com`, `EmailValidationSuppressed`).
+     *
+     * So the mapping is by whether it left, not by the final word.
+     */
+    const [row] = await sql`select status from email_deliveries
+      where org_id = ${orgId} and order_id = ${orderId}
+      order by created_at desc limit 1`;
+    // Reached SES; anything after this is feedback about a message that went.
+    const reachedProvider = ["sent", "bounced", "complained"].includes(row.status);
+    const expected = reachedProvider ? "email_sent" : "email_failed";
+    expect(
+      mailEvents.map((e: any) => e.type),
+      `delivery status=${row.status}`,
+    ).toContain(expected);
   });
 
   it("never falls back to Markii's own sending domain", async () => {
