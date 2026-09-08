@@ -35,7 +35,9 @@ import {
 } from "../lib/billing/price-catalog";
 
 const API = "https://api.stripe.com/v1";
-const API_VERSION = "2025-03-31.basil";
+/** Matches the version the webhook endpoints send; reasoning in
+ *  `lib/billing/stripe-billing.ts`. */
+const API_VERSION = "2026-07-29.dahlia";
 const INTERVALS: BillingInterval[] = ["month", "year"];
 const CURRENCY = "usd";
 

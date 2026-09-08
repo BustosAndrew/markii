@@ -298,7 +298,15 @@ gets quietly reversed later.
 >   two in step automatically, and Markii must not bill an amount it does not display.
 >   `annualPerMonthMinor` is a **per-month** figure — a yearly price is twelve of them, and getting
 >   that wrong undercharges by 12×.
-> - **The API version is pinned** (`2025-03-31.basil`). `/invoices/create_preview` replaced
+> - **The API version is pinned** (`2026-07-29.dahlia` since 2026-09-08; was `2025-03-31.basil`).
+>   It was moved to match what the webhook endpoints already send — an endpoint's explicit version
+>   beats the account default, so the handlers were parsing Dahlia while every outbound call spoke
+>   Basil. The jump crosses **two** breaking releases, Clover and Dahlia; every breaking change in
+>   both was checked against the surfaces used here and none touches them, then the result was
+>   verified against test-mode Stripe (`pnpm stripe:prices`, and `stripe-fee-invoice.test.ts` under
+>   `MARKII_STRIPE_TESTS=1`, which creates a real subscription and invoice item). If you move it
+>   again, check those two things in that order — the changelog is necessary and not sufficient.
+>   The pin lives in five files and `lib/billing/stripe-billing.ts` carries the reasoning. `/invoices/create_preview` replaced
 >   `/invoices/upcoming`, period bounds moved onto the subscription *item*, and an invoice's
 >   subscription moved under `parent.subscription_details`. Inheriting the account default would make
 >   a plan change work on one deployment and 404 on another.
@@ -415,6 +423,15 @@ gets quietly reversed later.
 > accounts, so the rail is **inferred from the subscribed events** and reported as `unknown` rather
 > than guessed when the signal is ambiguous. And an empty list in *test* mode is normal, not a
 > fault: `stripe listen` registers an ephemeral endpoint this API never returns.
+
+> **Genuine Connect delivery is proven, and it took the CLI to do it** (2026-09-08). Every Connect
+> row before that carried a synthetic id — hand-signed probes POSTed at the URL — which tests the
+> handler and not the wire. `stripe listen --forward-connect-to` plus
+> `stripe trigger invoice.created --stripe-account acct_…` produces a real Stripe-generated,
+> Stripe-signed event, and `evt_1UDIuh…` verified, resolved its tenant from the event's `account`,
+> and reached the correct branch. Note what each half proves: this is the **receiver**, in test mode,
+> through the CLI's ephemeral endpoint; the production endpoint's *subscription list* is proven
+> separately by `pnpm stripe:webhooks`. Neither substitutes for the other.
 
 > **In production the two are genuinely different**: two endpoints created in the Stripe dashboard,
 > one with "Listen to events on Connected accounts" checked, each with its own secret. That is the

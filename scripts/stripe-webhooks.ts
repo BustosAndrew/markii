@@ -42,7 +42,9 @@ const API = "https://api.stripe.com/v1";
  * Mirrors the pin in `lib/billing/stripe-billing.ts`, `fee-invoice.ts` and
  * `commerce/membership-billing.ts` — the version this codebase *sends* with.
  */
-const API_VERSION = "2025-03-31.basil";
+/** Matches the version the webhook endpoints send; reasoning in
+ *  `lib/billing/stripe-billing.ts`. */
+const API_VERSION = "2026-07-29.dahlia";
 
 type EndpointRow = {
   id: string;

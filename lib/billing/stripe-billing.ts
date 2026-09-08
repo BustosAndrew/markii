@@ -32,8 +32,42 @@ const API = "https://api.stripe.com/v1";
  * the account's dashboard setting decide which one exists would make a plan
  * change work on one deployment and 404 on another, with no code difference to
  * explain it — and the failure would land on a merchant mid-upgrade.
+ *
+ * **Moved from `2025-03-31.basil` to Dahlia on 2026-09-08, to match what the
+ * webhook endpoints already send.** Both live endpoints render events as
+ * `2026-07-29.dahlia`, and an endpoint's explicit version wins over the
+ * account default — so the handlers were already parsing Dahlia bodies while
+ * every outbound call spoke Basil. Two versions in one integration is a
+ * standing invitation to write a handler against a shape the API never returns.
+ *
+ * The jump crosses **two** breaking releases, Clover and Dahlia. Every breaking
+ * change in both was checked against the surfaces used here and none touches
+ * them: subscription-item `current_period_*`, `parent.subscription_details`,
+ * `create_preview`'s `subscription_details` parameters, and `POST
+ * /v1/invoiceitems` are all unchanged. Two things came close and did not land —
+ * Dahlia removes `payment_method_types` on PaymentIntents, which
+ * `lib/payments/stripe-charges.ts` does not send (it uses
+ * `automatic_payment_methods`), and Clover makes flexible billing mode the
+ * default for new subscriptions, which is the shape this code already reads,
+ * because periods are taken off the subscription **item** and never the
+ * subscription.
+ *
+ * Verified against test mode after the change rather than reasoned about alone.
+ *
+ * **One behavioural consequence, and it is not a shape change.** Clover makes
+ * *flexible billing mode* the default for subscriptions created under it, so
+ * every subscription created from here on — Markii's own plans on the platform
+ * account, and shopper memberships on merchants' Connect accounts — is flexible
+ * where a Basil-era one was classic. Billing mode is fixed at creation, so
+ * subscriptions that already exist are untouched and the two kinds now coexist
+ * permanently. It changes proration and period behaviour rather than any field
+ * this code reads: periods are still taken off the subscription **item**, which
+ * is what flexible mode expects. The billing, renewal and cron suites pass
+ * against subscriptions created under the new pin, which is the evidence for
+ * that. If a proration preview ever disagrees with what a merchant is finally
+ * charged, this is the first thing to suspect.
  */
-const API_VERSION = "2025-03-31.basil";
+const API_VERSION = "2026-07-29.dahlia";
 
 export type StripeFailure = {
   ok: false;

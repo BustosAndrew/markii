@@ -37,7 +37,7 @@ const KEY = process.env.STRIPE_SECRET_KEY ?? "";
 const IS_TEST_KEY = KEY.startsWith("sk_test") || KEY.startsWith("rk_test");
 
 const STRIPE = "https://api.stripe.com/v1";
-const STRIPE_VERSION = "2025-03-31.basil";
+const STRIPE_VERSION = "2026-07-29.dahlia";
 
 async function stripe<T = any>(
   path: string,
