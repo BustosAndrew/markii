@@ -7,6 +7,7 @@ import {
   assessmentBillable,
   createFeeInvoiceItem,
   feeLineDescription,
+  unattemptedAfterStop,
   type BillableAssessment,
 } from "../../billing/fee-invoice";
 import { statusGrantsPlan } from "../../billing/mirror";
@@ -930,6 +931,20 @@ export const invoiceAssessments = defineAction({
             .update(feeAssessments)
             .set({ invoiced: true, invoicedAt: new Date() })
             .where(eq(feeAssessments.id, row.id));
+          /**
+           * **Audited like any other settle.** This path writes `invoiced` the
+           * same as the charged one, and recording a diff only when money moved
+           * would leave the audit log showing an invocation that changed rows
+           * without saying which — the log is read to answer "what did this
+           * touch", and a settled period is part of that answer even at zero.
+           */
+          ctx.recordDiff({
+            entity: "feeAssessment",
+            entityId: row.id,
+            path: "invoiced",
+            before: false,
+            after: true,
+          });
           billed.push({ id: row.id, feeMinor: 0, invoiceItemId: null });
           continue;
         }
@@ -954,8 +969,16 @@ export const invoiceAssessments = defineAction({
          * reported "3 billed, 7 failed" invites a re-run that has to reason
          * about which is which. Each item is already durable and idempotent, so
          * stopping loses nothing.
+         *
+         * **The remainder is named rather than dropped.** Stopping used to end
+         * the loop with the untried assessments in neither `billed` nor
+         * `skipped`, so a caller reading "3 billed, 1 skipped" against ten
+         * outstanding periods could not see that six were never attempted — the
+         * same silent no-op the `unaccounted` block above exists to prevent on
+         * the input side. Nothing more is attempted; only the report changes.
          */
         skipped.push({ id: row.id, reason: item.message });
+        skipped.push(...unattemptedAfterStop(wanted.slice(wanted.indexOf(row) + 1), row.id));
         break;
       }
 

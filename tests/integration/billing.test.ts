@@ -453,6 +453,24 @@ describe("billing", () => {
       // The schema refuses an invoiced row with no time on it.
       expect(after.invoiced_at).not.toBeNull();
       expect(res.json.result.charging).toBe(false);
+
+      /**
+       * **Audited even though no money moved.** This path writes `invoiced` the
+       * same as the charged one, and it used to record no diff at all — so the
+       * audit log showed an invocation that changed a row without saying which,
+       * on exactly the surface a merchant reads to find out what happened to a
+       * billing period.
+       */
+      const audit = await merchant.get("/api/org/audit?actionId=billing.invoiceAssessments");
+      expect(audit.status).toBe(200);
+      const entry = audit.json.items.find((i: any) =>
+        i.changes?.some((c: any) => c.entityId === a.id || c.entity === "feeAssessment"),
+      );
+      expect(entry, "the zero-fee settle should appear in the audit log").toBeDefined();
+      expect(entry.entities).toContainEqual({ type: "feeAssessment", id: a.id });
+      const settled = entry.changes.find((c: any) => c.path === "invoiced");
+      expect(settled.before).toBe(false);
+      expect(settled.after).toBe(true);
     });
 
     /** A dry run must leave the ledger exactly as it found it (§22 rule 2). */

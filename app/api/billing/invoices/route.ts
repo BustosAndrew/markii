@@ -14,13 +14,21 @@ import { db, feeAssessments, organizations } from "@/lib/db";
  * hosted PDF. They cover the **subscription**.
  *
  * `assessments` are the closed-period threshold-fee ledger: what each period
- * *measured*, with the inputs that produced it. They are **not invoices**, and
- * `fee_assessments.invoiced` is still `false` on every row — threshold-fee
- * invoicing is not built (`docs/PRICING.md` §4). Merging them into one list
- * under an `invoices` key would claim money had been demanded that has not been.
+ * *measured*, with the inputs that produced it. They are **not invoices**.
+ * Merging them into one list under an `invoices` key would claim money had been
+ * demanded that has not been.
  *
- * When threshold-fee billing lands, an invoice will *cite* these rows rather
- * than replace them, and `invoiced` becomes the link.
+ * **Threshold-fee invoicing is built** (`lib/billing/fee-invoice.ts`,
+ * `billing.invoiceAssessments`, scheduled monthly by §25), so `invoiced` is
+ * genuinely both values now and an invoice *cites* these rows rather than
+ * replacing them — `stripeInvoiceItemId` is the link. This comment claimed the
+ * opposite for weeks after it shipped, directly above code that already reported
+ * three settled/pending states; that is the one-directional staleness `CLAUDE.md`
+ * warns about, in the code rather than the docs.
+ *
+ * A null `stripeInvoiceItemId` on an invoiced row means **settled at nothing
+ * owed**, not unbilled — the merchant was under their threshold. `invoiced`
+ * alone cannot express that, which is why both are returned.
  */
 export const GET = orgHandler(
   async (req, { orgId }) => {

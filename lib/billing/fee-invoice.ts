@@ -143,6 +143,33 @@ export function feeLineDescription(a: BillableAssessment, format: (minor: number
 }
 
 /**
+ * Accounts for the assessments a stopped run never reached.
+ *
+ * `billing.invoiceAssessments` stops at the first Stripe failure rather than
+ * working down the list — the next call would fail identically, and a partial
+ * run reporting "3 billed, 7 failed" invites a re-run that has to reason about
+ * which is which. But stopping silently is its own version of the problem this
+ * module is written against: an assessment that is in neither `billed` nor
+ * `skipped` has simply vanished from the answer, and "a silent no-op is
+ * indistinguishable from a success" applies to the output as much as the input.
+ *
+ * So the remainder is named, with the reason it was not tried. The work is
+ * unchanged — nothing further is attempted — only the report is honest about
+ * what is still outstanding.
+ */
+export function unattemptedAfterStop(
+  remaining: { id: string }[],
+  stoppedAtId: string,
+): { id: string; reason: string }[] {
+  return remaining.map((r) => ({
+    id: r.id,
+    reason:
+      `Not attempted — the run stopped after Stripe failed on assessment ${stoppedAtId}. ` +
+      "Still unbilled; the next sweep retries it.",
+  }));
+}
+
+/**
  * Adds the fee to the customer's next invoice.
  *
  * **Idempotent on the assessment id.** Stripe collapses a retry carrying the

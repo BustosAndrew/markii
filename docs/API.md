@@ -1795,6 +1795,20 @@ importantly — **will not create an item for an org with no active subscription
 invoice item with nothing to ride on is never billed, never expires, and later attaches to whatever
 invoice eventually appears.
 
+**A run that stops accounts for what it did not do** (2026-09-07). It still halts at the first
+Stripe failure rather than working down the list — the next call would fail identically, and a
+partial run reporting "3 billed, 7 failed" invites a re-run that has to reason about which is which.
+What was wrong is that the untried assessments then appeared in **neither `billed` nor `skipped`**,
+so an operator reading `3 billed, 1 skipped` against ten outstanding periods could not see that six
+were never attempted. They are now named in `skipped` with that reason. Nothing more is attempted;
+only the report is honest. This is the same silent no-op the explicit-`assessmentIds` accounting
+already prevented on the *input* side, arriving through the output.
+
+**A zero-fee settle is audited too** (2026-09-07). Owing nothing still writes `invoiced` on the row,
+and that path recorded no field-level diff — so `GET /api/org/audit` showed an invocation that
+changed rows without saying which, on exactly the surface a merchant reads to find out what happened
+to a billing period. It now records the same `invoiced: false → true` change the charged path does.
+
 `billingStatus.charging` on `GET /api/billing/usage` is now **per merchant, not per deployment**:
 true only for an org whose subscription can actually carry the line. That is the same rule that made
 it `false` when only a credential existed — it reports the capability, never the environment.
@@ -1858,7 +1872,7 @@ interface UsageRecord {            // immutable; written at event time, never de
 | `GET` | `/api/billing/invoices` | ✅ Stripe invoices **and** the assessment ledger, under separate keys. Each assessment carries `invoiced`, `invoicedAt`, and `stripeInvoiceItemId` — a null item id on an invoiced row means *settled, nothing owed*, which `invoiced` alone cannot express |
 | `GET` | `/api/billing/invoices/:id` | ✅ One invoice, line-itemized. **The id is caller-supplied and `in_…` is a shared namespace**, so the invoice's customer is checked against the org's own and a mismatch answers `404`, not `403` — "forbidden" would confirm it exists. Threshold-fee lines carry the assessment that produced them |
 | `POST` | `/api/actions/billing.closePeriod` | ✅ Freeze a **finished** period into an assessment. Measures only. Refuses a period that has not ended — closing a live month freezes a partial one, and idempotency then means the rest is never assessed |
-| `POST` | `/api/actions/billing.invoiceAssessments` | ✅ Bill closed assessments onto the next subscription invoice. `?dryRun=1` shows what would be charged and why. **Every id in an explicit `assessmentIds` list is answered for** — already-billed and unknown ids come back in `skipped` with a reason rather than silently vanishing |
+| `POST` | `/api/actions/billing.invoiceAssessments` | ✅ Bill closed assessments onto the next subscription invoice. `?dryRun=1` shows what would be charged and why. **Every id is answered for, on both sides**: already-billed and unknown ids in an explicit `assessmentIds` list come back in `skipped` with a reason, and when a Stripe failure stops the run the assessments it never reached are named there too rather than silently vanishing |
 | `POST` | `/api/billing/payment-method` | ✅ Stripe SetupIntent client secret; card data never touches Markii. Must be followed by `billing.setDefaultPaymentMethod` or the card is attached but not charged |
 | `GET` | `/api/billing/addons/:addon` | ✅ What the org actually has. Reports `includedInPlan` apart from `purchased`, so a Scale merchant is never asked to buy Chargeback Assist their plan already includes |
 | `POST` · `DELETE` | `/api/billing/addons/:addon` | ⛔ **Refuses with `409`** — Agent Ops and Chargeback Assist are Phase F and do not exist, so there is nothing to sell. Not a missing-credential `503`: no configuration makes an unbuilt product exist |

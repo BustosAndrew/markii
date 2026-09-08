@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { assessmentBillable, feeLineDescription, type BillableAssessment } from "./fee-invoice";
+import {
+  assessmentBillable,
+  feeLineDescription,
+  unattemptedAfterStop,
+  type BillableAssessment,
+} from "./fee-invoice";
 
 /**
  * The gate between a measurement and a charge (§17, `docs/PRICING.md` §4).
@@ -114,5 +119,35 @@ describe("feeLineDescription", () => {
     expect(line).toContain("sales");
     expect(line).not.toContain("physical");
     expect(line).not.toContain("digital");
+  });
+});
+
+/**
+ * A stopped run has to say what it did not do.
+ *
+ * `billing.invoiceAssessments` stops at the first Stripe failure, which is
+ * right — the next call fails identically. What was wrong is that the untried
+ * assessments appeared in neither `billed` nor `skipped`, so an operator
+ * reading "3 billed, 1 skipped" against ten outstanding periods could not see
+ * that six were never attempted. That is the same silent no-op this module
+ * refuses on the input side, arriving through the output.
+ */
+describe("unattemptedAfterStop", () => {
+  it("names every assessment the run did not reach", () => {
+    const out = unattemptedAfterStop([{ id: "fa_2" }, { id: "fa_3" }], "fa_1");
+    expect(out.map((o) => o.id)).toEqual(["fa_2", "fa_3"]);
+  });
+
+  it("says why, and names the assessment that stopped the run", () => {
+    const [first] = unattemptedAfterStop([{ id: "fa_2" }], "fa_1");
+    expect(first.reason).toContain("fa_1");
+    expect(first.reason).toMatch(/not attempted/i);
+    // The operator's actual question: is this still owed?
+    expect(first.reason).toMatch(/unbilled/i);
+  });
+
+  /** Nothing left to report is an empty list, never a fabricated entry. */
+  it("reports nothing when the failure was the last one", () => {
+    expect(unattemptedAfterStop([], "fa_9")).toEqual([]);
   });
 });

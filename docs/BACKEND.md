@@ -314,6 +314,16 @@ gets quietly reversed later.
 >   refuses that case rather than creating one.
 > - **Idempotent on the assessment id**, because the caller writes `invoiced = true` in a
 >   transaction that can roll back after Stripe has already accepted the item.
+> - **Every assessment is accounted for in the result, including the ones a stopped run never
+>   reached** (fixed 2026-09-07). The loop still breaks at the first Stripe failure — the next call
+>   fails identically — but the remainder used to end up in neither `billed` nor `skipped` and simply
+>   vanish from the answer. `unattemptedAfterStop` names them. If you add another early exit here,
+>   account for the tail the same way: this module's own rule is that "a silent no-op is
+>   indistinguishable from a success", and that applies to what it reports, not only to what it
+>   refuses.
+> - **The zero-fee settle records an audit diff** (fixed 2026-09-07). It writes `invoiced` like the
+>   charged path and recorded nothing, so the org audit log showed an invocation that changed rows
+>   without naming them. Any path that flips `invoiced` needs a `recordDiff`.
 > - **`charging` is now per merchant, not per deployment.** It reads the org's own subscription
 >   state. That is the same rule that kept it `false` when only a credential existed — report the
 >   capability, never the environment.
