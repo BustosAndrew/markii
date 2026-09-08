@@ -24,6 +24,17 @@ export const emailOnlySchema = z.object({ email: z.email().max(255) });
 
 export const updatePasswordSchema = z.object({ password: passwordSchema });
 
+/**
+ * Requesting a move to a new address (§16).
+ *
+ * Lowercased and trimmed on the way in: Supabase stores what it is given, and
+ * an address differing only in case would defeat the "already your address"
+ * refusal in the route while creating a change that appears to do nothing.
+ */
+export const updateEmailSchema = z.object({
+  email: z.string().trim().toLowerCase().email().max(255),
+});
+
 export const paymentProvidersSchema = z.object({
   x402: z.boolean(),
   stripe: z.boolean(),

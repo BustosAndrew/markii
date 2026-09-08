@@ -26,6 +26,12 @@ export type AuthMailContext = {
   actionUrl: string;
   /** Shown so a recipient who did not expect this knows what to ignore. */
   toEmail: string;
+  /**
+   * The address an email change is moving to. Only set during a change, and
+   * only the mail to the *current* address needs it — naming the destination is
+   * what lets that reader tell a mistake from an attack.
+   */
+  newEmail?: string | null;
 };
 
 function shell(input: {
@@ -123,6 +129,10 @@ export function magicLinkEmail(ctx: AuthMailContext): RenderedEmail {
  * the copy has to read correctly at either end — so it names the address it was
  * sent to rather than assuming "your new address".
  */
+/**
+ * The single-message flow, used when Supabase's *Secure email change* is off.
+ * One mail, to the account holder.
+ */
 export function emailChangeEmail(ctx: AuthMailContext): RenderedEmail {
   return shell({
     storeName: ctx.storeName,
@@ -132,6 +142,63 @@ export function emailChangeEmail(ctx: AuthMailContext): RenderedEmail {
     actionUrl: ctx.actionUrl,
     closing:
       "If you did not ask to change your email address, ignore this — the change will not take effect.",
+    toEmail: ctx.toEmail,
+  });
+}
+
+/**
+ * Sent to the address **currently** on the account.
+ *
+ * This is the message that stops an account takeover, so it names where the
+ * account would move to. A reader who did not ask for this needs two facts to
+ * act: that a change was requested, and what address it would move to. "Confirm
+ * your email change" alone gives neither.
+ *
+ * The destination is stated even though it is attacker-chosen text: it is
+ * escaped, and withholding it would leave the reader unable to tell a typo from
+ * a hijack.
+ */
+export function emailChangeCurrentEmail(ctx: AuthMailContext): RenderedEmail {
+  const destination = ctx.newEmail ? esc(ctx.newEmail) : null;
+  return shell({
+    storeName: ctx.storeName,
+    heading: "Did you ask to change your email address?",
+    lead: destination
+      ? `Someone asked to move your ${esc(ctx.storeName)} account from this address to ` +
+        `${destination}. Confirm below if that was you.`
+      : `Someone asked to change the email address on your ${esc(ctx.storeName)} account. ` +
+        "Confirm below if that was you.",
+    cta: "Yes, confirm the change",
+    actionUrl: ctx.actionUrl,
+    /**
+     * **Never "ignore this".** For the other auth mails an unexpected message is
+     * inert, so ignoring it is correct advice. Here it means someone with access
+     * to the account is moving it away from this address, and the right response
+     * is to sign in and secure it.
+     */
+    closing:
+      "If this was not you, do not confirm. Sign in and change your password — someone may " +
+      "have access to your account. The change cannot complete without this confirmation.",
+    toEmail: ctx.toEmail,
+  });
+}
+
+/**
+ * Sent to the **new** address, to prove it is reachable by whoever asked.
+ *
+ * Deliberately plain: this reader may have no account yet and no context, so it
+ * asks one thing.
+ */
+export function emailChangeNewEmail(ctx: AuthMailContext): RenderedEmail {
+  return shell({
+    storeName: ctx.storeName,
+    heading: "Confirm your new email address",
+    lead: `Confirm this address to finish moving your ${esc(ctx.storeName)} account to it.`,
+    cta: "Confirm this address",
+    actionUrl: ctx.actionUrl,
+    closing:
+      "If you did not ask for this, ignore it — the change will not take effect without a " +
+      "confirmation from the account's current address as well.",
     toEmail: ctx.toEmail,
   });
 }

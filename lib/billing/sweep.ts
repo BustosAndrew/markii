@@ -3,6 +3,7 @@ import "server-only";
 import { and, eq, gte, lt } from "drizzle-orm";
 import { db, feeAssessments, usageRecords } from "../db";
 import { invokeAction } from "../actions/invoke";
+import { driftFor, type Drift } from "./rollup";
 import type { Actor } from "../actions/types";
 
 /**
@@ -34,6 +35,17 @@ import type { Actor } from "../actions/types";
 /** What one organization's sweep did. Failures are outcomes, not exceptions. */
 export type OrgSweepOutcome = {
   orgId: string;
+  /**
+   * Where the §4.5 rollup disagreed with a fresh sum, if it did
+   * (`docs/BACKEND.md`: "an alert on drift between the two").
+   *
+   * Empty is the normal answer and an absent cache reports empty too — a
+   * merchant the nightly job has not covered is not a discrepancy. Non-empty
+   * means the cache and the ledger disagree, which is a bug in one of them and
+   * is **reported, never repaired**: overwriting the row here would destroy the
+   * evidence of which, and the next nightly run rewrites it anyway.
+   */
+  drift: Drift[];
   closed: {
     ok: boolean;
     assessmentIds: string[];
@@ -63,6 +75,13 @@ export type SweepResult = {
   orgsClosed: number;
   orgsBilled: number;
   orgsFailed: number;
+  /**
+   * Orgs whose §4.5 rollup disagreed with a fresh computation. **Zero is the
+   * expected value**; anything else means the cache and the ledger have diverged
+   * and the nightly job or the meter's reader is wrong. It bills nobody
+   * differently — close always recomputes — so this is a signal, not an incident.
+   */
+  orgsWithDrift: number;
   /**
    * Totalled **per currency**, never as one number. Billing currency is
    * merchant-set, so a single `chargedMinor` across the run would add JPY yen to
@@ -180,7 +199,7 @@ export async function runBillingSweep(input: {
   const outcomeFor = (orgId: string): OrgSweepOutcome => {
     const existing = outcomes.get(orgId);
     if (existing) return existing;
-    const fresh: OrgSweepOutcome = { orgId, closed: null, invoiced: null };
+    const fresh: OrgSweepOutcome = { orgId, closed: null, invoiced: null, drift: [] };
     outcomes.set(orgId, fresh);
     return fresh;
   };
@@ -217,6 +236,28 @@ export async function runBillingSweep(input: {
         error: errorMessage(e),
       };
       console.error(`[billing sweep] close failed for org ${orgId}`, e);
+    }
+
+    /**
+     * **The drift alert, run here because here is where it is nearly free.**
+     * Period close has just recomputed this org's figures from records, so the
+     * database pages are warm and the comparison costs one more aggregate.
+     *
+     * Deliberately outside the try above and in its own: a rollup disagreement
+     * must never turn a successful close into a failed one. The measurement is
+     * the important thing; this is a health check on a cache sitting beside it.
+     */
+    try {
+      outcome.drift = await driftFor(orgId, new Date());
+      if (outcome.drift.length > 0) {
+        console.error(
+          `[billing sweep] t12 rollup drift for org ${orgId}`,
+          JSON.stringify(outcome.drift),
+        );
+      }
+    } catch (e) {
+      // Not recorded as drift — an unreadable cache is not a disagreement.
+      console.error(`[billing sweep] drift check failed for org ${orgId}`, e);
     }
   }
 
@@ -287,6 +328,12 @@ export function summariseSweep(
     periodEnd: periodEnd.toISOString(),
     dryRun,
     orgsConsidered: outcomes.length,
+    /**
+     * Zero is the expected value. Anything else means the §4.5 rollup and the
+     * ledger disagree for that many orgs — a signal about the cache, never a
+     * difference in what anyone is billed, because close always recomputes.
+     */
+    orgsWithDrift: outcomes.filter((o) => o.drift.length > 0).length,
     /** Newly closed only — an org that was already closed did no work this run. */
     orgsClosed: outcomes.filter((o) => o.closed?.ok && !o.closed.alreadyClosed).length,
     /**

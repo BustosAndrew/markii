@@ -6,7 +6,10 @@ import { db, sites } from "../db";
 import { verifySiteRef } from "../auth/site-ref";
 import {
   confirmSignupEmail,
+  type AuthMailContext,
   emailChangeEmail,
+  emailChangeCurrentEmail,
+  emailChangeNewEmail,
   magicLinkEmail,
   resetPasswordEmail,
   type RenderedEmail,
@@ -90,6 +93,15 @@ export type HookPayload = {
   user: {
     id: string;
     email: string;
+    /**
+     * The address an email change is moving *to*, present only during one.
+     *
+     * Optional because it is absent from every other action, and because a
+     * build that stopped receiving it must degrade rather than throw — the
+     * recipient logic below falls back to the current address and the copy
+     * falls back to not naming a destination.
+     */
+    new_email?: string | null;
     app_metadata?: Record<string, unknown> | null;
     /** User-writable. Only ever read through a signature check. */
     user_metadata?: Record<string, unknown> | null;
@@ -112,6 +124,33 @@ export type AuthAction =
   | "email_change_current"
   | "email_change_new"
   | "unknown";
+
+/**
+ * Which address this particular message goes to.
+ *
+ * **Not always `user.email`, and that was a real defect.** With Supabase's
+ * *Secure email change* enabled, one change produces two messages:
+ * `email_change_current` to the address on the account, and `email_change_new`
+ * to the address it is moving to. Both were being sent to the current address.
+ *
+ * That is not a cosmetic misdelivery. The second message exists to prove the
+ * new address is reachable by whoever asked; delivering its token to the old
+ * address means the change can complete for an address nobody has demonstrated
+ * control of — a typo, or someone else's inbox — which is precisely the
+ * guarantee the two-email flow is there to provide.
+ *
+ * `email_change` (the single-message flow, when secure change is off) stays on
+ * the current address: Supabase sends only one, and the account holder is who
+ * it is for.
+ */
+export function recipientOf(payload: HookPayload): string {
+  if (actionOf(payload) === "email_change_new") {
+    // Falls back rather than throwing: a missing `new_email` should still
+    // deliver *something* to a real address, not 500 the whole hook.
+    return payload.user.new_email || payload.user.email;
+  }
+  return payload.user.email;
+}
 
 export function actionOf(payload: HookPayload): AuthAction {
   const raw = payload.email_data.email_action_type;
@@ -147,15 +186,23 @@ export function actionUrl(payload: HookPayload, supabaseUrl: string): string {
 
 export const TEMPLATE_FOR: Record<
   AuthAction,
-  { id: string; render: (ctx: { storeName: string; actionUrl: string; toEmail: string }) => RenderedEmail } | null
+  { id: string; render: (ctx: AuthMailContext) => RenderedEmail } | null
 > = {
   signup: { id: "auth_confirm_signup", render: confirmSignupEmail },
   invite: { id: "auth_confirm_signup", render: confirmSignupEmail },
   recovery: { id: "auth_reset_password", render: resetPasswordEmail },
   magiclink: { id: "auth_magic_link", render: magicLinkEmail },
   email_change: { id: "auth_email_change", render: emailChangeEmail },
-  email_change_current: { id: "auth_email_change", render: emailChangeEmail },
-  email_change_new: { id: "auth_email_change", render: emailChangeEmail },
+  /**
+   * The two halves of a secure email change say different things, because they
+   * are read by people in different situations. The message to the **current**
+   * address is the one that stops an account takeover, so it names the
+   * destination and leads with "did you ask for this"; the one to the **new**
+   * address is an ordinary confirmation. Rendering one template for both left
+   * the security-critical mail unable to tell its reader what would change.
+   */
+  email_change_current: { id: "auth_email_change_current", render: emailChangeCurrentEmail },
+  email_change_new: { id: "auth_email_change_new", render: emailChangeNewEmail },
   unknown: null,
 };
 

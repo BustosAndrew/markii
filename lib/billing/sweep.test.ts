@@ -12,7 +12,7 @@ const PERIOD_START = new Date("2026-07-01T00:00:00.000Z");
 const PERIOD_END = new Date("2026-08-01T00:00:00.000Z");
 
 function outcome(over: Partial<OrgSweepOutcome> & { orgId: string }): OrgSweepOutcome {
-  return { closed: null, invoiced: null, ...over };
+  return { closed: null, invoiced: null, drift: [], ...over };
 }
 
 const closedOk = (feeMinor: number, alreadyClosed = false) => ({

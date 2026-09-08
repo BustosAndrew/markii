@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   actionOf,
   actionUrl,
+  recipientOf,
   routeFor,
   verifyHookSignature,
   TEMPLATE_FOR,
@@ -75,7 +76,12 @@ export async function POST(req: Request) {
   }
 
   const route = await routeFor(payload);
-  const to = payload.user.email;
+  /**
+   * **Not `payload.user.email`.** The second half of a secure email change is
+   * addressed to the *new* address — see `recipientOf`, which is where the
+   * reasoning lives.
+   */
+  const to = recipientOf(payload);
   const url = actionUrl(payload, supabaseUrl);
 
   if (route.stream === "refuse") {
@@ -85,7 +91,12 @@ export async function POST(req: Request) {
 
   if (route.stream === "platform") {
     // Markii's own people — Resend, from markii.shop, exactly as before the hook.
-    const rendered = template.render({ storeName: "Markii", actionUrl: url, toEmail: to });
+    const rendered = template.render({
+      storeName: "Markii",
+      actionUrl: url,
+      toEmail: to,
+      newEmail: payload.user.new_email ?? null,
+    });
     const sent = await sendPlatformMail({
       to,
       subject: rendered.subject,
@@ -104,6 +115,7 @@ export async function POST(req: Request) {
     storeName: route.storeName,
     actionUrl: url,
     toEmail: to,
+    newEmail: payload.user.new_email ?? null,
   });
 
   /**

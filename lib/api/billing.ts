@@ -124,6 +124,16 @@ export type UsageResponse = {
   processorFeesNote: string;
   dataSource: "production" | "not_yet_measured";
   /**
+   * Where the trailing-twelve figure came from. **Null means it was summed live
+   * for this request**; a timestamp means it came from the nightly §4.5 rollup
+   * and is at most a day old.
+   *
+   * Additive — ignoring it changes nothing. Render it only where the number
+   * carries a decision, such as a threshold position: "as of 02:00" is honest
+   * there, and noise everywhere else. The current-period figures are always live.
+   */
+  t12AsOf: string | null;
+  /**
    * Sales whose currency could not be converted, so the total above is
    * known-incomplete. No FX provider is wired; these are excluded rather than
    * summed as zero, and the count is what makes the gap visible.

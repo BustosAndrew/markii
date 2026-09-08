@@ -488,6 +488,28 @@ The audit list carries both directions now — `undoneBy` on the original row, `
 so a history screen can strike through a reversed change and label its reversal without a second
 query. Both are `string | null` on `ActionInvocation`.
 
+### 🟢 New 2026-09-08 — `GET /api/billing/usage` gained `t12AsOf`
+
+**Additive; nothing that ignores it changes.** `t12AsOf` says where the trailing-twelve figure came
+from: `null` means it was summed live for this request, a timestamp means it came from the nightly
+§4.5 rollup and is at most a day old.
+
+Worth rendering **only where the number carries a decision** — a "how close am I to my threshold"
+surface should be able to say "as of 02:00" rather than implying live. Everywhere else it is noise.
+The current-period figures are always live and unaffected.
+
+`UsageMeter` in `lib/api/billing.ts` is typed for it.
+
+### 🟢 New 2026-09-08 — `POST /api/auth/update-email` is live
+
+Starts moving an account to a new address. It **requests** a change and never applies one, which is
+why the response is `{ ok, pending, message }` — `pending`, deliberately not `email`, so a screen
+cannot render it as the account's address before both confirmations land.
+
+Supabase's *Secure email change* is on, so this sends **two** emails — one to the current address and
+one to the new one — and the change needs both. Tell the user to check both inboxes; the copy in
+`message` already says so. Refuses with `400` when the address is the one already on the account.
+
 ### 🟢 New 2026-09-08 — `billing.invoiceAssessments` accounts for every assessment
 
 If a screen invokes `billing.invoiceAssessments` and renders the outcome, **`skipped` means

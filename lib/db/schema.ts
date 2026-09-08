@@ -1084,6 +1084,77 @@ export const apiTokens = pgTable(
  * ceiling is every credential that has ever called. A handful of tokens for a
  * real merchant; the integration suite mints one per fixture and sweeps its own.
  */
+/**
+ * Nightly cache of trailing-twelve-month net sales per org (`docs/PRICING.md`
+ * §4.5).
+ *
+ * **A cache, never the authority.** Period close still recomputes from
+ * `usage_records` — `lib/billing/close.ts` — and `feeAssessments` is what a
+ * merchant is billed against. This exists so the *live* meter can answer without
+ * summing a year of rows on every dashboard load.
+ *
+ * It was deliberately absent until 2026-09-08 on the grounds that a cache nobody
+ * refreshes is worse than the query it replaces. What changed is that something
+ * refreshes it (§25) **and** something checks it: `computedAt` is stored so a
+ * reader can tell how old the number is, and `usageMeterFor` falls back to the
+ * live sum rather than serving a stale one. A cron that stops running therefore
+ * degrades to the previous behaviour instead of quietly reporting last week's
+ * figure as today's.
+ *
+ * One row per `(orgId, productClass)` because physical and digital meter against
+ * **separate thresholds** (D39). `product_class` is nullable for the same reason
+ * the ledger's is: money metered before the split is reported on its own rather
+ * than bucketed into either.
+ */
+export const t12NetSales = pgTable(
+  "t12_net_sales",
+  {
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** Null means "metered before the D39 split" — reported, never bucketed. */
+    productClass: text("product_class", { enum: ["physical", "digital"] }),
+    /** Trailing-twelve net sales in the org's billing currency, minor units. */
+    netSalesMinor: integer("net_sales_minor").notNull().default(0),
+    /**
+     * Records inside the window that carry no converted amount, and so are
+     * excluded from the sum. Carried forward from the live computation because
+     * a total that silently omits rows is the exact misreport the meter refuses
+     * to make — the reader has to be able to say "and N records could not be
+     * converted".
+     */
+    unconvertedCount: integer("unconverted_count").notNull().default(0),
+    /**
+     * Records in the window with no fee class — money metered before the D39
+     * split. Stored for the same reason as `unconverted_count`: the cached path
+     * has to reproduce the live meter's output exactly, and a field the cache
+     * cannot supply would silently read as zero on cache hits and non-zero on
+     * misses. A number that changes depending on whether a cron ran is worse
+     * than either value.
+     */
+    unclassifiedCount: integer("unclassified_count").notNull().default(0),
+    /** The window this sum covers, so a reader can state it rather than assume. */
+    windowStart: timestamp("window_start", { withTimezone: true }).notNull(),
+    windowEnd: timestamp("window_end", { withTimezone: true }).notNull(),
+    /** When the rollup ran. Staleness is decided from this, never from a flag. */
+    computedAt: timestamp("computed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    /**
+     * `product_class` is nullable, and a plain unique index treats two nulls as
+     * distinct — which would let the unclassified row be inserted repeatedly.
+     * `coalesce` gives the null bucket a stable key.
+     */
+    uniqueIndex("t12_net_sales_org_class_uq").on(
+      t.orgId,
+      sql`coalesce(${t.productClass}, '')`,
+    ),
+    index("t12_net_sales_computed_idx").on(t.computedAt),
+  ],
+);
+
+export type T12NetSales = typeof t12NetSales.$inferSelect;
+
 export const rateLimitCounters = pgTable("rate_limit_counters", {
   /** Scope and subject, e.g. `mcp:tok_abc`. Never a raw secret — token *ids* only. */
   key: text("key").primaryKey(),

@@ -329,3 +329,27 @@ receiver — and fails if the deployment is behind the branch under test.
 
 Mail goes to `simulator.amazonses.com`, which touches neither the account's
 sending reputation nor its daily quota, so both are safe to re-run.
+
+---
+
+## When a red test is lying to you
+
+Two dev-loop faults produce failures that look like findings. Both are worth ruling out **before**
+reading a stack trace, and both have caught someone recently.
+
+**`Duplicate action id` — you edited a registry module while the dev server was up.** A hot reload
+re-executes the module that registers the actions, and `defineAction` refuses the second
+registration. Every action invocation 500s afterwards, so a test fails at whatever assertion happens
+to come first — usually `expect(res.status).toBe(200)`, several lines above the thing you were
+actually testing.
+
+This is at its most dangerous during a **falsification**, when a red result is exactly what you are
+hoping for: break a check, watch a test fail, conclude the check is load-bearing. If the failure is
+at the wrong line, you have proved nothing and believe you have proved something. Pin the exact
+assertion, and if it failed anywhere else, restart the server and run it again.
+
+**Every page 500s but route handlers are fine — the Turbopack cache is corrupt.** `pnpm build` and
+`pnpm dev` share `.next`, and interleaving them can wedge the dev CSS pipeline
+(`0xc0000142` on Windows). It survives a dev-server restart and a reboot; `rm -rf .next` clears it.
+The signature is that only *pages* fail, because only pages import `app/globals.css` — an integration
+suite shows this as storefront and dashboard tests failing while every `/api/*` test passes.

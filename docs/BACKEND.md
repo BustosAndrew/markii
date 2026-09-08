@@ -338,9 +338,29 @@ gets quietly reversed later.
 >
 > Two things worth knowing before extending the meter:
 >
-> - **The §4.5 nightly `t12_net_sales` rollup is still deliberately absent.** A scheduler now exists
->   (§25) but a cache nobody reads is still worse than the query it replaces. Add it when volume
->   demands it — the sweep gives you somewhere to hang it when that day comes.
+> - **The §4.5 nightly `t12_net_sales` rollup is built** (2026-09-08, `lib/billing/rollup.ts`,
+>   `GET /api/cron/t12-rollup` at `0 2 * * *`). It was absent on the grounds that a cache nobody
+>   refreshes is worse than the query it replaces; what changed is that something refreshes it and
+>   **something checks it**.
+>
+>   Three properties make it safe to put in front of a number merchants read, and all three are
+>   asserted in `tests/integration/t12-rollup.test.ts`. Every row carries `computedAt`, and
+>   `readT12` returns null for anything older than `MAX_ROLLUP_AGE_MS` (26 hours — wider than the
+>   daily interval, so a late run does not read as stale). The meter falls back to the same exact
+>   sum it used before, so **a cron that stops running costs a query, never correctness**. And
+>   `usageMeterFor` reports `t12AsOf`, so a cached figure can never be mistaken for a live one.
+>
+>   **The current period is deliberately not cached.** It is the number that moves while a merchant
+>   is watching it; caching that would cache the thing they are watching change.
+>
+>   `computeT12` duplicates the meter's aggregate rather than sharing it, on purpose: a rollup built
+>   from the same code could not disagree, which would make the drift check incapable of finding
+>   anything.
+>
+> - **Drift between the rollup and the ledger is reported at period close** (`driftFor`, surfaced as
+>   `orgsWithDrift` on the sweep). **Reported, never repaired** — overwriting the row would destroy
+>   the evidence of which side is wrong, and the next nightly run rewrites it anyway. It runs inside
+>   its own `try`, so a cache disagreement can never turn a successful close into a failed one.
 > - **Records with no FX conversion are excluded *and counted*** (`unconvertedRecordCount`). No FX
 >   provider is wired, so cross-currency sales store `convertedMinor: null`; summing them as zero
 >   would understate a merchant's threshold, and inventing a rate would corrupt what they are
@@ -718,12 +738,33 @@ goes live — that badge is the frontend's only signal that something is callabl
 > An hour was spent on this on 2026-09-08, including a reboot that changed nothing. `rm -rf .next`
 > fixed it immediately.
 
+> **Restart `pnpm dev` after editing anything the action registry imports, before believing a
+> test result.**
+>
+> `defineAction` refuses a duplicate id. A dev-server hot reload re-executes the module that
+> registers the definitions, so editing `lib/actions/definitions/*` — or anything they pull in, such
+> as `lib/billing/sweep.ts` or a `lib/billing/*` helper — throws `Duplicate action id` on the next
+> request. **Every action invocation then 500s**, which means every registry-backed route, the cron
+> sweeps, and the MCP server.
+>
+> The cost is not the 500. It is that a test **fails for the wrong reason** and looks like it found
+> something. This caught the same person twice on 2026-09-08: once while falsifying a permission
+> check, where the test "failed" at `expect(res.status).toBe(200)` rather than at the assertion under
+> test and proved nothing; and once while falsifying `MAX_ROLLUP_AGE_MS`, where an unrelated billing
+> test went red. A falsification that fails at the wrong line is worse than no falsification, because
+> it is read as confirmation.
+>
+> The tell is `Duplicate action id` in `.next/dev/logs/next-development.log`, or a 500 from a route
+> that was working a minute ago and whose code you did not touch. **Restart the server and re-run
+> before drawing any conclusion from a red test.**
+
 ## Traps worth knowing in advance
 
 | Trap | Cost if missed |
 |---|---|
 | Forgetting an org filter on one route | Cross-tenant data leak |
 | Running `pnpm build` and `pnpm dev` against the same `.next` | Every page 500s with a Turbopack `0xc0000142`; route handlers keep working, so it reads as a code bug. `rm -rf .next` — see below |
+| Editing a registry module while `pnpm dev` runs | `Duplicate action id` on hot reload; every action 500s and tests fail at the wrong assertion, which reads as a real finding. Restart before trusting a red test — see above |
 | Any auth mutation running in the browser | The session cookie cannot be `HttpOnly` (D30) — XSS in merchant custom code reaches an admin session |
 | Computing fees from `orders` instead of usage records | Wrong invoices after any refund |
 | Non-idempotent webhook handling | Double-charged merchants |

@@ -2,6 +2,7 @@ import { and, eq, gte, isNull, lt, sql } from "drizzle-orm";
 import { db, organizations, usageRecords, type DbHandle } from "../db";
 import type { ProductClass } from "../commerce/product-class";
 import { entitlementsFor, planCatalog, planPricing } from "../plans";
+import { readT12 } from "./rollup";
 import {
   computeThresholdFee,
   meterState,
@@ -198,6 +199,14 @@ export type UsageMeter = {
   upgradeSuggestion: ReturnType<typeof suggestUpgrade>;
   processorFeesNote: string;
   dataSource: "production" | "not_yet_measured";
+  /**
+   * When the trailing-twelve figure was computed. **Null means it was summed
+   * live for this request**; a timestamp means it came from the §4.5 nightly
+   * rollup and is at most a day old. Additive — nothing that ignores it
+   * behaves differently, but a surface quoting a threshold position should
+   * say which it is showing.
+   */
+  t12AsOf: string | null;
   /** Records whose currency could not be converted, so the number is known-incomplete. */
   unconvertedRecordCount: number;
   /**
@@ -216,12 +225,18 @@ export type UsageMeter = {
 /**
  * The meter for one org.
  *
- * Everything is computed from records at read time. `docs/PRICING.md` §4.5 also
- * describes a nightly rollup of `t12_net_sales`, and it is deliberately **not**
- * built: nothing schedules jobs in this deployment yet, and a cache nobody
- * refreshes is worse than the query it replaces. The direct sum is exact, and
- * the indexes it uses (`usage_records_org_occurred_idx`) are the ones a rollup
- * would have been built on anyway.
+ * The **current period** is always computed from records: it is the number that
+ * moves during the day a merchant is looking at it, and caching it would be
+ * caching the one figure they are watching change.
+ *
+ * The **trailing twelve months** comes from the §4.5 nightly rollup when one is
+ * fresh (`lib/billing/rollup.ts`), because summing a year of rows on every
+ * dashboard load is what that job exists to avoid. It is a cache and is treated
+ * as one: `readT12` returns null when the row is missing or older than
+ * `MAX_ROLLUP_AGE_MS`, and this falls through to the same exact sum it always
+ * used. A cron that stops running costs a query, never a wrong number — and
+ * `t12AsOf` states which path answered, so a stale figure can never be mistaken
+ * for a live one.
  */
 export async function usageMeterFor(
   orgId: string,
@@ -240,7 +255,23 @@ export async function usageMeterFor(
   const entitlements = entitlementsFor(org);
   const period = currentPeriod(now);
 
-  const t12 = await netSalesBetween(handle, orgId, trailing12Start(now), now);
+  /**
+   * Cache first, and **the fallback is the whole safety argument**: a miss, a
+   * stale row, or a cron that never ran all land on the exact sum this used
+   * before the rollup existed.
+   */
+  const cached = await readT12(orgId, now, handle);
+  const t12: NetSalesWindow = cached
+    ? {
+        byClass: cached.byClass,
+        totalMinor: cached.byClass.physical + cached.byClass.digital + cached.unclassifiedMinor,
+        unclassifiedMinor: cached.unclassifiedMinor,
+        unconvertedCount: cached.unconvertedCount,
+        unclassifiedCount: cached.unclassifiedCount,
+      }
+    : await netSalesBetween(handle, orgId, trailing12Start(now), now);
+  /** Null when the figure was summed live just now. */
+  const t12AsOf = cached ? cached.computedAt.toISOString() : null;
   const inPeriod = await netSalesBetween(handle, orgId, period.start, now);
 
   const [everRow] = await handle
@@ -275,6 +306,7 @@ export async function usageMeterFor(
       upgradeSuggestion: null,
       processorFeesNote,
       dataSource: "not_yet_measured",
+      t12AsOf,
       unconvertedRecordCount: 0,
       unclassifiedRecordCount: 0,
       billingStatus: billingStatus(org.subscriptionStatus),
@@ -372,6 +404,7 @@ export async function usageMeterFor(
     }),
     processorFeesNote,
     dataSource: "production",
+    t12AsOf,
     unconvertedRecordCount: t12.unconvertedCount,
     unclassifiedRecordCount: t12.unclassifiedCount,
     billingStatus: billingStatus(org.subscriptionStatus),

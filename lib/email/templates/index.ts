@@ -16,6 +16,8 @@ export type {
 export {
   confirmSignupEmail,
   emailChangeEmail,
+  emailChangeCurrentEmail,
+  emailChangeNewEmail,
   magicLinkEmail,
   resetPasswordEmail,
 } from "./auth";

@@ -3093,6 +3093,30 @@ promises.
 
 ---
 
+### `GET /api/cron/t12-rollup` — ✅ LIVE (§4.5)
+
+Nightly at `0 2 * * *`. Refreshes `t12_net_sales`, the trailing-twelve cache the live meter reads.
+
+**It changes no merchant-facing state**, which is why it authenticates with `CRON_SECRET` and then
+mints **no actor at all** — no registry action, no money, no access, no mail. `/api/cron/billing` is
+the only job that needs a `system` actor, because it bills people.
+
+**A cache that cannot report a wrong number.** Rows carry `computedAt`; the meter refuses anything
+older than 26 hours and falls back to the exact sum it used before the cache existed, and reports
+`t12AsOf` (null = summed live) so the two can never be confused. A job that silently stops therefore
+costs a query rather than correctness.
+
+Scheduled an hour ahead of the monthly billing sweep so that on the 1st, period close compares
+against a cache written an hour earlier. That is a convenience, not a dependency: `closePeriod`
+always recomputes from records, and the drift check reports rather than repairs.
+
+Answers `200` with `{ orgsConsidered, orgsRolledUp, orgsFailed, failures[], orgsPruned }` even when
+individual orgs fail — a non-2xx would make Vercel retry the whole sweep to reach the one that
+failed. **`orgsFailed` is the number to watch**: an org that keeps failing keeps its old row until it
+ages out, after which the meter goes back to summing live, correctly and invisibly.
+
+---
+
 ## 23. Storefront routes (FYI — do not build these)
 
 Owned by the backend; listed so the frontend can link to them (e.g. "view live site",
