@@ -39,11 +39,13 @@ import {
 
 const API = "https://api.stripe.com/v1";
 /**
- * Mirrors the pin in `lib/billing/stripe-billing.ts`, `fee-invoice.ts` and
- * `commerce/membership-billing.ts` — the version this codebase *sends* with.
+ * The version this codebase *sends* with — mirrors the pin in
+ * `lib/billing/stripe-billing.ts`, `fee-invoice.ts` and
+ * `commerce/membership-billing.ts`, which carries the reasoning.
+ *
+ * Compared against each endpoint's own `api_version` below, because the two are
+ * set independently and an endpoint's version decides the shape of what arrives.
  */
-/** Matches the version the webhook endpoints send; reasoning in
- *  `lib/billing/stripe-billing.ts`. */
 const API_VERSION = "2026-07-29.dahlia";
 
 type EndpointRow = {

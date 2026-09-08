@@ -704,11 +704,26 @@ goes live — that badge is the frontend's only signal that something is callabl
 
 ---
 
+> **If `pnpm dev` starts 500ing every page, clear `.next` before suspecting anything else.**
+>
+> `pnpm build` and `pnpm dev` share that directory, and interleaving them can leave the Turbopack
+> dev cache in a state it does not recover from. The symptom is specific and misleading: every
+> **page** returns 500 while every **route handler** still answers normally, because only pages go
+> through the CSS pipeline — the failure is Turbopack spawning a Node subprocess for
+> `@tailwindcss/postcss` and getting `0xc0000142` (Windows `STATUS_DLL_INIT_FAILED`).
+>
+> It looks like a broken machine rather than a broken cache, and it is on disk, so it survives
+> restarting the dev server **and** rebooting. Two facts point at the cache instead: `pnpm build`
+> keeps compiling the same CSS successfully, and the module loads fine in a plain `node` process.
+> An hour was spent on this on 2026-09-08, including a reboot that changed nothing. `rm -rf .next`
+> fixed it immediately.
+
 ## Traps worth knowing in advance
 
 | Trap | Cost if missed |
 |---|---|
 | Forgetting an org filter on one route | Cross-tenant data leak |
+| Running `pnpm build` and `pnpm dev` against the same `.next` | Every page 500s with a Turbopack `0xc0000142`; route handlers keep working, so it reads as a code bug. `rm -rf .next` — see below |
 | Any auth mutation running in the browser | The session cookie cannot be `HttpOnly` (D30) — XSS in merchant custom code reaches an admin session |
 | Computing fees from `orders` instead of usage records | Wrong invoices after any refund |
 | Non-idempotent webhook handling | Double-charged merchants |
