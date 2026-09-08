@@ -253,7 +253,11 @@ by synthetic *signed* Connect events, including a redelivery arriving under a **
 which is precisely the case `stripe_webhook_events` cannot catch. All passed first run; the renewal
 machinery had no bugs. What they do **not** prove is that real Stripe deliveries verify — the route
 HMACs with whatever secret is configured and cannot know which endpoint issued it, so a mode-matched
-`STRIPE_CONNECT_WEBHOOK_SECRET` is still required and still unset in this deployment.
+`STRIPE_CONNECT_WEBHOOK_SECRET` is still required, and it is **set**. Both halves were verified on 2026-09-07. The *secret*: a signed Connect event was accepted and recorded in `stripe_webhook_events` (`invoice.created`, `status: ignored` — the correct branch, declining a subscription with no Markii membership), and an unverified payload writes no row at all, so a recorded Connect event proves the secret is right. The *subscription*: `pnpm stripe:webhooks` against the live key reports the Connect endpoint (`we_1U1dS5…`, identified by its `ca_…` `application`) carrying all nine required events including `invoice.created`, and the platform endpoint carrying all five of its own.
+
+**What is still unproven is delivery.** Every live Connect row so far carries a synthetic id — probes POSTed straight at the URL — so no genuine Stripe-delivered Connect event has ever arrived. Configuration is right; the wire is untested until a real membership invoice fires.
+
+**Both endpoints render events as `2026-07-29.dahlia` while this codebase pins `2025-03-31.basil`.** Stripe renders an event body in the *endpoint's* version, not the one the code sends with, so the handlers parse whatever those endpoints emit — the same hazard the pin exists to prevent on outbound calls, arriving inbound. `pnpm stripe:webhooks` now reports it as a warning rather than a failure: a version difference is not proof of breakage, and calling it an error would teach someone to ignore the output.
 
 **The purchase flow is `/_sites/{slug}/api/checkout/subscription`**, separate from
 `/checkout/session` because a subscription opens no PaymentIntent and reserves no stock; the one-off

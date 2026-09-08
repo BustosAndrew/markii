@@ -399,6 +399,23 @@ gets quietly reversed later.
 > value by accident when only one endpoint is configured would make an unverifiable event look
 > verified.
 >
+> **Nothing checked that Stripe still *sends* these, and now something does.** The receiving half
+> is well covered — signatures verified, events claimed by id, handlers tested. The sending half is
+> configuration in a dashboard, invisible from here: unsubscribing an event produces no error, no
+> log line and no failing test, and the capability simply stops. `pnpm stripe:webhooks` reads
+> `lib/payments/webhook-events.ts` — the manifest of what each rail depends on, and what breaks
+> without each event — and reports the difference against Stripe's own endpoint list. It is
+> read-only, so run it **with the live key**, which is the configuration that bills merchants.
+>
+> The manifest is a second list of event types beside the route's `HANDLERS` map, so a unit test
+> asserts every required event still has a handler. A required event with no handler would report as
+> correctly subscribed while nothing acted on it — a green check over a dead wire.
+>
+> Two things it cannot do. Stripe does not reliably expose which endpoint listens to connected
+> accounts, so the rail is **inferred from the subscribed events** and reported as `unknown` rather
+> than guessed when the signal is ambiguous. And an empty list in *test* mode is normal, not a
+> fault: `stripe listen` registers an ephemeral endpoint this API never returns.
+
 > **In production the two are genuinely different**: two endpoints created in the Stripe dashboard,
 > one with "Listen to events on Connected accounts" checked, each with its own secret. That is the
 > configuration the two variables exist for.
