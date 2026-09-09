@@ -1,18 +1,17 @@
+import Link from "next/link";
 import { getMe, listSites, listStaff, listTokens } from "@/lib/api/server";
 import { loadOrError } from "@/lib/api/load";
 import { SettingsShell } from "@/components/dashboard/settings-shell";
 import { StaffPanel } from "@/components/dashboard/staff-panel";
 import { TokensPanel } from "@/components/dashboard/tokens-panel";
-import { ComingSoon } from "@/components/ui/coming-soon";
 import { FetchError } from "@/components/dashboard/fetch-error";
 
 /**
  * Settings → Team (§16).
  *
- * Staff, invites, roles, tokens, and the audit log are live. **Sessions are
- * not** — shown as such rather than omitted, because a team page with no
- * mention of them reads as "there are no sessions", which is a different claim
- * from "it is not built yet".
+ * Staff, invites, roles, and tokens. Sessions and email live on Account —
+ * they are the signed-in user's, and listing them here would read as the
+ * org's devices.
  */
 export default async function SettingsTeamPage() {
   const [me, staff, tokens, sites] = await Promise.all([
@@ -50,10 +49,16 @@ export default async function SettingsTeamPage() {
           <TokensPanel tokens={tokens.data.items} sites={siteOptions} />
         )}
 
-        <ComingSoon
-          title="Sessions aren’t ready yet"
-          description="Per-device session management will appear here when it is built. Sign out from the sidebar ends this session."
-        />
+        <p className="text-sm leading-6 text-muted">
+          Your signed-in browsers are on{" "}
+          <Link
+            href="/dashboard/settings/account"
+            className="font-medium text-foreground underline-offset-2 hover:underline"
+          >
+            Account
+          </Link>
+          , because they are yours — not the organization&apos;s.
+        </p>
       </div>
     </SettingsShell>
   );

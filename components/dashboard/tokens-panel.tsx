@@ -60,8 +60,8 @@ export function TokensPanel({
       <p className="mt-1 text-sm leading-6 text-muted">
         Scoped, role-bound credentials for MCP clients, agents, and CI. Point a client at{" "}
         <span className="font-mono text-foreground">/api/mcp</span> with the token as a
-        Bearer secret — a signed-in dashboard session is refused there. A token can never
-        do more than the role it carries.
+        Bearer secret — a signed-in dashboard session is refused there. A client can call
+        tools and pin store resources; a token can never do more than the role it carries.
       </p>
 
       {tokens.length === 0 ? (

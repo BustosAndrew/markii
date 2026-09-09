@@ -552,8 +552,9 @@ inventory-level previews are the ones still without a screen. `ACTIONS_UNDO_API_
 `true` on 2026-08-18** in the same change that built the route, and **`ORG_AUDIT_API_LIVE` on
 2026-09-06** in the same change that built `/api/org/audit` — which also corrected that constant's
 `OrgAuditEntry`, a planned type whose flat `entity`/`before`/`after` could not have described the
-field-level diff the log actually holds. `ORG_SESSIONS_API_LIVE` is the last one left and is
-correct — no route backs it.
+field-level diff the log actually holds. `ORG_SESSIONS_API_LIVE` flipped with the routes on
+2026-09-07, and the screen is `/dashboard/settings/account` (2026-09-08) — email change and the
+caller's own devices, not the org's.
 
 **Recurring membership billing came off this list** on 2026-08-10: it was listed as planned while
 being built and passing, which is the same staleness that had MFA's screens listed as missing after

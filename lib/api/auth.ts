@@ -56,3 +56,20 @@ export function updatePassword(body: { password: string }, init?: RequestInit) {
     apiPost<void>("/api/auth/update-password", body, init),
   );
 }
+
+/**
+ * Starts moving the signed-in account to a new address. The address on the
+ * account does not change here — `pending` is the destination, never the
+ * current one, and both inboxes must confirm before it takes effect.
+ */
+export type EmailChangeRequest = {
+  ok: true;
+  pending: string;
+  message: string;
+};
+
+export function updateEmail(body: { email: string }, init?: RequestInit) {
+  return callWhenLive(AUTH_API_LIVE, AUTH_SECTION, () =>
+    apiPost<EmailChangeRequest>("/api/auth/update-email", body, init),
+  );
+}

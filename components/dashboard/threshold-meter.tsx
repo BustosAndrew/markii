@@ -1,6 +1,6 @@
 import type { UsageResponse } from "@/lib/api/billing";
 import { ComingSoon } from "@/components/ui/coming-soon";
-import { LocalDateRange } from "@/components/ui/local-date";
+import { LocalDateRange, LocalDateTime } from "@/components/ui/local-date";
 import { formatMinor } from "@/lib/api/money";
 import { cn } from "@/lib/utils";
 
@@ -100,6 +100,23 @@ export function ThresholdMeter({
               <p className="mt-1 text-2xl font-semibold tracking-tight text-foreground">
                 {money(usage.trailing12NetSalesMinor, usage.currency)}
               </p>
+              {/*
+                The T12 figure is what decides whether a class is over its
+                threshold. `t12AsOf` is null when this request summed it live;
+                a timestamp means the nightly rollup, at most a day old.
+                Period figures below are always live and do not get this line.
+              */}
+              {usage.trailing12NetSalesMinor !== null ? (
+                <p className="mt-1 text-xs text-muted">
+                  {usage.t12AsOf ? (
+                    <>
+                      As of <LocalDateTime value={usage.t12AsOf} />
+                    </>
+                  ) : (
+                    "Live figure"
+                  )}
+                </p>
+              ) : null}
             </div>
             <div className="text-right">
               <p className="text-muted">Threshold, each class</p>

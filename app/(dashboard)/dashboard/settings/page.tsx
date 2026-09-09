@@ -6,6 +6,12 @@ import { getMe } from "@/lib/api/server";
 
 const sections = [
   {
+    href: "/dashboard/settings/account",
+    title: "Account",
+    description: "Your login address and the browsers you are signed in on.",
+    audit: false,
+  },
+  {
     href: "/dashboard/settings/team",
     title: "Team",
     description: "Staff, invites, roles, and API tokens.",

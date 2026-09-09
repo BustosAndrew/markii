@@ -32,8 +32,8 @@ backend could be swapped without touching a screen.
 **Built and working** (2026-08-09): the marketing landing page; auth including the full **MFA** flow
 (`/mfa/enroll · challenge · recover`) with step-up handled centrally; and a dashboard covering
 overview, catalog, categories, products, collections, customers, orders + settlements, discounts,
-memberships, **payments**, **billing**, websites, analytics, health, and settings (team, audit, tax,
-shipping, domains, email). All against **LIVE** endpoints.
+memberships, **payments**, **billing**, websites, analytics, health, and settings (account, team,
+audit, tax, shipping, domains, email). All against **LIVE** endpoints.
 
 **See "What is left" below before picking anything up** — most of what remains is finishing screens
 against real response shapes, plus the one genuine gap: storefront themes.
@@ -66,7 +66,7 @@ API-independent work so you don't outrun the backend") no longer applies to A, B
 | Auth, orgs, staff, roles | §16 | ✅ LIVE | Build it. Forms post to `/api/auth/*`, identity from `GET /api/me` |
 | MFA (merchants) | §16 | ✅ LIVE, screens built | Enrol/challenge/recover ship; step-up retries inline via `MfaStepUpProvider` |
 | Org audit log | §16 | ✅ LIVE, screen built | `/dashboard/settings/audit` via `listOrgAudit(filters)`. Owner/administrator only — the tab is gated on role so a `viewer` is not sent to a 403 |
-| Account sessions | §16 | ✅ LIVE, **screen not built** | `listSessions()` / `revokeSession(id)`. The caller's own devices, every role. `wasCurrent: true` means sign the user out |
+| Account sessions | §16 | ✅ LIVE, screen built | `/dashboard/settings/account` via `listSessions()` / `revokeSession(id)`. The caller's own devices, every role. `wasCurrent: true` means sign the user out |
 | Payment rails | §8 | ✅ LIVE, screen built | `/dashboard/payments`. Rails split from catalog feeds — different authority, see below |
 | Commerce core | §18.1–18.8 | ✅ LIVE | Variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping, order ops, digital delivery |
 | Membership gating | §18.9 | ✅ LIVE | Tiers gate products; buying a granting product confers one |
@@ -74,7 +74,7 @@ API-independent work so you don't outrun the backend") no longer applies to A, B
 | **Billing & metering** | §17 | ✅ **LIVE — newly** | See below. This changed most recently and most sharply |
 | Card checkout (Stripe) | §18.4 | ✅ LIVE | Elements mount with a publishable key the server hands you |
 | **Action undo** | §22 | ✅ **LIVE** | `undoInvocation()` hangs on `/dashboard/settings/audit`. Gate on `outcome.undoable` |
-| **MCP server** | §22 | ✅ **LIVE (tools), no extra screen** | Token-only at `/api/mcp`. Settings → Team mints the token. Session cookies are refused. Connecting a client: `docs/MCP.md`. `resources/*` still unbuilt |
+| **MCP server** | §22 | ✅ **LIVE (tools, prompts, resources), no extra screen** | Token-only at `/api/mcp`. Settings → Team mints the token. Session cookies are refused. Connecting a client: `docs/MCP.md` |
 | Add-on **purchase** | §17 | ⛔ Refuses `409` | Agent Ops / Chargeback Assist do not exist. Show them as unavailable — never as "coming soon with a buy button" |
 | Email delivery | §24 | ✅ LIVE, screen built | SES sends; `/dashboard/settings/email`. Unverified domains still send via the storefront fallback (D44) — do not say mail is not going out |
 | Site builder, Channels, Test Lab, Agent Ops chat | §19–21 | ⛔ Deferred | Out of launch scope — do not start. MCP (§22) is live; do not confuse it with Agent Ops chat |
@@ -498,7 +498,9 @@ Worth rendering **only where the number carries a decision** — a "how close am
 surface should be able to say "as of 02:00" rather than implying live. Everywhere else it is noise.
 The current-period figures are always live and unaffected.
 
-`UsageMeter` in `lib/api/billing.ts` is typed for it.
+`UsageResponse` in `lib/api/billing.ts` is typed for it. The threshold meter on `/dashboard/billing`
+renders it under the trailing-twelve total — "as of …" when the rollup supplied the figure, "Live
+figure" when this request summed it. Period metrics stay unlabeled.
 
 ### 🟢 New 2026-09-08 — `POST /api/auth/update-email` is live
 
@@ -509,6 +511,9 @@ cannot render it as the account's address before both confirmations land.
 Supabase's *Secure email change* is on, so this sends **two** emails — one to the current address and
 one to the new one — and the change needs both. Tell the user to check both inboxes; the copy in
 `message` already says so. Refuses with `400` when the address is the one already on the account.
+
+The form is on `/dashboard/settings/account` via `updateEmail()` in `lib/api/auth.ts`. It shows
+`pending` as a destination waiting on confirmation, never as the address on the account.
 
 ### 🟢 New 2026-09-08 — `billing.invoiceAssessments` accounts for every assessment
 
@@ -547,8 +552,8 @@ no `lib/api/*` type changed.
 
 **They are the signed-in user's own devices, not the org's.** No role can list or revoke anybody
 else's — removing a colleague is `deleteStaff`, which ends their access on their next request.
-So this belongs on a personal-security surface, not under Team: a card on `/dashboard/settings`
-or an "Account" screen, visible to every role.
+The screen is `/dashboard/settings/account` — a personal-security surface, not under Team, visible
+to every role. Team links here rather than listing devices.
 
 **`SessionRecord.userAgent` is now `string | null`.** It was typed `string` while the route did
 not exist, which would have made TypeScript forbid handling the case the API really returns — a
@@ -660,7 +665,7 @@ real state. These are the open items, recorded so they are not rediscovered late
 | ~~§24 email had no client or screen~~ ✅ **fixed 2026-08-02** | `lib/api/email.ts`, `/dashboard/settings/email` | The route and its five actions shipped 2026-08-02 with nothing calling them, while `lib/email/` told merchants to go to a page that did not exist |
 | ~~Invoices screen stubbed on `configuration_required`~~ ⚠️ **unblocked 2026-08-07** | `/dashboard/billing` | §17 is LIVE in full. Plan, card, meter, and invoices share this screen. Old `/dashboard/settings/billing` and `/dashboard/settings/subscription` redirect here |
 | ~~Org switcher was a placeholder~~ ✅ **built 2026-08-03** | `components/dashboard/sidebar.tsx` | The sidebar card said "org switching is coming soon with Phase A auth" long after `POST /api/org/switch` shipped. Now a real switcher, shown only when the user belongs to more than one org. Identity is resolved **once in the layout** and passed to both shells, so the rail and the mobile drawer cannot disagree about which org is active |
-| ~~Team settings was a stub~~ ✅ **built 2026-08-03** | `/dashboard/settings/team` | Staff with inline role changes, invites against the plan's seat limit, and scoped API tokens. **Audit** is now its own screen (`/dashboard/settings/audit`, 2026-09-06). **Sessions** went LIVE 2026-09-07 and are the one §16 surface with no screen — they belong on a personal account page, not Team |
+| ~~Team settings was a stub~~ ✅ **built 2026-08-03** | `/dashboard/settings/team` | Staff with inline role changes, invites against the plan's seat limit, and scoped API tokens. **Audit** is now its own screen (`/dashboard/settings/audit`, 2026-09-06). **Account** (`/dashboard/settings/account`, 2026-09-08) holds email change and the caller's own sessions |
 | ~~Orders list is genuinely blocked~~ ✅ **unblocked** | `/dashboard/orders` | `GET /api/orders` ships; the screen exists. Settlements live at `/dashboard/orders/settlements` |
 | ~~Collections tab and discounts were stubs~~ ✅ **built 2026-08-03** | `/dashboard/catalog?tab=collections`, `/dashboard/discounts` | Both read-only lists against live routes. Discounts show derived `status`, redemption counts, and a **Fully redeemed** badge — an exhausted code still reads as active by its dates and only fails when a shopper tries it |
 | ~~Customers screen was a stub~~ ✅ **built 2026-08-03** | `/dashboard/customers` + `/dashboard/customers/[id]` | List with search, store filter and pagination; detail with memberships, orders and addresses. Money formats from `org.currency` via `formatMinor` (**D31**), never a hardcoded `/100` |

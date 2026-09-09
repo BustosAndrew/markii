@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 
 const settingsLinks = [
+  { href: "/dashboard/settings/account", label: "Account" },
   { href: "/dashboard/settings/team", label: "Team" },
   { href: "/dashboard/settings/audit", label: "Audit", audit: true },
   { href: "/dashboard/settings/tax", label: "Tax" },

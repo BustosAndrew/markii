@@ -33,6 +33,7 @@ import { GET as customerOrdersGET } from "@/app/api/customers/[id]/orders/route"
 import { GET as customerMembershipsGET } from "@/app/api/customers/[id]/memberships/route";
 import { GET as meGET } from "@/app/api/me/route";
 import { GET as orgAuditGET } from "@/app/api/org/audit/route";
+import { GET as orgSessionsGET } from "@/app/api/org/sessions/route";
 import { GET as staffGET } from "@/app/api/org/staff/route";
 import { GET as tokensGET } from "@/app/api/org/tokens/route";
 import { GET as membershipTiersGET } from "@/app/api/memberships/tiers/route";
@@ -67,6 +68,7 @@ import type {
   OrgAuditEntry,
   OrgAuditFilters,
   ScopedToken,
+  SessionRecord,
   StaffMember,
 } from "./org";
 import type { OrderDetail, OrdersQuery, OrdersResponse } from "./orders";
@@ -362,6 +364,9 @@ export const listOrgAudit = (filters?: OrgAuditFilters) =>
     "/api/org/audit",
     filters as Record<string, QueryValue>,
   );
+
+export const listSessions = () =>
+  call<{ items: SessionRecord[] }>(orgSessionsGET, "/api/org/sessions");
 
 export const listTokens = () => call<{ items: ScopedToken[] }>(tokensGET, "/api/org/tokens");
 
