@@ -1312,10 +1312,14 @@ config flag. This — not latency — is the thing that would force multi-region
 
 ### G12 — Abuse and rate limits
 
-- **Per-org API rate limits**, with headroom well above normal dashboard and MCP use.
+- **Per-org API rate limits**, with headroom well above normal dashboard and MCP use. ✅ MCP is
+  limited per token (2026-09-07); the dashboard REST surface is not, and is cookie-gated.
 - **Storefront fair-use bandwidth** on top of the G5 quotas; throttle rather than hard-cut.
 - **Trial abuse:** email verification required, and since no card is taken at signup (D9), pair it
-  with per-IP/per-domain signup limits and manual review above a threshold.
+  with per-IP/per-domain signup limits and manual review above a threshold. ✅ **The limits are
+  built (2026-09-13)** — `lib/auth/rate-limits.ts`, on sign-up, sign-in and password reset, for
+  merchants and shoppers, per address and per subject (`docs/API.md` §16). Manual review is not:
+  nothing surfaces "this domain signed up 40 times today" to a person yet.
 - **SES sending caps for new merchants** until sending reputation is established — this protects
   every other merchant's deliverability, which is the shared resource most easily poisoned.
 - **Scraping:** storefronts are *meant* to be crawled by agents, so the control is rate limiting and

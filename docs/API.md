@@ -1689,13 +1689,39 @@ interface StaffMember {
 
 | Method | Route | Notes |
 |---|---|---|
-| `POST` | `/api/auth/sign-up` | `{ email, password }` → creates the user *and* their first org. Server-side (D30) |
-| `POST` | `/api/auth/sign-in` | `{ email, password }` → sets the session cookie. Server-side (D30) |
+| `POST` | `/api/auth/sign-up` | `{ email, password }` → creates the user *and* their first org. Server-side (D30). **Rate limited** (below) |
+| `POST` | `/api/auth/sign-in` | `{ email, password }` → sets the session cookie. Server-side (D30). **Rate limited** (below) |
 | `POST` | `/api/auth/sign-out` | Clears the session cookie |
-| `POST` | `/api/auth/reset-password` | `{ email }` → sends the reset mail. Always `200`, even for an unknown address — never confirm whether an account exists |
+| `POST` | `/api/auth/reset-password` | `{ email }` → sends the reset mail. Always `200`, even for an unknown address — never confirm whether an account exists. **Rate limited** (below) |
 | `POST` | `/api/auth/update-password` | `{ password }`, authorized by the recovery session |
 | `POST` | `/api/auth/update-email` | `{ email }` → `{ ok, pending, message }`. Requests a move; does not apply it. Both the current and new inboxes must confirm. `400` when the address is already on the account. Server-side (D30) |
 | `GET` | `/api/auth/callback` | Exchanges the emailed code for a session, then redirects. Confirmation, recovery, and any future OAuth land here |
+
+**Rate limits on sign-up, sign-in and reset — ✅ LIVE 2026-09-13 (G12).** Each is limited on two
+dimensions at once, and a refusal on either is `429` with
+`{ error: { code: "RATE_LIMITED", message, details: { retryAfterSeconds } } }` plus `Retry-After`
+and the `RateLimit-*` headers. The message is *"Too many attempts. Try again in N minutes."* for
+both dimensions — naming the account would confirm it exists.
+
+| Route | Per client address | Per subject |
+|---|---|---|
+| sign-up | 10 / hour | 50 / hour per **email domain** — the brake on a disposable-mail service minting a free month (D45) per address |
+| sign-in | 30 / 15 min | 10 / 15 min per email, registered or not |
+| reset-password | 10 / hour | 3 / hour per email — each accepted request is a mail from `markii.shop` |
+
+Windows are fixed, aligned to the clock. **Attempts count before validation**, so a malformed body
+is a counted attempt and not a way around the limit. Defaults are overridable by env
+(`AUTH_RATE_LIMIT_*`, `.env.example`). The same limiter with the same numbers covers the storefront
+shopper routes (§18.3); a plain form post there is answered with the `303` redirect and the message
+in `?error=` like every other refusal on that page.
+
+**Why Supabase's own limits are not enough:** every auth call is made server-side (D30), so the
+address Supabase sees is Vercel's, shared by every merchant and shopper. Its per-address limit would
+be spent by an attacker on everyone's behalf. Counting here, where the caller's own address is
+still known, is what keeps one password-spraying run from locking the whole platform out of
+sign-in. **Fails open** like the MCP limiter — an unreachable counter is a degraded abuse control,
+not an outage. Counters are keyed on a hash of the subject, never the address itself, and rows
+whose window ended more than a day ago are swept by the nightly cron (§25).
 | `GET` | `/api/me` | Current user, org, role, entitlements — one call to boot the dashboard. **Cookie-only: answers `401` to an API token**, since a token has no user and no org switcher. Programmatic callers want `GET /api/org` |
 | `GET`/`PATCH` | `/api/org` | Org profile, billing email, currency |
 | `GET` | `/api/org/staff` | List staff |
@@ -2653,7 +2679,9 @@ gating would have been a dashboard toggle enforcing nothing.
 
 So §18.3's shopper *login* landed with this section (D34):
 `POST /_sites/:site/api/auth/sign-up` · `sign-in` · `sign-out`, and a server-rendered `/account`
-page. Three properties are load-bearing:
+page. **Sign-up and sign-in carry the §16 rate limits** (2026-09-13) — shopper sign-up sends
+confirmation mail from the merchant's own identity (§24), so a script pointed at the form spends
+the merchant's reputation. Three properties are load-bearing:
 
 - **Sign-up stamps `user_kind: "customer"` into `app_metadata`**, which only the service role can
   write. `user_metadata` is user-writable, so a shopper could otherwise promote themselves.
@@ -3112,7 +3140,14 @@ Scheduled an hour ahead of the monthly billing sweep so that on the 1st, period 
 against a cache written an hour earlier. That is a convenience, not a dependency: `closePeriod`
 always recomputes from records, and the drift check reports rather than repairs.
 
-Answers `200` with `{ orgsConsidered, orgsRolledUp, orgsFailed, failures[], orgsPruned }` even when
+**Since 2026-09-13 it also sweeps expired rate-limit counters** — rows whose window ended more than a
+day ago, which are inert (the next request would reset them in place anyway). This is the nightly job
+that changes no merchant-facing state, and the auth limits key on hashed addresses, so a
+credential-stuffing run is a stream of rows nothing would otherwise remove. In its own `try`, so a
+failed sweep cannot fail the rollup or vice versa; reported as `countersSwept`, `null` if the sweep
+itself failed.
+
+Answers `200` with `{ orgsConsidered, orgsRolledUp, orgsFailed, failures[], orgsPruned, countersSwept }` even when
 individual orgs fail — a non-2xx would make Vercel retry the whole sweep to reach the one that
 failed. **`orgsFailed` is the number to watch**: an org that keeps failing keeps its old row until it
 ages out, after which the meter goes back to summing live, correctly and invisibly.

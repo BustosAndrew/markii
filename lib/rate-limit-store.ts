@@ -69,3 +69,34 @@ export async function consumeRateLimit(
 function allow(windowStart: Date, policy: RateLimitPolicy): RateLimitDecision {
   return decide(1, windowStart, policy);
 }
+
+/**
+ * How long a counter row is kept past its window before the nightly sweep
+ * takes it. Wider than any policy's window by a large margin, so a row is only
+ * ever removed once it is certainly inert.
+ */
+export const COUNTER_RETENTION_MS = 24 * 60 * 60_000;
+
+/**
+ * Deletes counter rows whose window ended more than a day ago.
+ *
+ * "Bounded by distinct callers, so no sweeper is needed" was true while the
+ * only keys were API token ids. The auth limits (`lib/auth/rate-limits.ts`)
+ * key on hashed email addresses and client IPs, and a credential-stuffing run
+ * is precisely a stream of distinct subjects — a million tried addresses is a
+ * million rows, each inert after fifteen minutes and each kept forever.
+ *
+ * Removing an expired row is equivalent to the in-place reset the upsert would
+ * do on the row's next request, so this changes no decision; it only stops
+ * the table growing with every address ever tried. Runs from the nightly
+ * housekeeping cron rather than on the request path, where a `DELETE` over the
+ * table would be paid by whichever shopper happened to sign in next.
+ */
+export async function sweepExpiredCounters(now: Date = new Date()): Promise<number> {
+  const cutoff = new Date(now.getTime() - COUNTER_RETENTION_MS);
+  const deleted = await db
+    .delete(rateLimitCounters)
+    .where(sql`${rateLimitCounters.windowStart} < ${cutoff.toISOString()}`)
+    .returning({ key: rateLimitCounters.key });
+  return deleted.length;
+}

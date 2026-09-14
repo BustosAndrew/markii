@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { ApiError, appUrl, badRequest, handler } from "@/lib/api";
 import { setUserKind } from "@/lib/auth/admin";
 import { ensureFirstOrg } from "@/lib/auth/provisioning";
+import { enforceAuthLimit, readJsonBody } from "@/lib/auth/rate-limits";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { credentialsSchema } from "@/lib/validation";
 
@@ -10,9 +11,16 @@ import { credentialsSchema } from "@/lib/validation";
  *
  * Runs server-side (D30): the browser posts credentials to Markii's own origin
  * and the server sets the httpOnly cookie. No `createBrowserClient` exists.
+ *
+ * **Rate limited per address and per email domain** (G12), before validation:
+ * sign-up takes no card (D45), so a free month costs an abuser nothing but an
+ * address, and the domain is what a disposable-mail service has in common
+ * across all of them.
  */
 export const POST = handler(async (req) => {
-  const { email, password } = credentialsSchema.parse(await req.json());
+  const body = await readJsonBody(req);
+  await enforceAuthLimit("signUp", req, body.email);
+  const { email, password } = credentialsSchema.parse(body);
 
   const supabase = await getSupabaseServerClient();
   if (!supabase) {

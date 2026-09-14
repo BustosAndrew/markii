@@ -484,6 +484,15 @@ advertise it as the retrieval path that replaces crawling every product page. No
 Phase C in the register and never made the build-order list — the fourth "planned" item found
 finished or unstarted only by checking.
 
+**The unauthenticated auth routes are rate limited as of 2026-09-13** (G12) — sign-up, sign-in and
+password reset, for merchants and shoppers, per client address **and** per subject (the email; the
+email *domain* for sign-up, which is what a disposable-mail service has in common across a thousand
+free months). `429 RATE_LIMITED` with `Retry-After`; counted before validation; keys hold a hash,
+never the address; expired rows swept by the nightly cron. **Supabase's own limits do not cover
+this** because every auth call is server-side (D30) and Supabase sees Vercel's address for
+everyone — so without it one password-spraying run would lock the whole platform out. Fails open,
+like the MCP limiter. Config: `AUTH_RATE_LIMIT_*` in `.env.example`.
+
 **Still planned:** everything in §10–15 and §19–21.
 
 **Authorization on the v1 REST surface was closed 2026-08-11.** `orgHandler` authorizes **every

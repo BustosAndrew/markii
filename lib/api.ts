@@ -51,10 +51,23 @@ export class ApiError extends Error {
        * diff to a human instead.
        */
       | "HUMAN_APPROVAL_REQUIRED"
+      /**
+       * Too many attempts in the window (G12). Paired with 429 and a
+       * `Retry-After`. Not `FORBIDDEN`: the caller may be perfectly entitled
+       * and simply needs to wait, and a form that reads this as "wrong
+       * password" would tell someone to keep retyping the thing that was right.
+       */
+      | "RATE_LIMITED"
       | "INTERNAL",
     public status: number,
     message: string,
     public details?: unknown,
+    /**
+     * Headers the refusal must carry — `Retry-After` and the `RateLimit-*`
+     * set. On the error rather than the response because refusals are thrown
+     * from inside helpers that never see the response being built.
+     */
+    public headers?: Record<string, string>,
   ) {
     super(message);
   }
@@ -109,7 +122,7 @@ export function errorResponse(e: unknown): NextResponse {
           ...(e.details !== undefined ? { details: sanitizePublicValue(e.details) } : {}),
         },
       },
-      { status: e.status },
+      { status: e.status, headers: e.headers },
     );
   }
   console.error(e);

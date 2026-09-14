@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { ApiError, handler, unauthorized } from "@/lib/api";
 import { ensureFirstOrg } from "@/lib/auth/provisioning";
+import { enforceAuthLimit, readJsonBody } from "@/lib/auth/rate-limits";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { credentialsSchema } from "@/lib/validation";
 
@@ -9,9 +10,15 @@ import { credentialsSchema } from "@/lib/validation";
  *
  * The cookie is written by the `setAll` adapter in `lib/supabase/server.ts`,
  * which stamps `httpOnly` / `secure` / `sameSite: lax` on everything it sets.
+ *
+ * **Rate limited per address and per email** (G12). Supabase's own sign-in
+ * limit sees only Vercel's address, so without this a password-spraying run
+ * would spend the whole platform's allowance and lock every merchant out.
  */
 export const POST = handler(async (req) => {
-  const { email, password } = credentialsSchema.parse(await req.json());
+  const body = await readJsonBody(req);
+  await enforceAuthLimit("signIn", req, body.email);
+  const { email, password } = credentialsSchema.parse(body);
 
   const supabase = await getSupabaseServerClient();
   if (!supabase) {

@@ -567,6 +567,19 @@ Contract `docs/API.md` §18. The largest phase. Order within it:
    is a read over the catalogue the product pages already serve to anyone. It had sat in the
    decision register as "Phase C" without ever reaching this list, which is how it was missed
    while everything above it shipped.
+10. ~~**Auth rate limits** (G12)~~ — done 2026-09-13. `lib/auth/rate-limits.ts` over the existing
+    counter store: sign-up, sign-in and password reset, merchant and shopper alike, limited per
+    client address **and** per subject (email, or email domain for sign-up) in one pass. **Counted
+    before validation**, or a script spraying malformed bodies would never be counted. Keys hold a
+    hash of the subject, never the address — `rate_limit_counters` is not a list of everyone who
+    has ever typed into a form — and the nightly cron now sweeps rows whose window ended a day ago,
+    because "bounded by distinct callers" stopped being a bound once callers were email addresses.
+    **Supabase's own auth limits could not do this**: every auth call is server-side (D30), so
+    Supabase sees Vercel's address for everyone, and one password-spraying run would spend the
+    whole platform's allowance. The integration test carries its own `x-forwarded-for` per request
+    (TEST-NET-2), because a dev server has no proxy and an addressless caller gets no address limit
+    on purpose — and it waits for room in the window, since a fixed window that resets mid-loop
+    is the documented trade, not a bug.
 
 > **Two things this uncovered, both worth knowing.**
 >

@@ -488,6 +488,17 @@ The audit list carries both directions now — `undoneBy` on the original row, `
 so a history screen can strike through a reversed change and label its reversal without a second
 query. Both are `string | null` on `ActionInvocation`.
 
+### 🟢 New 2026-09-13 — sign-up, sign-in and reset can answer `429 RATE_LIMITED`
+
+Per client address and per email (per email *domain* on sign-up). The envelope is the usual
+`{ error: { code: "RATE_LIMITED", message, details: { retryAfterSeconds } } }` with a
+`Retry-After` header, and the message is already what a person should read — *"Too many attempts.
+Try again in 3 minutes."* `components/auth/auth-form.tsx` renders `caught.message`, so **it
+already shows correctly with no change**. Two things not to do: do not map `429` onto the
+"invalid email or password" copy (the password may be right; the answer is *wait*), and do not
+show a per-account message — the limiter deliberately says the same thing whether or not the
+account exists. Contract in `docs/API.md` §16.
+
 ### 🟢 New 2026-09-13 — storefronts have search (G6); nothing in the dashboard changes
 
 **No typed service, no constant to flip, no screen to build** — this is a storefront surface (§23,

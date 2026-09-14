@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { ApiError, badRequest, handler } from "@/lib/api";
 import { setUserKind } from "@/lib/auth/admin";
+import { consumeAuthLimit, rateLimited } from "@/lib/auth/rate-limits";
 import { signSiteRef } from "@/lib/auth/site-ref";
 import { ensureCustomerForShopper, readCredentialBody } from "@/lib/auth/shopper";
 import { loadStore } from "@/lib/commerce/cart";
@@ -29,6 +30,20 @@ export const POST = handler(async (req, { params }) => {
   const account = `${storefrontUrl(site)}/account`;
   const fail = (message: string) =>
     NextResponse.redirect(`${account}?error=${encodeURIComponent(message)}`, { status: 303 });
+
+  /**
+   * Counted before validation, per address and per email domain (G12). A
+   * shopper sign-up sends confirmation mail from the **merchant's** sending
+   * identity (§24), so a script pointed at this form spends the merchant's
+   * reputation — and SES measures bounces across the whole account, so one
+   * store's flood can cost every store its receipts.
+   */
+  const limit = await consumeAuthLimit("signUp", req, values.email);
+  if (!limit.allowed) {
+    const refusal = rateLimited(limit);
+    if (isFormPost) return fail(refusal.message);
+    throw refusal;
+  }
 
   const parsed = credentialsSchema.safeParse(values);
   if (!parsed.success) {

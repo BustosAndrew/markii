@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { ApiError, handler, unauthorized } from "@/lib/api";
+import { consumeAuthLimit, rateLimited } from "@/lib/auth/rate-limits";
 import {
   ensureCustomerForShopper,
   isShopperUser,
@@ -35,6 +36,19 @@ export const POST = handler(async (req, { params }) => {
    */
   const fail = (message: string) =>
     NextResponse.redirect(`${account}?error=${encodeURIComponent(message)}`, { status: 303 });
+
+  /**
+   * Counted before validation and keyed on the caller's address and the
+   * submitted email (G12) — the same limiter as the dashboard's sign-in, since
+   * a shopper's password is worth the same to a credential-stuffing run as a
+   * merchant's, and Supabase sees only Vercel's address either way.
+   */
+  const limit = await consumeAuthLimit("signIn", req, values.email);
+  if (!limit.allowed) {
+    const refusal = rateLimited(limit);
+    if (isFormPost) return fail(refusal.message);
+    throw refusal;
+  }
 
   const parsed = credentialsSchema.safeParse(values);
   if (!parsed.success) {

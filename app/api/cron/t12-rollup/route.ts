@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { runRollup } from "@/lib/billing/rollup";
 import { authenticateCron } from "@/lib/cron/auth";
+import { sweepExpiredCounters } from "@/lib/rate-limit-store";
 
 /**
  * `GET /api/cron/t12-rollup` (§25, `docs/PRICING.md` §4.5) — the nightly
@@ -30,6 +31,13 @@ import { authenticateCron } from "@/lib/cron/auth";
  * **Answers `200` with counts even when individual orgs fail.** A non-2xx makes
  * Vercel retry the whole sweep, which would re-aggregate every org that already
  * succeeded to reach the one that did not. Failures are reported per org.
+ *
+ * **It also sweeps expired rate-limit counters**, because it is the nightly
+ * job that changes no merchant-facing state and a fifth cron for one `DELETE`
+ * is not worth a schedule slot. In its own `try`: a counter table that cannot
+ * be swept must not turn a successful rollup into a failed one, and a rollup
+ * failure must not leave the counters unswept. Reported as `countersSwept`, or
+ * `null` when the sweep itself failed.
  */
 export const runtime = "nodejs";
 /** A sweep must never be cached — it is a mutation behind a GET. */
@@ -46,7 +54,15 @@ export async function GET(request: Request) {
     );
   }
 
-  const result = await runRollup(new Date());
+  const now = new Date();
+  const result = await runRollup(now);
+
+  let countersSwept: number | null = null;
+  try {
+    countersSwept = await sweepExpiredCounters(now);
+  } catch (e) {
+    console.error("[cron] rate-limit counter sweep failed", e);
+  }
 
   /**
    * `orgsFailed` is the number worth watching. An org that keeps failing keeps
@@ -54,5 +70,5 @@ export async function GET(request: Request) {
    * simply goes back to summing live — correct, slower, and invisible from the
    * outside. This count is the only place that degradation is legible.
    */
-  return NextResponse.json(result);
+  return NextResponse.json({ ...result, countersSwept });
 }
