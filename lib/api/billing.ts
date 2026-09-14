@@ -149,8 +149,37 @@ export type UsageResponse = {
   billingStatus: { charging: boolean; reason: string };
 };
 
+/** A merchant's billing address — Stripe's field names, camel-cased. */
+export type BillingAddress = {
+  line1: string;
+  line2: string | null;
+  city: string | null;
+  /** State, province, or region. Required for US and CA. */
+  state: string | null;
+  postalCode: string;
+  /** ISO 3166-1 alpha-2, uppercase. */
+  country: string;
+};
+
+/**
+ * Whether Markii's own invoice carries sales tax (G3), and if not, whose job it
+ * is. **Render the reason, not just the boolean**: `no_billing_address` is a
+ * form the merchant fills in; `tax_not_active` is nothing they can do.
+ */
+export type PlatformTax = {
+  applied: boolean;
+  reason: "active" | "no_billing_address" | "tax_not_active" | "billing_not_configured";
+  /** Merchant-facing copy for the state — one sentence, safe to render as-is. */
+  message: string;
+  /** Set when Stripe's tax-settings read itself failed; the reason then defaults to `tax_not_active`. */
+  settingsError?: string | null;
+};
+
 export type SubscriptionResponse = {
   planId: PlanId;
+  /** Null until the merchant sets one. Edit with `updateBillingAddress`. */
+  billingAddress: BillingAddress | null;
+  tax: PlatformTax;
   /** What screens gate on — never the plan name (`docs/PRICING.md` §5). */
   entitlements: Entitlements;
   pricing: {
@@ -337,10 +366,25 @@ export type ActionOutcome<T> = {
 
 export type PlanChangePreview = {
   kind: "first_subscription" | "plan_change";
+  /** Includes `taxMinor` when tax applied. */
   amountDueMinor: number;
   currency: string;
   lines: { description: string; amountMinor: number }[];
   nextChargeAt: string | null;
+  /**
+   * Tax inside `amountDueMinor`, on its own line. Absent on an untaxed local
+   * preview (a first subscription with no address on file); `0` when Stripe
+   * computed and found none owed.
+   */
+  taxMinor?: number;
+  /**
+   * `complete` — rates applied (possibly 0%). `requires_location_inputs` —
+   * Tax was on but the address did not resolve, so the amount is untaxed.
+   * `not_applied` — Tax was off for this preview. Do not collapse these into
+   * one boolean: on a $0 tax line the first two look identical and mean
+   * opposite things.
+   */
+  taxStatus?: string;
 };
 
 export type PlanChangeResult = {
@@ -348,6 +392,8 @@ export type PlanChangeResult = {
   confirmed: boolean;
   charging: boolean;
   note: string;
+  /** Whether this subscription's invoices carry tax, and why not if not (G3). */
+  tax: PlatformTax;
   /** Present only on a preview. */
   preview?: PlanChangePreview;
   subscriptionId?: string;
@@ -480,6 +526,38 @@ export function setDefaultPaymentMethod(paymentMethodId: string, init?: RequestI
     apiPost<ActionOutcome<{ applied: boolean }>>(
       "/api/actions/billing.setDefaultPaymentMethod",
       { paymentMethodId },
+      init,
+    ),
+  );
+}
+
+export type BillingAddressInput = {
+  line1: string;
+  line2?: string | null;
+  city?: string | null;
+  /** Required for US and CA — the API refuses without it. */
+  state?: string | null;
+  postalCode: string;
+  country: string;
+};
+
+export type UpdateBillingAddressResult = {
+  address: BillingAddress;
+  tax: PlatformTax;
+  note: string;
+};
+
+/**
+ * Set the org's billing address (G3). Writes it to the merchant's Stripe
+ * customer in the same call, and — if a subscription is live — switches tax
+ * on from the next invoice. Undoable. Not step-up gated: it changes what a
+ * future invoice adds, not what is charged today.
+ */
+export function updateBillingAddress(address: BillingAddressInput, init?: RequestInit) {
+  return callWhenLive(BILLING_API_LIVE, BILLING_SECTION, () =>
+    apiPost<ActionOutcome<UpdateBillingAddressResult>>(
+      "/api/actions/billing.updateBillingAddress",
+      { address },
       init,
     ),
   );

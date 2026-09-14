@@ -1723,7 +1723,7 @@ sign-in. **Fails open** like the MCP limiter — an unreachable counter is a deg
 not an outage. Counters are keyed on a hash of the subject, never the address itself, and rows
 whose window ended more than a day ago are swept by the nightly cron (§25).
 | `GET` | `/api/me` | Current user, org, role, entitlements — one call to boot the dashboard. **Cookie-only: answers `401` to an API token**, since a token has no user and no org switcher. Programmatic callers want `GET /api/org` |
-| `GET`/`PATCH` | `/api/org` | Org profile, billing email, currency |
+| `GET`/`PATCH` | `/api/org` | Org profile, billing email, currency. `GET` also returns `billingAddress` (G3, 2026-09-13) — **read-only here**; it moves through `billing.updateBillingAddress` because the write also goes to Stripe |
 | `GET` | `/api/org/staff` | List staff |
 | `POST` | `/api/org/staff/invite` | `{ email, role, storeIds }` → `201`, `status: "invited"` |
 | `PATCH`/`DELETE` | `/api/org/staff/:id` | Change role/scope, remove |
@@ -1892,7 +1892,7 @@ interface UsageRecord {            // immutable; written at event time, never de
 | Method | Route | Notes |
 |---|---|---|
 | `GET` | `/api/billing/plans` | ✅ Public plan catalog + prices. Competitor comparisons are **data with a `verifiedAt`**, never hardcoded copy |
-| `GET` | `/api/billing/subscription` | ✅ Current subscription + entitlements, **plus `standing`** (D45): `subscribed` · `trialing` (with `endsAt`, `daysLeft`) · `expired` · `ungated`. Reads the mirror, not Stripe — except the card, fetched live because a card removed in Stripe's portal emits no reliable event |
+| `GET` | `/api/billing/subscription` | ✅ Current subscription + entitlements, **plus `standing`** (D45): `subscribed` · `trialing` (with `endsAt`, `daysLeft`) · `expired` · `ungated`. Reads the mirror, not Stripe — except the card, fetched live because a card removed in Stripe's portal emits no reliable event. **Since 2026-09-13 also `billingAddress` and `tax`** (G3, below) |
 | `POST` | `/api/billing/subscription` | ✅ Create/change plan. **Returns Stripe's proration preview and writes nothing unless `confirm: true`.** Resolves the stored subscription against Stripe first, so an `incomplete` one is **reopened** (`resumed: true`, same invoice, no second charge) and an expired or missing one is cleared and replaced. Delegates to `billing.changePlan` (§22) |
 | `DELETE` | `/api/billing/subscription` | ✅ Cancel at period end — never immediately **when there is paid access to protect**. A subscription that granted nothing (`incomplete`, expired, or gone from Stripe) is *discarded* outright instead and answers `discarded: true`; there is no paid period to run out. Delegates to `billing.setCancellation` |
 | `GET` | `/api/billing/usage` | ✅ **The threshold meter** — see below. Measured, still not invoiced |
@@ -1901,9 +1901,52 @@ interface UsageRecord {            // immutable; written at event time, never de
 | `POST` | `/api/actions/billing.closePeriod` | ✅ Freeze a **finished** period into an assessment. Measures only. Refuses a period that has not ended — closing a live month freezes a partial one, and idempotency then means the rest is never assessed |
 | `POST` | `/api/actions/billing.invoiceAssessments` | ✅ Bill closed assessments onto the next subscription invoice. `?dryRun=1` shows what would be charged and why. **Every id is answered for, on both sides**: already-billed and unknown ids in an explicit `assessmentIds` list come back in `skipped` with a reason, and when a Stripe failure stops the run the assessments it never reached are named there too rather than silently vanishing |
 | `POST` | `/api/billing/payment-method` | ✅ Stripe SetupIntent client secret; card data never touches Markii. Must be followed by `billing.setDefaultPaymentMethod` or the card is attached but not charged |
+| `POST` | `/api/actions/billing.updateBillingAddress` | ✅ **2026-09-13 (G3).** `{ address: { line1, line2?, city?, state?, postalCode, country } }` — where Markii invoices the org. Written to the merchant's Stripe Customer in the same call, and if a subscription is live, switches `automatic_tax` on from the next invoice. `state` required for US/CA. Medium risk, no step-up, **undoable back to a previous address only** — an org that had none cannot be put back to none |
 | `GET` | `/api/billing/addons/:addon` | ✅ What the org actually has. Reports `includedInPlan` apart from `purchased`, so a Scale merchant is never asked to buy Chargeback Assist their plan already includes |
 | `POST` · `DELETE` | `/api/billing/addons/:addon` | ⛔ **Refuses with `409`** — Agent Ops and Chargeback Assist are Phase F and do not exist, so there is nothing to sell. Not a missing-credential `503`: no configuration makes an unbuilt product exist |
 | `POST` | `/api/webhooks/stripe` | ✅ LIVE — signature-verified, idempotent, retry-safe. Handles Connect account state, `payment_intent.*`, refunds, **and Markii's own `customer.subscription.*` / `invoice.*`** (see below) |
+
+### Sales tax on Markii's own subscription — ✅ LIVE 2026-09-13 (G3)
+
+**Stripe Tax, on the platform account, no `Stripe-Account` header** — the opposite direction of money
+from §18.6, where the merchant is the seller. Here Markii is the seller and the merchant is the
+customer, and Stripe decides what is owed from the **Customer's address**, so nothing is taxed until
+the merchant supplies one.
+
+Two facts decide it and are reported apart in `tax` on `GET /api/billing/subscription` and on every
+`billing.changePlan` result:
+
+```ts
+type PlatformTax = {
+  applied: boolean;
+  reason: "active" | "no_billing_address" | "tax_not_active" | "billing_not_configured";
+  message: string;          // one merchant-facing sentence
+  settingsError?: string | null;  // set when Stripe's tax-settings read itself failed
+};
+```
+
+**Render the reason, not the boolean.** `no_billing_address` is a form the merchant fills in;
+`tax_not_active` is a switch in Markii's Stripe dashboard and nothing the merchant can do. One flag
+would send the wrong person to fix it.
+
+**A subscription without an address is created untaxed and says so, not refused.** Refusing would
+take plan purchase away from every merchant until the address form ships. When the address arrives
+later, `billing.updateBillingAddress` writes it to the Customer and enables `automatic_tax` on the
+live subscription from the next invoice; nothing already invoiced is re-taxed.
+
+**The preview shows the tax.** With an address on file, a first-subscription preview is computed by
+Stripe against that address (`create_preview` with `customer_details`, creating no Customer) rather
+than locally, so `amountDueMinor` is what will be charged. `PlanChangePreview` carries `taxMinor`
+(the tax inside the amount) and `taxStatus`: `complete` means a location resolved and rates applied
+— **possibly at 0%**, which is what an address in a jurisdiction Markii holds no registration for
+produces (`taxability_reason: not_collecting`); `requires_location_inputs` means the address did not
+resolve and the amount is untaxed. Do not merge those two on a $0 line.
+
+Stripe Tax is **active on the platform test account** (verified 2026-09-13; `GET /v1/tax/settings`).
+Registrations are Markii's own obligation (G3: register as nexus thresholds are crossed) and are not
+read here — with none, every calculation is a legitimate zero, the same trap §18.6 documents for
+merchants. Opt-in proof against real Stripe: `tests/integration/stripe-platform-tax.test.ts`
+(`MARKII_STRIPE_TESTS=1`).
 
 ### `POST /api/webhooks/stripe` — ✅ LIVE (unauthenticated, signature-verified)
 
@@ -2991,7 +3034,7 @@ defineAction({
 | `POST` | `/api/actions/:id?dryRun=1` | Return the diff an invocation *would* produce, without writing. A **query flag on the invoke route**, not a `/dry-run` sub-path — one handler, so the preview cannot drift from the execution |
 | `POST` | `/api/actions/:id/undo` | ✅ Invert a prior invocation by `invocationId`, when `undoable`. Runs the inverse as a **new** invocation — same permission, same step-up, its own audit row |
 | `GET` | `/api/actions/invocations` | Audit trail: actor (`user` \| `agent` \| `token`), input, result, `occurredAt`. Requires **`org.audit`** — same gate as `/api/org/audit`, since both read one table |
-| `ALL` | `/api/mcp` | ✅ MCP server — **tools** (58 registry actions + 10 `read_*`), **prompts**, and **resources** (`resources/list`, `resources/templates/list`, `resources/read`). Stateless JSON-RPC over `POST`; `GET`/`DELETE` are `405`. **Token-only auth** (rule 6) — a session cookie is refused. **Rate limited** at 120 req/min per token (`429` + `Retry-After`, fails open). Setup: `docs/MCP.md` |
+| `ALL` | `/api/mcp` | ✅ MCP server — **tools** (59 registry actions + 10 `read_*`), **prompts**, and **resources** (`resources/list`, `resources/templates/list`, `resources/read`). Stateless JSON-RPC over `POST`; `GET`/`DELETE` are `405`. **Token-only auth** (rule 6) — a session cookie is refused. **Rate limited** at 120 req/min per token (`429` + `Retry-After`, fails open). Setup: `docs/MCP.md` |
 
 Invocation response:
 

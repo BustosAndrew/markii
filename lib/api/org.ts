@@ -1,4 +1,4 @@
-import type { AccountStanding } from "./billing";
+import type { AccountStanding, BillingAddress } from "./billing";
 import { apiDelete, apiGet, apiPatch, apiPost } from "./client";
 import { callWhenLive } from "./planned";
 
@@ -55,6 +55,12 @@ export type Organization = {
   billingEmail: string;
   currency: string;
   country: string;
+  /**
+   * Where Markii invoices the org (G3). Null until set — through
+   * `updateBillingAddress` in `lib/api/billing.ts`, never `PATCH /api/org`,
+   * because the write also goes to Stripe.
+   */
+  billingAddress: BillingAddress | null;
   planId: string;
   entitlements: {
     storeLimit: number;

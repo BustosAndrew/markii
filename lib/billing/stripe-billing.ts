@@ -1,5 +1,5 @@
 import "server-only";
-import type { PlanId } from "../db";
+import type { BillingAddress, PlanId } from "../db";
 import { matchedPublishableKey } from "../stripe-mode";
 
 /**
@@ -290,6 +290,8 @@ export async function ensureCustomer(input: {
   existingCustomerId: string | null;
   name: string;
   email: string;
+  /** Written on create only; `syncCustomerBillingDetails` updates an existing customer. */
+  address?: BillingAddress | null;
 }): Promise<{ ok: true; customerId: string; created: boolean } | StripeFailure> {
   if (input.existingCustomerId) {
     const existing = await call<{ id?: string; deleted?: boolean }>(
@@ -327,6 +329,7 @@ export async function ensureCustomer(input: {
     name: input.name,
     email: input.email,
     "metadata[markii_org_id]": input.orgId,
+    ...addressParams(input.address ?? null),
   });
   const created = await call<{ id?: string }>("/customers", {
     method: "POST",
@@ -338,6 +341,118 @@ export async function ensureCustomer(input: {
     return { ok: false, code: "unavailable", message: "Stripe created no customer id." };
   }
   return { ok: true, customerId: created.data.id, created: true };
+}
+
+/**
+ * The address as Stripe's form fields. Empty optional parts are omitted rather
+ * than sent as `""`, which Stripe would store as a blank line.
+ */
+function addressParams(address: BillingAddress | null): Record<string, string> {
+  if (!address) return {};
+  const params: Record<string, string> = {
+    "address[line1]": address.line1,
+    "address[postal_code]": address.postalCode,
+    "address[country]": address.country,
+  };
+  if (address.line2) params["address[line2]"] = address.line2;
+  if (address.city) params["address[city]"] = address.city;
+  if (address.state) params["address[state]"] = address.state;
+  return params;
+}
+
+/**
+ * Writes the merchant's name, billing email and address onto their platform
+ * Customer (G3).
+ *
+ * The address is what `automatic_tax` decides from: Stripe Tax on a
+ * subscription reads the **customer's** location, not anything on the
+ * subscription itself, so an address that never reaches the Customer is an
+ * address that never taxes anything. Called whenever the org's billing details
+ * change and again before any subscription is created, so a customer created
+ * before the address existed is repaired rather than left untaxed forever.
+ */
+export async function syncCustomerBillingDetails(input: {
+  customerId: string;
+  name: string;
+  email: string;
+  address: BillingAddress | null;
+}): Promise<{ ok: true } | StripeFailure> {
+  const res = await call<Record<string, unknown>>(
+    `/customers/${encodeURIComponent(input.customerId)}`,
+    {
+      method: "POST",
+      body: new URLSearchParams({
+        name: input.name,
+        email: input.email,
+        ...addressParams(input.address),
+      }),
+    },
+  );
+  return res.ok ? { ok: true } : res;
+}
+
+export type PlatformTaxSettings = {
+  /** `active` once Stripe Tax is switched on for the platform account; `pending` before. */
+  status: "active" | "pending" | string;
+  /** Whether a head office address is on file — Stripe refuses to activate without one. */
+  headOffice: boolean;
+};
+
+/**
+ * Whether Stripe Tax is activated on **Markii's own** account (G3).
+ *
+ * Distinct from a merchant's Tax activation (§18.6), which is read with a
+ * `Stripe-Account` header and answers for *their* obligations. This one has
+ * no header — it is Markii's position as the seller of its own software.
+ *
+ * Cached per instance for ten minutes: the answer changes when someone flips a
+ * switch in the Stripe dashboard, not per request, and a preview should not
+ * pay a round trip to learn it every time.
+ */
+let taxSettingsCache: { at: number; value: PlatformTaxSettings } | null = null;
+const TAX_SETTINGS_TTL_MS = 10 * 60_000;
+
+export async function platformTaxSettings(): Promise<
+  { ok: true; settings: PlatformTaxSettings } | StripeFailure
+> {
+  if (taxSettingsCache && Date.now() - taxSettingsCache.at < TAX_SETTINGS_TTL_MS) {
+    return { ok: true, settings: taxSettingsCache.value };
+  }
+  const res = await call<{ status?: string; head_office?: { address?: unknown } | null }>(
+    "/tax/settings",
+    { method: "GET" },
+  );
+  if (!res.ok) return res;
+  const settings: PlatformTaxSettings = {
+    status: res.data.status ?? "pending",
+    headOffice: Boolean(res.data.head_office?.address),
+  };
+  taxSettingsCache = { at: Date.now(), value: settings };
+  return { ok: true, settings };
+}
+
+/** Test seam: forget the cached tax settings. */
+export function resetPlatformTaxSettingsCache(): void {
+  taxSettingsCache = null;
+}
+
+/**
+ * Turns `automatic_tax` on or off for a subscription that already exists —
+ * the repair path when a merchant supplies a billing address after subscribing.
+ * Applies from the next invoice; nothing already invoiced is re-taxed.
+ */
+export async function setSubscriptionAutomaticTax(
+  subscriptionId: string,
+  enabled: boolean,
+): Promise<{ ok: true; snapshot: SubscriptionSnapshot } | StripeFailure> {
+  const res = await call<StripeSubscription>(
+    `/subscriptions/${encodeURIComponent(subscriptionId)}`,
+    { method: "POST", body: new URLSearchParams({ "automatic_tax[enabled]": String(enabled) }) },
+  );
+  if (!res.ok) return res;
+  const snapshot = toSnapshot(res.data);
+  if (!snapshot) return { ok: false, code: "unavailable", message: "Stripe returned an unusable subscription." };
+  return { ok: true, snapshot };
 }
 
 // ---------------------------------------------------------------------------
@@ -451,6 +566,8 @@ export async function createSubscription(input: {
    * would hand back the very object that was just discarded.
    */
   replacing?: string | null;
+  /** Whether Stripe Tax computes tax on this subscription's invoices (G3). See the body. */
+  automaticTax: boolean;
 }): Promise<{ ok: true; snapshot: SubscriptionSnapshot; clientSecret: string | null } | StripeFailure> {
   const body = new URLSearchParams({
     customer: input.customerId,
@@ -459,6 +576,14 @@ export async function createSubscription(input: {
     "payment_settings[save_default_payment_method]": "on_subscription",
     "expand[]": "latest_invoice.confirmation_secret",
     "metadata[markii_org_id]": input.orgId,
+    /**
+     * Stripe Tax on Markii's own invoice (G3). Only when the caller has
+     * established that it can apply — Tax active on the platform account and
+     * an address on the customer — because Stripe refuses to create a
+     * subscription with `automatic_tax` and no determinable location, and that
+     * refusal would read to the merchant as "subscriptions are broken".
+     */
+    "automatic_tax[enabled]": String(input.automaticTax),
   });
   const res = await call<StripeSubscription & {
     latest_invoice?: { confirmation_secret?: { client_secret?: string } };
@@ -471,8 +596,8 @@ export async function createSubscription(input: {
      * billed for twice.
      */
     idempotencyKey: input.replacing
-      ? `markii_sub_${input.orgId}_${input.priceId}_${input.replacing}`
-      : `markii_sub_${input.orgId}_${input.priceId}`,
+      ? `markii_sub_${input.orgId}_${input.priceId}_${input.replacing}_${input.automaticTax ? "tax" : "notax"}`
+      : `markii_sub_${input.orgId}_${input.priceId}_${input.automaticTax ? "tax" : "notax"}`,
   });
   if (!res.ok) return res;
   const snapshot = toSnapshot(res.data);
@@ -496,10 +621,13 @@ export async function changeSubscriptionPrice(input: {
   subscriptionId: string;
   itemId: string;
   priceId: string;
+  automaticTax: boolean;
 }): Promise<{ ok: true; snapshot: SubscriptionSnapshot } | StripeFailure> {
   const body = new URLSearchParams({
     "items[0][id]": input.itemId,
     "items[0][price]": input.priceId,
+    /** See `createSubscription`. A plan change is the moment an older, untaxed subscription is brought under Tax. */
+    "automatic_tax[enabled]": String(input.automaticTax),
     /**
      * Stripe's default, stated explicitly. An upgrade mid-period bills the
      * difference now and a downgrade credits it, which is what the preview the
@@ -628,6 +756,16 @@ export type ProrationPreview = {
   lines: { description: string; amountMinor: number }[];
   /** When the next full charge lands, so "and then?" is answered too. */
   nextChargeAt: string | null;
+  /** Tax included in `amountDueMinor`, stated on its own. 0 when none applied. */
+  taxMinor: number;
+  /**
+   * `complete` — a location was found and rates applied (possibly at 0%).
+   * `requires_location_inputs` — Tax was on but the address did not resolve,
+   * so the amount is untaxed. `not_applied` — Tax was not enabled for this
+   * preview at all. Never merge these into one boolean: the first two look
+   * identical on a $0 line and mean opposite things.
+   */
+  taxStatus: string;
 };
 
 /**
@@ -648,6 +786,7 @@ export async function previewPlanChange(input: {
   subscriptionId: string;
   itemId: string;
   priceId: string;
+  automaticTax: boolean;
 }): Promise<{ ok: true; preview: ProrationPreview } | StripeFailure> {
   const body = new URLSearchParams({
     customer: input.customerId,
@@ -655,27 +794,72 @@ export async function previewPlanChange(input: {
     "subscription_details[items][0][id]": input.itemId,
     "subscription_details[items][0][price]": input.priceId,
     "subscription_details[proration_behavior]": "create_prorations",
+    "automatic_tax[enabled]": String(input.automaticTax),
   });
-  const res = await call<{
-    amount_due?: number;
-    currency?: string;
-    next_payment_attempt?: number | null;
-    period_end?: number | null;
-    lines?: { data?: { description?: string | null; amount?: number }[] };
-  }>("/invoices/create_preview", { method: "POST", body });
+  const res = await call<PreviewInvoice>("/invoices/create_preview", { method: "POST", body });
   if (!res.ok) return res;
+  return { ok: true, preview: toProrationPreview(res.data) };
+}
 
+/**
+ * What a **first** subscription will cost, taxed, without creating anything.
+ *
+ * Stripe previews for a customer that does not exist yet when handed
+ * `customer_details` instead of `customer` — which is exactly the case here.
+ * The action deliberately creates no Customer during a preview (an object left
+ * behind for a change the merchant may never confirm), and before Tax that
+ * meant the first-subscription preview was computed locally as "the price".
+ * With Tax the price is no longer the amount, and Markii must not bill what it
+ * does not display, so the preview comes from Stripe with the address the
+ * merchant supplied.
+ */
+export async function previewFirstSubscription(input: {
+  priceId: string;
+  address: BillingAddress;
+}): Promise<{ ok: true; preview: ProrationPreview } | StripeFailure> {
+  /** Address only — `customer_details` on a preview accepts no email, and refuses one as unknown. */
+  const body = new URLSearchParams({
+    "subscription_details[items][0][price]": input.priceId,
+    "automatic_tax[enabled]": "true",
+  });
+  for (const [k, v] of Object.entries(addressParams(input.address))) {
+    body.set(`customer_details[${k}]`, v);
+  }
+  const res = await call<PreviewInvoice>("/invoices/create_preview", { method: "POST", body });
+  if (!res.ok) return res;
+  return { ok: true, preview: toProrationPreview(res.data) };
+}
+
+type PreviewInvoice = {
+  amount_due?: number;
+  currency?: string;
+  next_payment_attempt?: number | null;
+  period_end?: number | null;
+  /** Dahlia: the invoice's tax total lives in `total_taxes`; `tax` was removed in Basil. */
+  total_taxes?: { amount?: number }[] | null;
+  automatic_tax?: { enabled?: boolean; status?: string | null } | null;
+  lines?: { data?: { description?: string | null; amount?: number }[] };
+};
+
+function toProrationPreview(data: PreviewInvoice): ProrationPreview {
+  const taxMinor = (data.total_taxes ?? []).reduce((sum, t) => sum + (t.amount ?? 0), 0);
   return {
-    ok: true,
-    preview: {
-      amountDueMinor: res.data.amount_due ?? 0,
-      currency: (res.data.currency ?? "usd").toUpperCase(),
-      lines: (res.data.lines?.data ?? []).map((l) => ({
-        description: l.description ?? "Proration",
-        amountMinor: l.amount ?? 0,
-      })),
-      nextChargeAt: secondsToDate(res.data.next_payment_attempt ?? res.data.period_end)?.toISOString() ?? null,
-    },
+    amountDueMinor: data.amount_due ?? 0,
+    currency: (data.currency ?? "usd").toUpperCase(),
+    lines: (data.lines?.data ?? []).map((l) => ({
+      description: l.description ?? "Proration",
+      amountMinor: l.amount ?? 0,
+    })),
+    /**
+     * The tax Stripe computed, stated on its own so a screen can show "plus
+     * $2.40 tax" rather than a total that quietly grew. `automatic_tax.status`
+     * is `complete` when a location was found and rates applied, and
+     * `requires_location_inputs` when it was not — the second means the
+     * amount is untaxed and must be shown as such.
+     */
+    taxMinor,
+    taxStatus: data.automatic_tax?.enabled ? (data.automatic_tax.status ?? "unknown") : "not_applied",
+    nextChargeAt: secondsToDate(data.next_payment_attempt ?? data.period_end)?.toISOString() ?? null,
   };
 }
 

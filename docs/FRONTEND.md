@@ -488,6 +488,31 @@ The audit list carries both directions now — `undoneBy` on the original row, `
 so a history screen can strike through a reversed change and label its reversal without a second
 query. Both are `string | null` on `ActionInvocation`.
 
+### 🔴 New 2026-09-13 — billing address form needed; `tax` on the subscription read (G3)
+
+**One screen to build, one field to render.** Markii now charges sales tax on its own subscription
+through Stripe Tax, computed from the merchant's **billing address** — and no screen collects one
+yet. Until it exists every merchant subscribes untaxed, which the API reports rather than hides.
+
+- **Build:** a billing-address form on `/dashboard/settings/billing` (or beside the plan picker —
+  a merchant with no address should meet it before they see prices). `updateBillingAddress` in
+  `lib/api/billing.ts`; `state` is required for US and CA and the API refuses without it (400).
+  The current value is `billingAddress` on `GET /api/billing/subscription` and `GET /api/org`.
+  It is an action: it lands in the audit log and is undoable back to a previous address. **Not**
+  `PATCH /api/org` — that route does not accept it.
+- **Render:** `tax` on `SubscriptionResponse` and on every `PlanChangeResult`. **Show
+  `tax.message` and key any call-to-action on `tax.reason`**: `no_billing_address` → link to the
+  form; `tax_not_active` → nothing to do, it is Markii's switch; `active` → the preview's
+  `taxMinor` is real. Never reduce it to "tax: yes/no".
+- **The preview changed shape, additively.** `PlanChangePreview` gained optional `taxMinor` and
+  `taxStatus`. When present, `amountDueMinor` already **includes** `taxMinor` — render "incl.
+  $X tax", not "+ $X". A `taxStatus` of `complete` with `taxMinor: 0` is a genuine zero (no
+  registration in that jurisdiction), not a missing calculation; `requires_location_inputs` is
+  the one to flag, because the amount shown is untaxed.
+
+Types in `lib/api/billing.ts` (`BillingAddress`, `PlatformTax`, `updateBillingAddress`) and
+`lib/api/org.ts`; contract in `docs/API.md` §17 *Sales tax on Markii's own subscription*.
+
 ### 🟢 New 2026-09-13 — sign-up, sign-in and reset can answer `429 RATE_LIMITED`
 
 Per client address and per email (per email *domain* on sign-up). The envelope is the usual
@@ -874,8 +899,10 @@ banners key off `subscriptionState.code === "inactive"`
 and the `past_due` status, which **still grants access** — do not lock a merchant out of their
 dashboard over a card Stripe is still retrying.
 
-Two screens that need care rather than effort:
+Two screens that need care rather than effort, and one that is missing:
 
+- **Billing address (G3, 2026-09-13).** Not built. Without it every merchant is invoiced untaxed;
+  see the 🔴 entry above.
 - **Add-ons.** `GET` is real and tells you whether a tier includes one (`includedInPlan`) versus
   whether it was bought (`purchased`). Buying refuses with `409` because the products do not exist.
   Render them as unavailable with the reason — **not** as a purchasable upsell, and not as "coming

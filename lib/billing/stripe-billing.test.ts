@@ -225,7 +225,22 @@ describe("billing action registration", () => {
       "billing.setCancellation",
       "billing.setDefaultPaymentMethod",
       "billing.startPaymentMethodSetup",
+      "billing.updateBillingAddress",
     ]);
+  });
+
+  /**
+   * The address decides what a *future* invoice adds, not what is charged
+   * today — so it is medium and needs no fresh factor, unlike a plan change.
+   * It is undoable, but only back to a previous address: an org that had none
+   * cannot be put back to none, since Stripe would then be told to tax from
+   * an empty location.
+   */
+  it("treats the billing address as a medium change with a bounded undo", () => {
+    const address = billing().find((a) => a.id === "billing.updateBillingAddress");
+    expect(address?.riskTier).toBe("medium");
+    expect(address?.requiresStepUp ?? false).toBe(false);
+    expect(address?.undoable).toBe(true);
   });
 
   /**

@@ -493,6 +493,14 @@ this** because every auth call is server-side (D30) and Supabase sees Vercel's a
 everyone — so without it one password-spraying run would lock the whole platform out. Fails open,
 like the MCP limiter. Config: `AUTH_RATE_LIMIT_*` in `.env.example`.
 
+**Stripe Tax on Markii's own subscription is built as of 2026-09-13** (G3). `automatic_tax` on every
+platform-account subscription create, change and preview — **no `Stripe-Account` header**, the
+opposite direction of money from §18.6 — decided from two facts that are reported apart and never
+merged: Tax active on the platform account (Markii's switch) and a billing address on the org (the
+merchant's form, `billing.updateBillingAddress`, written to their Stripe Customer in the same call).
+**No address → created untaxed and said so**, not refused. The frontend's address form is not built
+yet (`docs/FRONTEND.md`), so today every merchant is invoiced untaxed and the API says why.
+
 **Still planned:** everything in §10–15 and §19–21.
 
 **Authorization on the v1 REST surface was closed 2026-08-11.** `orgHandler` authorizes **every

@@ -6,6 +6,7 @@ import { orgHandler } from "@/lib/auth/handler";
 import { currentPeriod } from "@/lib/billing/meter";
 import { billingConfigured, defaultCard } from "@/lib/billing/stripe-billing";
 import { statusGrantsPlan } from "@/lib/billing/mirror";
+import { describePlatformTax, resolvePlatformTax } from "@/lib/billing/platform-tax";
 import { accountStanding } from "@/lib/billing/standing";
 import { db, organizations } from "@/lib/db";
 import { entitlementsFor, planPricing } from "@/lib/plans";
@@ -59,8 +60,23 @@ export const GET = orgHandler(
      */
     const standing = accountStanding(org);
 
+    /**
+     * Whether Markii's own invoice to this merchant carries sales tax (G3).
+     * Two facts, reported apart: Stripe Tax active on the platform account
+     * (Markii's to fix) and a billing address on file (the merchant's). The
+     * settings read is cached and soft-fails into `settingsError`.
+     */
+    const platformTax = await resolvePlatformTax(org.billingAddress);
+
     return NextResponse.json({
       planId: org.planId,
+      billingAddress: org.billingAddress ?? null,
+      tax: {
+        applied: platformTax.application.applies,
+        reason: platformTax.application.reason,
+        message: describePlatformTax(platformTax.application),
+        settingsError: platformTax.settingsError,
+      },
       /**
        * Entitlements are what screens gate on, never the plan name (§17,
        * `docs/PRICING.md` §5). Plans change; capabilities are stable.

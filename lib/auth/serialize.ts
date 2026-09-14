@@ -12,6 +12,8 @@ export function serializeOrg(org: Organization) {
     billingEmail: org.billingEmail,
     currency: org.currency,
     country: org.country,
+    /** Where Markii invoices them (G3). Null until set through `billing.updateBillingAddress`. */
+    billingAddress: org.billingAddress ?? null,
     planId: org.planId,
     entitlements: entitlementsFor(org),
     createdAt: org.createdAt.toISOString(),

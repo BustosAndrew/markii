@@ -1260,11 +1260,23 @@ So the marginal EU work, once Stripe Tax is wired for US/UK anyway, is small:
 **Why UK first is deliberate:** post-Brexit UK VAT is the same mechanics in a single jurisdiction —
 a clean rehearsal for OSS across 27. Prove the pipeline there, then widen.
 
-### G3 — Sales tax on Markii's own subscription
+### G3 — Sales tax on Markii's own subscription — ✅ built 2026-09-13
 
 **Enable Stripe Tax on subscriptions from day one.** Register in jurisdictions as economic nexus
 thresholds are crossed rather than pre-emptively. This is Markii's own obligation and is separate
 from merchant tax calculation (§18.6).
+
+> **Built** — `lib/billing/platform-tax.ts`, `billing.updateBillingAddress`, and `automatic_tax` on
+> every subscription create, change and preview (`docs/API.md` §17). Stripe Tax is **active on the
+> platform test account**; whether it is active in **live** mode is a dashboard fact this code reads
+> and reports (`tax.reason: tax_not_active`) but cannot set — check it before launch. Two things
+> settled while building: tax is decided from a **billing address** the merchant supplies, kept on
+> `organizations.billing_address` and written to their Stripe Customer, because Stripe reads the
+> Customer's location and `country` alone is not a taxable address anywhere Markii sells; and a
+> subscription without one is **created untaxed and reported**, not refused, because refusing would
+> take plan purchase away until the address form ships (the form is a frontend job, listed in
+> `docs/FRONTEND.md`). Registrations remain to do as thresholds are crossed — with none, every
+> calculation is a legitimate zero.
 
 ### G6 — Storefront search — ✅ built 2026-09-13
 

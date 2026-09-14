@@ -580,6 +580,18 @@ Contract `docs/API.md` §18. The largest phase. Order within it:
     (TEST-NET-2), because a dev server has no proxy and an addressless caller gets no address limit
     on purpose — and it waits for room in the window, since a fixed window that resets mid-loop
     is the documented trade, not a bug.
+11. ~~**Stripe Tax on Markii's own subscription** (G3)~~ — done 2026-09-13. `automatic_tax` on
+    every platform-account subscription create, change and preview, decided by
+    `lib/billing/platform-tax.ts` from two facts reported apart: Tax active on the platform
+    account (`GET /v1/tax/settings`, cached ten minutes) and a billing address on the org
+    (migration `0040`, set through `billing.updateBillingAddress`, which writes it to the Stripe
+    Customer in the same transaction). **No address → created untaxed and said so**, not refused;
+    the address arriving later enables tax on the live subscription from the next invoice. The
+    first-subscription preview is Stripe's when tax applies (`create_preview` with
+    `customer_details` — address only, it refuses an email), so the merchant approves the taxed
+    amount. Idempotency keys on create carry the tax flag, because Stripe refuses a reused key with
+    different params. Verified against real Stripe in `stripe-platform-tax.test.ts` (opt-in), and
+    falsified: forcing the flag off makes the test fail on Stripe's own object.
 
 > **Two things this uncovered, both worth knowing.**
 >

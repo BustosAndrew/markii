@@ -19,6 +19,18 @@ import {
 export type PaymentProviders = { x402: boolean; stripe: boolean };
 export type AddOn = { productId: number; mandatory: boolean };
 
+/** A merchant's billing address (G3). Stripe's own field names, camel-cased. */
+export type BillingAddress = {
+  line1: string;
+  line2: string | null;
+  city: string | null;
+  /** State, province, or region — Stripe's `state`. */
+  state: string | null;
+  postalCode: string;
+  /** ISO 3166-1 alpha-2, uppercase. */
+  country: string;
+};
+
 /**
  * Postgres `tsvector`, which Drizzle has no built-in column for. Only ever
  * read through `@@` and `ts_rank_cd` in SQL — nothing selects it as a value,
@@ -524,6 +536,16 @@ export const organizations = pgTable(
     /** Billing currency, ISO 4217. Minor-unit exponent derives from this, never a constant (D31). */
     currency: text("currency").notNull().default("USD"),
     country: text("country").notNull().default("US"),
+    /**
+     * Where Markii invoices this merchant (G3). Stripe Tax on Markii's **own**
+     * subscription — the opposite direction of money from §18.6 — decides what
+     * is owed from the customer's address, so without one no tax can be
+     * computed and the subscription is created untaxed. Null until the merchant
+     * supplies it; `country` above is the trading country and predates this,
+     * and is deliberately not read as a billing location (a country alone is
+     * not a taxable address anywhere Markii sells).
+     */
+    billingAddress: jsonb("billing_address").$type<BillingAddress | null>(),
     planId: text("plan_id", { enum: PLAN_IDS }).notNull().default("starter"),
     /**
      * Add-ons and purchased extras. Entitlements are otherwise **derived** from

@@ -11,6 +11,7 @@ import {
   type BillableAssessment,
 } from "../../billing/fee-invoice";
 import { statusGrantsPlan } from "../../billing/mirror";
+import { describePlatformTax, resolvePlatformTax } from "../../billing/platform-tax";
 import { closePeriod } from "../../billing/close";
 import { periodStartingAt, previousPeriod } from "../../billing/meter";
 import {
@@ -23,10 +24,13 @@ import {
   createSubscription,
   ensureCustomer,
   matchedPublishableKey,
+  previewFirstSubscription,
   previewPlanChange,
   resolvePrice,
   retrievePayableSubscription,
   setDefaultPaymentMethod,
+  setSubscriptionAutomaticTax,
+  syncCustomerBillingDetails,
   type StripeFailure,
   type SubscriptionSnapshot,
 } from "../../billing/stripe-billing";
@@ -146,6 +150,24 @@ export const changePlan = defineAction({
     const price = priced.price;
 
     /**
+     * Whether Stripe Tax applies to this merchant's invoice (G3), decided once
+     * and carried into every branch below — the preview, the create and the
+     * change must agree, or the merchant approves one number and is billed
+     * another. A subscription without an address is created **untaxed and
+     * says so** rather than refused: refusing would take plan purchase away
+     * from every merchant until the address form ships, and the response
+     * carries the reason so nothing about it is silent.
+     */
+    const platformTax = await resolvePlatformTax(org.billingAddress);
+    const tax = {
+      applied: platformTax.application.applies,
+      reason: platformTax.application.reason,
+      message: describePlatformTax(platformTax.application),
+      ...(platformTax.settingsError ? { settingsError: platformTax.settingsError } : {}),
+    };
+    const automaticTax = platformTax.application.applies;
+
+    /**
      * **A stored subscription id is not the same as a usable subscription**, and
      * gating the first-subscription path on the id alone is what stranded orgs
      * holding one Stripe had already expired: every later attempt fell into the
@@ -186,6 +208,7 @@ export const changePlan = defineAction({
       if (!input.confirm || ctx.dryRun) {
         return {
           preview: startPreview(input.planId, input.interval, price),
+          tax,
           confirmed: false,
           charging: false,
           note: samePrice
@@ -212,6 +235,7 @@ export const changePlan = defineAction({
           clientSecret: existing.clientSecret,
           publishableKey: matchedPublishableKey(),
           charging: true,
+          tax,
           /** Distinguishes "paying the one you already have" from "a new one". */
           resumed: true,
           note:
@@ -238,13 +262,33 @@ export const changePlan = defineAction({
       if (!input.confirm || ctx.dryRun) {
         /**
          * No proration exists for a first subscription — there is no partial
-         * period to credit — so the amount due is simply the price. This is
-         * computed locally rather than previewed because previewing would need
-         * a Stripe Customer, and creating one during a preview leaves an object
-         * behind for a change the merchant may never confirm.
+         * period to credit — so untaxed the amount due is simply the price,
+         * computed locally: previewing would need a Stripe Customer, and
+         * creating one during a preview leaves an object behind for a change
+         * the merchant may never confirm.
+         *
+         * **Taxed, the price is no longer the amount**, and Markii must not
+         * bill what it does not display — so that case is previewed by Stripe
+         * against the merchant's address without creating a Customer
+         * (`customer_details`), and the tax line comes back stated on its own.
          */
+        if (automaticTax && org.billingAddress) {
+          const taxed = await previewFirstSubscription({
+            priceId: price.id,
+            address: org.billingAddress,
+          });
+          if (!taxed.ok) refuse(taxed);
+          return {
+            preview: { kind: "first_subscription" as const, ...taxed.preview },
+            tax,
+            confirmed: false,
+            charging: false,
+            note: "Nothing has been charged. Call again with confirm: true to subscribe.",
+          };
+        }
         return {
           preview: startPreview(input.planId, input.interval, price),
+          tax,
           confirmed: false,
           charging: false,
           note: "Nothing has been charged. Call again with confirm: true to subscribe.",
@@ -256,8 +300,25 @@ export const changePlan = defineAction({
         existingCustomerId: org.stripeCustomerId,
         name: org.name,
         email: org.billingEmail,
+        address: org.billingAddress,
       });
       if (!customer.ok) refuse(customer);
+
+      /**
+       * A customer that already existed may predate the address. Tax reads the
+       * Customer's location, so it is written there before the subscription is
+       * created — otherwise `automatic_tax` would be enabled against a customer
+       * Stripe cannot place, and the create would be refused.
+       */
+      if (!customer.created && automaticTax) {
+        const synced = await syncCustomerBillingDetails({
+          customerId: customer.customerId,
+          name: org.name,
+          email: org.billingEmail,
+          address: org.billingAddress,
+        });
+        if (!synced.ok) refuse(synced);
+      }
 
       /**
        * Persist the customer **before** creating the subscription. If the
@@ -279,6 +340,7 @@ export const changePlan = defineAction({
         priceId: price.id,
         orgId,
         replacing,
+        automaticTax,
       });
       if (!created.ok) refuse(created);
 
@@ -309,6 +371,7 @@ export const changePlan = defineAction({
         /** Null when unset **or** in the other mode — see `matchedPublishableKey`. */
         publishableKey: matchedPublishableKey(),
         charging: true,
+        tax,
         /** The dead subscription this one replaced, when there was one. */
         replaced: replacing,
         note:
@@ -343,10 +406,12 @@ export const changePlan = defineAction({
         subscriptionId: existing.snapshot.subscriptionId,
         itemId,
         priceId: price.id,
+        automaticTax,
       });
       if (!preview.ok) refuse(preview);
       return {
         preview: { kind: "plan_change" as const, ...preview.preview },
+        tax,
         confirmed: false,
         charging: false,
         note: "Nothing has been charged. Call again with confirm: true to apply this change.",
@@ -357,6 +422,7 @@ export const changePlan = defineAction({
       subscriptionId: existing.snapshot.subscriptionId,
       itemId,
       priceId: price.id,
+      automaticTax,
     });
     if (!changed.ok) refuse(changed);
 
@@ -377,7 +443,134 @@ export const changePlan = defineAction({
       status: mirrored.status,
       planId: mirrored.planId,
       charging: true,
+      tax,
       note: "Plan changed. Any proration appears on the next invoice.",
+    };
+  },
+});
+
+/**
+ * The merchant's billing address — where Markii invoices them (G3).
+ *
+ * Country and postal code are what Stripe needs to place a customer; the rest
+ * is required only where a postal code does not pin a location on its own.
+ * Uppercased ISO country so the same address never counts as two.
+ */
+export const billingAddressSchema = z
+  .object({
+    line1: z.string().trim().min(1).max(200),
+    line2: z.string().trim().max(200).nullish(),
+    city: z.string().trim().max(120).nullish(),
+    state: z.string().trim().max(120).nullish(),
+    postalCode: z.string().trim().min(1).max(20),
+    country: z
+      .string()
+      .trim()
+      .length(2)
+      .regex(/^[A-Za-z]{2}$/)
+      .transform((c) => c.toUpperCase()),
+  })
+  .strict()
+  .superRefine((a, ctx) => {
+    // US and CA rates are decided by state/province; Stripe cannot infer one from every postal code.
+    if ((a.country === "US" || a.country === "CA") && !a.state) {
+      ctx.addIssue({ code: "custom", path: ["state"], message: `state is required for ${a.country}` });
+    }
+  });
+
+/**
+ * Set, or replace, the org's billing address.
+ *
+ * **Stripe is written inside `run`, like every other billing mutation.** The
+ * address only taxes anything once it is on the Customer, so a row that says
+ * "address on file" while Stripe has none would tell the merchant they are
+ * being taxed when they are not. If Stripe refuses, the transaction rolls back
+ * and the merchant sees the refusal rather than a saved address that does
+ * nothing.
+ *
+ * With a live subscription, `automatic_tax` is switched on from the next
+ * invoice — the repair path for a merchant who subscribed before supplying an
+ * address. Nothing already invoiced is re-taxed.
+ */
+export const updateBillingAddress = defineAction({
+  id: "billing.updateBillingAddress",
+  description:
+    "Set the organization's billing address — where Markii invoices it, and what Stripe Tax " +
+    "calculates sales tax on the subscription from. Takes effect from the next invoice.",
+  input: z.object({ address: billingAddressSchema }).strict(),
+  permission: "billing.write",
+  /** Medium: it changes what a future invoice adds, not what is charged today. */
+  riskTier: "medium",
+  undoable: true,
+  /**
+   * Not `patchInverse`: the org is the actor's, not an input field, so there
+   * is no id to carry. An org that had **no** address before cannot be put back
+   * to none — the schema requires one — so that undo is refused rather than
+   * faked with an empty address Stripe would then be told to tax from.
+   */
+  inverse: (recorded) => {
+    const entry = recorded.diff.find((d) => d.path === "billingAddress");
+    if (!entry || !entry.before) return null;
+    return { actionId: "billing.updateBillingAddress", input: { address: entry.before } };
+  },
+  async run(input, ctx) {
+    if (!ctx.actor.orgId) throw notFound("Organization");
+    const orgId = ctx.actor.orgId;
+    const org = await loadOrg(ctx.db, orgId);
+
+    const address = {
+      line1: input.address.line1,
+      line2: input.address.line2 ?? null,
+      city: input.address.city ?? null,
+      state: input.address.state ?? null,
+      postalCode: input.address.postalCode,
+      country: input.address.country,
+    };
+
+    if (!ctx.dryRun) {
+      await ctx.db
+        .update(organizations)
+        .set({ billingAddress: address, updatedAt: new Date() })
+        .where(eq(organizations.id, orgId));
+
+      if (org.stripeCustomerId && billingConfigured()) {
+        const synced = await syncCustomerBillingDetails({
+          customerId: org.stripeCustomerId,
+          name: org.name,
+          email: org.billingEmail,
+          address,
+        });
+        if (!synced.ok) refuse(synced);
+
+        if (org.stripeSubscriptionId && statusGrantsPlan(org.subscriptionStatus ?? "")) {
+          const platformTax = await resolvePlatformTax(address);
+          if (platformTax.application.applies) {
+            const enabled = await setSubscriptionAutomaticTax(org.stripeSubscriptionId, true);
+            if (!enabled.ok) refuse(enabled);
+          }
+        }
+      }
+    }
+
+    ctx.recordDiff({
+      entity: "organization",
+      entityId: orgId,
+      path: "billingAddress",
+      before: org.billingAddress ?? null,
+      after: address,
+    });
+
+    const platformTax = await resolvePlatformTax(address);
+    return {
+      address,
+      tax: {
+        applied: platformTax.application.applies,
+        reason: platformTax.application.reason,
+        message: describePlatformTax(platformTax.application),
+      },
+      note: org.stripeSubscriptionId
+        ? "Saved. Tax applies from the next invoice; nothing already invoiced changes."
+        : "Saved. It will be used when you subscribe.",
     };
   },
 });
