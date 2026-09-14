@@ -516,7 +516,7 @@ onboarding, templates, demo data, and landing page are built for.
 | D7 | Threshold basis: trailing 12mo / calendar year / plan year | **Trailing 12 months** (BigCommerce validates it; avoids a January reset cliff) |
 | D8 | Fee application: marginal on the excess vs on all sales once crossed | **Marginal** — no cliff, ever |
 | D9 | Trial length; card required up front? | 14 days, no card; fees accrue and display but are not charged |
-| D10 | Dunning restriction ladder and grace period | Storefronts stay live; restrict dashboard writes/publishes first. Hard suspension last |
+| D10 | Dunning restriction ladder and grace period | ✅ **Decided 2026-09-14, built the same day.** Grace 7 days (banner + email only) · day 7 hold new storefronts and new API tokens · day 14 hold every write except billing · day 30 storefront stops. Emails day 0, 7, 13 from Markii (Resend); Stripe's own failed-payment emails **off**. Stripe final action **mark unpaid**, never cancel. Threshold fees on a lapsed subscription written off. `docs/API.md` §17 *Dunning* |
 | D11 | Do annual prepayers get any threshold credit? | No — keep the model explainable |
 
 ### Before Phase C (commerce)

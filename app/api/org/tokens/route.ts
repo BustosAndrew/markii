@@ -2,6 +2,7 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { orgHandler } from "@/lib/auth/handler";
+import { assertGrowthAllowed } from "@/lib/billing/standing-guard";
 import { newId } from "@/lib/auth/provisioning";
 import { mintToken } from "@/lib/auth/tokens";
 import { apiTokens, db, type ApiToken } from "@/lib/db";
@@ -49,6 +50,13 @@ export const GET = orgHandler(
 export const POST = orgHandler(
   async (req, { orgId, session }) => {
     const input = createSchema.parse(await req.json());
+
+    /**
+     * Minting is growth; revoking is account administration and is never held.
+     * `/api/org/` is exempt from the method-keyed standing check for exactly
+     * that reason, so the growth rung of dunning (D10) is asked for here by name.
+     */
+    await assertGrowthAllowed(orgId, "creating an API token");
 
     /**
      * `owner` is absent from the schema on purpose. A token that can do

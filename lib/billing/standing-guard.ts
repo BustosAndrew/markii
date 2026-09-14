@@ -2,7 +2,13 @@ import "server-only";
 import { eq } from "drizzle-orm";
 import { ApiError } from "../api";
 import { customerMemberships, customers, db, organizations, sites } from "../db";
-import { accountStanding, type AccountStanding } from "./standing";
+import {
+  accountStanding,
+  growthHeld,
+  storefrontHeld,
+  writesHeld,
+  type AccountStanding,
+} from "./standing";
 
 /**
  * Why a storefront is not transacting. Kept apart from `halted` itself because
@@ -26,6 +32,7 @@ export async function siteHalted(siteId: number): Promise<{ halted: boolean; cau
       stripeSubscriptionId: organizations.stripeSubscriptionId,
       subscriptionStatus: organizations.subscriptionStatus,
       freeTrialEndsAt: organizations.freeTrialEndsAt,
+      pastDueSince: organizations.pastDueSince,
     })
     .from(sites)
     .innerJoin(organizations, eq(organizations.id, sites.orgId))
@@ -35,8 +42,22 @@ export async function siteHalted(siteId: number): Promise<{ halted: boolean; cau
   /** A missing join is Markii's bug, not a merchant's debt — never halt on it. */
   if (!row) return { halted: false, cause: null };
   if (row.status === "paused") return { halted: true, cause: "paused" };
-  if (accountStanding(row).state === "expired") return { halted: true, cause: "billing" };
+  if (storefrontHeld(accountStanding(row))) return { halted: true, cause: "billing" };
   return { halted: false, cause: null };
+}
+
+/**
+ * The **growth** rung of the dunning ladder (D10, day 7): going live on a new
+ * storefront and minting an API token. Called explicitly from the handful of
+ * routes that do those things, because they are v1 REST routes outside the
+ * registry and `assertAccountStanding` — keyed on the HTTP method — cannot tell
+ * "publish a store" from "fix a typo". Everything the writes rung holds, this
+ * holds too.
+ */
+export async function assertGrowthAllowed(orgId: string, what: string): Promise<void> {
+  const standing = await standingFor(orgId);
+  if (!standing || standing.state !== "past_due") return;
+  if (growthHeld(standing)) throw pastDueRefusal(standing, what);
 }
 
 /** The store behind a shopper's recurring membership, for the renewal gate. */
@@ -84,12 +105,38 @@ export async function standingFor(orgId: string): Promise<AccountStanding | null
       stripeSubscriptionId: organizations.stripeSubscriptionId,
       subscriptionStatus: organizations.subscriptionStatus,
       freeTrialEndsAt: organizations.freeTrialEndsAt,
+      pastDueSince: organizations.pastDueSince,
     })
     .from(organizations)
     .where(eq(organizations.id, orgId))
     .limit(1);
   if (!org) return null;
   return accountStanding(org);
+}
+
+/**
+ * The dunning refusal (D10). Same 402 as the trial hold and for the same
+ * reason — what is missing is a payment — but its own code, because the fix is
+ * different: a lapsed trial needs a plan chosen, a failing renewal needs a card
+ * updated, and a screen that showed the subscribe button for both would send
+ * a paying merchant to buy the plan they already have.
+ */
+function pastDueRefusal(standing: Extract<AccountStanding, { state: "past_due" }>, what: string) {
+  const d = standing.dunning;
+  return new ApiError(
+    "PAYMENT_PAST_DUE",
+    402,
+    `A renewal payment has been failing since ${d.since.toISOString().slice(0, 10)}, so "${what}" is on hold.`,
+    {
+      resolution:
+        "Update the card at /dashboard/billing and Stripe will retry the invoice; everything " +
+        "is reinstated the moment it is paid. Your catalog, orders and customers are untouched.",
+      standing: standing.state,
+      dunningStep: d.step,
+      since: d.since.toISOString(),
+      nextStepAt: d.nextStepAt?.toISOString() ?? null,
+    },
+  );
 }
 
 /**
@@ -106,7 +153,12 @@ export async function standingFor(orgId: string): Promise<AccountStanding | null
  */
 export async function assertAccountStanding(orgId: string, actionId: string): Promise<void> {
   const standing = await standingFor(orgId);
-  if (!standing || standing.state !== "expired") return;
+  if (!standing) return;
+  if (standing.state === "past_due") {
+    if (writesHeld(standing)) throw pastDueRefusal(standing, actionId);
+    return;
+  }
+  if (standing.state !== "expired") return;
 
   throw new ApiError(
     "TRIAL_ENDED",

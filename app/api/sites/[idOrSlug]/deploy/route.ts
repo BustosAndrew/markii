@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { orgHandler } from "@/lib/auth/handler";
+import { assertGrowthAllowed } from "@/lib/billing/standing-guard";
 import { db, sites } from "@/lib/db";
 import { attachTenantHost, isPlatformConfigured } from "@/lib/domains/platform";
 import { resolveSite, storefrontUrl } from "@/lib/queries";
@@ -21,6 +22,8 @@ export const POST = orgHandler(
   async (_req, { params, orgId }) => {
     const { idOrSlug } = await params;
     const site = await resolveSite(idOrSlug, orgId);
+    /** The growth rung of dunning (D10) — see the sibling check on `PATCH`. */
+    if (site.status !== "live") await assertGrowthAllowed(orgId, "publishing a storefront");
     const [row] = await db
       .update(sites)
       .set({ status: "live", updatedAt: new Date() })

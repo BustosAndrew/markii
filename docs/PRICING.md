@@ -296,7 +296,7 @@ that month, every month, with no threshold at all. That contrast is the product.
   invoice — not deducted from their payouts. Deducting from settlement would make Markii a party to
   merchant funds flow.
 - **Trial:** 14 days, no card required (PROPOSED). Fee accrual visible but not charged.
-- **Dunning:** retry schedule, in-app banner, email sequence, then a defined restriction ladder —
+- **Dunning (D10, decided 2026-09-14 — `docs/API.md` §17 *Dunning*):** retry schedule, in-app banner, email sequence, then a defined restriction ladder —
   **storefronts stay live** through dunning; restrict dashboard writes and new publishes first.
   Taking a paying merchant's store offline over a failed card is a churn event, not a collection
   strategy. Hard suspension only after the full ladder.
@@ -361,5 +361,6 @@ forever.
 - Threshold basis (§4.2) and marginal application (§4.3) — confirm recommendations
 - Trial length and whether a card is required
 - Whether annual plans get threshold credit for prepayment
-- Dunning restriction ladder specifics and grace period length
+- ~~Dunning restriction ladder specifics and grace period length~~ — decided 2026-09-14 (D10): 7-day
+  grace, growth held at day 7, writes at 14, storefront at 30; emails day 0/7/13
 - Whether Starter's single storefront is genuinely enough for the target merchant

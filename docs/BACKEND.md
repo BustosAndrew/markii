@@ -592,6 +592,19 @@ Contract `docs/API.md` §18. The largest phase. Order within it:
     amount. Idempotency keys on create carry the tax flag, because Stripe refuses a reused key with
     different params. Verified against real Stripe in `stripe-platform-tax.test.ts` (opt-in), and
     falsified: forcing the flag off makes the test fail on Stripe's own object.
+12. ~~**Dunning ladder** (D10)~~ — done 2026-09-14, the day the owner decided it. `lib/billing/dunning.ts`
+    is pure: a step from `past_due_since` and the clock, never stored, for the same reason
+    standing and membership status are derived. The mirror is the **only writer** of that
+    timestamp — set on the way into `past_due`, **kept through `unpaid`** (Stripe giving up is a
+    later rung, not a new episode), cleared by anything that grants. **Three questions, answered
+    once**: `storefrontHeld` / `writesHeld` / `growthHeld` on a standing replaced every
+    `state === "expired"` at the gates, which is how the ladder reached the invoke gate, the
+    method-keyed REST gate, `siteHalted`, `loadSite` and `assertPurchasable` in one change rather
+    than the ones someone remembered. The growth rung is the exception: going live and minting
+    tokens are v1 routes the method-keyed gate cannot tell from a typo fix, so `assertGrowthAllowed`
+    is called by name in the four places that grow. Emails ride the 09:00 cron beside the trial
+    reminder, claimed in `dunning_notices` per episode and step. Falsified by moving the
+    storefront hold to the writes rung: the day-14 test fails on the storefront page.
 
 > **Two things this uncovered, both worth knowing.**
 >

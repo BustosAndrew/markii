@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { sweepDunningNotices } from "@/lib/billing/dunning-notices";
 import { orgsOutOfStanding, sweepTrialReminders } from "@/lib/billing/trial-reminders";
 import { authenticateCron } from "@/lib/cron/auth";
 
@@ -24,6 +25,12 @@ import { authenticateCron } from "@/lib/cron/auth";
  * is broken or unscheduled, merchants lose a *warning*, not their store, and
  * nobody is billed or blocked by a job that failed to run.
  *
+ * **Since 2026-09-14 it also sends the dunning sequence** (D10) — day 0, 7 and
+ * 13 of a failing renewal — for the same reason it sends the trial reminder:
+ * it is the daily job that mails merchants about Markii's own billing and
+ * enforces nothing. The two sweeps run in their own `try` each, so a provider
+ * refusing one cannot silence the other, and each reports its own counts.
+ *
  * **Answers `200` with counts even when individual sends fail.** Vercel retries
  * a non-2xx, and a retry here would re-scan orgs already claimed.
  */
@@ -43,6 +50,14 @@ export async function GET(request: Request) {
   }
 
   const result = await sweepTrialReminders();
+
+  let dunning: Awaited<ReturnType<typeof sweepDunningNotices>> | { error: string };
+  try {
+    dunning = await sweepDunningNotices();
+  } catch (e) {
+    console.error("[cron] dunning sweep failed", e);
+    dunning = { error: e instanceof Error ? e.message : String(e) };
+  }
   /**
    * Reported alongside the sends because it is the number that says whether the
    * warning is doing its job. A rising count of silently-dark storefronts is the
@@ -50,5 +65,5 @@ export async function GET(request: Request) {
    */
   const outOfStanding = await orgsOutOfStanding();
 
-  return NextResponse.json({ ok: true, ...result, outOfStanding });
+  return NextResponse.json({ ok: true, ...result, outOfStanding, dunning });
 }

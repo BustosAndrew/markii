@@ -15,6 +15,7 @@ function org(over: Partial<StandingOrg> = {}): StandingOrg {
     stripeSubscriptionId: null,
     subscriptionStatus: null,
     freeTrialEndsAt: null,
+    pastDueSince: null,
     ...over,
   };
 }

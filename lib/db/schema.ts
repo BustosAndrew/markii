@@ -606,6 +606,18 @@ export const organizations = pgTable(
      * address and Markii's sending reputation.
      */
     trialReminderSentAt: timestamp("trial_reminder_sent_at", { withTimezone: true }),
+    /**
+     * When the subscription first went `past_due` in the current dunning
+     * episode (D10). Written by `mirrorSubscription` on the transition in,
+     * **kept through `unpaid`** (Stripe giving up does not restart the clock),
+     * and cleared the moment a status that grants — or a cancellation — arrives.
+     *
+     * A timestamp, not a step. The step is derived from it and `now` on every
+     * request (`lib/billing/dunning.ts`), for the same reason standing and
+     * membership status are derived: nothing here runs on a clock that could
+     * be trusted to flip a stored step on the right day.
+     */
+    pastDueSince: timestamp("past_due_since", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -1212,6 +1224,30 @@ export const t12NetSales = pgTable(
 );
 
 export type T12NetSales = typeof t12NetSales.$inferSelect;
+
+/**
+ * Dunning notices sent (D10) — one row per org, per dunning episode, per step,
+ * claimed **before** the send like the trial reminder and the abandoned-cart
+ * email. The episode is identified by `past_due_since`, so a merchant whose
+ * card fails again next year gets the sequence again, and a daily sweep that
+ * finds the same org on the same day sends nothing twice.
+ */
+export const dunningNotices = pgTable(
+  "dunning_notices",
+  {
+    id: serial("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    pastDueSince: timestamp("past_due_since", { withTimezone: true }).notNull(),
+    /** Which notice in the sequence — `0`, `7`, `13` (days into the episode). */
+    step: integer("step").notNull(),
+    sentAt: timestamp("sent_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("dunning_notices_episode_step_uq").on(t.orgId, t.pastDueSince, t.step)],
+);
+
+export type DunningNotice = typeof dunningNotices.$inferSelect;
 
 export const rateLimitCounters = pgTable("rate_limit_counters", {
   /** Scope and subject, e.g. `mcp:tok_abc`. Never a raw secret — token *ids* only. */

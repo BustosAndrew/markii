@@ -40,6 +40,13 @@ export class ApiError extends Error {
        */
       | "TRIAL_ENDED"
       /**
+       * A renewal payment has been failing long enough that the dunning ladder
+       * (D10) holds this. Also 402, also not `FORBIDDEN` — but its own code,
+       * because the fix is "update the card", not "choose a plan", and a screen
+       * reacting to `TRIAL_ENDED` would offer the wrong door.
+       */
+      | "PAYMENT_PAST_DUE"
+      /**
        * A `high` risk-tier action was invoked by a non-human actor (§22 rule 3).
        *
        * **Not `FORBIDDEN`, though it shares the 403.** The caller's permissions

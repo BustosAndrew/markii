@@ -1892,7 +1892,7 @@ interface UsageRecord {            // immutable; written at event time, never de
 | Method | Route | Notes |
 |---|---|---|
 | `GET` | `/api/billing/plans` | ✅ Public plan catalog + prices. Competitor comparisons are **data with a `verifiedAt`**, never hardcoded copy |
-| `GET` | `/api/billing/subscription` | ✅ Current subscription + entitlements, **plus `standing`** (D45): `subscribed` · `trialing` (with `endsAt`, `daysLeft`) · `expired` · `ungated`. Reads the mirror, not Stripe — except the card, fetched live because a card removed in Stripe's portal emits no reliable event. **Since 2026-09-13 also `billingAddress` and `tax`** (G3, below) |
+| `GET` | `/api/billing/subscription` | ✅ Current subscription + entitlements, **plus `standing`** (D45): `subscribed` · `trialing` (with `endsAt`, `daysLeft`) · **`past_due` (with `dunning`, D10 — 2026-09-14)** · `expired` · `ungated`. Reads the mirror, not Stripe — except the card, fetched live because a card removed in Stripe's portal emits no reliable event. **Since 2026-09-13 also `billingAddress` and `tax`** (G3, below) |
 | `POST` | `/api/billing/subscription` | ✅ Create/change plan. **Returns Stripe's proration preview and writes nothing unless `confirm: true`.** Resolves the stored subscription against Stripe first, so an `incomplete` one is **reopened** (`resumed: true`, same invoice, no second charge) and an expired or missing one is cleared and replaced. Delegates to `billing.changePlan` (§22) |
 | `DELETE` | `/api/billing/subscription` | ✅ Cancel at period end — never immediately **when there is paid access to protect**. A subscription that granted nothing (`incomplete`, expired, or gone from Stripe) is *discarded* outright instead and answers `discarded: true`; there is no paid period to run out. Delegates to `billing.setCancellation` |
 | `GET` | `/api/billing/usage` | ✅ **The threshold meter** — see below. Measured, still not invoiced |
@@ -1905,6 +1905,51 @@ interface UsageRecord {            // immutable; written at event time, never de
 | `GET` | `/api/billing/addons/:addon` | ✅ What the org actually has. Reports `includedInPlan` apart from `purchased`, so a Scale merchant is never asked to buy Chargeback Assist their plan already includes |
 | `POST` · `DELETE` | `/api/billing/addons/:addon` | ⛔ **Refuses with `409`** — Agent Ops and Chargeback Assist are Phase F and do not exist, so there is nothing to sell. Not a missing-credential `503`: no configuration makes an unbuilt product exist |
 | `POST` | `/api/webhooks/stripe` | ✅ LIVE — signature-verified, idempotent, retry-safe. Handles Connect account state, `payment_intent.*`, refunds, **and Markii's own `customer.subscription.*` / `invoice.*`** (see below) |
+
+### Dunning — ✅ LIVE 2026-09-14 (D10)
+
+What happens between a failed renewal and a lost merchant. **The storefront is the last thing to
+go**, a month after the card failed; what restricts first is growth on the unpaid plan.
+
+| Day | `dunning.step` | Held |
+|---|---|---|
+| 0 | `grace` | Nothing. Banner on every dashboard page + email |
+| 7 | `restricted_growth` | `POST /api/sites`, going live (`PATCH` status → `live`, `/deploy`), `POST /api/org/tokens` |
+| 14 | `restricted_writes` | Every mutation except `billing.*` — REST and registry alike, the trial-hold shape |
+| 30 | `suspended` | The storefront stops serving and selling; membership renewals and downloads halt with it |
+
+**Derived, never stored.** `organizations.past_due_since` is written once by the subscription
+mirror on the transition into `past_due` and cleared by any status that grants or by a
+cancellation; the step is computed from it and the clock on every request, so it moves at the right
+second whether or not any job ran. A redelivered `past_due` event keeps the value rather than
+rewriting it. **`unpaid` — Stripe giving up — stays on the same clock**: the plan drops to the floor
+(entitlements) but standing stays on the ladder, so the storefront is not taken down on Stripe's
+schedule. The Stripe dashboard's final action for failed payments should be **mark unpaid**, not
+cancel, so the subscription object survives and a payment restores access without a new one.
+
+Refusals are `402 PAYMENT_PAST_DUE` — its own code beside `TRIAL_ENDED`, because the fix is
+"update the card", not "choose a plan", and a screen reacting to the trial code would sell a paying
+merchant the plan they have. `details` carries `dunningStep`, `since` and `nextStepAt`. Reads are
+never held; `billing.*` and `/api/billing/` are never held; revoking a token or removing staff is
+never held.
+
+`standing` on `GET /api/me` and `GET /api/billing/subscription`:
+
+```ts
+{ state: "past_due", message: string,
+  dunning: { step, since, day, nextStep, nextStepAt, holds: { growth, writes, storefront } } }
+```
+
+**Emails: Markii's own, days 0, 7 and 13** — the last one the day *before* writes are held. Sent
+from `markii.shop` via Resend by the daily 09:00 cron (§25), claimed in `dunning_notices` per
+episode and step so each goes once. **Stripe's own failed-payment emails should be off** for the
+platform account, or the merchant is mailed twice. Like every cron here it enforces nothing: a
+broken job loses a warning, never a store.
+
+**Threshold fees on a lapsed subscription are written off.** A fee item rides on the next
+subscription invoice; if the subscription ends unpaid, that month's fee is never billed. One
+invoice, one dunning path — a second collection for a small fee from someone whose card already
+failed is not worth a second path.
 
 ### Sales tax on Markii's own subscription — ✅ LIVE 2026-09-13 (G3)
 
@@ -3379,6 +3424,10 @@ on for every store because the feature shipped would be sending on their behalf 
 > `free_trial_ends_at` on every request, so a store goes quiet at the right second whether or not
 > this job ran. If the cron is broken, merchants lose a warning — never their store, and nobody is
 > blocked by a job that failed to run.
+>
+> **Since 2026-09-14 the same job also sends the dunning sequence** (D10, §17) — day 0, 7 and 13 of a
+> failing renewal, claimed in `dunning_notices` per episode and step. Reported under `dunning` in the
+> response, in its own `try`, so one sweep's provider failure cannot silence the other.
 
 Swept hourly by `GET /api/cron/abandoned-carts` (§25). A cart qualifies when **all** of these hold,
 and each clause stops a specific way this becomes spam:

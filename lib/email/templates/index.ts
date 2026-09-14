@@ -24,6 +24,7 @@ export {
 export type { AuthMailContext } from "./auth";
 export { abandonedCart } from "./cart";
 export { trialEnding } from "./trial";
+export { dunningNotice } from "./dunning";
 export type { TrialEndingContext } from "./trial";
 export type { AbandonedCartContext, AbandonedCartItem } from "./cart";
 export type { RenderedEmail } from "./layout";

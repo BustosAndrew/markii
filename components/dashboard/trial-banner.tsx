@@ -36,6 +36,44 @@ export function TrialBanner({ standing }: { standing: AccountStanding }) {
   }
 
   /**
+   * A failing renewal (D10). **The card, not the plan**: this merchant already
+   * bought a plan, and a "choose a plan" link here would sell them the thing
+   * they have. Tone follows the rung — quiet while Stripe is still retrying,
+   * an error band once something is actually held — and the next date is
+   * stated because "soon" is not a date a merchant can put in a calendar.
+   */
+  if (standing.state === "past_due") {
+    const d = standing.dunning;
+    const holding = d.holds.growth || d.holds.writes || d.holds.storefront;
+    const next = d.nextStepAt ? new Date(d.nextStepAt).toLocaleDateString() : null;
+    const nextCopy =
+      d.nextStep === "restricted_growth"
+        ? `From ${next}, new storefronts cannot go live.`
+        : d.nextStep === "restricted_writes"
+          ? `From ${next}, changes to your stores go on hold.`
+          : d.nextStep === "suspended"
+            ? `From ${next}, your storefronts stop serving.`
+            : "";
+    return (
+      <div
+        role="status"
+        className={`mb-4 rounded-[var(--radius-card)] border px-4 py-3 text-sm leading-6 ${
+          holding
+            ? "border-error-border bg-error-bg text-error-text"
+            : "border-warning-border bg-warning-bg text-warning-text"
+        }`}
+      >
+        <strong className="font-semibold">A renewal payment is failing.</strong> {standing.message}{" "}
+        {nextCopy}{" "}
+        <Link href="/dashboard/billing" className="underline underline-offset-2">
+          Update your card
+        </Link>{" "}
+        and Stripe will retry the invoice; everything is reinstated as soon as it is paid.
+      </div>
+    );
+  }
+
+  /**
    * Escalates only in the last few days. A month-long banner at full volume is
    * ignored by week two; this stays quiet until it is actually close, which is
    * also when the reminder email goes out.

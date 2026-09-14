@@ -218,8 +218,39 @@ export type SubscriptionResponse = {
   standing: AccountStanding;
 };
 
+/**
+ * Where a failing renewal has got to (D10). `step` and `holds` are derived
+ * from `since` and the clock on every request — nothing here is stored, so
+ * the banner can trust it to the minute.
+ *
+ * | step                | holds                          |
+ * |---------------------|--------------------------------|
+ * | `grace`             | nothing — banner and email     |
+ * | `restricted_growth` | new storefronts, new tokens    |
+ * | `restricted_writes` | every mutation except billing  |
+ * | `suspended`         | the storefront                 |
+ */
+export type Dunning = {
+  step: "grace" | "restricted_growth" | "restricted_writes" | "suspended";
+  /** ISO — the first failed renewal. */
+  since: string;
+  /** Whole days into the episode. */
+  day: number;
+  nextStep: Dunning["step"] | null;
+  /** ISO, or null at the last rung. Render it: "changes go on hold on the 28th" beats "soon". */
+  nextStepAt: string | null;
+  holds: { growth: boolean; writes: boolean; storefront: boolean };
+};
+
 export type AccountStanding =
   | { state: "subscribed"; message: string }
+  /**
+   * A renewal payment is failing. **Render this above everything, on every
+   * dashboard page**, with the card-update path — never the subscribe button,
+   * which would sell a paying merchant the plan they already have. The
+   * storefront stays live until `holds.storefront`.
+   */
+  | { state: "past_due"; message: string; dunning: Dunning }
   | {
       state: "trialing";
       message: string;

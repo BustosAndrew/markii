@@ -2,6 +2,7 @@ import { and, asc, count, desc, eq, ilike, or, type SQL } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { badRequest, conflict, pagination, slugify } from "@/lib/api";
 import { orgHandler } from "@/lib/auth/handler";
+import { assertGrowthAllowed } from "@/lib/billing/standing-guard";
 import { db, sites } from "@/lib/db";
 import { serializeSite, serializeSites } from "@/lib/queries";
 import { ownSitesForStaff } from "@/lib/tenancy";
@@ -55,6 +56,8 @@ export const POST = orgHandler(
     // one that demands proof of ownership. Neither is a site field.
     assertNoRedirectedSiteFields(body);
     const input = siteCreateSchema.parse(body);
+    /** A new storefront is growth on an unpaid plan — the day-7 rung of dunning (D10). */
+    await assertGrowthAllowed(orgId, "creating a storefront");
     const slug = input.slug ?? slugify(input.name);
     // Site slugs are globally unique (they are subdomains), so this check stays
     // deliberately unscoped — another org holding the slug is still a conflict.

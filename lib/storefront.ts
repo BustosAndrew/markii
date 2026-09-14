@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { accountStanding, type AccountStanding } from "@/lib/billing/standing";
+import { accountStanding, storefrontHeld, type AccountStanding } from "@/lib/billing/standing";
 import {
   categories,
   db,
@@ -60,6 +60,7 @@ export async function loadSite(siteSlug: string): Promise<SiteData | null> {
       stripeSubscriptionId: organizations.stripeSubscriptionId,
       subscriptionStatus: organizations.subscriptionStatus,
       freeTrialEndsAt: organizations.freeTrialEndsAt,
+      pastDueSince: organizations.pastDueSince,
     })
     .from(organizations)
     .where(eq(organizations.id, site.orgId))
@@ -82,6 +83,7 @@ export async function loadSite(siteSlug: string): Promise<SiteData | null> {
     bundle: bundleFromDb(site, cats, prods),
     baseUrl: storefrontUrl(site),
     standing,
-    billingHold: standing.state === "expired",
+    /** A lapsed trial, or the last rung of dunning (D10) — both Markii's hold, not the merchant's. */
+    billingHold: storefrontHeld(standing),
   };
 }

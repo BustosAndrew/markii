@@ -2,6 +2,7 @@ import { eq, ne, and } from "drizzle-orm";
 import { after, NextResponse } from "next/server";
 import { conflict } from "@/lib/api";
 import { orgHandler } from "@/lib/auth/handler";
+import { assertGrowthAllowed } from "@/lib/billing/standing-guard";
 import { syncMembershipCollection } from "@/lib/commerce/membership-holds";
 import { db, sites } from "@/lib/db";
 import { invalidateCustomDomain } from "@/lib/domains";
@@ -27,6 +28,15 @@ export const PATCH = orgHandler(
     // Refused by name, not stripped — see SITE_FIELDS_ELSEWHERE.
     assertNoRedirectedSiteFields(body);
     const input = siteUpdateSchema.parse(body);
+
+    /**
+     * Going live is the growth rung of the dunning ladder (D10, day 7): a
+     * merchant whose renewal is failing can keep editing a live store, but not
+     * publish a new one on the plan they have stopped paying for.
+     */
+    if (input.status === "live" && site.status !== "live") {
+      await assertGrowthAllowed(orgId, "publishing a storefront");
+    }
 
     if (input.slug && input.slug !== site.slug) {
       const [taken] = await db

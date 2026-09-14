@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { badRequest, conflict, notFound } from "../api";
 import { currentCustomerId } from "../auth/shopper";
+import { storefrontHeld } from "../billing/standing";
 import { standingFor } from "../billing/standing-guard";
 import { cartLines, carts, db, sites, type Cart, type Site } from "../db";
 import { assertAccess } from "./memberships";
@@ -52,7 +53,7 @@ export async function assertPurchasable(site: Site): Promise<void> {
   if (!site.purchasesEnabled) throw conflict("Purchases are disabled on this store");
 
   const standing = await standingFor(site.orgId);
-  if (standing?.state === "expired") {
+  if (standing && storefrontHeld(standing)) {
     throw conflict("This store is not currently accepting orders");
   }
 }

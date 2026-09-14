@@ -162,8 +162,15 @@ their reputation, so it is theirs to switch on. One reminder per cart ever, and 
 *before* the send so a crash costs a missed email rather than an hourly repeat.
 
 **The nightly T12 rollup is scheduled too** (`0 2 * * *`, 2026-09-08 — this line said "no T12
-rollup" for five days after it shipped). **Still no dunning sweep of Markii's own.** Membership
-status stays derived per request for exactly this reason.
+rollup" for five days after it shipped). **Dunning is built as of 2026-09-14** (D10) and, like
+everything else here, **holds nothing on a schedule**: the ladder — grace 7 days, growth held at
+day 7, writes at 14, storefront at 30 — is derived from `past_due_since` and the clock on every
+request, and the daily cron only sends the day-0/7/13 emails. `402 PAYMENT_PAST_DUE`, its own code
+beside `TRIAL_ENDED` because the fix is a card, not a plan. `unpaid` stays on the same clock: the
+plan drops to the floor, the storefront runs to day 30. **Two Stripe dashboard settings are part of
+this and cannot be set from here**: failed-payment final action = *mark unpaid* (never cancel), and
+Stripe's own failed-payment emails *off*. Membership status stays derived per request for exactly
+this reason.
 
 **SES is live as of 2026-08-11 — the platform gate is closed, the merchant gate is not.**
 `lib/email/` has the SES v2 transport (hand-rolled SigV4 over `fetch`), per-merchant sending

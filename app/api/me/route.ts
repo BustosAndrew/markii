@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { handler } from "@/lib/api";
-import { accountStanding } from "@/lib/billing/standing";
+import { accountStanding, serializeStanding } from "@/lib/billing/standing";
 import { serializeOrg } from "@/lib/auth/serialize";
 import { listMemberships, requireSession } from "@/lib/auth/session";
 import { entitlementsFor } from "@/lib/plans";
@@ -47,17 +47,7 @@ export const GET = handler(async () => {
   return NextResponse.json({
     user,
     org: serializeOrg(org),
-    standing:
-      standing.state === "trialing"
-        ? {
-            state: standing.state,
-            message: standing.reason,
-            endsAt: standing.endsAt.toISOString(),
-            daysLeft: standing.daysLeft,
-          }
-        : standing.state === "expired"
-          ? { state: standing.state, message: standing.reason, endedAt: standing.endedAt.toISOString() }
-          : { state: standing.state, message: standing.reason },
+    standing: serializeStanding(standing),
     role,
     organizations: memberships.map((m) => ({
       id: m.org.id,

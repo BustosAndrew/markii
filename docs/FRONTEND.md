@@ -488,6 +488,22 @@ The audit list carries both directions now — `undoneBy` on the original row, `
 so a history screen can strike through a reversed change and label its reversal without a second
 query. Both are `string | null` on `ActionInvocation`.
 
+### 🟡 New 2026-09-14 — `standing.state` can be `past_due` (D10); the banner already handles it
+
+`AccountStanding` gained a variant: `{ state: "past_due", message, dunning }`, where `dunning`
+carries the rung (`grace` → `restricted_growth` → `restricted_writes` → `suspended`), `since`,
+`day`, `nextStep`, `nextStepAt` and `holds`. **A non-exhaustive switch on `state` now has a fifth
+case** — TypeScript flagged `components/dashboard/trial-banner.tsx` and the backend change added
+the branch there (warning band while nothing is held, error band once something is, the next date
+stated, and a link to **update the card** — never "choose a plan", which would sell a paying
+merchant the plan they have). Check any other place that switches on `state`.
+
+One thing to build when touching `/dashboard/billing`: the card-update path is where every dunning
+refusal points, so it should be reachable in one click from the banner and render `standing`
+above the plan picker when `past_due`. Refusals are `402 PAYMENT_PAST_DUE` with
+`details.dunningStep` — render the message; do not map it onto the trial copy. Contract:
+`docs/API.md` §17 *Dunning*.
+
 ### 🔴 New 2026-09-13 — billing address form needed; `tax` on the subscription read (G3)
 
 **One screen to build, one field to render.** Markii now charges sales tax on its own subscription
@@ -895,9 +911,10 @@ Then, in the order a merchant meets them, all on **`/dashboard/billing`**: plan 
 **proration preview → confirm** (two calls, never one; **changing a plan requires MFA**) →
 **first-invoice Payment Element** (`confirmPayment` with the `clientSecret` from confirm) → card on
 file via `setDefaultPaymentMethod` → threshold meter, invoice history, and invoice detail. Dunning
-banners key off `subscriptionState.code === "inactive"`
-and the `past_due` status, which **still grants access** — do not lock a merchant out of their
-dashboard over a card Stripe is still retrying.
+banners key off **`standing.state === "past_due"`** (D10, 2026-09-14 — `TrialBanner` already renders
+it) rather than `subscriptionState.code`; `past_due` **still grants access** for the first two
+weeks, and the storefront serves for a month — never lock a merchant out over a card Stripe is
+still retrying.
 
 Two screens that need care rather than effort, and one that is missing:
 

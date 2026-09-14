@@ -7,7 +7,7 @@ import { currentPeriod } from "@/lib/billing/meter";
 import { billingConfigured, defaultCard } from "@/lib/billing/stripe-billing";
 import { statusGrantsPlan } from "@/lib/billing/mirror";
 import { describePlatformTax, resolvePlatformTax } from "@/lib/billing/platform-tax";
-import { accountStanding } from "@/lib/billing/standing";
+import { accountStanding, serializeStanding } from "@/lib/billing/standing";
 import { db, organizations } from "@/lib/db";
 import { entitlementsFor, planPricing } from "@/lib/plans";
 
@@ -129,21 +129,7 @@ export const GET = orgHandler(
        * merchant already out of standing needs to know their store is dark —
        * that is not a footnote on a pricing table.
        */
-      standing:
-        standing.state === "trialing"
-          ? {
-              state: standing.state,
-              message: standing.reason,
-              endsAt: standing.endsAt.toISOString(),
-              daysLeft: standing.daysLeft,
-            }
-          : standing.state === "expired"
-            ? {
-                state: standing.state,
-                message: standing.reason,
-                endedAt: standing.endedAt.toISOString(),
-              }
-            : { state: standing.state, message: standing.reason },
+      standing: serializeStanding(standing),
     });
   },
   { permission: "billing.read" },
@@ -181,7 +167,7 @@ function subscriptionState(status: string | null, subscribed: boolean) {
       code: "active" as const,
       message:
         status === "past_due"
-          ? "A renewal payment failed and Stripe is retrying. Access continues while it does."
+          ? "A renewal payment failed and Stripe is retrying. Access continues while it does — see `standing` for what the dunning ladder holds and when."
           : "Subscription is current.",
       /** Threshold fees are a separate meter and separately not billed yet. */
       charging: true,

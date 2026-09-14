@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import type { DbHandle, PlanId, SubscriptionStatusValue } from "../db";
 import { organizations, SUBSCRIPTION_STATUSES } from "../db";
+import { inDunningStatus } from "./dunning";
 import type { SubscriptionSnapshot } from "./stripe-billing";
 
 /**
@@ -91,7 +92,11 @@ export async function mirrorSubscription(
   opts: { guardAgainstStale?: boolean } = {},
 ): Promise<MirrorResult | { stale: true; reason: string }> {
   const [org] = await db
-    .select({ planId: organizations.planId, subscriptionId: organizations.stripeSubscriptionId })
+    .select({
+      planId: organizations.planId,
+      subscriptionId: organizations.stripeSubscriptionId,
+      pastDueSince: organizations.pastDueSince,
+    })
     .from(organizations)
     .where(eq(organizations.id, orgId))
     .limit(1);
@@ -145,10 +150,20 @@ export async function mirrorSubscription(
   const grants = statusGrantsPlan(status);
   const nextPlan: PlanId = grants ? (snapshot.planId ?? org.planId) : FLOOR_PLAN;
 
+  /**
+   * The dunning clock (D10). Starts on the way **into** `past_due`, keeps its
+   * value through `unpaid` — Stripe giving up is a later rung on the same
+   * ladder, not a new episode — and clears on anything else. A redelivered
+   * `past_due` event therefore cannot restart the clock, because the value is
+   * kept rather than rewritten while the status stays in dunning.
+   */
+  const pastDueSince = inDunningStatus(status) ? (org.pastDueSince ?? new Date()) : null;
+
   await db
     .update(organizations)
     .set({
       planId: nextPlan,
+      pastDueSince,
       stripeCustomerId: snapshot.customerId || undefined,
       stripeSubscriptionId: snapshot.subscriptionId,
       subscriptionStatus: status,
@@ -197,6 +212,7 @@ export async function mirrorCancellation(
     .update(organizations)
     .set({
       planId: FLOOR_PLAN,
+      pastDueSince: null,
       stripeSubscriptionId: null,
       subscriptionStatus: "canceled",
       subscriptionInterval: null,
