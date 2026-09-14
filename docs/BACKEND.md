@@ -605,6 +605,14 @@ Contract `docs/API.md` §18. The largest phase. Order within it:
     is called by name in the four places that grow. Emails ride the 09:00 cron beside the trial
     reminder, claimed in `dunning_notices` per episode and step. Falsified by moving the
     storefront hold to the writes rung: the day-14 test fails on the storefront page.
+13. ~~**Collections on the storefront**~~ — done 2026-09-14. §18.2 had been live since July with a
+    `publishedAt` documented as "invisible to storefronts until published", and nothing rendered a
+    collection at all, so the switch gated nothing. `/collections` and `/collections/{handle}`
+    (`lib/storefront/collections.ts`: published only, enabled products only, `membersOf` for the
+    order and the rules), `CollectionPage` + `ItemList` JSON-LD, and `## Collections` in
+    `llms.txt` and the sitemap through the shared bundle. Falsified: dropping the published filter
+    serves a draft handle 200. Found by reading §23's PLANNED rows, three of which — `/cart`,
+    `/account`, and this — were stale in the two directions this file warns about.
 
 > **Two things this uncovered, both worth knowing.**
 >

@@ -45,7 +45,7 @@ export async function generateMetadata({ params, searchParams }: Props): Promise
 export default async function SearchPage({ params, searchParams }: Props) {
   const data = await loadSite((await params).site);
   if (!data || storefrontHalted(data)) notFound();
-  const { site, bundle, baseUrl } = data;
+  const { site, bundle, colls, baseUrl } = data;
   const q = normalizeQuery(firstParam((await searchParams).q));
 
   await logTraffic({
@@ -66,6 +66,7 @@ export default async function SearchPage({ params, searchParams }: Props) {
         cartHref={`${baseUrl}/cart`}
         accountHref={`${baseUrl}/account`}
         searchAction={`${baseUrl}/search`}
+        collectionsHref={colls.length > 0 ? `${baseUrl}/collections` : undefined}
         searchQuery={q}
         nav={topCategories.map((c) => ({
           name: c.name,

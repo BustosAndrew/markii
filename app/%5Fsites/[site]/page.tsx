@@ -28,7 +28,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function StorePage({ params }: Props) {
   const data = await loadSite((await params).site);
   if (!data) notFound();
-  const { site, bundle, baseUrl } = data;
+  const { site, bundle, colls, baseUrl } = data;
   const themeId = site.themeId ?? "studio";
 
   /**
@@ -57,6 +57,7 @@ export default async function StorePage({ params }: Props) {
         cartHref={`${baseUrl}/cart`}
         accountHref={`${baseUrl}/account`}
         searchAction={`${baseUrl}/search`}
+        collectionsHref={colls.length > 0 ? `${baseUrl}/collections` : undefined}
         nav={topCategories.map((c) => ({
           name: c.name,
           href: `${baseUrl}/c/${c.slug}`,

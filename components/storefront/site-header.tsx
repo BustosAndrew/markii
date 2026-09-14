@@ -8,6 +8,7 @@ export function SiteHeader({
   accountHref,
   searchAction,
   searchQuery,
+  collectionsHref,
 }: {
   siteName: string;
   homeHref: string;
@@ -23,6 +24,8 @@ export function SiteHeader({
   searchAction?: string;
   /** The current query, so the box on a results page shows what was searched. */
   searchQuery?: string;
+  /** The collections index, shown beside the categories only when the store has published any. */
+  collectionsHref?: string;
 }) {
   return (
     <header className="sf-header">
@@ -30,13 +33,14 @@ export function SiteHeader({
         <a className="sf-brand" href={homeHref}>
           {siteName}
         </a>
-        {nav.length > 0 ? (
+        {nav.length > 0 || collectionsHref ? (
           <nav className="sf-nav" aria-label="Categories">
             {nav.map((item) => (
               <a key={item.href} href={item.href}>
                 {item.name}
               </a>
             ))}
+            {collectionsHref ? <a href={collectionsHref}>Collections</a> : null}
           </nav>
         ) : null}
         {searchAction || accountHref || cartHref ? (

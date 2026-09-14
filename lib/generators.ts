@@ -1,6 +1,6 @@
 import type { Product as SchemaProduct, WithContext } from "schema-dts";
 import { slugify, tenantBaseUrl } from "@/lib/api";
-import type { Category, Product, Site } from "@/lib/db";
+import type { Category, Collection, Product, Site } from "@/lib/db";
 import { getTheme, themeDocumentStylesheet } from "@/lib/storefront/themes";
 
 /**
@@ -24,6 +24,16 @@ export type Bundle = {
     parentSlug?: string | null;
     description?: string | null;
   }[];
+  /**
+   * Published merchandising collections (§18.2). Optional because the
+   * create-site wizard's preview has none yet; a storefront always supplies
+   * the list, empty or not.
+   */
+  collections?: {
+    title: string;
+    handle: string;
+    description?: string | null;
+  }[];
   products: {
     name: string;
     slug: string;
@@ -37,7 +47,13 @@ export type Bundle = {
   }[];
 };
 
-export function bundleFromDb(site: Site, cats: Category[], prods: Product[]): Bundle {
+export function bundleFromDb(
+  site: Site,
+  cats: Category[],
+  prods: Product[],
+  /** Published collections only — the caller applies that filter (`lib/storefront/collections.ts`). */
+  colls: Collection[] = [],
+): Bundle {
   const catById = new Map(cats.map((c) => [c.id, c]));
   return {
     site: {
@@ -55,6 +71,11 @@ export function bundleFromDb(site: Site, cats: Category[], prods: Product[]): Bu
         parentSlug: c.parentId != null ? (catById.get(c.parentId)?.slug ?? null) : null,
         description: c.description,
       })),
+    collections: colls.map((c) => ({
+      title: c.title,
+      handle: c.handle,
+      description: c.description,
+    })),
     products: prods
       .filter((p) => p.enabled)
       .map((p) => ({
@@ -130,6 +151,15 @@ export function generateLlmsTxt(
     lines.push("## Categories", "");
     for (const c of categories) {
       lines.push(`- [${c.name}](${baseUrl}/c/${c.slug})${c.description ? `: ${strip(c.description)}` : ""}`);
+    }
+    lines.push("");
+  }
+  if (bundle.collections?.length) {
+    lines.push("## Collections", "");
+    for (const c of bundle.collections) {
+      lines.push(
+        `- [${c.title}](${baseUrl}/collections/${c.handle})${c.description ? `: ${strip(c.description)}` : ""}`,
+      );
     }
     lines.push("");
   }
@@ -266,6 +296,7 @@ export function generateSitemapXml(bundle: Bundle, baseUrl: string): string {
   const urls = [
     `${baseUrl}/`,
     ...bundle.categories.map((c) => `${baseUrl}/c/${c.slug}`),
+    ...(bundle.collections ?? []).map((c) => `${baseUrl}/collections/${c.handle}`),
     ...bundle.products.map((p) => `${baseUrl}/p/${p.slug}`),
   ];
   return `<?xml version="1.0" encoding="UTF-8"?>

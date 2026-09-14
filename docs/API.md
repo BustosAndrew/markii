@@ -2142,13 +2142,11 @@ idempotent on `(orgId, periodStart)` — a retried scheduler must not double-bil
 settled number that silently changes is worse than a wrong one somebody can see; drift means either
 a late record (a §4.4 credit) or a bug, and both need a human.
 
-**The nightly `t12_net_sales` rollup in §4.5 is deliberately not built** — and as of 2026-08-18 the
-reason has narrowed to one. This used to say "nothing schedules jobs in this deployment yet"; that is
-no longer true (`vercel.json` runs the billing sweep monthly and abandoned-cart recovery hourly,
-§25), so **the scheduler is no longer the blocker**. What still stands on its own is the rest: the
-direct sum is exact, and it already uses `usage_records_org_occurred_idx` — the index a rollup would
-have been built on anyway — so a cache would add staleness and a refresh path without making the
-answer better. Add it when **volume** demands it, which is now the only remaining trigger.
+**The nightly `t12_net_sales` rollup in §4.5 is built** (2026-09-08, `GET /api/cron/t12-rollup`,
+§25) — this paragraph called it "deliberately not built" for six days afterwards. What made it safe
+is what the earlier objection asked for: every row carries `computedAt`, the meter refuses anything
+older than 26 hours and falls back to the exact sum, and `t12AsOf` on the usage read says which one
+answered. A cron that stops costs a query, never correctness.
 
 ---
 
@@ -2212,6 +2210,8 @@ it, and so does the Agent Ops undo path.
 ### 18.2 Collections — ✅ LIVE
 
 > **Live (2026-07-31).** Reads: `GET /api/collections`, `GET /api/collections/:idOrHandle`.
+> **Storefront pages live 2026-09-14** — `/collections` and `/collections/{handle}` (§23). Until then
+> `publishedAt` gated nothing, because nothing rendered a collection to gate.
 > Writes via §22 actions: `catalog.createCollection`, `catalog.updateCollection`,
 > `catalog.setCollectionProducts`, `catalog.deleteCollection`.
 >
@@ -2301,7 +2301,7 @@ acceptsMarketing, marketingConsentAt, tags[], note, ordersCount, totalSpentMinor
 PII rules: never log or prompt-inject customer records; support export and deletion requests;
 marketing consent is explicit, timestamped, and never defaulted on.
 
-### 18.4 Cart & checkout ✅ LIVE (x402 rail) · 🟡 card rail PLANNED
+### 18.4 Cart & checkout ✅ LIVE — x402 rail and card rail (Stripe Connect direct charges; this heading said the card rail was PLANNED long after it shipped)
 
 ```ts
 interface Cart {
@@ -2851,8 +2851,9 @@ direction and `memberships.grant` restores it in one call, so this errs the way 
 
 ### Not built
 
-Recurring billing — a membership does not auto-renew — and gating anything other than products:
-there is still no CMS content model, which remains Phase D.
+Gating anything other than products: there is still no CMS content model, which remains Phase D.
+(Recurring billing was listed here until 2026-09-14, a month after it shipped — see *Recurring
+memberships* above.)
 
 ---
 
@@ -2942,7 +2943,7 @@ Three contract rules that belong here rather than only in the spec:
 
 ---
 
-## 22. Action registry & MCP — ✅ LIVE (registry) / 🟡 PLANNED (undo, MCP)
+## 22. Action registry & MCP — ✅ LIVE (registry, undo, MCP tools · prompts · resources)
 
 Markii is **agent-native**: humans and agents operate the product through the same actions,
 permissions, and audit trail. Architecture in `docs/BUILDER.md` §2–3. This section is the contract.
@@ -3045,10 +3046,9 @@ its audit table (`action_invocations`, migration `0001`). What it provides today
 - Authorization is **injected** via `setAuthorizationResolver`. Until Phase A installs the real one,
   the resolver **denies everything**.
 
-**Not built yet, and deliberately:** there are **no action definitions**, and the endpoints below
-are unrouted. Both wait on §16 — every one of them needs an actor to authorize, so shipping them
-today would mean routes that can only answer 401. The first definitions land with Phase C's commerce
-mutations, which is the whole reason the primitive was built ahead of them.
+> The paragraph that stood here said "there are no action definitions, and the endpoints below are
+> unrouted" — written before §16, and never removed. There are 59 definitions and every endpoint
+> below is routed; `GET /api/actions` lists them. Corrected 2026-09-14.
 
 **Existing §1–8 routes still mutate directly.** They are converted in Phase A, which re-scopes every
 one of them for tenancy anyway — doing it twice would be the more expensive path.
@@ -3259,10 +3259,10 @@ preview tabs):
 | `/sitemap.xml` | sitemap | ✅ LIVE |
 | `/api/checkout` | x402 payment endpoint (402 challenge → settle) | ✅ LIVE |
 | `/api/cart*` · `/api/checkout/session*` | cart + checkout API | ✅ LIVE (§18.4) — x402 rail; card rail PLANNED |
-| `/cart` · `/checkout` | human cart + checkout **pages** | 🟡 PLANNED (§18.4) — the API exists; the storefront islands do not |
-| `/collections/{handle}` | merchandising collection page | 🟡 PLANNED (§18.2) |
+| `/cart` | the human cart page (§18.4) — the sanctioned island; checkout continues from it | ✅ LIVE (this row said PLANNED for weeks after `app/%5Fsites/[site]/cart/page.tsx` shipped) |
+| `/collections` · `/collections/{handle}` | published collections — index, and one collection as product cards with a Schema.org `CollectionPage` + `ItemList` of the product URLs. Manual order or rules evaluated per request; enabled products only; an unpublished handle is a 404 like one that never existed. Also in `llms.txt` (`## Collections`), the sitemap, and the header nav once any is published | ✅ LIVE (2026-09-14, §18.2) |
 | `/blog` · `/pages/{handle}` | builder-authored content | 🟡 PLANNED (§19) |
-| `/account` | customer account area | 🟡 PLANNED (§18.3) |
+| `/account` | shopper account — sign in/up, memberships, cancel a renewal (§18.3, §18.9) | ✅ LIVE (row corrected 2026-09-14) |
 
 In local dev, storefronts are reachable at `http://localhost:3000/_sites/{siteSlug}/…`.
 

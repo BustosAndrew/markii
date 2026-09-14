@@ -24,7 +24,7 @@ export default async function CategoryPage({ params }: Props) {
   const { site: siteSlug, categorySlug } = await params;
   const data = await loadSite(siteSlug);
   if (!data) notFound();
-  const { site, cats, prods, bundle, baseUrl } = data;
+  const { site, cats, prods, bundle, colls, baseUrl } = data;
   const category = cats.find((c) => c.slug === categorySlug && c.enabled);
   if (!category || storefrontHalted(data)) notFound();
 
@@ -50,6 +50,7 @@ export default async function CategoryPage({ params }: Props) {
         cartHref={`${baseUrl}/cart`}
         accountHref={`${baseUrl}/account`}
         searchAction={`${baseUrl}/search`}
+        collectionsHref={colls.length > 0 ? `${baseUrl}/collections` : undefined}
         nav={topCategories.map((c) => ({
           name: c.name,
           href: `${baseUrl}/c/${c.slug}`,

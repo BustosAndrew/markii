@@ -508,6 +508,11 @@ merchant's form, `billing.updateBillingAddress`, written to their Stripe Custome
 **No address → created untaxed and said so**, not refused. The frontend's address form is not built
 yet (`docs/FRONTEND.md`), so today every merchant is invoiced untaxed and the API says why.
 
+**Collections reach the storefront as of 2026-09-14** — `/collections` and `/collections/{handle}`,
+`llms.txt` and the sitemap. §18.2 had a `publishedAt` "invisible to storefronts until published"
+for six weeks while nothing rendered a collection, so the switch gated nothing. Published only,
+enabled products only, rules evaluated per request.
+
 **Still planned:** everything in §10–15 and §19–21.
 
 **Authorization on the v1 REST surface was closed 2026-08-11.** `orgHandler` authorizes **every

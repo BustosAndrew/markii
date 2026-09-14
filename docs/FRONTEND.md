@@ -488,6 +488,16 @@ The audit list carries both directions now — `undoneBy` on the original row, `
 so a history screen can strike through a reversed change and label its reversal without a second
 query. Both are `string | null` on `ActionInvocation`.
 
+### 🟢 New 2026-09-14 — collections have storefront pages; `Bundle.collections` in the previews
+
+`/collections` and `/collections/{handle}` are live (§23) — backend-owned, nothing to build. Two
+things become visible from the dashboard: **`Bundle` gained an optional `collections` list**, so
+`generatePreview`'s `llms.txt` and sitemap panes show a `## Collections` section for a saved site
+that has published any (the create-site wizard passes none and is unchanged); and the storefront
+header nav gains a "Collections" link once one is published, which matters to themes work (§1).
+The collections screen's "published" toggle now does something a shopper can see — worth saying so
+in its copy.
+
 ### 🟡 New 2026-09-14 — `standing.state` can be `past_due` (D10); the banner already handles it
 
 `AccountStanding` gained a variant: `{ state: "past_due", message, dunning }`, where `dunning`

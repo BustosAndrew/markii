@@ -7,9 +7,11 @@ import {
   products,
   sites,
   type Category,
+  type Collection,
   type Product,
   type Site,
 } from "@/lib/db";
+import { publishedCollectionsFor } from "@/lib/storefront/collections";
 import { bundleFromDb, type Bundle } from "@/lib/generators";
 import { storefrontUrl } from "@/lib/queries";
 
@@ -17,6 +19,8 @@ export type SiteData = {
   site: Site;
   cats: Category[];
   prods: Product[];
+  /** Published only. Membership is resolved per page, not here — rules are evaluated at read time. */
+  colls: Collection[];
   bundle: Bundle;
   baseUrl: string;
   /**
@@ -76,11 +80,13 @@ export async function loadSite(siteSlug: string): Promise<SiteData | null> {
 
   const cats = await db.select().from(categories).where(eq(categories.siteId, site.id));
   const prods = await db.select().from(products).where(eq(products.siteId, site.id));
+  const colls = await publishedCollectionsFor(site.id);
   return {
     site,
     cats,
     prods,
-    bundle: bundleFromDb(site, cats, prods),
+    colls,
+    bundle: bundleFromDb(site, cats, prods, colls),
     baseUrl: storefrontUrl(site),
     standing,
     /** A lapsed trial, or the last rung of dunning (D10) — both Markii's hold, not the merchant's. */

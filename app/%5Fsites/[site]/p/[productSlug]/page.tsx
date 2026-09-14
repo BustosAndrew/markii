@@ -37,7 +37,7 @@ export default async function ProductPage({ params }: Props) {
   const { site: siteSlug, productSlug } = await params;
   const data = await loadSite(siteSlug);
   if (!data) notFound();
-  const { site, bundle, cats, prods, baseUrl } = data;
+  const { site, bundle, cats, prods, colls, baseUrl } = data;
   const dbProduct = prods.find((p) => p.slug === productSlug && p.enabled);
   const product = bundle.products.find((p) => p.slug === productSlug);
   if (!dbProduct || !product || storefrontHalted(data)) notFound();
@@ -92,6 +92,7 @@ export default async function ProductPage({ params }: Props) {
         cartHref={`${baseUrl}/cart`}
         accountHref={`${baseUrl}/account`}
         searchAction={`${baseUrl}/search`}
+        collectionsHref={colls.length > 0 ? `${baseUrl}/collections` : undefined}
         nav={topCategories.map((c) => ({
           name: c.name,
           href: `${baseUrl}/c/${c.slug}`,
