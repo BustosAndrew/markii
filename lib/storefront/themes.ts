@@ -283,6 +283,9 @@ export function themeStylesheet(theme: ThemeTokens): string {
 .sf-header-actions{margin-left:auto;display:flex;flex-wrap:wrap;align-items:center;gap:.75rem 1rem}
 .sf-cart-link{font-size:.9rem;font-weight:600;text-decoration:none;color:var(--sf-fg)}
 .sf-cart-link:hover{color:var(--sf-accent)}
+.sf-search{display:flex;gap:.4rem;align-items:center}
+.sf-search input{padding:.4rem .6rem;border:1px solid var(--sf-border);border-radius:var(--sf-radius);font:inherit;font-size:.9rem;background:var(--sf-surface);color:var(--sf-fg);min-width:0;width:11rem;max-width:100%}
+.sf-search button{padding:.4rem .7rem;border:0;border-radius:var(--sf-radius);font:inherit;font-size:.9rem;font-weight:600;cursor:pointer;background:var(--sf-accent);color:var(--sf-accent-text)}
 .sf-main{max-width:var(--sf-max);margin:0 auto;padding:2rem 1.25rem 4rem}
 .sf-hero{margin:0 0 2rem}
 .sf-title{font-family:var(--sf-font-display);font-size:clamp(1.75rem,4vw,2.75rem);font-weight:600;letter-spacing:-0.03em;line-height:1.15;margin:0 0 .75rem}

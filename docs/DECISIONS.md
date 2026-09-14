@@ -1266,7 +1266,7 @@ a clean rehearsal for OSS across 27. Prove the pipeline there, then widen.
 thresholds are crossed rather than pre-emptively. This is Markii's own obligation and is separate
 from merchant tax calculation (§18.6).
 
-### G6 — Storefront search
+### G6 — Storefront search — ✅ built 2026-09-13
 
 **Postgres full-text search** (`tsvector` + GIN index) over products and content. No separate search
 vendor: it is free, it is already in the database, and it is sufficient for a per-store catalog.
@@ -1274,6 +1274,14 @@ Revisit only if relevance complaints appear at scale. Phase C.
 
 Search also helps agents — a `/search?q=` endpoint documented in `agent.md` gives buyer agents a
 retrieval path that does not depend on crawling every product page.
+
+> **Built as decided**, with two details settled while building. The vector is a **stored generated
+> column**, so nothing that writes a product can forget to update it. The dictionary is **`english`**,
+> fixed in the expression (a generated column must be immutable), matching the G2 launch countries;
+> a substring fallback on name and SKU covers partial words and other languages, and a per-store
+> language belongs on `sites` the day a non-English store asks for it. The endpoint is
+> `/api/search?q=` (JSON) beside `/search?q=` (HTML) — the same `searchProducts` behind both, so a
+> shopper and an agent asking the same question get the same list.
 
 ### G7 — Cookie consent
 

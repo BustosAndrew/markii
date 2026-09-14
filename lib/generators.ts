@@ -120,6 +120,7 @@ export function generateLlmsTxt(
     `- Store: ${baseUrl}/`,
     `- Agent protocol: ${baseUrl}/agent.md`,
     `- Sitemap: ${baseUrl}/sitemap.xml`,
+    `- Search API: GET ${baseUrl}/api/search?q={query}`,
   ];
   if (opts.purchasesEnabled !== false && opts.rails?.x402) {
     lines.push(`- Checkout API: POST ${baseUrl}/api/checkout`);
@@ -180,6 +181,23 @@ This store is machine-readable. ${discoveryBlurb(opts)}
 - \`GET ${baseUrl}/llms.txt\` — catalog summary
 - \`GET ${baseUrl}/sitemap.xml\` — all URLs
 - Every product page (\`${baseUrl}/p/{slug}\`) embeds Schema.org Product JSON-LD.
+
+## Search
+
+\`GET ${baseUrl}/api/search?q={query}&limit={1..50}\` — full-text search over this store's
+products by name, description and SKU, best match first. Use it instead of crawling every
+product page. \`q\` accepts quoted phrases and \`-excluded\` words. Answers JSON:
+
+\`\`\`json
+{ "query": "...", "limit": 20, "count": 1,
+  "results": [ { "name": "...", "slug": "...", "url": "${baseUrl}/p/{slug}", "sku": null,
+                 "description": "...", "priceMinor": 1200, "currency": "USD",
+                 "stock": 3, "inStock": true, "category": { "name": "...", "slug": "..." },
+                 "membersOnly": false } ] }
+\`\`\`
+
+\`priceMinor\` is in the currency's minor unit (cents for USD). \`membersOnly\` products need a
+signed-in member of the store and cannot be bought through the agent checkout.
 
 ${purchaseSection}
 ## Catalog

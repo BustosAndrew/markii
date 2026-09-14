@@ -66,9 +66,9 @@ unagreed figure is worse than not gating yet.
 merchant's own account out of their own balance. `method: "manual"` still records a refund the
 merchant issued themselves and is the only option on x402, whose settlement is irreversible.
 
-**What is still missing** is Markii's own subscription billing (plan changes, invoices, payment
-methods — all `503`) and **content** membership gating, which has no content model to gate until
-Phase D. **Stripe Tax landed 2026-08-17** — every call carries `Stripe-Account`, because the merchant
+**Markii's own subscription billing is built too** (plan changes, invoices, payment methods — this
+paragraph said "all `503`" until 2026-09-13, long after §17 went live). **What is still missing** is
+**content** membership gating, which has no content model to gate until Phase D. **Stripe Tax landed 2026-08-17** — every call carries `Stripe-Account`, because the merchant
 is the seller of record and their registrations decide what is owed (§18.6).
 
 **Storage buckets are not in the migration chain.** Supabase creates them through its Storage API,
@@ -270,7 +270,7 @@ gets quietly reversed later.
 >   at its next refresh, within the hour. That window is documented in §16 rather than closed with a
 >   denylist on the hot auth path.
 
-### 3. Phase B — billing and metering — subscriptions done, threshold-fee invoicing not
+### 3. Phase B — billing and metering — done, including threshold-fee invoicing
 
 > **Built.** `lib/billing/` — `fees.ts` (the marginal engine, pure), `meter.ts` (T12 and period net
 > sales over the ledger), `close.ts` (period close into immutable `fee_assessments`, plus a
@@ -558,6 +558,15 @@ Contract `docs/API.md` §18. The largest phase. Order within it:
    gating would have enforced nothing. A refund revokes conferred memberships, scoped to the
    refunded lines. **Content** gating is still Phase D (no content model), and memberships do
    **not** auto-renew (Phase B recurring billing)
+9. ~~**Storefront search** (G6)~~ — done 2026-09-13. A stored generated `tsvector` on `products`
+   (migration `0039`) with a GIN index; `lib/storefront/search.ts` ranks full-text matches and
+   falls back to a substring match on name and SKU for what the `english` stemmer cannot see.
+   `/search` is the page and `/api/search` the JSON, both over one `searchProducts`, and
+   `agent.md` documents the endpoint as the retrieval path that replaces crawling. **Not gated on
+   `agentDiscovery`** — that switch withholds the documents that advertise the store, and search
+   is a read over the catalogue the product pages already serve to anyone. It had sat in the
+   decision register as "Phase C" without ever reaching this list, which is how it was missed
+   while everything above it shipped.
 
 > **Two things this uncovered, both worth knowing.**
 >
@@ -673,7 +682,8 @@ Still outstanding, and none of it is code:
 
 Not built:
 
-- Secure Email Change, which requires sending **two** emails with specific token/hash pairings.
+- ~~Secure Email Change~~ — built (`app/api/auth/update-email/route.ts`, `email_change_current` +
+  `email_change_new` in `lib/email/auth-hook.ts`); listed here as missing until 2026-09-13.
 - Broadcast/campaign sending — **deferred until further notice (D43)**, and the blocking
   prerequisite is reputation isolation: SES suspends on account-wide rates, so one merchant's
   campaign can cost every merchant their order confirmations.

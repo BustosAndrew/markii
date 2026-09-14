@@ -161,7 +161,8 @@ default** (`sites.abandonedCartEmails`): the mail leaves from the merchant's dom
 their reputation, so it is theirs to switch on. One reminder per cart ever, and the cart is claimed
 *before* the send so a crash costs a missed email rather than an hourly repeat.
 
-**Still nothing else is scheduled** — no T12 rollup, no dunning sweep of Markii's own. Membership
+**The nightly T12 rollup is scheduled too** (`0 2 * * *`, 2026-09-08 — this line said "no T12
+rollup" for five days after it shipped). **Still no dunning sweep of Markii's own.** Membership
 status stays derived per request for exactly this reason.
 
 **SES is live as of 2026-08-11 — the platform gate is closed, the merchant gate is not.**
@@ -473,6 +474,15 @@ is most likely to hold the only one that cannot be cut off. **The cascade is the
 `auth.refresh_tokens` and `auth.mfa_amr_claims` are `ON DELETE CASCADE`, so a revoked session can
 never mint another token — but a JWT already issued is verified by signature and lives out its hour,
 which is stated rather than papered over.
+
+**Storefront search is built as of 2026-09-13** (G6). A stored generated `tsvector` on `products`
+with a GIN index, ranked full-text with a substring fallback, served as `/search` (HTML, a plain
+`GET` form in the header — no island) and `/api/search` (JSON) over **one** `searchProducts`, so a
+shopper and a buyer agent asking the same thing get the same list. `agent.md` and `llms.txt` now
+advertise it as the retrieval path that replaces crawling every product page. Not gated on
+`agentDiscovery`, which withholds the *documents*, not the catalogue. It had been decided for
+Phase C in the register and never made the build-order list — the fourth "planned" item found
+finished or unstarted only by checking.
 
 **Still planned:** everything in §10–15 and §19–21.
 

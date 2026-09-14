@@ -1,6 +1,7 @@
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import {
   boolean,
+  customType,
   index,
   integer,
   jsonb,
@@ -17,6 +18,17 @@ import {
 
 export type PaymentProviders = { x402: boolean; stripe: boolean };
 export type AddOn = { productId: number; mandatory: boolean };
+
+/**
+ * Postgres `tsvector`, which Drizzle has no built-in column for. Only ever
+ * read through `@@` and `ts_rank_cd` in SQL — nothing selects it as a value,
+ * so the TypeScript type is a formality.
+ */
+const tsvector = customType<{ data: string }>({
+  dataType() {
+    return "tsvector";
+  },
+});
 
 export const sites = pgTable(
   "sites",
@@ -260,6 +272,29 @@ export const products = pgTable(
      * platform key. Never read it without a `Stripe-Account` header.
      */
     stripeRecurringPriceId: text("stripe_recurring_price_id"),
+    /**
+     * Storefront search (G6): Postgres full-text search over the fields a
+     * shopper or a buyer agent would type — no separate search vendor, because
+     * a per-store catalogue is small and the database already holds it.
+     *
+     * **Generated, never written**, so it cannot drift from the columns it
+     * indexes: an importer, an action, and a seed script all update `name` and
+     * the vector follows. Name and SKU are weighted above the description so a
+     * product *called* "leather wallet" outranks one that merely mentions one.
+     * HTML tags are stripped from the description first, or every product would
+     * match "strong" and "p".
+     *
+     * `english` is a fixed choice, matching the launch countries (G2: US, CA,
+     * UK, AU). Stemming another language with the English dictionary is wrong
+     * but not broken — the query is stemmed the same way, so exact words still
+     * meet — and `searchProducts` falls back to a substring match for the rest.
+     * A per-store language belongs on `sites` when a non-English store exists to
+     * ask for it; putting the config in the expression now would freeze a guess.
+     */
+    searchVector: tsvector("search_vector").generatedAlwaysAs(
+      (): SQL =>
+        sql`setweight(to_tsvector('english', coalesce(${products.name}, '')), 'A') || setweight(to_tsvector('english', coalesce(${products.sku}, '')), 'A') || setweight(to_tsvector('english', regexp_replace(coalesce(${products.description}, ''), '<[^>]*>', ' ', 'g')), 'B')`,
+    ),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -269,6 +304,7 @@ export const products = pgTable(
     index("products_category_idx").on(t.categoryId),
     index("products_requires_tier_idx").on(t.requiresTierId),
     index("products_grants_tier_idx").on(t.grantsTierId),
+    index("products_search_idx").using("gin", t.searchVector),
   ],
 );
 

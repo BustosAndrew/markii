@@ -6,12 +6,23 @@ export function SiteHeader({
   nav,
   cartHref,
   accountHref,
+  searchAction,
+  searchQuery,
 }: {
   siteName: string;
   homeHref: string;
   nav: NavItem[];
   cartHref?: string;
   accountHref?: string;
+  /**
+   * Where the search form submits — the store's `/search` page. Absent on
+   * pages that have no catalogue to search from (the cart, the account area).
+   * A plain `GET` form and nothing else: storefronts are server-rendered
+   * minimal HTML, and a search box does not earn an island.
+   */
+  searchAction?: string;
+  /** The current query, so the box on a results page shows what was searched. */
+  searchQuery?: string;
 }) {
   return (
     <header className="sf-header">
@@ -28,8 +39,21 @@ export function SiteHeader({
             ))}
           </nav>
         ) : null}
-        {accountHref || cartHref ? (
+        {searchAction || accountHref || cartHref ? (
           <div className="sf-header-actions">
+            {searchAction ? (
+              <form className="sf-search" role="search" action={searchAction} method="get">
+                <input
+                  type="search"
+                  name="q"
+                  defaultValue={searchQuery ?? ""}
+                  placeholder="Search products"
+                  aria-label="Search products"
+                  maxLength={200}
+                />
+                <button type="submit">Search</button>
+              </form>
+            ) : null}
             {accountHref ? (
               <a className="sf-cart-link" href={accountHref}>
                 Account

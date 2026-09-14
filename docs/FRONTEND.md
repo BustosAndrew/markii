@@ -488,6 +488,22 @@ The audit list carries both directions now — `undoneBy` on the original row, `
 so a history screen can strike through a reversed change and label its reversal without a second
 query. Both are `string | null` on `ActionInvocation`.
 
+### 🟢 New 2026-09-13 — storefronts have search (G6); nothing in the dashboard changes
+
+**No typed service, no constant to flip, no screen to build** — this is a storefront surface (§23,
+backend-owned). Listed so the two places it becomes visible from the dashboard are not a surprise:
+
+- **The storefront header now carries a search box** on the home, category and product pages — a
+  plain `GET` form to `/search?q=`, styled through `.sf-search` in `lib/storefront/themes.ts`. If
+  you are working on themes (build order §1), it is part of the header every theme lays out;
+  the `stacked` header variant already centres it with the rest of `.sf-header-actions`.
+- **`llms.txt` and `agent.md` gained a line and a section** advertising `GET /api/search?q=`, so
+  the create-site wizard's preview panes (`generatePreview`) show it. That is the document the
+  store really serves — no preview-only copy.
+
+The JSON shape (`priceMinor` + `currency`, `membersOnly`) is documented in `docs/API.md` §18.4 and
+rendered in `agent.md` itself; the dashboard has no reason to call it.
+
 ### 🟢 New 2026-09-08 — `GET /api/billing/usage` gained `t12AsOf`
 
 **Additive; nothing that ignores it changes.** `t12AsOf` says where the trailing-twelve figure came
@@ -782,6 +798,9 @@ responses rather than the shapes they were first written to:
 
 ### 3. Storefront shopper surfaces
 
+- **Search** — `/search?q=` (page) and `GET /_sites/{slug}/api/search?q=` (JSON), built
+  2026-09-13. Server-rendered; the header form is the whole interaction. Not something to build,
+  something to keep when restyling the header.
 - **Recurring membership purchase** — `POST /_sites/{slug}/api/checkout/subscription`. Requires a
   signed-in shopper, cannot share a cart, quantity is capped at 1. The one-off route returns `409`
   with `useEndpoint` pointing here.

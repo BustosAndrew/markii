@@ -56,6 +56,7 @@ export default async function StorePage({ params }: Props) {
         homeHref={`${baseUrl}/`}
         cartHref={`${baseUrl}/cart`}
         accountHref={`${baseUrl}/account`}
+        searchAction={`${baseUrl}/search`}
         nav={topCategories.map((c) => ({
           name: c.name,
           href: `${baseUrl}/c/${c.slug}`,
