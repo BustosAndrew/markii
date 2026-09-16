@@ -488,6 +488,17 @@ The audit list carries both directions now — `undoneBy` on the original row, `
 so a history screen can strike through a reversed change and label its reversal without a second
 query. Both are `string | null` on `ActionInvocation`.
 
+### 🟢 New 2026-09-15 — API tokens are rate limited on the REST routes; the dashboard is not affected
+
+`Authorization: Bearer mk_…` calls to any `/api/*` route now carry `RateLimit-Limit` /
+`RateLimit-Remaining` / `RateLimit-Reset` and can answer `429 RATE_LIMITED` (the same envelope as
+the auth limits, `details.retryAfterSeconds` + `Retry-After`) after 300 requests in a minute
+(`docs/API.md` §16). **Cookie sessions are not counted and carry none of these headers**, so
+nothing the dashboard calls through `lib/api/*` changes — no screen needs a `429` branch it did
+not already have from 2026-09-13. The one place this is visible to a merchant is the tokens
+screen: a client reporting `429` from a route (rather than a JSON-RPC error from `/api/mcp`) has
+spent that token's REST budget, and the fix is a narrower token per client, not a broader one.
+
 ### 🟢 New 2026-09-14 — collections have storefront pages; `Bundle.collections` in the previews
 
 `/collections` and `/collections/{handle}` are live (§23) — backend-owned, nothing to build. Two

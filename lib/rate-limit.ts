@@ -102,3 +102,31 @@ export const MCP_RATE_LIMIT: RateLimitPolicy = {
   limit: Number(process.env.MCP_RATE_LIMIT ?? 120),
   windowMs: 60_000,
 };
+
+/**
+ * The REST policy for API tokens (G12) — `Authorization: Bearer mk_…` on any
+ * `/api/*` route.
+ *
+ * **The same credential, limited on the second door.** A token used through
+ * `/api/mcp` was capped at `MCP_RATE_LIMIT` while the same token on the REST
+ * surface was capped at nothing, so a limit an agent hit on one surface was
+ * routable around on the other. Keyed on the token for the same reasons as
+ * the MCP policy; cookie sessions are not limited here at all — a dashboard
+ * page fans out many calls per render, MFA and the auth limits already gate
+ * how a session is obtained, and the caller that loops is one holding a token.
+ *
+ * **Deliberately above the MCP limit, and the ordering is load-bearing.** The
+ * MCP `read_*` tools forward in-process to these same REST handlers carrying
+ * the caller's own token (`lib/mcp/reads.ts`), so every MCP read is counted on
+ * both keys. Were this ceiling at or below MCP's, an MCP client would be
+ * refused by the REST counter before reaching the number `docs/MCP.md`
+ * promises it, with a `429` from the wrong surface.
+ *
+ * Higher for its own reason too: a REST integration is typically a sync — a
+ * catalogue pulled page by page, orders polled every minute — where an MCP
+ * turn is a handful of calls.
+ */
+export const API_TOKEN_RATE_LIMIT: RateLimitPolicy = {
+  limit: Number(process.env.API_TOKEN_RATE_LIMIT ?? 300),
+  windowMs: 60_000,
+};

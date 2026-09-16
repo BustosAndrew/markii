@@ -151,6 +151,13 @@ RateLimit-Reset: 34
 Over the limit is a **`429`** with `Retry-After` in seconds and a JSON-RPC error explaining which
 limit was hit.
 
+**The REST routes have their own budget for the same token** — 300 per minute (`API_TOKEN_RATE_LIMIT`),
+since 2026-09-15. The `read_*` tools forward to those routes carrying your token, so a read is
+counted on both: one against the MCP budget above, one against the REST budget. The REST ceiling
+is kept above the MCP one so this budget is the one you reach first; a `429` with a plain
+`{ error: { code: "RATE_LIMITED" } }` body rather than a JSON-RPC error means the REST budget
+was spent — by another client sharing the token, or by calling the routes directly.
+
 **Per token, not per IP** — an IP is shared behind NAT and forgeable without a trusted proxy, while
 the token is the thing that can be revoked. It also means one merchant's runaway agent cannot spend
 another's allowance. A second token gets its own budget, which is another reason to mint a narrow one

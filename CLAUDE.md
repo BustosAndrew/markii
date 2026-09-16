@@ -498,7 +498,12 @@ free months). `429 RATE_LIMITED` with `Retry-After`; counted before validation; 
 never the address; expired rows swept by the nightly cron. **Supabase's own limits do not cover
 this** because every auth call is server-side (D30) and Supabase sees Vercel's address for
 everyone — so without it one password-spraying run would lock the whole platform out. Fails open,
-like the MCP limiter. Config: `AUTH_RATE_LIMIT_*` in `.env.example`.
+like the MCP limiter. Config: `AUTH_RATE_LIMIT_*` in `.env.example`. **API tokens are limited on
+the REST surface too as of 2026-09-15** (`lib/auth/token-rate-limit.ts`, consumed in `orgHandler`,
+300/min per token): the MCP budget was routable around by calling `/api/*` directly with the same
+token. Cookie sessions are not counted. **The REST ceiling must stay above MCP's** — `read_*`
+tools forward to these handlers with the caller's token, so an MCP read lands on both counters;
+a unit test pins the ordering.
 
 **Stripe Tax on Markii's own subscription is built as of 2026-09-13** (G3). `automatic_tax` on every
 platform-account subscription create, change and preview — **no `Stripe-Account` header**, the

@@ -1325,7 +1325,15 @@ config flag. This — not latency — is the thing that would force multi-region
 ### G12 — Abuse and rate limits
 
 - **Per-org API rate limits**, with headroom well above normal dashboard and MCP use. ✅ MCP is
-  limited per token (2026-09-07); the dashboard REST surface is not, and is cookie-gated.
+  limited per token (2026-09-07), and ✅ **the REST surface is limited per token too
+  (2026-09-15)** — `lib/auth/token-rate-limit.ts`, consumed in `orgHandler`, which is the one
+  wrapper every token-authenticated route passes through. Until then the limit met on `/api/mcp`
+  was routable around by calling the routes directly with the same token. **Per token rather than
+  per org**, matching MCP: the token is the credential that can be revoked, and a merchant who
+  mints ten tokens has spent ten of their own budgets on their own org's rows — the shared
+  resource G12 protects is the platform, and each token's ceiling bounds that. Cookie sessions
+  are deliberately not counted: a dashboard render fans out a dozen calls, and sessions are
+  gated on how they come to exist, not how often they read.
 - **Storefront fair-use bandwidth** on top of the G5 quotas; throttle rather than hard-cut.
 - **Trial abuse:** email verification required, and since no card is taken at signup (D9), pair it
   with per-IP/per-domain signup limits and manual review above a threshold. ✅ **The limits are

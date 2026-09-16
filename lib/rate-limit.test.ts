@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { decide, rateLimitHeaders, windowStartFor, type RateLimitPolicy } from "./rate-limit";
+import {
+  API_TOKEN_RATE_LIMIT,
+  MCP_RATE_LIMIT,
+  decide,
+  rateLimitHeaders,
+  windowStartFor,
+  type RateLimitPolicy,
+} from "./rate-limit";
 
 /**
  * The rate-limit arithmetic.
@@ -106,5 +113,22 @@ describe("rateLimitHeaders", () => {
   it("omits Retry-After unless the request was refused", () => {
     expect(rateLimitHeaders(decide(1, WINDOW, POLICY), POLICY)["Retry-After"]).toBeUndefined();
     expect(rateLimitHeaders(decide(4, WINDOW, POLICY), POLICY)["Retry-After"]).toBe("30");
+  });
+});
+
+describe("API_TOKEN_RATE_LIMIT", () => {
+  /**
+   * The MCP `read_*` tools forward in-process to the REST handlers carrying
+   * the caller's own token, so every MCP read is counted on both keys. If the
+   * REST ceiling ever sat at or below MCP's, an MCP client would be refused by
+   * the REST counter before reaching the number `docs/MCP.md` promises it —
+   * with a `429` from the surface it never called.
+   */
+  it("sits strictly above the MCP limit, because MCP reads land on both counters", () => {
+    expect(API_TOKEN_RATE_LIMIT.limit).toBeGreaterThan(MCP_RATE_LIMIT.limit);
+  });
+
+  it("is a per-minute window like the MCP policy, so the two budgets are comparable", () => {
+    expect(API_TOKEN_RATE_LIMIT.windowMs).toBe(MCP_RATE_LIMIT.windowMs);
   });
 });

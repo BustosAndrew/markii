@@ -4,6 +4,7 @@ import { errorResponse, forbidden } from "../api";
 import { assertAccountStanding } from "../billing/standing-guard";
 import { roleHasPermission } from "./permissions";
 import { requireAuthContext, type AuthContext } from "./session";
+import { consumeTokenBudget, withTokenBudget, type TokenBudget } from "./token-rate-limit";
 
 type RouteCtx = { params: Promise<Record<string, string>> };
 
@@ -52,8 +53,24 @@ export function orgHandler(
   options: { permission?: string } = {},
 ) {
   return async (req: Request, ctx: RouteCtx): Promise<Response> => {
+    /**
+     * The token's remaining budget, once known, so it rides on the reply
+     * whichever way the request ends. Declared outside the `try` because the
+     * refusals below — permission, standing, the handler's own errors — all
+     * land in the `catch`, and a refused request spent a slot too.
+     */
+    let budget: TokenBudget | null = null;
     try {
       const session = await requireAuthContext(req);
+
+      /**
+       * Per-token rate limit on the REST surface (G12). **After auth, before
+       * authorization**: a request that is over budget is refused before its
+       * permission is checked, so a token in a hot loop costs one indexed
+       * lookup and one upsert and nothing else. Cookie sessions return null
+       * here and are not limited — see `consumeTokenBudget` for why.
+       */
+      budget = await consumeTokenBudget(session);
 
       if (options.permission && !roleHasPermission(session.role, options.permission)) {
         throw forbidden(`Your role (${session.role}) cannot ${options.permission}`);
@@ -116,9 +133,9 @@ export function orgHandler(
         }
       }
 
-      return await fn(req, { ...ctx, session, orgId: session.org.id });
+      return withTokenBudget(await fn(req, { ...ctx, session, orgId: session.org.id }), budget);
     } catch (e) {
-      return errorResponse(e);
+      return withTokenBudget(errorResponse(e), budget);
     }
   };
 }

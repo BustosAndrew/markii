@@ -1566,6 +1566,19 @@ delivered when no mail service is wired.
 > unrecoverable, `owner` is not a mintable role, and revocation is a soft delete so past audit
 > entries stay attributable.
 >
+> **Token calls are rate limited — ✅ LIVE 2026-09-15 (G12).** 300 requests per minute per token,
+> fixed window, on every `/api/*` route a token can authenticate to (`API_TOKEN_RATE_LIMIT`). The
+> budget rides every token reply as `RateLimit-Limit` / `RateLimit-Remaining` / `RateLimit-Reset`,
+> error replies included, and a refusal is `429`
+> `{ error: { code: "RATE_LIMITED", message, details: { retryAfterSeconds } } }` with
+> `Retry-After`. It is checked **after authentication and before authorization**, so an anonymous
+> flood fills no counter and an over-budget token is refused for budget, never told `FORBIDDEN`.
+> **Cookie sessions are not counted** and carry no `RateLimit-*` headers — a dashboard render fans
+> out a dozen calls, and how a session comes to exist is already gated (MFA, the auth limits
+> below). The MCP server has its own 120/min budget on `/api/mcp`, and its `read_*` tools forward
+> to these handlers with the same token, so an MCP read is counted on both; the REST ceiling is
+> kept above MCP's for that reason. Fails open, like every limiter here.
+>
 > ✅ **Org switching** — `POST /api/org/switch { orgId }`. `GET /api/me` now also returns
 > `organizations: [{ id, name, slug, role, active }]` so the dashboard can render a switcher from
 > one call. Membership is re-checked server-side on every switch and every request, which is why the
@@ -3079,7 +3092,7 @@ defineAction({
 | `POST` | `/api/actions/:id?dryRun=1` | Return the diff an invocation *would* produce, without writing. A **query flag on the invoke route**, not a `/dry-run` sub-path — one handler, so the preview cannot drift from the execution |
 | `POST` | `/api/actions/:id/undo` | ✅ Invert a prior invocation by `invocationId`, when `undoable`. Runs the inverse as a **new** invocation — same permission, same step-up, its own audit row |
 | `GET` | `/api/actions/invocations` | Audit trail: actor (`user` \| `agent` \| `token`), input, result, `occurredAt`. Requires **`org.audit`** — same gate as `/api/org/audit`, since both read one table |
-| `ALL` | `/api/mcp` | ✅ MCP server — **tools** (59 registry actions + 10 `read_*`), **prompts**, and **resources** (`resources/list`, `resources/templates/list`, `resources/read`). Stateless JSON-RPC over `POST`; `GET`/`DELETE` are `405`. **Token-only auth** (rule 6) — a session cookie is refused. **Rate limited** at 120 req/min per token (`429` + `Retry-After`, fails open). Setup: `docs/MCP.md` |
+| `ALL` | `/api/mcp` | ✅ MCP server — **tools** (59 registry actions + 10 `read_*`), **prompts**, and **resources** (`resources/list`, `resources/templates/list`, `resources/read`). Stateless JSON-RPC over `POST`; `GET`/`DELETE` are `405`. **Token-only auth** (rule 6) — a session cookie is refused. **Rate limited** at 120 req/min per token (`429` + `Retry-After`, fails open); the same token on the REST routes has its own 300/min budget (§16, 2026-09-15). Setup: `docs/MCP.md` |
 
 Invocation response:
 
@@ -3258,7 +3271,7 @@ preview tabs):
 | `/agent.md` | agent protocol + purchase instructions | ✅ LIVE |
 | `/sitemap.xml` | sitemap | ✅ LIVE |
 | `/api/checkout` | x402 payment endpoint (402 challenge → settle) | ✅ LIVE |
-| `/api/cart*` · `/api/checkout/session*` | cart + checkout API | ✅ LIVE (§18.4) — x402 rail; card rail PLANNED |
+| `/api/cart*` · `/api/checkout/session*` | cart + checkout API | ✅ LIVE (§18.4) — both rails (this row said "card rail PLANNED" for weeks after Stripe Connect direct charges shipped) |
 | `/cart` | the human cart page (§18.4) — the sanctioned island; checkout continues from it | ✅ LIVE (this row said PLANNED for weeks after `app/%5Fsites/[site]/cart/page.tsx` shipped) |
 | `/collections` · `/collections/{handle}` | published collections — index, and one collection as product cards with a Schema.org `CollectionPage` + `ItemList` of the product URLs. Manual order or rules evaluated per request; enabled products only; an unpublished handle is a 404 like one that never existed. Also in `llms.txt` (`## Collections`), the sitemap, and the header nav once any is published | ✅ LIVE (2026-09-14, §18.2) |
 | `/blog` · `/pages/{handle}` | builder-authored content | 🟡 PLANNED (§19) |

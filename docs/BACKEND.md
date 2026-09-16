@@ -613,6 +613,17 @@ Contract `docs/API.md` §18. The largest phase. Order within it:
     `llms.txt` and the sitemap through the shared bundle. Falsified: dropping the published filter
     serves a draft handle 200. Found by reading §23's PLANNED rows, three of which — `/cart`,
     `/account`, and this — were stale in the two directions this file warns about.
+14. ~~**API token rate limit on the REST surface** (G12)~~ — done 2026-09-15. The MCP limiter
+    keyed on the token, and the same token on `/api/*` was keyed on nothing, so the ceiling was
+    routable around. `lib/auth/token-rate-limit.ts` is consumed in `orgHandler` after
+    `requireAuthContext` and before the permission check — the same choke-point argument that put
+    the audit request context in `requireAuthContext`: every token-accepting route is wrapped by
+    it, so a route added tomorrow is limited without opting in. The budget rides every token reply,
+    error replies included; cookie sessions are not counted. **The REST ceiling must stay above
+    MCP's** — `read_*` tools forward in-process to these handlers with the caller's token, so an
+    MCP read lands on both counters, and `lib/rate-limit.test.ts` pins the ordering. Falsified:
+    making the budget a no-op fails five of the six integration tests at their own assertions
+    and leaves the cookie test green.
 
 > **Two things this uncovered, both worth knowing.**
 >
