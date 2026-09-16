@@ -115,7 +115,12 @@ export type MeResponse = {
   standing: AccountStanding;
 };
 
-export const AUDIT_ACTOR_TYPES = ["user", "agent", "token", "system"] as const;
+/**
+ * `operator` (2026-09-15, G12) is a Markii operator acting on this org —
+ * today, suspending or reinstating it. Rendered as "Markii operator"; the
+ * merchant's staff list has no row for them, and `actor.name` says so.
+ */
+export const AUDIT_ACTOR_TYPES = ["user", "agent", "token", "system", "operator"] as const;
 export const AUDIT_RISK_TIERS = ["read", "low", "medium", "high"] as const;
 
 export type AuditActorType = (typeof AUDIT_ACTOR_TYPES)[number];

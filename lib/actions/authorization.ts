@@ -2,7 +2,7 @@ import "server-only";
 
 import { and, eq, isNull } from "drizzle-orm";
 import { apiTokens, db, staff } from "../db";
-import { roleHasPermission } from "../auth/permissions";
+import { PLATFORM_PERMISSIONS, roleHasPermission } from "../auth/permissions";
 import { setAuthorizationResolver } from "./registry";
 import type { Actor } from "./types";
 
@@ -27,6 +27,18 @@ async function resolve(actor: Actor, permission: string): Promise<boolean> {
    * is missing. Anything else that mints one is a full authorization bypass.
    */
   if (actor.type === "system") return true;
+
+  /**
+   * An operator holds the platform permissions and nothing else. The allowlist
+   * was checked when the actor was minted (`requireOperator`), which is the
+   * same trust the `system` branch places in `CRON_SECRET`: what may mint one
+   * is the whole question, and nothing may but that one function. Denying
+   * every merchant-scoped permission here is what keeps an operator from
+   * editing a catalog through the door that exists to suspend a store.
+   */
+  if (actor.type === "operator") {
+    return (PLATFORM_PERMISSIONS as readonly string[]).includes(permission);
+  }
 
   if (!actor.orgId) return false;
 

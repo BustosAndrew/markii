@@ -243,6 +243,16 @@ export type Dunning = {
 };
 
 export type AccountStanding =
+  /**
+   * Held by Markii itself (G12, 2026-09-15) — a platform operator's decision,
+   * never a billing state, and reported ahead of every billing state because
+   * paying does not lift it. **Render it above everything, on every page,
+   * with a support link and no subscribe button** — writes answer
+   * `403 ACCOUNT_SUSPENDED` (its own code: not `FORBIDDEN`, so do not suggest
+   * asking an admin; not 402, so do not open the plan picker). The operator's
+   * reason is not on the wire; `message` is the whole merchant-facing copy.
+   */
+  | { state: "suspended"; message: string; since: string }
   | { state: "subscribed"; message: string }
   /**
    * A renewal payment is failing. **Render this above everything, on every

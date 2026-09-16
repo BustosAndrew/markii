@@ -634,6 +634,22 @@ Contract `docs/API.md` §18. The largest phase. Order within it:
     Not claimed before sending, unlike the merchant-facing sweeps: a duplicate to Markii's own
     inbox costs a second read, not a complaint on Markii's reputation. Verified with a real Resend
     send to `delivered@resend.dev`; falsified by moving the threshold to `>`.
+16. ~~**Org suspension — the operator's action** (G12)~~ — done 2026-09-15, `docs/API.md` §26.
+    Four pieces, and the order they were found in is the lesson. **A new actor kind, `operator`**,
+    rather than a `user` with a borrowed org: the resolver authorizes a `user` from their staff row
+    in `orgId`, which an operator must not have, so it needed its own branch — one that grants
+    `platform.*` and nothing else. **A permission no role holds**: `owner` and `administrator`
+    resolve to the whole `PERMISSIONS` array, so `platform.operate` lives in a separate
+    `PLATFORM_PERMISSIONS` or every merchant could suspend themselves; the MCP toolset test that
+    said "an administrator gets every action" went red and now says "every action but
+    `platform.*`", which is the property. **Derived standing**: `suspended_at` is read into
+    `accountStanding` ahead of every billing state, so all five column-enumerating selects had to
+    learn the new columns — the compiler found them, which is the argument for `StandingOrg` being
+    a `Pick`. **The gate exemption**: `invokeAction` holds `platform.*` out of
+    `assertAccountStanding` beside `billing.*`, or `unsuspendOrg` refuses itself; falsified, and it
+    does. One wording correction while building: the reason is **not** a private note — it is the
+    input of an audited action the merchant's admins can read, and that is right, so the comments
+    now say to write it for them.
 
 > **Two things this uncovered, both worth knowing.**
 >

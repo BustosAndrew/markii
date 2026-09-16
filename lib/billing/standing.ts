@@ -21,6 +21,14 @@ import { statusGrantsPlan } from "./mirror";
  */
 
 export type AccountStanding =
+  /**
+   * Held by Markii itself (G12) — a platform operator's decision, not a
+   * billing state, and answered ahead of every billing state because paying
+   * does not lift it. `reason` is what the operator recorded; the standing
+   * payload carries a "contact support" message instead, and the reason is
+   * read from the org's audit log, where it belongs.
+   */
+  | { state: "suspended"; reason: string; since: Date }
   /** A paid (or Stripe-trialing) subscription. Nothing is gated. */
   | { state: "subscribed"; reason: string }
   /** Inside the free month. Full access, no card taken. */
@@ -50,12 +58,30 @@ export type AccountStanding =
 
 export type StandingOrg = Pick<
   Organization,
-  "stripeSubscriptionId" | "subscriptionStatus" | "freeTrialEndsAt" | "pastDueSince"
+  | "stripeSubscriptionId"
+  | "subscriptionStatus"
+  | "freeTrialEndsAt"
+  | "pastDueSince"
+  | "suspendedAt"
+  | "suspendedReason"
 >;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export function accountStanding(org: StandingOrg, now: Date = new Date()): AccountStanding {
+  /**
+   * First, and unconditionally: a suspension is Markii's own hold and no
+   * subscription state can outrank it. The timestamp records *when*; it is
+   * not a schedule, so it is never compared with the clock.
+   */
+  if (org.suspendedAt) {
+    return {
+      state: "suspended",
+      reason: org.suspendedReason ?? "Suspended by Markii.",
+      since: org.suspendedAt,
+    };
+  }
+
   /**
    * The subscription is checked **first and on its own terms**. A merchant who
    * pays is in standing whatever their trial date says — and leaving a stale
@@ -131,12 +157,12 @@ export function inGoodStanding(org: StandingOrg, now?: Date): boolean {
  * ladder reaches every gate at once rather than the ones someone remembered.
  */
 export function storefrontHeld(standing: AccountStanding): boolean {
-  if (standing.state === "expired") return true;
+  if (standing.state === "expired" || standing.state === "suspended") return true;
   return standing.state === "past_due" && standing.dunning.holds.storefront;
 }
 
 export function writesHeld(standing: AccountStanding): boolean {
-  if (standing.state === "expired") return true;
+  if (standing.state === "expired" || standing.state === "suspended") return true;
   return standing.state === "past_due" && standing.dunning.holds.writes;
 }
 
@@ -162,6 +188,19 @@ export function serializeStanding(standing: AccountStanding) {
       };
     case "expired":
       return { state: standing.state, message: standing.reason, endedAt: standing.endedAt.toISOString() };
+    /**
+     * `message` is what to do, which is the same every time; the grounds are
+     * in the merchant's audit log (`platform.suspendOrg`, with its input), not
+     * repeated on every `/api/me`. Not a secret — the audit log is theirs.
+     */
+    case "suspended":
+      return {
+        state: standing.state,
+        message:
+          "This account has been suspended by Markii. Your data is intact and readable; " +
+          "contact support to resolve it.",
+        since: standing.since.toISOString(),
+      };
     case "past_due": {
       const d = standing.dunning;
       return {

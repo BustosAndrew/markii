@@ -17,7 +17,7 @@ import type { DiffEntry } from "../db";
  */
 
 /** Actor types as the audit table records them. */
-export const AUDIT_ACTOR_TYPES = ["user", "agent", "token", "system"] as const;
+export const AUDIT_ACTOR_TYPES = ["user", "agent", "token", "system", "operator"] as const;
 export const AUDIT_RISK_TIERS = ["read", "low", "medium", "high"] as const;
 
 export type AuditActorType = (typeof AUDIT_ACTOR_TYPES)[number];
@@ -140,9 +140,17 @@ export function toAuditEntry(
       id: row.actorId,
       /**
        * `system` names itself — there is no record to resolve, and it is the
-       * one actor whose identity is a role rather than a person.
+       * one actor whose identity is a role rather than a person. An `operator`
+       * is a person, but not one of the merchant's staff, so there is no row
+       * in their org to name them from — and the merchant is owed the fact
+       * that Markii acted, not the operator's name.
        */
-      name: row.actorType === "system" ? "Markii system" : (resolved?.name ?? null),
+      name:
+        row.actorType === "system"
+          ? "Markii system"
+          : row.actorType === "operator"
+            ? "Markii operator"
+            : (resolved?.name ?? null),
       email: resolved?.email ?? null,
     },
     action: row.actionId,

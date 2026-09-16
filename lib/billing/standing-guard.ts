@@ -15,7 +15,7 @@ import {
  * the two causes are undone by different actions — the merchant un-pauses their
  * own store; only a subscription clears a billing hold.
  */
-export type HaltCause = "paused" | "billing" | null;
+export type HaltCause = "paused" | "billing" | "suspended" | null;
 
 /**
  * Whether a storefront must not transact, resolved from a site id.
@@ -33,6 +33,8 @@ export async function siteHalted(siteId: number): Promise<{ halted: boolean; cau
       subscriptionStatus: organizations.subscriptionStatus,
       freeTrialEndsAt: organizations.freeTrialEndsAt,
       pastDueSince: organizations.pastDueSince,
+      suspendedAt: organizations.suspendedAt,
+      suspendedReason: organizations.suspendedReason,
     })
     .from(sites)
     .innerJoin(organizations, eq(organizations.id, sites.orgId))
@@ -42,7 +44,9 @@ export async function siteHalted(siteId: number): Promise<{ halted: boolean; cau
   /** A missing join is Markii's bug, not a merchant's debt — never halt on it. */
   if (!row) return { halted: false, cause: null };
   if (row.status === "paused") return { halted: true, cause: "paused" };
-  if (storefrontHeld(accountStanding(row))) return { halted: true, cause: "billing" };
+  const standing = accountStanding(row);
+  if (standing.state === "suspended") return { halted: true, cause: "suspended" };
+  if (storefrontHeld(standing)) return { halted: true, cause: "billing" };
   return { halted: false, cause: null };
 }
 
@@ -106,6 +110,8 @@ export async function standingFor(orgId: string): Promise<AccountStanding | null
       subscriptionStatus: organizations.subscriptionStatus,
       freeTrialEndsAt: organizations.freeTrialEndsAt,
       pastDueSince: organizations.pastDueSince,
+      suspendedAt: organizations.suspendedAt,
+      suspendedReason: organizations.suspendedReason,
     })
     .from(organizations)
     .where(eq(organizations.id, orgId))
@@ -154,6 +160,27 @@ function pastDueRefusal(standing: Extract<AccountStanding, { state: "past_due" }
 export async function assertAccountStanding(orgId: string, actionId: string): Promise<void> {
   const standing = await standingFor(orgId);
   if (!standing) return;
+  /**
+   * Markii's own hold (G12). **403, not 402**: there is nothing to pay. And
+   * its own code rather than `FORBIDDEN`, because the caller's permissions are
+   * fine — a screen reacting to `FORBIDDEN` would suggest asking an admin for
+   * access, which is exactly the wrong door. The reason is in the merchant's
+   * audit log, not repeated here; see `serializeStanding`.
+   */
+  if (standing.state === "suspended") {
+    throw new ApiError(
+      "ACCOUNT_SUSPENDED",
+      403,
+      `This account was suspended by Markii on ${standing.since.toISOString().slice(0, 10)}, so "${actionId}" is on hold.`,
+      {
+        resolution:
+          "Contact support to resolve the suspension. Your catalog, orders and customers are " +
+          "untouched and still readable.",
+        standing: standing.state,
+        since: standing.since.toISOString(),
+      },
+    );
+  }
   if (standing.state === "past_due") {
     if (writesHeld(standing)) throw pastDueRefusal(standing, actionId);
     return;

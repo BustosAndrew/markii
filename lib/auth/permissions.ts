@@ -50,7 +50,19 @@ export const PERMISSIONS = [
   "org.audit",
 ] as const;
 
-export type Permission = (typeof PERMISSIONS)[number];
+/**
+ * Permissions held by **no staff role**, only by a platform `operator` actor
+ * (G12). Kept out of `PERMISSIONS` on purpose: `owner` and `administrator`
+ * resolve to that whole array, so listing `platform.operate` there would hand
+ * every merchant the ability to suspend themselves — and, through any bug in
+ * org scoping, anyone else. `roleHasPermission` reads `ROLE_PERMISSIONS`, which
+ * is built from `PERMISSIONS`, so a role can never hold one of these.
+ */
+export const PLATFORM_PERMISSIONS = ["platform.operate"] as const;
+
+export type Permission =
+  | (typeof PERMISSIONS)[number]
+  | (typeof PLATFORM_PERMISSIONS)[number];
 
 const READ_ONLY: Permission[] = [
   "catalog.read",

@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { accountStanding, inGoodStanding, trialEndFrom, type StandingOrg } from "./standing";
+import {
+  accountStanding,
+  growthHeld,
+  inGoodStanding,
+  serializeStanding,
+  storefrontHeld,
+  trialEndFrom,
+  writesHeld,
+  type StandingOrg,
+} from "./standing";
 
 /**
  * Account standing decides whether a merchant's storefront serves at all, which
@@ -16,6 +25,8 @@ function org(over: Partial<StandingOrg> = {}): StandingOrg {
     subscriptionStatus: null,
     freeTrialEndsAt: null,
     pastDueSince: null,
+    suspendedAt: null,
+    suspendedReason: null,
     ...over,
   };
 }
@@ -127,5 +138,56 @@ describe("trialEndFrom", () => {
   it("rolls a month-end start forward rather than truncating it", () => {
     const end = trialEndFrom(new Date("2026-01-31T00:00:00.000Z"));
     expect(end.toISOString().slice(0, 10)).toBe("2026-03-03");
+  });
+});
+
+describe("suspended (G12)", () => {
+  const since = new Date("2026-09-10T00:00:00.000Z");
+
+  /**
+   * The ordering that matters: a paying merchant is normally in standing
+   * whatever else the row says. A suspension is the one thing that outranks
+   * that, because it is Markii's decision and paying does not lift it.
+   */
+  it("outranks a paying subscription", () => {
+    const s = accountStanding(
+      org({
+        stripeSubscriptionId: "sub_1",
+        subscriptionStatus: "active",
+        suspendedAt: since,
+        suspendedReason: "review",
+      }),
+      NOW,
+    );
+    expect(s.state).toBe("suspended");
+    if (s.state === "suspended") expect(s.since).toBe(since);
+  });
+
+  it("holds storefront, writes and growth all at once", () => {
+    const s = accountStanding(org({ suspendedAt: since }), NOW);
+    expect(storefrontHeld(s)).toBe(true);
+    expect(writesHeld(s)).toBe(true);
+    expect(growthHeld(s)).toBe(true);
+    expect(inGoodStanding(org({ suspendedAt: since }), NOW)).toBe(false);
+  });
+
+  /** The timestamp records when; it is not a schedule. */
+  it("is suspended even if the timestamp is in the future", () => {
+    const s = accountStanding(org({ suspendedAt: new Date("2030-01-01T00:00:00Z") }), NOW);
+    expect(s.state).toBe("suspended");
+  });
+
+  /**
+   * The standing payload says what to do; the grounds live in the audit log.
+   * Pinned so `/api/me` does not start repeating a free-text note on every
+   * page load.
+   */
+  it("carries the support message, not the reason", () => {
+    const s = accountStanding(org({ suspendedAt: since, suspendedReason: "40 sign-ups from throwaway.example" }), NOW);
+    const wire = serializeStanding(s) as { state: string; message: string; since?: string };
+    expect(wire.state).toBe("suspended");
+    expect(wire.since).toBe(since.toISOString());
+    expect(JSON.stringify(wire)).not.toContain("throwaway");
+    expect(wire.message).toMatch(/support/i);
   });
 });

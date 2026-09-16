@@ -59,6 +59,13 @@ export class ApiError extends Error {
        */
       | "HUMAN_APPROVAL_REQUIRED"
       /**
+       * The org is held by Markii itself (G12) — a platform operator's
+       * decision, never a billing state. 403 with its own code: there is
+       * nothing to pay (so not 402) and nothing to ask an admin for (so not
+       * `FORBIDDEN`). The fix is a conversation with support.
+       */
+      | "ACCOUNT_SUSPENDED"
+      /**
        * Too many attempts in the window (G12). Paired with 429 and a
        * `Retry-After`. Not `FORBIDDEN`: the caller may be perfectly entitled
        * and simply needs to wait, and a form that reads this as "wrong

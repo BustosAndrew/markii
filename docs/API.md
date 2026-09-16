@@ -41,6 +41,7 @@ carry an explicit status — **never call a `PLANNED` endpoint and never fake it
 | 21 | Agent Ops add-on | 🟡 PLANNED | F (last) |
 | 22 | **Action registry & MCP** — agent-native architecture | ✅ LIVE (registry, invoke, dry-run, audit, **undo** — 2026-08-18, and the **MCP server** — 2026-09-07: tools, prompts **and resources**). `undoable` is now derived from an `inverse()` and refused if declared without one, which corrected four actions that claimed it falsely | **Registry: C · MCP: D** |
 | 24 | Email — sending domains, deliverability, suppression | ✅ LIVE — SES transport, templates, suppression list, bounce webhook, `/api/settings/email`, §22 actions. **Sending works as of 2026-08-11** (production access in `us-west-2`, verified by a live send). **Customer mail sends even before a merchant verifies a domain** (D44, 2026-08-16): without one it leaves from the storefront's own `accounts@{slug}.{ROOT_DOMAIN}` — still SES, still the store's name, **never bare `markii.shop` and never Resend**. A verified domain always wins when it exists. **The SNS → webhook hop has carried a real bounce end to end as of 2026-08-16** (`tests/integration/ses-suppression.test.ts`, gated on `MARKII_SES_TESTS=1`): a suppression row was written and **the next send to that address was refused**. This row claimed "never carried a real event" until 2026-08-18 | **C** |
+| 26 | Platform operations — org suspension | ✅ LIVE (2026-09-15, G12). Operator-only (`PLATFORM_OPERATOR_EMAILS`), registry actions `platform.suspendOrg` / `unsuspendOrg`, `403 ACCOUNT_SUSPENDED` to the merchant's writes, derived per request | — |
 
 **v3 note.** Markii is now a full commerce platform (`docs/PLAN.md` v3). §16 was a **breaking change
 to everything above it**, and as of 2026-07-31 that change has landed: **every `/api/*` route
@@ -3622,6 +3623,57 @@ waiver did not hold every run would 403 and nobody would ever be billed.
 **Frontend:** none, and none planned. This is operator surface; no `*_API_LIVE` constant and no
 `lib/api/*` service, because no screen calls it. The new **`billing.closePeriod` action** is
 registry-visible and invocable at `POST /api/actions/billing.closePeriod` like any other.
+
+---
+
+## 26. Platform operations — org suspension ✅ LIVE (2026-09-15, G12)
+
+What a person at Markii can do to a merchant's org, which until now was nothing short of a SQL
+client. Built to give the sign-up review digest (§25) an action behind it.
+
+| Method | Path | Notes |
+|---|---|---|
+| `GET` | `/api/admin/orgs/:idOrSlug` | The org as an operator sees it: `{ id, slug, name, billingEmail, createdAt, planId, standing, suspension: { since, reason, by } \| null, stores[] }`. By id or slug — the digest names slugs, the audit log names ids |
+| `POST` | `/api/admin/orgs/:idOrSlug/suspend` | `{ reason }` (3–1000 chars, required) → `ActionOutcome` of **`platform.suspendOrg`**. `?dryRun=1` for the diff without the write. `409` if already suspended |
+| `DELETE` | `/api/admin/orgs/:idOrSlug/suspend` | `ActionOutcome` of **`platform.unsuspendOrg`**. `409` if not suspended |
+
+**Who is an operator.** A **signed-in staff session** (so MFA and step-up apply — both actions are
+`high` and `requiresStepUp`) whose email is on **`PLATFORM_OPERATOR_EMAILS`**: exact addresses or
+`@domain` entries, comma-separated. Not a secret, because a secret cannot say *who* suspended a
+store and the audit row must; not an API token, because tokens are org-scoped and MFA-exempt.
+**Unset, nobody is an operator** — `503 CONFIGURATION_REQUIRED`, the same answer as a missing
+`CRON_SECRET` (D41). A merchant who is not on the list gets `403 FORBIDDEN` with their session
+intact; not a 404, since the route's existence is public in this repository.
+
+**It is the registry, not a side door.** Both mutations are actions held behind
+`platform.operate`, a permission **no staff role can hold** — it lives in `PLATFORM_PERMISSIONS`,
+kept out of the array `owner` and `administrator` resolve to, so no token of any role lists or can
+call them (a unit test pins this on the MCP toolset). The actor is a new kind, **`operator`**,
+whose `orgId` is the *target* org: that is what scopes the write and what makes it land in the
+**merchant's own audit log** as *"Markii operator"*, with the reason as the action's input. The
+`operator` branch of the resolver grants `platform.*` and **nothing else**, so an operator cannot
+edit a catalog through this door. `platform.*` is exempt from the standing gate in `invokeAction`
+for the mirror-image reason `billing.*` is — otherwise unsuspending a suspended org would refuse
+itself. Falsified: removing the exemption fails the reinstatement test with the gate's own 403.
+
+**What a suspension does — derived, never swept.** `organizations.suspended_at` is a timestamp
+(migration `0042`); `accountStanding` answers **`suspended` ahead of every billing state**, because
+paying does not lift it. Storefront, writes and growth are all held: the store renders the same
+"temporarily paused" page as a lapsed trial and **discloses nothing**, checkouts, downloads and
+membership renewals halt through `siteHalted` (cause `suspended`), and every write outside
+`billing.*` answers **`403 ACCOUNT_SUSPENDED`** — its own code: not 402 (nothing to pay), not
+`FORBIDDEN` (nothing to ask an admin for). **Reads are never gated** and **the billing door stays
+open** (the merchant can cancel; Markii must not keep charging a store it took offline).
+
+**The reason is the merchant's to read.** `standing.message` on `/api/me` says "contact support";
+the grounds are in their audit log as the input of `platform.suspendOrg`, readable by `org.audit`
+holders. It is deliberately not a private note: write it as the thing you would say to them.
+Both `suspended_reason` and `suspended_by` are also kept on the org row, since the audit view is
+filterable and the row is not.
+
+**Frontend:** `lib/api/admin.ts` (`ADMIN_API_LIVE`) exists so a screen *could* be built, but none
+is on the build order and it must never hang off merchant navigation. The merchant-facing change
+is the new `suspended` standing state — see `docs/FRONTEND.md`.
 
 ---
 

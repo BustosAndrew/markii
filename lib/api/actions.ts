@@ -82,7 +82,7 @@ export function dryRunAction<TResult = unknown>(
 export type ActionInvocation = {
   invocationId: string;
   actionId: string;
-  actor: { type: "user" | "agent" | "token" | "system"; id: string };
+  actor: { type: "user" | "agent" | "token" | "system" | "operator"; id: string };
   riskTier: RiskTier;
   ok: boolean;
   input: unknown;

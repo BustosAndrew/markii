@@ -232,7 +232,7 @@ export async function restockRefundLines(
   tx: DbHandle,
   reason: string,
   lines: ComputedRefundLine[],
-  actor: { type: "user" | "agent" | "token" | "system"; id: string | null },
+  actor: { type: "user" | "agent" | "token" | "system" | "operator"; id: string | null },
 ): Promise<{ restocked: number[]; unrestockable: number[] }> {
   const restocked: number[] = [];
   const unrestockable: number[] = [];

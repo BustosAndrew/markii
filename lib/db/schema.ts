@@ -618,6 +618,24 @@ export const organizations = pgTable(
      * be trusted to flip a stored step on the right day.
      */
     pastDueSince: timestamp("past_due_since", { withTimezone: true }),
+    /**
+     * Held by Markii itself (G12) — set by a platform operator through
+     * `platform.suspendOrg`, cleared by `platform.unsuspendOrg`, nothing else.
+     *
+     * A timestamp rather than a flag for the same reason standing is derived:
+     * `accountStanding` reads it on every request and answers `suspended`
+     * ahead of every billing state, so the store stops at the second it is
+     * set and nothing has to sweep. **Distinct from every billing hold** —
+     * paying does not lift it, so the merchant is told `ACCOUNT_SUSPENDED`
+     * and pointed at support, never at the subscribe button.
+     *
+     * `suspendedBy` is the operator's user id, kept here as well as in the
+     * audit log so the org row itself says who — the audit row is the
+     * merchant's view and can be filtered; this cannot.
+     */
+    suspendedAt: timestamp("suspended_at", { withTimezone: true }),
+    suspendedReason: text("suspended_reason"),
+    suspendedBy: text("suspended_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -1081,7 +1099,7 @@ export const inventoryLedger = pgTable(
     reason: text("reason").notNull(),
     /** Ties the entry to the action that caused it (§22), so undo can find it. */
     invocationId: text("invocation_id"),
-    actorType: text("actor_type", { enum: ["user", "agent", "token", "system"] }).notNull(),
+    actorType: text("actor_type", { enum: ["user", "agent", "token", "system", "operator"] }).notNull(),
     actorId: text("actor_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -1281,7 +1299,7 @@ export const actionInvocations = pgTable(
   {
     id: text("id").primaryKey(),
     actionId: text("action_id").notNull(),
-    actorType: text("actor_type", { enum: ["user", "agent", "token", "system"] }).notNull(),
+    actorType: text("actor_type", { enum: ["user", "agent", "token", "system", "operator"] }).notNull(),
     actorId: text("actor_id"),
     /**
      * Nullable **only because organizations do not exist yet**. Phase A makes it
@@ -2008,7 +2026,7 @@ export const refunds = pgTable(
      * absent rather than allowed to block a refund the shopper is owed.
      */
     taxReversalId: text("tax_reversal_id"),
-    actorType: text("actor_type", { enum: ["user", "agent", "token", "system"] }).notNull(),
+    actorType: text("actor_type", { enum: ["user", "agent", "token", "system", "operator"] }).notNull(),
     actorId: text("actor_id"),
     /** Ties the refund to the invocation that made it (§22). */
     invocationId: text("invocation_id"),
@@ -2065,7 +2083,7 @@ export const fulfillments = pgTable(
     /** Whether the shopper was emailed. False is a real state, not a failure. */
     notifiedCustomer: boolean("notified_customer").notNull().default(false),
     note: text("note"),
-    actorType: text("actor_type", { enum: ["user", "agent", "token", "system"] }).notNull(),
+    actorType: text("actor_type", { enum: ["user", "agent", "token", "system", "operator"] }).notNull(),
     actorId: text("actor_id"),
     invocationId: text("invocation_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -2130,7 +2148,7 @@ export const orderEvents = pgTable(
     visibility: text("visibility", { enum: ["internal", "customer"] })
       .notNull()
       .default("internal"),
-    actorType: text("actor_type", { enum: ["user", "agent", "token", "system"] }).notNull(),
+    actorType: text("actor_type", { enum: ["user", "agent", "token", "system", "operator"] }).notNull(),
     actorId: text("actor_id"),
     /** Display name captured at write time — staff leave, the timeline stays readable. */
     actorLabel: text("actor_label"),

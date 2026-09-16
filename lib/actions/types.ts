@@ -48,7 +48,21 @@ export type ActorIdentity =
    * is unset — is the *only* code permitted to mint a system actor from a
    * request. Adding a second such caller means re-arguing both bypasses below.
    */
-  | { type: "system"; id: string; orgId: string | null };
+  | { type: "system"; id: string; orgId: string | null }
+  /**
+   * A Markii operator acting on a merchant's org (G12) — a signed-in staff
+   * user on the `PLATFORM_OPERATOR_EMAILS` allowlist, with `orgId` set to the
+   * **target** org rather than their own.
+   *
+   * A fourth kind rather than a `user` with a borrowed org, because the
+   * resolver must be able to tell them apart: a `user` is authorized from
+   * their staff row in `orgId`, which an operator does not have, and must not
+   * be given one. It holds `platform.*` permissions and **nothing else** — it
+   * cannot edit the merchant's catalog through the same door. `id` is the
+   * person's user id, so the audit row names who. Minted only by
+   * `requireOperator` (`lib/auth/operator.ts`).
+   */
+  | { type: "operator"; id: string; orgId: string | null };
 
 /**
  * An actor as everything downstream sees it. The intersection keeps `type`

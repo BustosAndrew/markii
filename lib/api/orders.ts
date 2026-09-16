@@ -159,7 +159,7 @@ export type OrderEvent = {
   message: string;
   data: Record<string, unknown>;
   visibility: "internal" | "customer";
-  actorType: "user" | "agent" | "token" | "system";
+  actorType: "user" | "agent" | "token" | "system" | "operator";
   actorLabel: string | null;
   createdAt: string;
 };

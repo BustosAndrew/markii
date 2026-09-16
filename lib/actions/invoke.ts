@@ -163,7 +163,17 @@ export async function invokeAction<TResult = unknown>(
    *
    * Dry runs pass so an agent can still show a merchant what *would* happen.
    */
-  if (!dryRun && !def.id.startsWith("billing.") && actor.orgId) {
+  /**
+   * `platform.*` is exempt as well, for the mirror-image reason: an operator's
+   * `orgId` is the *target* org, and `platform.unsuspendOrg` on a suspended
+   * org would otherwise refuse itself with `ACCOUNT_SUSPENDED`.
+   */
+  if (
+    !dryRun &&
+    !def.id.startsWith("billing.") &&
+    !def.id.startsWith("platform.") &&
+    actor.orgId
+  ) {
     await assertAccountStanding(actor.orgId, def.id);
   }
 

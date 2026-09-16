@@ -276,10 +276,20 @@ export async function enrollMfa(client: Client): Promise<{ secret: string; recov
  * `requireAuthContext`, so without this every file in the suite would fail at
  * its first authenticated request.
  */
-export async function signUpMerchant(client: Client, label: string) {
+/**
+ * `domain` is for the platform-operator suite: `requireOperator` decides by
+ * the address's domain against `PLATFORM_OPERATOR_EMAILS`, so an operator
+ * fixture signs up under the allowlisted host and every other merchant stays
+ * a merchant.
+ */
+export async function signUpMerchant(
+  client: Client,
+  label: string,
+  opts: { domain?: string } = {},
+) {
   const stamp = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
   // Supabase rejects `.test` and `example.com`; markii.shop is a real domain.
-  const email = `test-${label}-${stamp}@markii.shop`;
+  const email = `test-${label}-${stamp}@${opts.domain ?? "markii.shop"}`;
   const password = `Tv!${stamp}aA9`;
 
   await createConfirmedStaffUser(email, password);

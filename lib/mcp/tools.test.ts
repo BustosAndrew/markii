@@ -253,7 +253,24 @@ describe("a scoped token narrows the toolset, which is the ergonomic answer too"
     expect(catalog).toBeLessThan(admin / 2);
   });
 
-  it("gives an administrator every registered action", async () => {
-    expect(await countFor("administrator")).toBe(allActions().length);
+  /**
+   * Every action a *merchant* can hold. The `platform.*` actions (G12) are
+   * held by no role — `PLATFORM_PERMISSIONS` is kept out of the role map — so
+   * they are absent from the strongest token's toolset, which is the property
+   * that matters: an MCP client cannot suspend a store, whatever role it was
+   * minted with.
+   */
+  it("gives an administrator every registered action except the platform ones", async () => {
+    const merchantActions = allActions().filter((a) => !a.id.startsWith("platform."));
+    expect(merchantActions.length).toBeLessThan(allActions().length);
+    expect(await countFor("administrator")).toBe(merchantActions.length);
+  });
+
+  it("lists no platform action for any role", async () => {
+    for (const role of ["owner", "administrator", "developer"] as const) {
+      const perms = new Set<string>(permissionsForRole(role));
+      const tools = await visibleTools(allActions(), describeAction, async (p) => perms.has(p));
+      expect(tools.map((t) => t.name).filter((n) => n.startsWith("platform_"))).toEqual([]);
+    }
   });
 });

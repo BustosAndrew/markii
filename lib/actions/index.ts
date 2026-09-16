@@ -32,6 +32,7 @@ import "./definitions/billing";
 import "./definitions/integrations";
 import "./definitions/payments";
 import "./definitions/domains";
+import "./definitions/platform";
 
 export { defineAction, getAction, allActions, describeAction } from "./registry";
 export {

@@ -155,7 +155,14 @@ about to go dark. **It enforces nothing**: if the cron never runs, merchants los
 than their store. **Since 2026-09-15 the same job carries the sign-up review digest** (G12) — the
 last day's sign-ups grouped by email domain, mailed to Markii's own inbox only when a domain
 crosses `SIGNUP_REVIEW_THRESHOLD`, never for `ROOT_DOMAIN`'s own addresses, and again enforcing
-nothing: the rate limit refuses a burst, this tells a person one happened.
+nothing: the rate limit refuses a burst, this tells a person one happened. **The action behind it
+exists too** (§26): `POST`/`DELETE /api/admin/orgs/:id/suspend`, operator-only —
+`PLATFORM_OPERATOR_EMAILS`, a signed-in session so MFA and step-up apply, refusing when unset.
+Registry actions `platform.suspendOrg`/`unsuspendOrg` with a new **`operator`** actor kind whose
+`orgId` is the *target*, holding `platform.*` and nothing else (`PLATFORM_PERMISSIONS`, which no
+role resolves to). Suspension is a timestamp derived into standing **ahead of billing** — paying
+does not lift it — answering `403 ACCOUNT_SUSPENDED` to writes while reads and `billing.*` stay
+open. It lands in the merchant's own audit log as "Markii operator", reason included.
 
 **A second job is scheduled now: abandoned-cart recovery** (`0 * * * *`, D27). It holds *less*
 authority than the billing cron on purpose — it authenticates with the same `CRON_SECRET` and then

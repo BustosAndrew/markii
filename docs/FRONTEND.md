@@ -488,6 +488,26 @@ The audit list carries both directions now — `undoneBy` on the original row, `
 so a history screen can strike through a reversed change and label its reversal without a second
 query. Both are `string | null` on `ActionInvocation`.
 
+### 🟢 New 2026-09-15 — a fourth held state: `standing.state === "suspended"` (G12)
+
+`AccountStanding` on `/api/me` and `/api/billing/subscription` (`lib/api/billing.ts`) has a new
+member, **`{ state: "suspended", message, since }`** — Markii itself has held the org, by an
+operator's decision. **It outranks every billing state**, so a paying merchant can be `suspended`.
+Writes answer **`403 ACCOUNT_SUSPENDED`** (`details: { resolution, standing, since }`); reads work.
+
+**Render it above everything, on every page, as an error band with a support link and nothing
+else** — no plan picker (not a 402; paying does not lift it) and no "ask your administrator" (not
+`FORBIDDEN`; their role is fine). `message` is the whole merchant-facing copy; the API sends no
+reason on standing — the merchant reads the grounds in **their own audit log**, where the
+`platform.suspendOrg` entry appears with actor `{ type: "operator", name: "Markii operator" }`
+(`AUDIT_ACTOR_TYPES` in `lib/api/org.ts` gained `"operator"`; `audit-log.tsx` labels it
+"Markii"). **A minimal branch was added to `trial-banner.tsx`** so the compiler and the merchant
+both see the right thing — restyle it as you see fit; the copy rules above are the constraint.
+
+`lib/api/admin.ts` is the typed service for the operator routes (`ADMIN_API_LIVE`). **No screen
+for it is on the build order**, and if one is ever built it must not be reachable from merchant
+navigation — it is not a merchant feature.
+
 ### 🟢 New 2026-09-15 — API tokens are rate limited on the REST routes; the dashboard is not affected
 
 `Authorization: Bearer mk_…` calls to any `/api/*` route now carry `RateLimit-Limit` /

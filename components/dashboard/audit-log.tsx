@@ -19,6 +19,7 @@ const ACTOR_LABEL: Record<AuditActorType, string> = {
   agent: "Agent",
   token: "Token",
   system: "System",
+  operator: "Markii",
 };
 
 const RISK_LABEL: Record<AuditRiskTier, string> = {

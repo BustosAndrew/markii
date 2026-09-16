@@ -17,6 +17,26 @@ import type { AccountStanding } from "@/lib/api/billing";
 export function TrialBanner({ standing }: { standing: AccountStanding }) {
   if (standing.state === "subscribed" || standing.state === "ungated") return null;
 
+  /**
+   * Held by Markii (G12). No plan link and no card link — neither lifts it —
+   * and no reason, because the API does not send one: the merchant's next
+   * step is always the same conversation with support.
+   */
+  if (standing.state === "suspended") {
+    return (
+      <div
+        role="status"
+        className="mb-4 rounded-[var(--radius-card)] border border-error-border bg-error-bg px-4 py-3 text-sm leading-6 text-error-text"
+      >
+        <strong className="font-semibold">This account is suspended.</strong> {standing.message}{" "}
+        <a href="mailto:support@markii.shop" className="underline underline-offset-2">
+          Contact support
+        </a>
+        .
+      </div>
+    );
+  }
+
   if (standing.state === "expired") {
     return (
       <div

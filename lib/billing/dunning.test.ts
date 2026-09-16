@@ -26,6 +26,8 @@ function org(over: Partial<StandingOrg> = {}): StandingOrg {
     subscriptionStatus: "past_due",
     freeTrialEndsAt: new Date("2026-01-01T00:00:00.000Z"),
     pastDueSince: since,
+    suspendedAt: null,
+    suspendedReason: null,
     ...over,
   };
 }

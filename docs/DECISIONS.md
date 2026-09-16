@@ -1344,9 +1344,16 @@ config flag. This — not latency — is the thing that would force multi-region
   `organizations.billing_email` rather than the limiter's counters, which hold hashes on purpose.
   Sent only when something crosses the threshold, never for the platform's own domain, and it
   enforces nothing — a burst from an agency onboarding clients looks exactly like one from a
-  disposable-mail service, and telling them apart is a person's job. What is still missing is
-  the *action* a person then takes: there is no platform-admin route to disable an org, so the
-  reader's next step is the database.
+  disposable-mail service, and telling them apart is a person's job. ✅ **And the action a
+  person then takes exists as of the same day**: `POST`/`DELETE /api/admin/orgs/:id/suspend`
+  (`docs/API.md` §26). **Operators are a signed-in staff session on `PLATFORM_OPERATOR_EMAILS`**
+  — a session so MFA and step-up apply, an allowlist because nothing in the data model says
+  "works at Markii"; not a shared secret, which cannot say *who*, and not an API token, which is
+  org-scoped and MFA-exempt. The mutation is a registry action with a new `operator` actor kind
+  whose `orgId` is the target, holding `platform.*` and nothing else — so it is audited in the
+  merchant's own log as "Markii operator" and cannot be used to edit their catalog. Suspension is
+  a timestamp derived into standing on every request, ahead of billing, held until an operator
+  lifts it: paying does not. The reason is written to the merchant's audit log on purpose.
 - **SES sending caps for new merchants** until sending reputation is established — this protects
   every other merchant's deliverability, which is the shared resource most easily poisoned.
 - **Scraping:** storefronts are *meant* to be crawled by agents, so the control is rate limiting and

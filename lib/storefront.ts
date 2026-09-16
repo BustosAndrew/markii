@@ -65,6 +65,8 @@ export async function loadSite(siteSlug: string): Promise<SiteData | null> {
       subscriptionStatus: organizations.subscriptionStatus,
       freeTrialEndsAt: organizations.freeTrialEndsAt,
       pastDueSince: organizations.pastDueSince,
+      suspendedAt: organizations.suspendedAt,
+      suspendedReason: organizations.suspendedReason,
     })
     .from(organizations)
     .where(eq(organizations.id, site.orgId))
@@ -89,7 +91,7 @@ export async function loadSite(siteSlug: string): Promise<SiteData | null> {
     bundle: bundleFromDb(site, cats, prods, colls),
     baseUrl: storefrontUrl(site),
     standing,
-    /** A lapsed trial, or the last rung of dunning (D10) — both Markii's hold, not the merchant's. */
+    /** A lapsed trial, the last rung of dunning (D10), or a platform suspension (G12) — Markii's hold, not the merchant's. */
     billingHold: storefrontHeld(standing),
   };
 }

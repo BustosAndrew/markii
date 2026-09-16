@@ -304,6 +304,9 @@ describe("billing action registration", () => {
       "orders.refund",
       "payments.connectRail",
       "payments.disconnectRail",
+      // Access moves in the other direction: Markii removing a store (G12).
+      "platform.suspendOrg",
+      "platform.unsuspendOrg",
     ]);
   });
 

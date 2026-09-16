@@ -205,9 +205,11 @@ export async function assertMfaSatisfied(): Promise<void> {
  * reason to skip proving a person is present for a payout change.
  */
 export async function assertStepUp(
-  actor: { type: "user" | "agent" | "token" | "system" },
+  actor: { type: "user" | "agent" | "token" | "system" | "operator" },
   actionId: string,
 ): Promise<void> {
+  // An operator is a person on a session — the fresh factor applies to them
+  // exactly as to a merchant: suspending a store is access removed.
   if (actor.type === "token" || actor.type === "system") return;
 
   const { getSupabaseServerClient } = await import("../supabase/server");
