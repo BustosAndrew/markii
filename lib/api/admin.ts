@@ -1,7 +1,6 @@
 import type { ActionOutcome } from "./actions";
-import type { AccountStanding } from "./billing";
-import { apiDelete, apiGet, apiPost } from "./client";
-import type { PlanId } from "./billing";
+import type { AccountStanding, PlanId } from "./billing";
+import { apiDelete, apiGet, apiPost, buildQuery } from "./client";
 
 /**
  * Platform operations (G12) — `/api/admin/*`. ✅ LIVE 2026-09-15.
@@ -10,11 +9,13 @@ import type { PlanId } from "./billing";
  * signed-in staff user; `requireOperator` checks their address against
  * `PLATFORM_OPERATOR_EMAILS`. A merchant calling these gets `403 FORBIDDEN`,
  * and on a deployment with no allowlist everyone gets
- * `503 CONFIGURATION_REQUIRED`. There is **no screen for this yet** and none
- * is on the frontend build order — it exists so the sign-up review digest has
- * an action behind it that is not "open a SQL client". If a screen is built,
- * it must not be reachable from the merchant navigation; it is not a merchant
- * feature.
+ * `503 CONFIGURATION_REQUIRED`. `MeResponse.operator` says whether to show
+ * the way in; it grants nothing.
+ *
+ * The screens live under `/admin` (`app/(admin)/`) — **not** under the
+ * merchant dashboard and never linked from merchant navigation except for the
+ * operator-only link the sidebar shows when `me.operator` is true. It is not a
+ * merchant feature.
  *
  * Suspension is the registry's `platform.suspendOrg` / `platform.unsuspendOrg`,
  * so both return an `ActionOutcome`, support `dryRun`, demand a fresh factor
@@ -44,9 +45,84 @@ export type PlatformOrgView = {
   stores: { id: number; slug: string; name: string; status: "draft" | "live" | "paused" }[];
 };
 
+export type PlatformOrgListItem = {
+  id: string;
+  slug: string;
+  name: string;
+  billingEmail: string;
+  createdAt: string;
+  planId: PlanId;
+  standing: AccountStanding;
+  suspendedAt: string | null;
+  storeCount: number;
+};
+
+export type PlatformOrgListQuery = {
+  q?: string;
+  suspended?: boolean;
+  page?: number;
+  limit?: number;
+};
+
+export type PlatformOrgList = {
+  items: PlatformOrgListItem[];
+  total: number;
+  page: number;
+  limit: number;
+};
+
+export type PlatformSignups = {
+  since: string;
+  until: string;
+  days: number;
+  threshold: number;
+  total: number;
+  /** Domains at or over `threshold`, largest first. The platform's own domain is never here. */
+  bursts: {
+    domain: string;
+    count: number;
+    orgs: { slug: string; name: string; email: string; createdAt: string }[];
+  }[];
+  recent: {
+    id: string;
+    slug: string;
+    name: string;
+    billingEmail: string;
+    createdAt: string;
+    suspended: boolean;
+  }[];
+};
+
+export type PlatformOverview = {
+  orgs: number;
+  suspended: number;
+  signups24h: number;
+  flaggedDomains: number;
+  threshold: number;
+  recentSuspensions: {
+    id: string;
+    slug: string;
+    name: string;
+    suspendedAt: string;
+    suspendedReason: string | null;
+  }[];
+};
+
 /** `idOrSlug`: the digest names slugs, the audit log names ids; both work. */
 export function getPlatformOrg(idOrSlug: string) {
   return apiGet<PlatformOrgView>(`/api/admin/orgs/${encodeURIComponent(idOrSlug)}`);
+}
+
+export function listPlatformOrgs(query: PlatformOrgListQuery = {}) {
+  return apiGet<PlatformOrgList>(`/api/admin/orgs${buildQuery(query)}`);
+}
+
+export function getPlatformSignups(days = 1) {
+  return apiGet<PlatformSignups>(`/api/admin/signups${buildQuery({ days })}`);
+}
+
+export function getPlatformOverview() {
+  return apiGet<PlatformOverview>("/api/admin/overview");
 }
 
 export type SuspendResult = { orgId: string; slug: string; suspendedAt: string; note: string };

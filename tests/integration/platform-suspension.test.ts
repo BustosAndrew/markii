@@ -77,6 +77,43 @@ describe.skipIf(!OPERATOR_DOMAIN)("platform suspension", () => {
     expect(byId.json.slug).toBe(orgSlug);
   });
 
+  it("lists and searches orgs for an operator, and refuses a merchant", async () => {
+    const all = await operator.get(`/api/admin/orgs?q=${encodeURIComponent(orgSlug)}`);
+    expect(all.status).toBe(200);
+    expect(all.json.items.map((o: { id: string }) => o.id)).toContain(orgId);
+    expect(all.json.items[0].storeCount).toBeGreaterThanOrEqual(1);
+
+    const none = await operator.get(`/api/admin/orgs?q=${encodeURIComponent(orgSlug)}&suspended=true`);
+    expect(none.json.items).toEqual([]);
+
+    expect((await bystander.get("/api/admin/orgs")).status).toBe(403);
+    expect((await bystander.get("/api/admin/overview")).status).toBe(403);
+    expect((await bystander.get("/api/admin/signups")).status).toBe(403);
+  });
+
+  it("reports the overview and the sign-up review to an operator", async () => {
+    const ov = await operator.get("/api/admin/overview");
+    expect(ov.status).toBe(200);
+    expect(ov.json.orgs).toBeGreaterThanOrEqual(3);
+    expect(typeof ov.json.suspended).toBe("number");
+    expect(Array.isArray(ov.json.recentSuspensions)).toBe(true);
+
+    const su = await operator.get("/api/admin/signups?days=1");
+    expect(su.status).toBe(200);
+    expect(su.json.recent.map((r: { id: string }) => r.id)).toContain(orgId);
+    // The fixtures live at the platform domain and are never a burst.
+    const root = process.env.ROOT_DOMAIN?.trim().toLowerCase();
+    if (root) expect(su.json.bursts.map((b: { domain: string }) => b.domain)).not.toContain(root);
+
+    // Clamped, never trusted.
+    expect((await operator.get("/api/admin/signups?days=9999")).json.days).toBe(30);
+  });
+
+  it("tells the operator they are one, and the merchant they are not", async () => {
+    expect((await operator.get("/api/me")).json.operator).toBe(true);
+    expect((await merchant.get("/api/me")).json.operator).toBe(false);
+  });
+
   it("dry-runs the suspension without writing", async () => {
     const res = await operator.post(`/api/admin/orgs/${orgSlug}/suspend?dryRun=1`, {
       reason: "dry run",
@@ -111,6 +148,20 @@ describe.skipIf(!OPERATOR_DOMAIN)("platform suspension", () => {
   it("refuses to suspend twice", async () => {
     const res = await operator.post(`/api/admin/orgs/${orgSlug}/suspend`, { reason: "again" });
     expect(res.status).toBe(409);
+  });
+
+  it("shows the suspension on the list, the overview and the org view", async () => {
+    const list = await operator.get(`/api/admin/orgs?q=${encodeURIComponent(orgSlug)}&suspended=true`);
+    expect(list.json.items.map((o: { id: string }) => o.id)).toEqual([orgId]);
+    expect(list.json.items[0].standing.state).toBe("suspended");
+
+    const ov = await operator.get("/api/admin/overview");
+    const mine = ov.json.recentSuspensions.find((r: { id: string }) => r.id === orgId);
+    expect(mine?.suspendedReason).toContain("40 sign-ups");
+
+    const view = await operator.get(`/api/admin/orgs/${orgId}`);
+    expect(view.json.suspension.reason).toContain("40 sign-ups");
+    expect(view.json.standing.state).toBe("suspended");
   });
 
   it("tells the merchant they are suspended — and not why", async () => {
@@ -197,6 +248,10 @@ describe.skipIf(!OPERATOR_DOMAIN)("platform suspension", () => {
 
     const me = await merchant.get("/api/me");
     expect(me.json.standing.state).not.toBe("suspended");
+
+    // Recent suspensions on the overview no longer list this org.
+    const ov = await operator.get("/api/admin/overview");
+    expect(ov.json.recentSuspensions.map((r: { id: string }) => r.id)).not.toContain(orgId);
 
     const edit = await merchant.patch(`/api/sites/${siteId}`, { name: "Edited after reinstatement" });
     expect(edit.status).toBe(200);

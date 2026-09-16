@@ -504,9 +504,25 @@ reason on standing — the merchant reads the grounds in **their own audit log**
 "Markii"). **A minimal branch was added to `trial-banner.tsx`** so the compiler and the merchant
 both see the right thing — restyle it as you see fit; the copy rules above are the constraint.
 
-`lib/api/admin.ts` is the typed service for the operator routes (`ADMIN_API_LIVE`). **No screen
-for it is on the build order**, and if one is ever built it must not be reachable from merchant
-navigation — it is not a merchant feature.
+**The operator screens are built** — `app/(admin)/admin/*`: overview, organizations, sign-ups,
+and the org page with `components/admin/suspend-controls.tsx`. Own shell (`components/admin/
+admin-shell.tsx`), own layout with the same sign-in → MFA gate as the dashboard, then
+`me.operator` (new on `MeResponse`): a non-operator sees a plain "not a platform operator" page.
+The only link in from merchant navigation is `OperatorLink` in `sidebar.tsx`, rendered when
+`me.operator` is true. `lib/api/admin.ts` is the typed service; `lib/api/server.ts` has the
+in-process wrappers. Styled to the existing primitives and deliberately plain — restyle freely,
+but keep it off merchant navigation for everyone else.
+
+**Two small fixes in existing files while building this, both worth knowing about:**
+
+- `audit-log.tsx` no longer offers **Undo** on an operator's row — `lib/org/audit.ts` masks
+  `undoable` when `actor.type === "operator"`, because undo runs under the reader's own permission
+  and no staff role holds `platform.operate`; the button could only ever be refused.
+- `app/(dashboard)/dashboard/page.tsx` imported `getReadinessOverview` from `lib/api/readiness`
+  (the **browser** client) rather than `lib/api/server`, so the server render fetched with no
+  cookies and the overview's Readiness card read *"Authentication required"* for every merchant.
+  It now uses the server wrapper. Pre-existing and unrelated to suspension; found by looking at
+  the page.
 
 ### 🟢 New 2026-09-15 — API tokens are rate limited on the REST routes; the dashboard is not affected
 

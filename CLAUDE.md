@@ -162,7 +162,9 @@ Registry actions `platform.suspendOrg`/`unsuspendOrg` with a new **`operator`** 
 `orgId` is the *target*, holding `platform.*` and nothing else (`PLATFORM_PERMISSIONS`, which no
 role resolves to). Suspension is a timestamp derived into standing **ahead of billing** — paying
 does not lift it — answering `403 ACCOUNT_SUSPENDED` to writes while reads and `billing.*` stay
-open. It lands in the merchant's own audit log as "Markii operator", reason included.
+open. It lands in the merchant's own audit log as "Markii operator", reason included. **The
+screens exist**: `/admin` (`app/(admin)/`) — overview, organizations, sign-ups, suspend/reinstate —
+shown to operators only via `me.operator`. **Production operator is `support@markii.shop`.**
 
 **A second job is scheduled now: abandoned-cart recovery** (`0 * * * *`, D27). It holds *less*
 authority than the billing cron on purpose — it authenticates with the same `CRON_SECRET` and then

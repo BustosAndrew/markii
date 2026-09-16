@@ -3633,6 +3633,9 @@ client. Built to give the sign-up review digest (§25) an action behind it.
 
 | Method | Path | Notes |
 |---|---|---|
+| `GET` | `/api/admin/overview` | `{ orgs, suspended, signups24h, flaggedDomains, threshold, recentSuspensions: [{ id, slug, name, suspendedAt, suspendedReason }] }` — the admin home's numbers, each derived on the request |
+| `GET` | `/api/admin/orgs?q=&suspended=true\|false&page=&limit=` | Every org, newest first: `{ items: [{ id, slug, name, billingEmail, createdAt, planId, standing, suspendedAt, storeCount }], total, page, limit }`. `q` is an `ILIKE` over name, slug and sign-up email |
+| `GET` | `/api/admin/signups?days=1..30` | The sign-up review as a page: `{ since, until, days, threshold, total, bursts: [{ domain, count, orgs[] }], recent[] }` — the digest's grouping (§25), platform domain excluded, plus every sign-up in the window |
 | `GET` | `/api/admin/orgs/:idOrSlug` | The org as an operator sees it: `{ id, slug, name, billingEmail, createdAt, planId, standing, suspension: { since, reason, by } \| null, stores[] }`. By id or slug — the digest names slugs, the audit log names ids |
 | `POST` | `/api/admin/orgs/:idOrSlug/suspend` | `{ reason }` (3–1000 chars, required) → `ActionOutcome` of **`platform.suspendOrg`**. `?dryRun=1` for the diff without the write. `409` if already suspended |
 | `DELETE` | `/api/admin/orgs/:idOrSlug/suspend` | `ActionOutcome` of **`platform.unsuspendOrg`**. `409` if not suspended |
@@ -3671,9 +3674,14 @@ holders. It is deliberately not a private note: write it as the thing you would 
 Both `suspended_reason` and `suspended_by` are also kept on the org row, since the audit view is
 filterable and the row is not.
 
-**Frontend:** `lib/api/admin.ts` (`ADMIN_API_LIVE`) exists so a screen *could* be built, but none
-is on the build order and it must never hang off merchant navigation. The merchant-facing change
-is the new `suspended` standing state — see `docs/FRONTEND.md`.
+**`GET /api/me` now carries `operator: boolean`** — the allowlist as it applies to the caller. It
+decides only whether the dashboard shows the way in; every route above re-checks.
+
+**Frontend:** built — `/admin` (`app/(admin)/`): overview, organizations (search, standing
+filter), sign-ups (24h/3d/7d/30d), and the org page with the suspend/reinstate control. Its shell
+is separate from the merchant dashboard's and the only link into it is the operator-only
+"Platform admin" entry the sidebar shows when `me.operator` is true. `lib/api/admin.ts`
+(`ADMIN_API_LIVE`) is the typed service; `lib/api/server.ts` has the in-process wrappers.
 
 ---
 

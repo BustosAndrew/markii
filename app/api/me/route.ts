@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { handler } from "@/lib/api";
 import { accountStanding, serializeStanding } from "@/lib/billing/standing";
 import { serializeOrg } from "@/lib/auth/serialize";
+import { isOperatorEmail, parseOperatorAllowlist } from "@/lib/auth/operator";
 import { listMemberships, requireSession } from "@/lib/auth/session";
 import { entitlementsFor } from "@/lib/plans";
 
@@ -59,5 +60,12 @@ export const GET = handler(async () => {
     // Mirrors org.entitlements, as §16 pins the shape. Same object, so the two
     // cannot disagree.
     entitlements,
+    /**
+     * Whether this person is a platform operator (G12) — on the
+     * `PLATFORM_OPERATOR_EMAILS` allowlist. Carried here so the dashboard can
+     * show the `/admin` link to exactly the people who can use it. It grants
+     * nothing: every `/api/admin/*` route re-checks the list itself.
+     */
+    operator: isOperatorEmail(user.email, parseOperatorAllowlist(process.env.PLATFORM_OPERATOR_EMAILS)),
   });
 });

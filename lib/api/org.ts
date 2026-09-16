@@ -113,6 +113,12 @@ export type MeResponse = {
    * standing; do not render it as a warning.
    */
   standing: AccountStanding;
+  /**
+   * Whether this person is a platform operator (G12, 2026-09-15) — on the
+   * deployment's `PLATFORM_OPERATOR_EMAILS`. Show the `/admin` link when true;
+   * it grants nothing by itself, every admin route re-checks.
+   */
+  operator: boolean;
 };
 
 /**

@@ -166,7 +166,15 @@ export function toAuditEntry(
     changes: row.diff,
     ip: row.ipAddress,
     userAgent: row.userAgent,
-    undoable: row.undoable,
+    /**
+     * An operator's action is never undoable *from here*: the reader is the
+     * merchant, undo runs the inverse under the reader's own permission, and
+     * no staff role holds `platform.operate`. The row's own flag is true (the
+     * action is undoable by an operator), so it is masked rather than stored
+     * false — advertising an Undo that can only be refused would be the
+     * fabricated-success rule with a button on it.
+     */
+    undoable: row.undoable && row.actorType !== "operator",
     undoneBy: row.undoneByInvocationId,
     undoOf: row.undoOfInvocationId,
     occurredAt: row.occurredAt.toISOString(),

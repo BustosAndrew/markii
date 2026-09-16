@@ -1,5 +1,9 @@
 import "server-only";
 import { cache } from "react";
+import { GET as adminOrgGET } from "@/app/api/admin/orgs/[id]/route";
+import { GET as adminOrgsGET } from "@/app/api/admin/orgs/route";
+import { GET as adminOverviewGET } from "@/app/api/admin/overview/route";
+import { GET as adminSignupsGET } from "@/app/api/admin/signups/route";
 import { GET as analyticsOverviewGET } from "@/app/api/analytics/overview/route";
 import { GET as analyticsSiteGET } from "@/app/api/analytics/sites/[idOrSlug]/route";
 import { GET as billingUsageGET } from "@/app/api/billing/usage/route";
@@ -81,6 +85,13 @@ import type { CategoriesQuery } from "./categories";
 import type { ProductsQuery } from "./products";
 import type { SiteSummary, SitesQuery } from "./sites";
 import type { OrgDomains, SiteDomain } from "./domains";
+import type {
+  PlatformOrgList,
+  PlatformOrgListQuery,
+  PlatformOrgView,
+  PlatformOverview,
+  PlatformSignups,
+} from "./admin";
 import {
   ApiClientError,
   type Category,
@@ -364,6 +375,19 @@ export const listOrgAudit = (filters?: OrgAuditFilters) =>
     "/api/org/audit",
     filters as Record<string, QueryValue>,
   );
+
+/**
+ * Platform operations (G12, §26) — operator-only; the handlers refuse anyone
+ * else, so a page under `/admin` gets the same 403/503 a fetch would.
+ */
+export const getPlatformOverview = () =>
+  call<PlatformOverview>(adminOverviewGET, "/api/admin/overview");
+export const listPlatformOrgs = (query: PlatformOrgListQuery = {}) =>
+  call<PlatformOrgList>(adminOrgsGET, "/api/admin/orgs", query as Record<string, QueryValue>);
+export const getPlatformOrg = (idOrSlug: string) =>
+  call<PlatformOrgView>(adminOrgGET, `/api/admin/orgs/${idOrSlug}`, undefined, { id: idOrSlug });
+export const getPlatformSignups = (days = 1) =>
+  call<PlatformSignups>(adminSignupsGET, "/api/admin/signups", { days });
 
 export const listSessions = () =>
   call<{ items: SessionRecord[] }>(orgSessionsGET, "/api/org/sessions");

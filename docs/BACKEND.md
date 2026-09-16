@@ -650,6 +650,15 @@ Contract `docs/API.md` §18. The largest phase. Order within it:
     does. One wording correction while building: the reason is **not** a private note — it is the
     input of an audited action the merchant's admins can read, and that is right, so the comments
     now say to write it for them.
+17. ~~**The admin dashboard** (G12)~~ — done 2026-09-15, same day, on the owner's ask. Three read
+    routes (`/api/admin/overview`, `/api/admin/orgs` with search and a standing filter,
+    `/api/admin/signups` — the digest's grouping over 1–30 days) and `operator: boolean` on
+    `/api/me`, plus the screens under `app/(admin)/`. **The operator is `support@markii.shop` in
+    production** — set `PLATFORM_OPERATOR_EMAILS` there; the owner's own merchant account is not
+    an operator. Two things found by looking at the rendered pages rather than the JSON: the
+    merchant's audit log offered **Undo** on the operator's suspension (now masked — it could only
+    be refused), and the dashboard overview's Readiness card said *"Authentication required"* for
+    every merchant because the page used the browser client from a server render (fixed).
 
 > **Two things this uncovered, both worth knowing.**
 >

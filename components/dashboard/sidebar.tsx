@@ -16,6 +16,7 @@ import {
   Plug,
   Receipt,
   Settings,
+  ShieldAlert,
   ShieldCheck,
   ShoppingBag,
   Users,
@@ -227,6 +228,27 @@ export function SidebarOrgCard({ me }: { me: MeResponse | null }) {
   );
 }
 
+/**
+ * The one link from merchant navigation into `/admin`, and only for a person
+ * `/api/me` reports as a platform operator (G12). It reveals nothing to anyone
+ * else — the routes behind it re-check the allowlist on every call.
+ */
+export function OperatorLink({ me, onNavigate }: { me: MeResponse | null; onNavigate?: () => void }) {
+  if (!me?.operator) return null;
+  return (
+    <div className="border-t border-border p-3">
+      <Link
+        href="/admin"
+        onClick={onNavigate}
+        className="flex items-center gap-2.5 rounded-[var(--radius-control)] px-3 py-2 text-sm text-muted hover:bg-hover-soft hover:text-foreground max-lg:min-h-11"
+      >
+        <ShieldAlert className="size-4 shrink-0" />
+        Platform admin
+      </Link>
+    </div>
+  );
+}
+
 /** Desktop rail. Hidden below `lg` — the mobile shell renders `MobileNav` instead. */
 export function DashboardSidebar({ me }: { me: MeResponse | null }) {
   return (
@@ -235,6 +257,7 @@ export function DashboardSidebar({ me }: { me: MeResponse | null }) {
         <SidebarBrand />
       </div>
       <SidebarNav className="flex-1 overflow-y-auto p-3" />
+      <OperatorLink me={me} />
       <div className="border-t border-border p-3">
         <SidebarOrgCard me={me} />
       </div>

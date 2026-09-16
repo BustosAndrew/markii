@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { getOverview } from "@/lib/api/server";
-import { getReadinessOverview, type ReadinessReport } from "@/lib/api/readiness";
+import { getOverview, getReadinessOverview } from "@/lib/api/server";
+import type { ReadinessReport } from "@/lib/api/readiness";
 import { isPlannedError } from "@/lib/api/planned";
 import { ApiClientError } from "@/lib/api/types";
 import { ReadinessCard } from "@/components/dashboard/readiness-card";

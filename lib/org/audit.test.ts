@@ -88,6 +88,21 @@ describe("actorKey", () => {
 });
 
 describe("toAuditEntry", () => {
+  /**
+   * A platform operator (G12) has no row in the merchant's org to be named
+   * from, and the merchant is owed the fact that Markii acted, not a name.
+   * Their action is never offered for undo here: undo runs under the reader's
+   * permission, and no staff role holds `platform.operate`.
+   */
+  it("names an operator as Markii and never offers their action for undo", () => {
+    const entry = toAuditEntry(
+      row({ actorType: "operator", actorId: "usr_op", actionId: "platform.suspendOrg", undoable: true }),
+      names,
+    );
+    expect(entry.actor).toEqual({ type: "operator", id: "usr_op", name: "Markii operator", email: null });
+    expect(entry.undoable).toBe(false);
+  });
+
   it("resolves a staff actor to their name and email", () => {
     const entry = toAuditEntry(row(), names);
     expect(entry.actor).toEqual({

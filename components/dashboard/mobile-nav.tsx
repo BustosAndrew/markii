@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { Menu, X } from "lucide-react";
 import {
   SidebarBrand,
+  OperatorLink,
   SidebarNav,
   SidebarOrgCard,
   useCurrentSection,
@@ -135,6 +136,7 @@ export function MobileNav({ me }: { me: MeResponse | null }) {
               onNavigate={close}
               className="min-h-0 flex-1 overflow-y-auto p-3"
             />
+            <OperatorLink me={me} onNavigate={close} />
 
             <div className="shrink-0 border-t border-border p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
               <SidebarOrgCard me={me} />
