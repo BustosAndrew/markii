@@ -3441,6 +3441,17 @@ on for every store because the feature shipped would be sending on their behalf 
 > **Since 2026-09-14 the same job also sends the dunning sequence** (D10, §17) — day 0, 7 and 13 of a
 > failing renewal, claimed in `dunning_notices` per episode and step. Reported under `dunning` in the
 > response, in its own `try`, so one sweep's provider failure cannot silence the other.
+>
+> **Since 2026-09-15 it also carries the sign-up review digest** (G12) — the one mail on this job
+> that goes to Markii's own inbox (`SIGNUP_REVIEW_TO`, else `CONTACT_TO`) rather than a merchant's.
+> It groups the last 24 hours of `organizations.billing_email` by domain and mails the domains
+> with `SIGNUP_REVIEW_THRESHOLD` (default 5) or more sign-ups, listing every org under each — the
+> sign-up rate limit *refuses* a burst and this is what tells a person one happened. **Sent only
+> when something crosses the threshold** (a daily "0 to review" gets archived unread), **never for
+> the platform's own domain** (an address at `ROOT_DOMAIN` can only be Markii's own — staff, seeds,
+> the test suite), and **enforces nothing**: a burst is a lead, not a verdict. Reported under
+> `signupReview` — `{ windowStart, windowEnd, threshold, signups, flaggedDomains, flaggedSignups,
+> domains, sent, to, reason }` — in its own `try`.
 
 Swept hourly by `GET /api/cron/abandoned-carts` (§25). A cart qualifies when **all** of these hold,
 and each clause stops a specific way this becomes spam:

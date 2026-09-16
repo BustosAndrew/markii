@@ -57,3 +57,5 @@ export const TEMPLATE_IDS = [
 ] as const;
 
 export type TemplateId = (typeof TEMPLATE_IDS)[number];
+export { signupReview } from "./signup-review";
+export type { SignupReviewContext } from "./signup-review";

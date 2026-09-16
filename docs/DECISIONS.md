@@ -1338,8 +1338,15 @@ config flag. This — not latency — is the thing that would force multi-region
 - **Trial abuse:** email verification required, and since no card is taken at signup (D9), pair it
   with per-IP/per-domain signup limits and manual review above a threshold. ✅ **The limits are
   built (2026-09-13)** — `lib/auth/rate-limits.ts`, on sign-up, sign-in and password reset, for
-  merchants and shoppers, per address and per subject (`docs/API.md` §16). Manual review is not:
-  nothing surfaces "this domain signed up 40 times today" to a person yet.
+  merchants and shoppers, per address and per subject (`docs/API.md` §16). ✅ **Manual review
+  has a surface as of 2026-09-15**: the 09:00 cron mails a digest of domains with five or more
+  sign-ups in the last day to Markii's inbox (`lib/auth/signup-review.ts`, §25). It reads
+  `organizations.billing_email` rather than the limiter's counters, which hold hashes on purpose.
+  Sent only when something crosses the threshold, never for the platform's own domain, and it
+  enforces nothing — a burst from an agency onboarding clients looks exactly like one from a
+  disposable-mail service, and telling them apart is a person's job. What is still missing is
+  the *action* a person then takes: there is no platform-admin route to disable an org, so the
+  reader's next step is the database.
 - **SES sending caps for new merchants** until sending reputation is established — this protects
   every other merchant's deliverability, which is the shared resource most easily poisoned.
 - **Scraping:** storefronts are *meant* to be crawled by agents, so the control is rate limiting and

@@ -152,7 +152,10 @@ the pre-charge stop never fires and only the fallback runs.
 within three days and who hold no subscription that *grants* a plan — an `incomplete` one sets
 `stripeSubscriptionId` while granting nothing, so the narrower test would skip exactly the merchant
 about to go dark. **It enforces nothing**: if the cron never runs, merchants lose a warning rather
-than their store.
+than their store. **Since 2026-09-15 the same job carries the sign-up review digest** (G12) — the
+last day's sign-ups grouped by email domain, mailed to Markii's own inbox only when a domain
+crosses `SIGNUP_REVIEW_THRESHOLD`, never for `ROOT_DOMAIN`'s own addresses, and again enforcing
+nothing: the rate limit refuses a burst, this tells a person one happened.
 
 **A second job is scheduled now: abandoned-cart recovery** (`0 * * * *`, D27). It holds *less*
 authority than the billing cron on purpose — it authenticates with the same `CRON_SECRET` and then

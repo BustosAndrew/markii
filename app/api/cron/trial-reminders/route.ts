@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { sweepDunningNotices } from "@/lib/billing/dunning-notices";
 import { orgsOutOfStanding, sweepTrialReminders } from "@/lib/billing/trial-reminders";
+import { sweepSignupReview } from "@/lib/auth/signup-review-sweep";
 import { authenticateCron } from "@/lib/cron/auth";
 
 /**
@@ -30,6 +31,11 @@ import { authenticateCron } from "@/lib/cron/auth";
  * it is the daily job that mails merchants about Markii's own billing and
  * enforces nothing. The two sweeps run in their own `try` each, so a provider
  * refusing one cannot silence the other, and each reports its own counts.
+ *
+ * **Since 2026-09-15 it also carries the sign-up review digest** (G12) — the
+ * one mail here that goes to Markii's own inbox rather than a merchant's. The
+ * sign-up rate limit refuses a burst; this is what tells a person one
+ * happened. Sent only on a day with something over the threshold.
  *
  * **Answers `200` with counts even when individual sends fail.** Vercel retries
  * a non-2xx, and a retry here would re-scan orgs already claimed.
@@ -65,5 +71,19 @@ export async function GET(request: Request) {
    */
   const outOfStanding = await orgsOutOfStanding();
 
-  return NextResponse.json({ ok: true, ...result, outOfStanding, dunning });
+  /**
+   * The sign-up review digest (G12) rides the same daily run. It reads its own
+   * table and mails Markii's own inbox, so a failure here is isolated like the
+   * dunning sweep's: recorded in the response, never allowed to fail the
+   * reminders that ran before it.
+   */
+  let signupReview: Awaited<ReturnType<typeof sweepSignupReview>> | { error: string };
+  try {
+    signupReview = await sweepSignupReview();
+  } catch (e) {
+    console.error("[cron] sign-up review failed", e);
+    signupReview = { error: e instanceof Error ? e.message : String(e) };
+  }
+
+  return NextResponse.json({ ok: true, ...result, outOfStanding, dunning, signupReview });
 }

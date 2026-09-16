@@ -624,6 +624,16 @@ Contract `docs/API.md` §18. The largest phase. Order within it:
     MCP read lands on both counters, and `lib/rate-limit.test.ts` pins the ordering. Falsified:
     making the budget a no-op fails five of the six integration tests at their own assertions
     and leaves the cookie test green.
+15. ~~**Sign-up review digest** (G12)~~ — done 2026-09-15. The daily cron groups the last day's
+    `organizations.billing_email` by domain and mails Markii's inbox the domains at or over
+    `SIGNUP_REVIEW_THRESHOLD`, every org listed (`lib/auth/signup-review.ts` pure,
+    `signup-review-sweep.ts` the I/O, template `signupReview`). Three rules: **quiet days send
+    nothing** (an empty digest trains its reader to archive it), **the platform's own domain is
+    excluded** (an address at `ROOT_DOMAIN` is staff, a seed or a test fixture — and without this
+    every integration run would page support about its own orgs), and **it enforces nothing**.
+    Not claimed before sending, unlike the merchant-facing sweeps: a duplicate to Markii's own
+    inbox costs a second read, not a complaint on Markii's reputation. Verified with a real Resend
+    send to `delivered@resend.dev`; falsified by moving the threshold to `>`.
 
 > **Two things this uncovered, both worth knowing.**
 >
