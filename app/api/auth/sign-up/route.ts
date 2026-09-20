@@ -4,7 +4,7 @@ import { setUserKind } from "@/lib/auth/admin";
 import { ensureFirstOrg } from "@/lib/auth/provisioning";
 import { enforceAuthLimit, readJsonBody } from "@/lib/auth/rate-limits";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
-import { credentialsSchema } from "@/lib/validation";
+import { signUpSchema } from "@/lib/validation";
 
 /**
  * `POST /api/auth/sign-up` — creates the user *and* their first org (§16).
@@ -20,7 +20,7 @@ import { credentialsSchema } from "@/lib/validation";
 export const POST = handler(async (req) => {
   const body = await readJsonBody(req);
   await enforceAuthLimit("signUp", req, body.email);
-  const { email, password } = credentialsSchema.parse(body);
+  const { email, password, name } = signUpSchema.parse(body);
 
   const supabase = await getSupabaseServerClient();
   if (!supabase) {
@@ -39,7 +39,7 @@ export const POST = handler(async (req) => {
        * which only the service role can set, and that is the copy
        * `isStaffUser()` reads.
        */
-      data: { signup_kind: "staff" },
+      data: { signup_kind: "staff", ...(name ? { name } : {}) },
     },
   });
 
@@ -58,7 +58,7 @@ export const POST = handler(async (req) => {
   // Idempotent: Supabase intentionally returns a plausible user for an existing
   // address so sign-up cannot enumerate accounts, so this must not mint a
   // second org on a repeat submission.
-  await ensureFirstOrg(data.user.id, email);
+  await ensureFirstOrg(data.user.id, email, name);
 
   // No session means email confirmation is on and the user must click through.
   // Say so plainly rather than implying they are signed in.

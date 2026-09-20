@@ -67,6 +67,7 @@ API-independent work so you don't outrun the backend") no longer applies to A, B
 | MFA (merchants) | §16 | ✅ LIVE, screens built | Enrol/challenge/recover ship; step-up retries inline via `MfaStepUpProvider` |
 | Org audit log | §16 | ✅ LIVE, screen built | `/dashboard/settings/audit` via `listOrgAudit(filters)`. Owner/administrator only — the tab is gated on role so a `viewer` is not sent to a 403 |
 | Account sessions | §16 | ✅ LIVE, screen built | `/dashboard/settings/account` via `listSessions()` / `revokeSession(id)`. The caller's own devices, every role. `wasCurrent: true` means sign the user out |
+| Username / org name | §16 | ✅ LIVE, screen built | Sign-up collects `name`. Change it on Account via `updateName()`. Org/company name is `updateOrg({ name })`, owner/administrator only |
 | Payment rails | §8 | ✅ LIVE, screen built | `/dashboard/payments`. Rails split from catalog feeds — different authority, see below |
 | Commerce core | §18.1–18.8 | ✅ LIVE | Variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping, order ops, digital delivery |
 | Membership gating | §18.9 | ✅ LIVE | Tiers gate products; buying a granting product confers one |
@@ -542,8 +543,9 @@ things become visible from the dashboard: **`Bundle` gained an optional `collect
 `generatePreview`'s `llms.txt` and sitemap panes show a `## Collections` section for a saved site
 that has published any (the create-site wizard passes none and is unchanged); and the storefront
 header nav gains a "Collections" link once one is published, which matters to themes work (§1).
-The collections screen's "published" toggle now does something a shopper can see — worth saying so
-in its copy.
+The collections screen's "published" toggle now does something a shopper can see — the create form
+and the catalog list say a published collection appears at `/collections` and in the storefront
+header.
 
 ### 🟡 New 2026-09-14 — `standing.state` can be `past_due` (D10); the banner already handles it
 
@@ -561,27 +563,17 @@ above the plan picker when `past_due`. Refusals are `402 PAYMENT_PAST_DUE` with
 `details.dunningStep` — render the message; do not map it onto the trial copy. Contract:
 `docs/API.md` §17 *Dunning*.
 
-### 🔴 New 2026-09-13 — billing address form needed; `tax` on the subscription read (G3)
+### 🟢 New 2026-09-13 — billing address form; `tax` on the subscription read (G3)
 
-**One screen to build, one field to render.** Markii now charges sales tax on its own subscription
-through Stripe Tax, computed from the merchant's **billing address** — and no screen collects one
-yet. Until it exists every merchant subscribes untaxed, which the API reports rather than hides.
+**Built 2026-09-20.** The form sits on `/dashboard/billing` above the plan picker, via
+`updateBillingAddress` in `lib/api/billing.ts`. Owner / administrator only (`billing.write`).
+`state` is required for US and CA. The current value is `billingAddress` on
+`GET /api/billing/subscription`. It is an action: it lands in the audit log and is undoable back
+to a previous address. **Not** `PATCH /api/org` — that route does not accept it.
 
-- **Build:** a billing-address form on `/dashboard/settings/billing` (or beside the plan picker —
-  a merchant with no address should meet it before they see prices). `updateBillingAddress` in
-  `lib/api/billing.ts`; `state` is required for US and CA and the API refuses without it (400).
-  The current value is `billingAddress` on `GET /api/billing/subscription` and `GET /api/org`.
-  It is an action: it lands in the audit log and is undoable back to a previous address. **Not**
-  `PATCH /api/org` — that route does not accept it.
-- **Render:** `tax` on `SubscriptionResponse` and on every `PlanChangeResult`. **Show
-  `tax.message` and key any call-to-action on `tax.reason`**: `no_billing_address` → link to the
-  form; `tax_not_active` → nothing to do, it is Markii's switch; `active` → the preview's
-  `taxMinor` is real. Never reduce it to "tax: yes/no".
-- **The preview changed shape, additively.** `PlanChangePreview` gained optional `taxMinor` and
-  `taxStatus`. When present, `amountDueMinor` already **includes** `taxMinor` — render "incl.
-  $X tax", not "+ $X". A `taxStatus` of `complete` with `taxMinor: 0` is a genuine zero (no
-  registration in that jurisdiction), not a missing calculation; `requires_location_inputs` is
-  the one to flag, because the amount shown is untaxed.
+`tax.message` is rendered on the same card, keyed on `tax.reason`. The plan-change preview shows
+"incl. $X tax" when `taxMinor` is present (already inside `amountDueMinor`) and flags
+`requires_location_inputs` as an untaxed amount.
 
 Types in `lib/api/billing.ts` (`BillingAddress`, `PlatformTax`, `updateBillingAddress`) and
 `lib/api/org.ts`; contract in `docs/API.md` §17 *Sales tax on Markii's own subscription*.
@@ -639,6 +631,20 @@ one to the new one — and the change needs both. Tell the user to check both in
 
 The form is on `/dashboard/settings/account` via `updateEmail()` in `lib/api/auth.ts`. It shows
 `pending` as a destination waiting on confirmation, never as the address on the account.
+
+### 🟢 New 2026-09-20 — username and organization name are writable
+
+`POST /api/auth/update-name` and optional `name` on sign-up. The value is a display name — a person
+or a company — **not a unique handle** and not the storefront slug.
+
+- Sign-up: `signUp({ email, password, name })`. The name seeds `user_metadata`, the owner staff
+  row, and the first org's name.
+- Account: `updateName({ name })` for the signed-in user (every role). `updateOrg({ name })` for
+  the current organization's company name (owner / administrator). Changing either does not
+  change `{slug}.{ROOT_DOMAIN}`.
+
+`GET /api/me` already returned `user.name` (`string | null`) and `org.name`. The sidebar prefers
+the username over the email once one is set.
 
 ### 🟢 New 2026-09-08 — `billing.invoiceAssessments` accounts for every assessment
 
@@ -790,7 +796,7 @@ real state. These are the open items, recorded so they are not rediscovered late
 | ~~§24 email had no client or screen~~ ✅ **fixed 2026-08-02** | `lib/api/email.ts`, `/dashboard/settings/email` | The route and its five actions shipped 2026-08-02 with nothing calling them, while `lib/email/` told merchants to go to a page that did not exist |
 | ~~Invoices screen stubbed on `configuration_required`~~ ⚠️ **unblocked 2026-08-07** | `/dashboard/billing` | §17 is LIVE in full. Plan, card, meter, and invoices share this screen. Old `/dashboard/settings/billing` and `/dashboard/settings/subscription` redirect here |
 | ~~Org switcher was a placeholder~~ ✅ **built 2026-08-03** | `components/dashboard/sidebar.tsx` | The sidebar card said "org switching is coming soon with Phase A auth" long after `POST /api/org/switch` shipped. Now a real switcher, shown only when the user belongs to more than one org. Identity is resolved **once in the layout** and passed to both shells, so the rail and the mobile drawer cannot disagree about which org is active |
-| ~~Team settings was a stub~~ ✅ **built 2026-08-03** | `/dashboard/settings/team` | Staff with inline role changes, invites against the plan's seat limit, and scoped API tokens. **Audit** is now its own screen (`/dashboard/settings/audit`, 2026-09-06). **Account** (`/dashboard/settings/account`, 2026-09-08) holds email change and the caller's own sessions |
+| ~~Team settings was a stub~~ ✅ **built 2026-08-03** | `/dashboard/settings/team` | Staff with inline role changes, invites against the plan's seat limit, and scoped API tokens. **Audit** is now its own screen (`/dashboard/settings/audit`, 2026-09-06). **Account** (`/dashboard/settings/account`) holds username, org name (owner/admin), email change, and the caller's own sessions |
 | ~~Orders list is genuinely blocked~~ ✅ **unblocked** | `/dashboard/orders` | `GET /api/orders` ships; the screen exists. Settlements live at `/dashboard/orders/settlements` |
 | ~~Collections tab and discounts were stubs~~ ✅ **built 2026-08-03** | `/dashboard/catalog?tab=collections`, `/dashboard/discounts` | Both read-only lists against live routes. Discounts show derived `status`, redemption counts, and a **Fully redeemed** badge — an exhausted code still reads as active by its dates and only fails when a shopper tries it |
 | ~~Customers screen was a stub~~ ✅ **built 2026-08-03** | `/dashboard/customers` + `/dashboard/customers/[id]` | List with search, store filter and pagination; detail with memberships, orders and addresses. Money formats from `org.currency` via `formatMinor` (**D31**), never a hardcoded `/100` |
@@ -856,8 +862,8 @@ The team is two people, so launch is a deliberate subset of the full plan
 
 | Area | Screens |
 |---|---|
-| **Auth & org** (Phase A) | Sign-up, sign-in, reset, org switcher, staff list, invites, role management, **audit log**, settings shell |
-| **Billing** (Phase B) | Plan & subscription, invoices, payment method, **threshold meter**, upgrade flow, dunning banners |
+| **Auth & org** (Phase A) | Sign-up, sign-in, reset, org switcher, staff list, invites, role management, **audit log**, username / org name, settings shell |
+| **Billing** (Phase B) | Plan & subscription, invoices, payment method, billing address, **threshold meter**, upgrade flow, dunning banners |
 | **Commerce** (Phase C) | Products **with variants**, inventory, collections, customers, orders + timeline + refunds, discounts, tax & shipping settings, digital delivery |
 | **Storefront** | Cart, variant picker, checkout — plus **3–4 polished themes** |
 | **Readiness** | Score card, issues list, issue drawer |

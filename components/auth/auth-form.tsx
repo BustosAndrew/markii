@@ -49,6 +49,7 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [name, setName] = useState("");
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -71,7 +72,7 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
         router.replace("/mfa?next=/dashboard");
         router.refresh();
       } else if (mode === "sign-up") {
-        const result = await signUp({ email, password });
+        const result = await signUp({ email, password, name: name.trim() || undefined });
         if (result.emailConfirmationRequired) {
           setMessage(
             "Account created. Check your inbox to confirm your email, then sign in.",
@@ -121,6 +122,26 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
 
         <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
           <fieldset disabled={!live || pending} className="space-y-4">
+            {mode === "sign-up" ? (
+              <div>
+                <Label htmlFor="name">Name or company</Label>
+                <Input
+                  id="name"
+                  name="name"
+                  type="text"
+                  autoComplete="organization"
+                  maxLength={80}
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  required
+                />
+                <p className="mt-1.5 text-xs text-muted">
+                  How you appear on the account. A person or a company — you can
+                  change it later.
+                </p>
+              </div>
+            ) : null}
+
             <div>
               <Label htmlFor="email">Email</Label>
               <Input

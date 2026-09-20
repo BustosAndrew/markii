@@ -20,6 +20,23 @@ export const credentialsSchema = z.object({
   password: passwordSchema,
 });
 
+/**
+ * How a person or company appears on the account. Not a unique handle and not
+ * the org slug — those stay derived. Spaces and punctuation are allowed so a
+ * merchant can use a company name.
+ */
+export const displayNameSchema = z
+  .string()
+  .trim()
+  .min(1, "Enter a name")
+  .max(80, "Keep the name under 80 characters");
+
+export const signUpSchema = credentialsSchema.extend({
+  name: displayNameSchema.optional(),
+});
+
+export const updateNameSchema = z.object({ name: displayNameSchema });
+
 export const emailOnlySchema = z.object({ email: z.email().max(255) });
 
 export const updatePasswordSchema = z.object({ password: passwordSchema });

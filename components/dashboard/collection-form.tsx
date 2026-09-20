@@ -170,7 +170,7 @@ export function CollectionForm({ sites }: { sites: Site[] }) {
       <div className="rounded-[var(--radius-card)] border border-border bg-surface px-5">
         <Toggle
           label="Published"
-          description="Published collections appear on the storefront."
+          description="Published collections appear on /collections and in the storefront header. Hidden ones stay in this list only."
           checked={published}
           onChange={setPublished}
           disabled={busy}

@@ -326,8 +326,18 @@ export function BillingPlanPicker({
                         preview.preview.currency,
                       )}
                     </span>
+                    {preview.preview.taxMinor != null
+                      ? ` (incl. ${formatMinor(preview.preview.taxMinor, preview.preview.currency)} tax)`
+                      : ""}
                     . This is Stripe&apos;s amount, not a local estimate.
                   </p>
+                  {preview.preview.taxStatus === "requires_location_inputs" ? (
+                    <p className="text-sm leading-6 text-warning-text">
+                      Tax could not be placed from the address on file, so this
+                      amount is untaxed. Update the billing address and preview
+                      again.
+                    </p>
+                  ) : null}
                   <ul className="space-y-1 text-sm text-muted">
                     {preview.preview.lines.map((line) => (
                       <li key={line.description} className="flex justify-between gap-4">

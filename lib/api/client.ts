@@ -1,7 +1,7 @@
 import { ApiClientError, type ApiErrorBody } from "./types";
 import { isMfaRequired, mfaErrorDetails } from "./mfa-errors";
 import { sanitizePublicCopy, sanitizePublicValue } from "./public-copy";
-import { isTrialEnded } from "./trial-errors";
+import { isPaymentPastDue, isTrialEnded } from "./trial-errors";
 
 export type QueryValue = string | number | boolean | null | undefined;
 
@@ -157,7 +157,7 @@ export async function apiFetch<T>(
      * payment wall — send them to the plan page, never the MFA modal.
      */
     if (
-      isTrialEnded(error) &&
+      (isTrialEnded(error) || isPaymentPastDue(error)) &&
       typeof window !== "undefined" &&
       (requestInit.method ?? "GET").toUpperCase() !== "GET" &&
       !window.location.pathname.startsWith("/dashboard/billing")

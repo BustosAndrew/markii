@@ -2,10 +2,12 @@ import {
   getBillingAddon,
   getBillingSubscription,
   getBillingUsage,
+  getMe,
   listBillingInvoices,
   listBillingPlans,
 } from "@/lib/api/server";
-import { loadConfigured } from "@/lib/api/load";
+import { loadConfigured, loadOrError } from "@/lib/api/load";
+import { canWriteBilling } from "@/lib/api/org";
 import { sanitizePublicCopy } from "@/lib/api/public-copy";
 import type {
   AddonResponse,
@@ -14,6 +16,7 @@ import type {
   SubscriptionResponse,
   UsageResponse,
 } from "@/lib/api/billing";
+import { BillingAddressForm } from "@/components/dashboard/billing-address-form";
 import { BillingInvoices } from "@/components/dashboard/billing-invoices";
 import { BillingPlanPicker } from "@/components/dashboard/billing-plan-picker";
 import { PaymentMethodForm } from "@/components/dashboard/payment-method-form";
@@ -21,7 +24,8 @@ import { ThresholdMeter } from "@/components/dashboard/threshold-meter";
 import { PageHeader } from "@/components/ui/page-header";
 
 export default async function BillingPage() {
-  const [plans, subscription, usage, invoices, agentOps, chargeback] = await Promise.all([
+  const [me, plans, subscription, usage, invoices, agentOps, chargeback] = await Promise.all([
+    loadOrError(() => getMe()),
     loadConfigured<PlansResponse>(() => listBillingPlans()),
     loadConfigured<SubscriptionResponse>(() => getBillingSubscription()),
     loadConfigured<UsageResponse>(() => getBillingUsage()),
@@ -45,6 +49,18 @@ export default async function BillingPage() {
       />
 
       <div className="space-y-10">
+        {subscription.data && canWriteBilling(me.data?.role) ? (
+          <BillingAddressForm
+            address={subscription.data.billingAddress}
+            tax={subscription.data.tax}
+          />
+        ) : subscription.data?.tax.reason === "no_billing_address" ? (
+          <p className="rounded-[var(--radius-control)] border border-warning-border bg-warning-bg px-4 py-3 text-sm leading-6 text-warning-text">
+            {subscription.data.tax.message} An owner or administrator can add
+            the billing address on this page.
+          </p>
+        ) : null}
+
         {billingUnconfigured ? (
           <p className="rounded-[var(--radius-control)] border border-border bg-surface-elevated p-4 text-sm text-muted">
             Billing is not configured on this deployment yet

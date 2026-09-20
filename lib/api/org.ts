@@ -47,6 +47,15 @@ export function canReadOrgAudit(role: StaffRole | null | undefined): boolean {
   return role === "owner" || role === "administrator";
 }
 
+/** `org.write` / `billing.write` — owner and administrator only. */
+export function canWriteOrg(role: StaffRole | null | undefined): boolean {
+  return role === "owner" || role === "administrator";
+}
+
+export function canWriteBilling(role: StaffRole | null | undefined): boolean {
+  return role === "owner" || role === "administrator";
+}
+
 export type Organization = {
   id: string;
   name: string;

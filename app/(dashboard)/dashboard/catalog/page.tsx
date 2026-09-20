@@ -427,13 +427,17 @@ export default async function CatalogPage({
         ) : collectionsResult.data.items.length === 0 ? (
           <EmptyState
             title="No collections yet"
-            description="Collections are merchandising, distinct from categories: a product sits in one category but can appear in many collections."
+            description="Collections are merchandising, distinct from categories: a product sits in one category but can appear in many collections. Publishing one adds it to the storefront at /collections."
             action={
               <ButtonLink href="/dashboard/collections/new">Create collection</ButtonLink>
             }
           />
         ) : (
           <>
+            <p className="mb-3 text-sm leading-6 text-muted">
+              Publishing a collection puts it on the storefront at /collections
+              and in the header. Hidden collections stay in this list only.
+            </p>
             <div className="overflow-x-auto rounded-[var(--radius-card)] border border-border bg-surface shadow-[var(--shadow-sm)]">
               <table className="w-full min-w-[40rem] text-left text-sm">
                 <thead className="text-muted">
@@ -466,7 +470,7 @@ export default async function CatalogPage({
                         {c.productCount}
                       </td>
                       <td className="px-4 py-3 text-muted">
-                        {c.publishedAt ? "Published" : "Hidden"}
+                        {c.publishedAt ? "On the storefront" : "Hidden"}
                       </td>
                     </tr>
                   ))}

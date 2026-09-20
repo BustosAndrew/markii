@@ -8,7 +8,7 @@ const sections = [
   {
     href: "/dashboard/settings/account",
     title: "Account",
-    description: "Your login address and the browsers you are signed in on.",
+    description: "Username, login address, and the browsers you are signed in on.",
     audit: false,
   },
   {

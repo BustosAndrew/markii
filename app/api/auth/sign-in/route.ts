@@ -36,7 +36,9 @@ export const POST = handler(async (req) => {
   // Covers the account that confirmed by email before any org existed, and any
   // future path that creates a user outside sign-up. Cheap, and the alternative
   // is a signed-in user with nowhere to go.
-  await ensureFirstOrg(data.user.id, data.user.email ?? email);
+  const metaName =
+    typeof data.user.user_metadata?.name === "string" ? data.user.user_metadata.name : null;
+  await ensureFirstOrg(data.user.id, data.user.email ?? email, metaName);
 
   return NextResponse.json({ ok: true });
 });

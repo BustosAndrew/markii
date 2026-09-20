@@ -15,6 +15,11 @@ export function isAuthApiLive() {
 
 export type Credentials = { email: string; password: string };
 
+export type SignUpBody = Credentials & {
+  /** Display name — a person or a company. Optional so existing callers stay valid. */
+  name?: string;
+};
+
 /**
  * Auth mutations run server-side only (D30). These routes are Markii's own
  * origin: the server sets the httpOnly session cookie, the browser never talks
@@ -27,7 +32,7 @@ export function signIn(body: Credentials, init?: RequestInit) {
   );
 }
 
-export function signUp(body: Credentials, init?: RequestInit) {
+export function signUp(body: SignUpBody, init?: RequestInit) {
   return callWhenLive(AUTH_API_LIVE, AUTH_SECTION, () =>
     apiPost<{ ok: true; emailConfirmationRequired: boolean }>(
       "/api/auth/sign-up",
@@ -71,5 +76,14 @@ export type EmailChangeRequest = {
 export function updateEmail(body: { email: string }, init?: RequestInit) {
   return callWhenLive(AUTH_API_LIVE, AUTH_SECTION, () =>
     apiPost<EmailChangeRequest>("/api/auth/update-email", body, init),
+  );
+}
+
+/** Sets the signed-in user's display name — a person or a company, not a handle. */
+export type NameChangeResult = { ok: true; name: string };
+
+export function updateName(body: { name: string }, init?: RequestInit) {
+  return callWhenLive(AUTH_API_LIVE, AUTH_SECTION, () =>
+    apiPost<NameChangeResult>("/api/auth/update-name", body, init),
   );
 }

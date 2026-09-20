@@ -1703,12 +1703,13 @@ interface StaffMember {
 
 | Method | Route | Notes |
 |---|---|---|
-| `POST` | `/api/auth/sign-up` | `{ email, password }` → creates the user *and* their first org. Server-side (D30). **Rate limited** (below) |
+| `POST` | `/api/auth/sign-up` | `{ email, password, name? }` → creates the user *and* their first org. Optional `name` is the display name (a person or a company) — written to `user_metadata` and used as the first org's name and the owner staff row. Server-side (D30). **Rate limited** (below) |
 | `POST` | `/api/auth/sign-in` | `{ email, password }` → sets the session cookie. Server-side (D30). **Rate limited** (below) |
 | `POST` | `/api/auth/sign-out` | Clears the session cookie |
 | `POST` | `/api/auth/reset-password` | `{ email }` → sends the reset mail. Always `200`, even for an unknown address — never confirm whether an account exists. **Rate limited** (below) |
 | `POST` | `/api/auth/update-password` | `{ password }`, authorized by the recovery session |
 | `POST` | `/api/auth/update-email` | `{ email }` → `{ ok, pending, message }`. Requests a move; does not apply it. Both the current and new inboxes must confirm. `400` when the address is already on the account. Server-side (D30) |
+| `POST` | `/api/auth/update-name` | `{ name }` → `{ ok, name }`. Sets the signed-in user's display name (person or company, not a unique handle). Writes `user_metadata.name` and every `staff.name` row for this user. Cookie-only. Server-side (D30) |
 | `GET` | `/api/auth/callback` | Exchanges the emailed code for a session, then redirects. Confirmation, recovery, and any future OAuth land here |
 
 **Rate limits on sign-up, sign-in and reset — ✅ LIVE 2026-09-13 (G12).** Each is limited on two

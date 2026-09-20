@@ -62,6 +62,9 @@ export function TokensPanel({
         <span className="font-mono text-foreground">/api/mcp</span> with the token as a
         Bearer secret — a signed-in dashboard session is refused there. A client can call
         tools and pin store resources; a token can never do more than the role it carries.
+        Direct <span className="font-mono">/api/*</span> calls with the same token are
+        limited to 300 requests a minute; a 429 from a route (not from MCP) means that
+        budget is spent — mint a narrower token per client rather than a broader one.
       </p>
 
       {tokens.length === 0 ? (

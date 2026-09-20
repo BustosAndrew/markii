@@ -40,6 +40,7 @@ async function uniqueOrgSlug(base: string): Promise<string> {
 export async function ensureFirstOrg(
   userId: string,
   email: string,
+  name?: string | null,
 ): Promise<{ org: Organization; created: boolean }> {
   const existing = await db
     .select({ org: organizations })
@@ -50,14 +51,15 @@ export async function ensureFirstOrg(
   if (existing.length > 0) return { org: existing[0].org, created: false };
 
   const local = email.split("@")[0] ?? "store";
-  const slug = await uniqueOrgSlug(local);
+  const displayName = name?.trim() || null;
+  const slug = await uniqueOrgSlug(displayName ?? local);
 
   const org = await db.transaction(async (tx) => {
     const [row] = await tx
       .insert(organizations)
       .values({
         id: newId("org"),
-        name: `${local}'s organization`,
+        name: displayName ?? `${local}'s organization`,
         slug,
         ownerId: userId,
         billingEmail: email,
@@ -78,6 +80,7 @@ export async function ensureFirstOrg(
       orgId: row.id,
       userId,
       email,
+      name: displayName ?? "",
       role: "owner",
       storeIds: "all",
       // The creator is active immediately — an "invited" owner could never

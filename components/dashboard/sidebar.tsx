@@ -158,7 +158,7 @@ export function SidebarOrgCard({ me }: { me: MeResponse | null }) {
   }
 
   const others = me.organizations.filter((o) => !o.active);
-  const accountLabel = me.user.email ?? me.user.name ?? "Signed in";
+  const accountLabel = me.user.name ?? me.user.email ?? "Signed in";
 
   return (
     <div className="rounded-[var(--radius-card)] border border-border bg-surface-elevated p-3">
