@@ -165,6 +165,9 @@ does not lift it — answering `403 ACCOUNT_SUSPENDED` to writes while reads and
 open. It lands in the merchant's own audit log as "Markii operator", reason included. **The
 screens exist**: `/admin` (`app/(admin)/`) — overview, organizations, sign-ups, suspend/reinstate —
 shown to operators only via `me.operator`. **Production operator is `support@markii.shop`.**
+Operators can also **reset a member's MFA** (`platform.resetMfa`, 2026-09-25): factors deleted
+via Supabase's admin API, codes voided, every session ended, notice mailed to the account email.
+A verification note is required and shows in the merchant's audit log; operators cannot reset themselves.
 
 **A second job is scheduled now: abandoned-cart recovery** (`0 * * * *`, D27). It holds *less*
 authority than the billing cron on purpose — it authenticates with the same `CRON_SECRET` and then

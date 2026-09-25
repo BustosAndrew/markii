@@ -1,7 +1,11 @@
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
-import { conflict, forbidden, notFound } from "../../api";
-import { organizations } from "../../db";
+import { ApiError, conflict, forbidden, notFound } from "../../api";
+import { removeAllMfaFactors } from "../../auth/admin";
+import { revokeAllUserSessions } from "../../auth/sessions";
+import { mfaRecoveryCodes, organizations, sql, staff } from "../../db";
+import { sendPlatformMail } from "../../email";
+import { mfaReset } from "../../email/templates/mfa-reset";
 import { defineAction } from "../registry";
 import type { ActionContext } from "../types";
 
@@ -164,6 +168,146 @@ export const unsuspendOrg = defineAction({
       note: ctx.dryRun
         ? "Dry run: nothing was written."
         : "Reinstated. Billing standing applies as before.",
+    };
+  },
+});
+
+export const resetMfa = defineAction({
+  id: "platform.resetMfa",
+  description:
+    "Remove every authenticator from one staff member of this organization, void their unused " +
+    "recovery codes and sign them out everywhere, so they re-enrol at their next sign-in. For a " +
+    "merchant who has lost both their authenticator and their recovery codes. Markii-only; the " +
+    "member is emailed, and the reset lands in the organization's audit log.",
+  input: z
+    .object({
+      userId: z.string().uuid(),
+      /**
+       * How the operator confirmed this is really the account holder — the
+       * whole risk of this action is someone talking support into it. Recorded
+       * in the audit log, so "who reset it, and on what evidence" can be
+       * answered later. Required and not trivially short.
+       */
+      verification: z.string().trim().min(10).max(1000),
+    })
+    .strict(),
+  permission: "platform.operate",
+  riskTier: "high",
+  requiresStepUp: true,
+  /** Nothing to restore: the old secret is gone at Supabase, by design. */
+  undoable: false,
+  async run(input, ctx) {
+    const org = await targetOrg(ctx);
+
+    const [member] = await ctx.db
+      .select({ userId: staff.userId, email: staff.email, role: staff.role })
+      .from(staff)
+      .where(and(eq(staff.orgId, org.id), eq(staff.userId, input.userId)))
+      .limit(1);
+    // A 404 either way: this org has no such member, whatever else exists.
+    if (!member?.userId) throw notFound("Staff member");
+
+    /**
+     * An operator may not reset their own factor. Doing so would let whoever
+     * holds an operator's password — but not their phone — remove the one
+     * thing standing between them and every merchant's store. A second
+     * operator can do it for them.
+     */
+    if (member.userId === ctx.actor.id) {
+      throw forbidden("An operator cannot reset their own two-factor authentication.");
+    }
+
+    const [{ n: factorCount }] = await sql<{ n: number }[]>`
+      select count(*)::int as n from auth.mfa_factors where user_id = ${member.userId}::uuid
+    `;
+    /**
+     * The notice goes to the **account's** email, not `staff.email`. The staff
+     * row keeps the address the invitation went to, and a Secure Email Change
+     * does not rewrite it — so a merchant who changed their address would be
+     * told about a reset of their own account at one they may no longer read.
+     */
+    const [account] = await sql<{ email: string | null }[]>`
+      select email from auth.users where id = ${member.userId}::uuid
+    `;
+    const notifyTo = account?.email ?? member.email;
+
+    if (ctx.dryRun) {
+      return {
+        userId: member.userId,
+        email: member.email,
+        factorsToRemove: factorCount,
+        note: "Dry run: nothing was removed and no one was signed out.",
+      };
+    }
+
+    /**
+     * The irreversible external call goes **first and in `run`**, never as a
+     * post-commit effect — the same rule as a processor refund. An effect that
+     * failed would leave an audit row saying the reset happened while the old
+     * factor still worked.
+     */
+    const removal = await removeAllMfaFactors(member.userId);
+    if (!removal.ok) {
+      throw new ApiError(
+        "INTERNAL",
+        502,
+        `Supabase refused to remove the authenticator (${removal.removed} of ${factorCount} removed). ` +
+          "Nothing was reported as reset; try again.",
+        { reason: removal.reason },
+      );
+    }
+
+    // Void what the old enrolment issued. Used codes stay as history.
+    await ctx.db
+      .delete(mfaRecoveryCodes)
+      .where(and(eq(mfaRecoveryCodes.userId, member.userId), isNull(mfaRecoveryCodes.usedAt)));
+    const sessionsEnded = await revokeAllUserSessions(member.userId);
+
+    ctx.recordDiff({
+      entity: "user",
+      entityId: member.userId,
+      path: "mfaFactors",
+      before: factorCount,
+      after: 0,
+    });
+    /**
+     * In the diff, not only the input, because the org's audit view shows the
+     * diff: the merchant can read on what evidence support reset their account,
+     * which is the answer they need if they never asked for it.
+     */
+    ctx.recordDiff({
+      entity: "user",
+      entityId: member.userId,
+      path: "mfaResetVerification",
+      before: null,
+      after: input.verification,
+    });
+
+    const base = (process.env.NEXT_PUBLIC_APP_URL || "https://markii.shop").replace(/\/+$/, "");
+    const support = process.env.CONTACT_TO?.trim() || "support@markii.shop";
+    ctx.effect(`email ${notifyTo} that their MFA was reset`, async () => {
+      const mail = mfaReset({ orgName: org.name, signInUrl: `${base}/sign-in`, supportAddress: support });
+      const sent = await sendPlatformMail({
+        to: notifyTo,
+        subject: mail.subject,
+        html: mail.html,
+        text: mail.text,
+        replyTo: support,
+      });
+      if (!sent.sent) console.error("[platform] MFA reset notice not sent", sent.reason);
+    });
+
+    return {
+      userId: member.userId,
+      email: member.email,
+      factorsRemoved: removal.removed,
+      sessionsEnded,
+      /**
+       * Where the notice is *queued* to. It sends after commit and a failure
+       * is only logged, so this names the address — it does not claim delivery.
+       */
+      noticeTo: notifyTo,
+      note: "They will be asked to set up a new authenticator at their next sign-in.",
     };
   },
 });

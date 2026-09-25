@@ -3640,6 +3640,7 @@ client. Built to give the sign-up review digest (§25) an action behind it.
 | `GET` | `/api/admin/orgs/:idOrSlug` | The org as an operator sees it: `{ id, slug, name, billingEmail, createdAt, planId, standing, suspension: { since, reason, by } \| null, stores[] }`. By id or slug — the digest names slugs, the audit log names ids |
 | `POST` | `/api/admin/orgs/:idOrSlug/suspend` | `{ reason }` (3–1000 chars, required) → `ActionOutcome` of **`platform.suspendOrg`**. `?dryRun=1` for the diff without the write. `409` if already suspended |
 | `DELETE` | `/api/admin/orgs/:idOrSlug/suspend` | `ActionOutcome` of **`platform.unsuspendOrg`**. `409` if not suspended |
+| `POST` | `/api/admin/orgs/:idOrSlug/staff/:userId/reset-mfa` | `{ verification }` (10–1000 chars, required) → `ActionOutcome` of **`platform.resetMfa`**: `{ userId, email, factorsRemoved, sessionsEnded, noticeTo }`. `?dryRun=1` → `factorsToRemove`. `404` if the user is not a member of that org; `403` for an operator's own account (added 2026-09-25) |
 
 **Who is an operator.** A **signed-in staff session** (so MFA and step-up apply — both actions are
 `high` and `requiresStepUp`) whose email is on **`PLATFORM_OPERATOR_EMAILS`**: exact addresses or
@@ -3674,6 +3675,22 @@ the grounds are in their audit log as the input of `platform.suspendOrg`, readab
 holders. It is deliberately not a private note: write it as the thing you would say to them.
 Both `suspended_reason` and `suspended_by` are also kept on the org row, since the audit view is
 filterable and the row is not.
+
+**MFA reset (2026-09-25).** For a merchant who has lost both their authenticator and their
+recovery codes, which had no way back short of the Supabase dashboard. `platform.resetMfa`
+deletes every factor through Supabase's **admin** MFA API (the merchant's own recover path uses
+their session, which is what they lack), voids their unused recovery codes, **ends every session
+they hold**, and queues a notice to their **account** email (`auth.users.email`, not
+`staff.email`, which a Secure Email Change does not rewrite). Their next sign-in meets the
+enrolment gate and issues fresh codes. The factor deletion runs **first and inside `run`**, never
+as a post-commit effect: an effect that failed would leave an audit row claiming a reset while the
+old factor still worked. **`verification` is required and lands in the org's audit log** (in the
+diff, which is what that view shows): this is the one action an impersonator wants support to
+take, so "on what evidence" must be answerable later and readable by the merchant. **An operator
+cannot reset their own factor**, or an operator's password alone would be enough to strip the
+second factor protecting every store. `org.staff[]` on `GET /api/admin/orgs/:id` now lists
+members with `mfaEnrolled`, counted from `auth.mfa_factors` (verified only), the same source
+the sign-in gate reads.
 
 **`GET /api/me` now carries `operator: boolean`** — the allowlist as it applies to the caller. It
 decides only whether the dashboard shows the way in; every route above re-checks.

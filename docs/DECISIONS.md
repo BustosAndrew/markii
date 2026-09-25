@@ -1354,6 +1354,10 @@ config flag. This — not latency — is the thing that would force multi-region
   merchant's own log as "Markii operator" and cannot be used to edit their catalog. Suspension is
   a timestamp derived into standing on every request, ahead of billing, held until an operator
   lifts it: paying does not. The reason is written to the merchant's audit log on purpose.
+  ✅ **Operators can reset a merchant's MFA** (2026-09-25, `platform.resetMfa`): the one action an
+  impersonator wants support to take, so it requires a written note on how identity was confirmed
+  (visible to the merchant in their audit log), always mails the account's own address, ends
+  every session, and cannot be used by an operator on themselves.
 - **SES sending caps for new merchants** until sending reputation is established — this protects
   every other merchant's deliverability, which is the shared resource most easily poisoned.
 - **Scraping:** storefronts are *meant* to be crawled by agents, so the control is rate limiting and

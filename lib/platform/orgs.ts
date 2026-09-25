@@ -2,7 +2,7 @@ import "server-only";
 
 import { and, count, desc, eq, gte, ilike, isNotNull, or, sql } from "drizzle-orm";
 import { notFound } from "@/lib/api";
-import { db, organizations, sites } from "@/lib/db";
+import { db, organizations, sites, sql as rawSql, staff } from "@/lib/db";
 import { accountStanding, serializeStanding } from "@/lib/billing/standing";
 import {
   SIGNUP_REVIEW_THRESHOLD,
@@ -38,6 +38,25 @@ export async function platformOrgView(idOrSlug: string) {
     .from(sites)
     .where(eq(sites.orgId, org.id));
 
+  const members = await db
+    .select({ userId: staff.userId, email: staff.email, role: staff.role, status: staff.status })
+    .from(staff)
+    .where(eq(staff.orgId, org.id));
+
+  /**
+   * Verified authenticators per member, read from Supabase's own
+   * `auth.mfa_factors` — the same source `readMfaState` asks, so this cannot
+   * say "enrolled" about a factor the sign-in gate does not count.
+   */
+  const userIds = members.map((m) => m.userId).filter((u): u is string => !!u);
+  const factorRows = userIds.length
+    ? await rawSql<{ user_id: string; n: number }[]>`
+        select user_id::text, count(*)::int as n from auth.mfa_factors
+        where status = 'verified' and user_id::text in ${rawSql(userIds)}
+        group by user_id`
+    : [];
+  const factors = new Map(factorRows.map((r) => [r.user_id, r.n]));
+
   const standing = accountStanding(org);
 
   return {
@@ -60,6 +79,14 @@ export async function platformOrgView(idOrSlug: string) {
         }
       : null,
     stores,
+    /** Invited members have no `userId` yet and nothing to reset. */
+    staff: members.map((m) => ({
+      userId: m.userId,
+      email: m.email,
+      role: m.role,
+      status: m.status,
+      mfaEnrolled: m.userId ? (factors.get(m.userId) ?? 0) > 0 : false,
+    })),
   };
 }
 

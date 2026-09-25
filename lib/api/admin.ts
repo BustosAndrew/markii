@@ -43,6 +43,14 @@ export type PlatformOrgView = {
     by: string | null;
   } | null;
   stores: { id: number; slug: string; name: string; status: "draft" | "live" | "paused" }[];
+  /** `userId` is null for an invitation not yet accepted. `mfaEnrolled` counts verified factors only. */
+  staff: {
+    userId: string | null;
+    email: string;
+    role: string;
+    status: "active" | "invited" | "disabled";
+    mfaEnrolled: boolean;
+  }[];
 };
 
 export type PlatformOrgListItem = {
@@ -143,6 +151,35 @@ export function suspendPlatformOrg(idOrSlug: string, reason: string, opts?: { dr
   return apiPost<ActionOutcome<SuspendResult>>(
     `/api/admin/orgs/${encodeURIComponent(idOrSlug)}/suspend${q}`,
     { reason },
+  );
+}
+
+export type ResetMfaResult = {
+  userId: string;
+  email: string;
+  factorsRemoved?: number;
+  factorsToRemove?: number;
+  sessionsEnded?: number;
+  /** The account email the notice was queued to — may differ from the staff row's. Not proof of delivery. */
+  noticeTo?: string;
+  note: string;
+};
+
+/**
+ * `verification` (10–1000 chars) says how the account holder's identity was
+ * confirmed. It is recorded in that org's audit log — the evidence behind the
+ * one action here that an impersonator would want support to take.
+ */
+export function resetPlatformMfa(
+  idOrSlug: string,
+  userId: string,
+  verification: string,
+  opts?: { dryRun?: boolean },
+) {
+  const q = opts?.dryRun ? "?dryRun=1" : "";
+  return apiPost<ActionOutcome<ResetMfaResult>>(
+    `/api/admin/orgs/${encodeURIComponent(idOrSlug)}/staff/${encodeURIComponent(userId)}/reset-mfa${q}`,
+    { verification },
   );
 }
 

@@ -58,3 +58,36 @@ export async function setUserKind(
   }
   return { ok: true };
 }
+
+/**
+ * Removes every MFA factor on a user (G12 — `platform.resetMfa`).
+ *
+ * **Through the admin API, not the user's session.** The merchant's own
+ * recovery path (`/api/auth/mfa/recover`) unenrolls with their session, which
+ * is exactly what a locked-out merchant does not have. Unverified factors go
+ * too: a half-finished enrolment left behind would be picked up by the next
+ * `challenge` and confuse the fresh one.
+ *
+ * Reports what it removed and what failed rather than throwing on the first
+ * error, so the caller can refuse to report success when a factor survived.
+ */
+export async function removeAllMfaFactors(
+  userId: string,
+): Promise<{ ok: true; removed: number } | { ok: false; removed: number; reason: string }> {
+  const admin = adminClient();
+  if (!admin) return { ok: false, removed: 0, reason: "SUPABASE_SERVICE_ROLE_KEY is not configured" };
+
+  const { data, error } = await admin.auth.admin.mfa.listFactors({ userId });
+  if (error) return { ok: false, removed: 0, reason: error.message };
+
+  let removed = 0;
+  const failures: string[] = [];
+  for (const factor of data?.factors ?? []) {
+    const { error: delError } = await admin.auth.admin.mfa.deleteFactor({ userId, id: factor.id });
+    if (delError) failures.push(delError.message);
+    else removed += 1;
+  }
+  return failures.length
+    ? { ok: false, removed, reason: failures.join("; ") }
+    : { ok: true, removed };
+}

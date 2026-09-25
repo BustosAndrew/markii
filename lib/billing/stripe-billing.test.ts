@@ -305,6 +305,7 @@ describe("billing action registration", () => {
       "payments.connectRail",
       "payments.disconnectRail",
       // Access moves in the other direction: Markii removing a store (G12).
+      "platform.resetMfa",
       "platform.suspendOrg",
       "platform.unsuspendOrg",
     ]);

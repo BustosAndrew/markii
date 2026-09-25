@@ -514,6 +514,12 @@ The only link in from merchant navigation is `OperatorLink` in `sidebar.tsx`, re
 in-process wrappers. Styled to the existing primitives and deliberately plain — restyle freely,
 but keep it off merchant navigation for everyone else.
 
+**2026-09-25: the admin org page has a Members panel** (`components/admin/staff-mfa.tsx`) with
+each member's MFA state and a **Reset MFA** control (`resetPlatformMfa` in `lib/api/admin.ts`;
+`PlatformOrgView.staff[]` is new). The form requires a note on how identity was confirmed, and
+the success line says a notice was *queued* to `noticeTo`, because the send is post-commit and
+not confirmed.
+
 **Two small fixes in existing files while building this, both worth knowing about:**
 
 - `audit-log.tsx` no longer offers **Undo** on an operator's row — `lib/org/audit.ts` masks

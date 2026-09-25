@@ -166,3 +166,20 @@ export async function revokeUserSession(userId: string, sessionId: string): Prom
   `;
   return deleted.length > 0;
 }
+
+/**
+ * Ends **every** session a user holds (G12 — `platform.resetMfa`).
+ *
+ * An operator resetting someone's MFA is resetting their identity's second
+ * half, and a session that was established with the old factor must not keep
+ * standing on it. Same cascade and the same caveat as `revokeUserSession`: the
+ * refresh chain dies with the row, an access token already issued lives out its
+ * hour. The user signs in again and meets the enrolment gate.
+ */
+export async function revokeAllUserSessions(userId: string): Promise<number> {
+  if (!isUuid(userId)) return 0;
+  const deleted = await sql`
+    delete from auth.sessions where user_id = ${userId}::uuid returning id
+  `;
+  return deleted.length;
+}

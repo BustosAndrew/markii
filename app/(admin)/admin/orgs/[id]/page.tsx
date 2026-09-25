@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { StaffMfa } from "@/components/admin/staff-mfa";
 import { SuspendControls } from "@/components/admin/suspend-controls";
 import { FetchError } from "@/components/dashboard/fetch-error";
 import { Badge } from "@/components/ui/badge";
@@ -89,6 +90,8 @@ export default async function AdminOrgPage({ params }: { params: Promise<{ id: s
               </ul>
             )}
           </section>
+
+          <StaffMfa org={o} />
         </div>
 
         <SuspendControls org={o} />

@@ -659,6 +659,15 @@ Contract `docs/API.md` §18. The largest phase. Order within it:
     merchant's audit log offered **Undo** on the operator's suspension (now masked — it could only
     be refused), and the dashboard overview's Readiness card said *"Authentication required"* for
     every merchant because the page used the browser client from a server render (fixed).
+18. ~~**Operator MFA reset** (G12)~~ — done 2026-09-25, `docs/API.md` §26. `platform.resetMfa`:
+    factors deleted via Supabase's admin MFA API, unused recovery codes voided, every session
+    ended (`revokeAllUserSessions`), notice queued to the **account** email. The Supabase call is
+    in `run`, before any write, for the same reason a processor refund is. Required
+    `verification` note, recorded in the diff so the merchant can read it. Operators cannot reset
+    themselves. Verified against real GoTrue in `platform-mfa-reset.test.ts` (old session dead,
+    next sign-in gated to enrol, re-enrolment works); falsified by skipping the session
+    revocation. The notice goes to Resend's sandbox in tests, because fixtures live at
+    `@markii.shop`, where a bounce would land on Markii's own reputation.
 
 > **Two things this uncovered, both worth knowing.**
 >
