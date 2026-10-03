@@ -79,6 +79,7 @@ API-independent work so you don't outrun the backend") no longer applies to A, B
 | Add-on **purchase** | §17 | ⛔ Refuses `409` | Agent Ops / Chargeback Assist do not exist. Show them as unavailable — never as "coming soon with a buy button" |
 | Email delivery | §24 | ✅ LIVE, screen built | SES sends; `/dashboard/settings/email`. Unverified domains still send via the storefront fallback (D44) — do not say mail is not going out |
 | Site builder, Channels, Test Lab, Agent Ops chat | §19–21 | ⛔ Deferred | Out of launch scope — do not start. MCP (§22) is live; do not confuse it with Agent Ops chat |
+| Platform admin | §26 | ✅ LIVE, screens built | `/admin` when `me.operator`. Suspend/reinstate and **Reset MFA** (`resetPlatformMfa`). Never on merchant nav for anyone else |
 
 ### MFA (D40) — built. What to preserve when touching it
 
@@ -250,13 +251,13 @@ What moved:
 A sweep reconciling every route against `lib/api/*` found four endpoints that were **built, live, and
 reachable from no screen**. This is the failure CLAUDE.md records as having happened once before,
 recurring where nobody had looked: `docs/API.md` marked them live and the badge was telling the truth
-about the *backend*. **No screens exist for any of these — the services are the unblock, not the
-feature.**
+about the *backend*. The services unblocked the screens; **digital delivery, discount preview, tax
+preview, and inventory levels all have screens now** (`/dashboard/delivery`, `/dashboard/discounts`,
+`/dashboard/settings/tax`, `/dashboard/catalog` / inventory).
 
 **1. Digital delivery (§18.8) — the serious one, and it is launch scope.** `lib/api/delivery.ts` is
-new. There was **no client for any of it**: a merchant could not upload a file they sell, attach one
-to a product, or set a download limit. D5 names creators and digital-goods sellers as the
-**beachhead segment**, so this was the launch feature for the launch audience with no way in.
+the client. Screens shipped 2026-08-17 at `/dashboard/delivery` and on the product editor. D5 names
+creators and digital-goods sellers as the **beachhead segment**.
 
 - `uploadDigitalAsset(file, { siteId, label })` — `FormData`, **not** an action. Bytes do not belong
   in an audit row. Deliberately no client-side type allowlist: a merchant may sell any file type.
@@ -518,7 +519,9 @@ but keep it off merchant navigation for everyone else.
 each member's MFA state and a **Reset MFA** control (`resetPlatformMfa` in `lib/api/admin.ts`;
 `PlatformOrgView.staff[]` is new). The form requires a note on how identity was confirmed, and
 the success line says a notice was *queued* to `noticeTo`, because the send is post-commit and
-not confirmed.
+not confirmed. **Do not offer Reset MFA on the operator's own row** — the action refuses it
+(`403`) so an operator's password alone cannot strip their second factor. Pass `operatorUserId`
+from `GET /api/me`.
 
 **Two small fixes in existing files while building this, both worth knowing about:**
 
@@ -551,7 +554,8 @@ that has published any (the create-site wizard passes none and is unchanged); an
 header nav gains a "Collections" link once one is published, which matters to themes work (§1).
 The collections screen's "published" toggle now does something a shopper can see — the create form
 and the catalog list say a published collection appears at `/collections` and in the storefront
-header.
+header. The catalog list can publish or hide an existing collection (`updateCollection`,
+`catalog.write`) without opening a second editor.
 
 ### 🟡 New 2026-09-14 — `standing.state` can be `past_due` (D10); the banner already handles it
 
@@ -804,7 +808,7 @@ real state. These are the open items, recorded so they are not rediscovered late
 | ~~Org switcher was a placeholder~~ ✅ **built 2026-08-03** | `components/dashboard/sidebar.tsx` | The sidebar card said "org switching is coming soon with Phase A auth" long after `POST /api/org/switch` shipped. Now a real switcher, shown only when the user belongs to more than one org. Identity is resolved **once in the layout** and passed to both shells, so the rail and the mobile drawer cannot disagree about which org is active |
 | ~~Team settings was a stub~~ ✅ **built 2026-08-03** | `/dashboard/settings/team` | Staff with inline role changes, invites against the plan's seat limit, and scoped API tokens. **Audit** is now its own screen (`/dashboard/settings/audit`, 2026-09-06). **Account** (`/dashboard/settings/account`) holds username, org name (owner/admin), email change, and the caller's own sessions |
 | ~~Orders list is genuinely blocked~~ ✅ **unblocked** | `/dashboard/orders` | `GET /api/orders` ships; the screen exists. Settlements live at `/dashboard/orders/settlements` |
-| ~~Collections tab and discounts were stubs~~ ✅ **built 2026-08-03** | `/dashboard/catalog?tab=collections`, `/dashboard/discounts` | Both read-only lists against live routes. Discounts show derived `status`, redemption counts, and a **Fully redeemed** badge — an exhausted code still reads as active by its dates and only fails when a shopper tries it |
+| ~~Collections tab and discounts were stubs~~ ✅ **built 2026-08-03** | `/dashboard/catalog?tab=collections`, `/dashboard/discounts` | Collections list can publish or hide (`updateCollection`, `catalog.write`) now that storefront `/collections` exists. Discounts show derived `status`, redemption counts, and a **Fully redeemed** badge — an exhausted code still reads as active by its dates and only fails when a shopper tries it |
 | ~~Customers screen was a stub~~ ✅ **built 2026-08-03** | `/dashboard/customers` + `/dashboard/customers/[id]` | List with search, store filter and pagination; detail with memberships, orders and addresses. Money formats from `org.currency` via `formatMinor` (**D31**), never a hardcoded `/100` |
 | ~~No memberships screen~~ ✅ **added 2026-08-03** | `/dashboard/memberships` | Tiers with live member counts, create/delete, and manual grant/revoke by customer search (§18.9). Deleting a tier warns that it **ungates** its products, because `requires_tier_id` is `on delete set null` and nothing errors when paid content becomes public |
 | ~~Session refresh is unwired~~ ✅ **fixed** | `proxy.ts` imports `updateSupabaseSession` | `/dashboard` is guarded. Note the API surface was never exposed regardless — every data route funnels through `getSession()`, which also enforces MFA |

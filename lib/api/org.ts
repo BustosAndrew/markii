@@ -56,6 +56,11 @@ export function canWriteBilling(role: StaffRole | null | undefined): boolean {
   return role === "owner" || role === "administrator";
 }
 
+/** `catalog.write` — owner, administrator, and catalog manager. */
+export function canWriteCatalog(role: StaffRole | null | undefined): boolean {
+  return role === "owner" || role === "administrator" || role === "catalog_manager";
+}
+
 export type Organization = {
   id: string;
   name: string;

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { FieldError, Label, Textarea } from "@/components/ui/field";
 import { resetPlatformMfa, type PlatformOrgView } from "@/lib/api/admin";
-import { ApiClientError } from "@/lib/api/types";
+import { publicErrorMessage } from "@/lib/api/public-copy";
 
 type Member = PlatformOrgView["staff"][number];
 
@@ -20,7 +20,14 @@ type Member = PlatformOrgView["staff"][number];
  * authenticator" — so the form asks how identity was confirmed and records the
  * answer in the org's audit log beside the reset.
  */
-export function StaffMfa({ org }: { org: PlatformOrgView }) {
+export function StaffMfa({
+  org,
+  operatorUserId,
+}: {
+  org: PlatformOrgView;
+  /** The signed-in operator. They cannot reset their own factor — hide the control. */
+  operatorUserId: string | null;
+}) {
   const router = useRouter();
   const [target, setTarget] = useState<Member | null>(null);
   const [verification, setVerification] = useState("");
@@ -35,6 +42,10 @@ export function StaffMfa({ org }: { org: PlatformOrgView }) {
     setError(null);
     try {
       const out = await resetPlatformMfa(org.id, target.userId, verification.trim());
+      if (!out.ok) {
+        setError("Reset failed.");
+        return;
+      }
       setDone(
         `Reset ${target.email}: ${out.result?.factorsRemoved ?? 0} authenticator(s) removed, ` +
           `${out.result?.sessionsEnded ?? 0} session(s) ended. A notice was queued to ` +
@@ -44,7 +55,7 @@ export function StaffMfa({ org }: { org: PlatformOrgView }) {
       setVerification("");
       router.refresh();
     } catch (err) {
-      setError(err instanceof ApiClientError ? err.message : "Reset failed.");
+      setError(publicErrorMessage(err, "Reset failed."));
     } finally {
       setBusy(false);
       setConfirmOpen(false);
@@ -62,7 +73,10 @@ export function StaffMfa({ org }: { org: PlatformOrgView }) {
             <li key={m.email} className="flex flex-wrap items-center justify-between gap-3 py-2">
               <span className="flex flex-wrap items-center gap-2">
                 <span className="font-medium text-foreground">{m.email}</span>
-                <span className="capitalize text-muted">{m.role.replace("_", " ")}</span>
+                <span className="capitalize text-muted">{m.role.replace(/_/g, " ")}</span>
+                {operatorUserId && m.userId === operatorUserId ? (
+                  <Badge variant="neutral">You</Badge>
+                ) : null}
                 {m.status !== "active" ? <Badge variant="neutral">{m.status}</Badge> : null}
                 {m.userId ? (
                   m.mfaEnrolled ? (
@@ -72,7 +86,7 @@ export function StaffMfa({ org }: { org: PlatformOrgView }) {
                   )
                 ) : null}
               </span>
-              {m.userId && m.mfaEnrolled ? (
+              {m.userId && m.mfaEnrolled && m.userId !== operatorUserId ? (
                 <Button
                   variant="secondary"
                   disabled={busy}

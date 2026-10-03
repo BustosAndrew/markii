@@ -2702,12 +2702,12 @@ action returns `customerNotified: false` / `queued: true`, and the outcome lands
 `email_sent` or `email_failed`. SES is not wired yet, so `email_failed` is currently the normal
 result and is reported as such.
 
-### 18.8 Digital delivery ✅ LIVE (backend); **no screens yet**
+### 18.8 Digital delivery ✅ LIVE
 
-> **The client was missing until 2026-08-10.** Every endpoint here was live and reachable from no
-> screen — a merchant could not upload a file they sell, attach one, or set a download limit.
-> `lib/api/delivery.ts` now exists; the screens do not. Given D5 names digital-goods sellers as the
-> beachhead, this is the highest-priority frontend gap. See `docs/FRONTEND.md`.
+> **Frontend:** `/dashboard/delivery` (`components/dashboard/digital-assets-panel.tsx`) and the
+> product page attachment editor — verified 2026-08-17. `lib/api/delivery.ts` (`DELIVERY_API_LIVE`)
+> is the typed service. The bucket stays private: the list has no `url`, and a paid download is a
+> signed grant, never a durable address.
 
 The **D5 beachhead**. Everything here exists because a merchant selling files never needs the
 fulfillment logistics `docs/PLAN.md` §3 permanently excludes — the platform's most conspicuous gap
@@ -3696,10 +3696,11 @@ the sign-in gate reads.
 decides only whether the dashboard shows the way in; every route above re-checks.
 
 **Frontend:** built — `/admin` (`app/(admin)/`): overview, organizations (search, standing
-filter), sign-ups (24h/3d/7d/30d), and the org page with the suspend/reinstate control. Its shell
-is separate from the merchant dashboard's and the only link into it is the operator-only
-"Platform admin" entry the sidebar shows when `me.operator` is true. `lib/api/admin.ts`
-(`ADMIN_API_LIVE`) is the typed service; `lib/api/server.ts` has the in-process wrappers.
+filter), sign-ups (24h/3d/7d/30d), and the org page with suspend/reinstate **and** the Members
+panel (`resetPlatformMfa`; hide the control on the operator's own row). Its shell is separate from
+the merchant dashboard's and the only link into it is the operator-only "Platform admin" entry the
+sidebar shows when `me.operator` is true. `lib/api/admin.ts` (`ADMIN_API_LIVE`) is the typed
+service; `lib/api/server.ts` has the in-process wrappers.
 
 ---
 

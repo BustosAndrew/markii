@@ -7,11 +7,14 @@ import { LocalDateTime } from "@/components/ui/local-date";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusDot } from "@/components/ui/status-dot";
 import { loadOrError } from "@/lib/api/load";
-import { getPlatformOrg } from "@/lib/api/server";
+import { getMe, getPlatformOrg } from "@/lib/api/server";
 
 export default async function AdminOrgPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const org = await loadOrError(() => getPlatformOrg(id));
+  const [org, me] = await Promise.all([
+    loadOrError(() => getPlatformOrg(id)),
+    loadOrError(() => getMe()),
+  ]);
 
   if (org.error || !org.data) {
     return (
@@ -91,7 +94,7 @@ export default async function AdminOrgPage({ params }: { params: Promise<{ id: s
             )}
           </section>
 
-          <StaffMfa org={o} />
+          <StaffMfa org={o} operatorUserId={me.data?.user.id ?? null} />
         </div>
 
         <SuspendControls org={o} />
