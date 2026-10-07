@@ -130,3 +130,56 @@ export const API_TOKEN_RATE_LIMIT: RateLimitPolicy = {
   limit: Number(process.env.API_TOKEN_RATE_LIMIT ?? 300),
   windowMs: 60_000,
 };
+
+/**
+ * A positive integer from the environment, or the default.
+ *
+ * `Number("abc")` is `NaN`, and a `NaN` limit refuses every request — `count
+ * <= NaN` is false — so a typo in an override would turn a throttle into an
+ * outage. An override that is not a positive number is ignored, not obeyed.
+ */
+export function limitFromEnv(name: string, fallback: number): number {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) && n > 0 ? Math.trunc(n) : fallback;
+}
+
+/**
+ * Storefront fair use (G12) — every request to one store from one client
+ * address, pages and storefront APIs alike.
+ *
+ * **Throttle, never block.** Storefronts exist to be read by agents, so the
+ * answer to a fast crawler is a `429` with a `Retry-After` it can obey, not a
+ * ban. The ceiling sits where no person browsing meets it — four requests a
+ * second, sustained for a minute — and where a scraper hammering one store
+ * from one machine does.
+ *
+ * **Per store and address, not per agent.** A crawler identifies itself by
+ * user agent, which anyone can type: a budget keyed on `GPTBot` could be spent
+ * by someone else claiming to be it, and the real crawler would then be turned
+ * away from a store it was entitled to read — blocking by proxy. The address
+ * is the dimension a caller cannot borrow from someone else. Per store, so a
+ * crawler working through many storefronts from one address is not penalised
+ * on the hundredth for the ninety-nine before it.
+ */
+export const STOREFRONT_RATE_LIMIT: RateLimitPolicy = {
+  limit: limitFromEnv("STOREFRONT_RATE_LIMIT", 240),
+  windowMs: 60_000,
+};
+
+/**
+ * Download fair use (G12 × G5) — redemptions of one download link per day.
+ *
+ * **This is the bandwidth control.** A merchant may set no download limit,
+ * and a link with none, posted to a forum, would let strangers pull a 2 GB
+ * file without end — egress Markii pays for and nothing else bounds. A buyer
+ * re-downloading on a second device, or after a failed transfer, uses two or
+ * three of these; ten a day is far above that and far below a leak.
+ *
+ * Time-based, so it **throttles rather than cuts off**: the link works again
+ * tomorrow, and a refused attempt is not counted against the merchant's own
+ * download limit.
+ */
+export const DOWNLOAD_RATE_LIMIT: RateLimitPolicy = {
+  limit: limitFromEnv("DOWNLOAD_RATE_LIMIT", 10),
+  windowMs: 24 * 60 * 60_000,
+};

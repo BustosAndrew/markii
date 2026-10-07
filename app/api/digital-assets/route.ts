@@ -1,9 +1,10 @@
 import { and, asc, count, eq, type SQL } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { badRequest, intParam, pagination } from "@/lib/api";
+import { ApiError, badRequest, intParam, pagination } from "@/lib/api";
 import { orgHandler } from "@/lib/auth/handler";
-import { mediaUsageFor } from "@/lib/commerce/media-usage";
+import { mediaQuotaFrom, mediaUsageFor, storageAllows } from "@/lib/commerce/media-usage";
 import { db, digitalAssets, sites } from "@/lib/db";
+import { entitlementsFor } from "@/lib/plans";
 import { ownSites } from "@/lib/tenancy";
 import { PRIVATE_BUCKET, isStorageConfigured, uploadFile } from "@/lib/storage";
 
@@ -31,7 +32,7 @@ import { PRIVATE_BUCKET, isStorageConfigured, uploadFile } from "@/lib/storage";
 const MAX_BYTES = 2 * 1024 * 1024 * 1024;
 
 export const GET = orgHandler(
-  async (req, { orgId }) => {
+  async (req, { orgId, session }) => {
     const sp = new URL(req.url).searchParams;
     const { page, limit, offset } = pagination(sp);
 
@@ -60,15 +61,17 @@ export const GET = orgHandler(
       total: Number(totalRow?.c ?? 0),
       page,
       limit,
-      /** Measured usage against G5's proposed quotas. Advisory — nothing blocks on it. */
-      usage: await mediaUsageFor(db, orgId),
+      /** Usage against the plan's G5 allowance — storage enforced at upload, delivery reported. */
+      usage: await mediaUsageFor(db, orgId, {
+        quota: mediaQuotaFrom(entitlementsFor(session.org).media),
+      }),
     });
   },
   { permission: "catalog.read" },
 );
 
 export const POST = orgHandler(
-  async (req, { orgId }) => {
+  async (req, { orgId, session }) => {
     const form = await req.formData();
     const file = form.get("file");
     if (!(file instanceof File)) throw badRequest('multipart field "file" is required');
@@ -106,6 +109,38 @@ export const POST = orgHandler(
           },
         },
         { status: 503 },
+      );
+    }
+
+    /**
+     * The G5 storage allowance, checked **before** any byte is stored — a
+     * refusal after the upload would pay for the transfer and then delete it.
+     *
+     * Two concurrent uploads can each see room for themselves and together
+     * overshoot. That is accepted rather than locked against: the overshoot is
+     * bounded by one file (`MAX_BYTES`), costs cents of storage, and the next
+     * upload is refused. A lock would serialise every upload an org makes for
+     * the sake of that.
+     */
+    const quota = mediaQuotaFrom(entitlementsFor(session.org).media);
+    const before = await mediaUsageFor(db, orgId, { quota });
+    const room = storageAllows(before.storageBytes, file.size, quota);
+    if (!room.allowed) {
+      throw new ApiError(
+        "QUOTA_EXCEEDED",
+        409,
+        `This file would take your stored files past your plan's ` +
+          `${Math.round(quota.storageBytes / 1024 ** 3)} GB storage allowance.`,
+        {
+          quota: "storage",
+          storageBytes: room.storageBytes,
+          quotaBytes: room.quotaBytes,
+          fileBytes: room.fileBytes,
+          overByBytes: room.overByBytes,
+          resolution:
+            "Delete files you no longer sell, or move to a plan with more storage. Files already " +
+            "stored keep serving to your customers either way.",
+        },
       );
     }
 
@@ -150,7 +185,7 @@ export const POST = orgHandler(
         ...row,
         createdAt: row.createdAt.toISOString(),
         updatedAt: row.updatedAt.toISOString(),
-        usage: await mediaUsageFor(db, orgId),
+        usage: await mediaUsageFor(db, orgId, { quota }),
       },
       { status: 201 },
     );

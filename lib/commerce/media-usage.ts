@@ -1,5 +1,6 @@
 import { and, eq, gte, sql } from "drizzle-orm";
 import { digitalAssets, downloadEvents, type DbHandle } from "../db";
+import type { Entitlements } from "../plans";
 
 /**
  * Storage and egress metering against the G5 quotas.
@@ -9,37 +10,92 @@ import { digitalAssets, downloadEvents, type DbHandle } from "../db";
  * deliver 100 times**. Gating storage alone would gate the cheap half and leave
  * the expensive one uncapped — "gate both, or the gate does nothing".
  *
- * Quotas here are the **proposed** numbers from G5, which the decision register
- * marks as needing sign-off alongside D1. They are therefore reported as a
- * measured usage figure against a stated allowance, never enforced by blocking
- * an upload or a download — enforcing an unsigned-off number would cut off a
- * paying merchant's customers over a figure nobody has agreed to.
+ * The quotas are the plan table in `docs/PRICING.md` §3, signed off with the
+ * plan prices on 2026-08-10, and `lib/plans.ts` is their only representation in
+ * code — this module converts, it does not restate them.
+ *
+ * **The two quotas are enforced differently, and on purpose:**
+ *
+ * - **Storage is enforced at upload.** An upload that would take the org past
+ *   its allowance is refused. That is the merchant's own action, refused before
+ *   any byte is stored; files already stored keep serving, so a merchant who
+ *   downgrades below what they hold loses the ability to add, never what their
+ *   customers bought.
+ * - **Delivery is reported, never enforced and never billed.** Cutting off
+ *   downloads would refuse a paying shopper something they already bought, and
+ *   the meter counts bytes *authorised*, not delivered (`download_events`), so
+ *   it over-counts every abandoned transfer — a number that may sit on Markii's
+ *   cost accounting but not on a merchant's invoice. Bandwidth abuse is bounded
+ *   instead by the per-link fair-use throttle (`DOWNLOAD_RATE_LIMIT`), which
+ *   needs no measurement to be right.
  */
 
-/** G5's proposed quotas. Storage in bytes, delivery per calendar month. */
-export const MEDIA_QUOTAS = {
-  starter: { storageBytes: 10 * 1024 ** 3, deliveryBytes: 50 * 1024 ** 3 },
-  growth: { storageBytes: 50 * 1024 ** 3, deliveryBytes: 250 * 1024 ** 3 },
-  scale: { storageBytes: 250 * 1024 ** 3, deliveryBytes: 1024 ** 4 },
-} as const;
+export type MediaQuota = { storageBytes: number; deliveryBytes: number };
 
-export type PlanKey = keyof typeof MEDIA_QUOTAS;
+/** How each quota is applied. A field, so a screen never has to infer it. */
+export type MediaEnforcement = {
+  /** An upload over the allowance is refused with `QUOTA_EXCEEDED`. */
+  storage: "enforced";
+  /** Measured against the allowance and shown; nothing is refused or billed on it. */
+  delivery: "reported";
+};
+
+const GIB = 1024 ** 3;
+
+/** The plan's allowance in bytes. GB here are GiB, as Supabase bills them. */
+export function mediaQuotaFrom(media: Entitlements["media"]): MediaQuota {
+  return {
+    storageBytes: media.storageGb * GIB,
+    deliveryBytes: media.monthlyEgressGb * GIB,
+  };
+}
 
 export type MediaUsage = {
   storageBytes: number;
   deliveryBytes: number;
   periodStart: string;
-  quota: { storageBytes: number; deliveryBytes: number } | null;
-  /** Fraction of quota used, or null when the plan has no quota on record. */
+  quota: MediaQuota | null;
+  /** Fraction of quota used, or null when no quota was supplied. */
   storageRatio: number | null;
   deliveryRatio: number | null;
-  /**
-   * Always true for now, and said out loud: these figures are measured but the
-   * quotas they are measured against are not signed off (G5), so nothing is
-   * blocked on them.
-   */
-  advisoryOnly: true;
+  enforcement: MediaEnforcement;
 };
+
+export const MEDIA_ENFORCEMENT: MediaEnforcement = { storage: "enforced", delivery: "reported" };
+
+export type StorageCheck =
+  | { allowed: true }
+  | {
+      allowed: false;
+      storageBytes: number;
+      quotaBytes: number;
+      fileBytes: number;
+      /** How much would have to be freed for this file to fit. */
+      overByBytes: number;
+    };
+
+/**
+ * Whether a file of `fileBytes` fits in what is left.
+ *
+ * **The file must fit, not merely start under the line.** Allowing any upload
+ * while usage is below the quota would let a merchant at 9.9 GB of 10 store a
+ * 2 GB file and sit 19% over — a quota that is a suggestion for whoever
+ * uploads the largest file last.
+ *
+ * Exactly at the allowance is allowed: the plan says 10 GB, and 10 GB is
+ * inside it.
+ */
+export function storageAllows(storageBytes: number, fileBytes: number, quota: MediaQuota): StorageCheck {
+  const after = storageBytes + fileBytes;
+  if (after <= quota.storageBytes) return { allowed: true };
+  return {
+    allowed: false,
+    storageBytes,
+    quotaBytes: quota.storageBytes,
+    fileBytes,
+    overByBytes: after - quota.storageBytes,
+  };
+}
 
 /** Start of the current calendar month, UTC — the window delivery is metered over. */
 export function currentPeriodStart(now = new Date()): Date {
@@ -59,7 +115,7 @@ export function currentPeriodStart(now = new Date()): Date {
 export async function mediaUsageFor(
   db: DbHandle,
   orgId: string,
-  opts: { plan?: PlanKey | null; now?: Date } = {},
+  opts: { quota?: MediaQuota | null; now?: Date } = {},
 ): Promise<MediaUsage> {
   const periodStart = currentPeriodStart(opts.now);
 
@@ -75,7 +131,7 @@ export async function mediaUsageFor(
 
   const storageBytes = Number(stored?.bytes ?? 0);
   const deliveryBytes = Number(delivered?.bytes ?? 0);
-  const quota = opts.plan ? MEDIA_QUOTAS[opts.plan] : null;
+  const quota = opts.quota ?? null;
 
   return {
     storageBytes,
@@ -84,6 +140,6 @@ export async function mediaUsageFor(
     quota: quota ? { ...quota } : null,
     storageRatio: quota ? storageBytes / quota.storageBytes : null,
     deliveryRatio: quota ? deliveryBytes / quota.deliveryBytes : null,
-    advisoryOnly: true,
+    enforcement: MEDIA_ENFORCEMENT,
   };
 }

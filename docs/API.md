@@ -2715,8 +2715,8 @@ is irrelevant for this segment.
 
 | Method | Route | Notes |
 |---|---|---|
-| `GET` | `/api/digital-assets` | The org's files, plus measured `usage` against the G5 quotas |
-| `POST` | `/api/digital-assets` | Multipart upload to the **private** bucket. Max 2 GB |
+| `GET` | `/api/digital-assets` | The org's files, plus `usage` against the plan's G5 allowance |
+| `POST` | `/api/digital-assets` | Multipart upload to the **private** bucket. Max 2 GB. **`409 QUOTA_EXCEEDED`** when the file would take stored files past the plan's storage allowance |
 | `GET` | `/api/orders/:id` | `downloads` and `licenceKeys` for that order (§18.7) |
 | `GET` | `/_sites/:site/download/:token` | **Storefront.** Redeem a grant → 302 to a signed URL |
 
@@ -2747,9 +2747,26 @@ of bandwidth against $0.25 of storage**, which is why egress is metered at all.
 **Metering is honest about what it counts.** `download_events.bytes` records bytes **authorised**,
 not delivered — the transfer happens between shopper and Supabase and is never observable from here.
 An abandoned download books a full file. The over-count falls on Markii's own cost accounting, never
-on a merchant's bill. G5's quotas are reported as `usage` with `advisoryOnly: true` and **nothing is
-blocked on them**, because those numbers are still unsigned-off and cutting off a paying merchant's
-customers over an unagreed figure is worse than not gating yet.
+on a merchant's bill.
+
+**The G5 allowance (2026-10-07) — storage enforced, delivery reported.** The quotas are the plan
+table in `docs/PRICING.md` §3, read from `lib/plans.ts`; `usage.quota` is always present and
+`usage.enforcement` is `{ storage: "enforced", delivery: "reported" }` (this replaced
+`advisoryOnly: true`). An upload that would not **fit** is refused before any byte is stored:
+
+```ts
+// 409
+{ error: { code: "QUOTA_EXCEEDED", message, details: {
+  quota: "storage", storageBytes, quotaBytes, fileBytes, overByBytes, resolution } } }
+```
+
+Stored files always keep serving — a merchant who downgrades below what they hold loses the ability
+to add, never what their customers bought. **Delivery is never refused and never billed**: the meter
+over-counts (above), and refusing a paid download is the wrong party paying. No media overage is
+charged today. Bandwidth abuse is bounded instead by the **per-link fair-use throttle**: a grant
+redeemed more than `DOWNLOAD_RATE_LIMIT` times in a UTC day (default **10**) answers `429
+RATE_LIMITED` with `Retry-After`, and the throttled attempt is **not** counted against the merchant's
+download limit. It keys on the grant id, never the token.
 
 **Markii never generates licence keys.** A key it invented would not validate against the merchant's
 software. Merchants load their own pool; each sale claims one with `for update skip locked`, so two
@@ -3281,6 +3298,16 @@ preview tabs):
 
 In local dev, storefronts are reachable at `http://localhost:3000/_sites/{siteSlug}/…`.
 
+**Fair use (G12, 2026-10-07).** Every storefront request — pages and storefront APIs, by hostname
+or by `/_sites/{slug}` path — is counted per store and client address in `proxy.ts`. Over
+`STOREFRONT_RATE_LIMIT` (default **240/min**) the answer is `429` with `Retry-After` and a plain-text
+body pointing agents at `/llms.txt` and `/api/search`. **Throttle, never block**: no crawler is
+refused outright, and the key is the address rather than the user agent, because a budget keyed on
+`GPTBot` could be spent by anyone claiming to be it. No address (a bare origin, a dev server without a
+proxy) means no throttle. Fails open. **The count is written after the response** (`waitUntil`) and a
+refusal is remembered per instance until the window resets, so normal traffic pays no database round
+trip in the proxy; the cost is that the request crossing the limit still gets through.
+
 ---
 
 ## 24. Email — sending domains, deliverability, suppression — partial ✅/🟡
@@ -3304,8 +3331,24 @@ SES-scoped IAM key can read none of it (no `sns:ListTopics`, `ses:ListEmailIdent
 `ses:GetConfigurationSetEventDestinations`), and **nothing in the app would notice if that chain
 later broke** — re-check after any AWS change.
 
-**One gate remains, and it is the merchant's.** Without their own verified domain a merchant gets
-`domain_verification_required` and no send — never a fallback to `markii.shop`.
+**Without their own verified domain a merchant's mail still sends** (D44), from the storefront's
+`accounts@{slug}.{ROOT_DOMAIN}` address — never bare `markii.shop`, never Resend. (This paragraph
+said "no send" until 2026-10-07.)
+
+**Sending cap (G12, 2026-10-07).** Every merchant shares one SES account's reputation, so
+`sendMerchantMail` refuses a send once the org has used its daily cap over a rolling 24 hours —
+after suppression, before SES. Tiers, decided in this order (`lib/email/sending-cap.ts`):
+
+| Tier | Who | Cap/24h |
+|---|---|---|
+| `probation` | any account whose last 30 days crossed AWS's review rates (5% bounces or 0.1% complaints, over ≥50 sends) | 100 |
+| `trial` | no plan-granting subscription | 100 |
+| `new` | paying, account younger than 30 days | 1,000 |
+| `established` | paying, 30+ days, clean | none |
+
+A capped send is recorded in `email_deliveries` with status **`capped`** and reaches the order
+timeline as `email_failed` with the reason. Nothing is exempt, receipts included. Derived per send,
+never stored; fails open. Overrides: `MERCHANT_MAIL_CAP_*`, `MERCHANT_MAIL_ESTABLISHED_DAYS`.
 
 **The loop has carried a real bounce as of 2026-08-16** —
 `tests/integration/ses-suppression.test.ts` (gated, `MARKII_SES_TESTS=1`). A receipt to
@@ -3327,7 +3370,8 @@ otherwise. So this only became testable once D44 let receipts send without a ver
 
 **Merchant mail never falls back to Resend.** A merchant's order confirmation leaving from
 `markii.shop` would put their bounces on Markii's sending reputation, which is the entire reason
-the two streams exist. Without a verified domain, merchant mail does not send.
+the two streams exist. Without a verified domain, merchant mail sends from the storefront's own
+`{slug}.{ROOT_DOMAIN}` address (D44).
 
 ### `GET /api/settings/email` — ✅ LIVE (`org.read`)
 
@@ -3335,7 +3379,7 @@ the two streams exist. Without a verified domain, merchant mail does not send.
 {
   customerEmail: {
     canSend: boolean;
-    code: "ready" | "configuration_required" | "domain_verification_required";
+    code: "ready" | "configuration_required" | "unverified_sender";
     message: string;
     senderAddress: string | null;
   };
@@ -3362,12 +3406,24 @@ the two streams exist. Without a verified domain, merchant mail does not send.
   }[];
   platformEmail: { status: "ready" | "configuration_required"; scope: string };
   providerConfigured: boolean;      // false ⇒ nothing above can work yet
+  /** The shared D44 fallback sender's SES health — a Markii incident when `ok` is false. */
+  fallbackSender: { ok: boolean; domain: string | null; verifiedForSending: boolean | null;
+                    dkimStatus: string | null; problem: string | null };
+  /** The daily sending cap (G12). Null when it could not be read — sends are not blocked then. */
+  sendingLimit: {
+    tier: "trial" | "new" | "probation" | "established";
+    dailyLimit: number | null;      // null ⇔ established
+    sentLast24h: number;
+    remaining: number | null;
+    reason: string;                 // says what lifts it — show as-is
+  } | null;
 }
 ```
 
 `customerEmail.code` distinguishes **whose problem it is**: `configuration_required` is Markii's
-(AWS credentials or region — resolved 2026-08-11), `domain_verification_required` is the merchant's
-and is now the only one most merchants will see. `platformEmail` is reported
+(AWS credentials or region — resolved 2026-08-11). `unverified_sender` means mail **is** sending,
+from the storefront's Markii address (D44), and the merchant should verify their own domain —
+`canSend` is true in that state. `platformEmail` is reported
 separately and must never be merged into one "email: OK" — a merchant whose password reset arrived
 would otherwise conclude their order confirmations work, and they do not.
 

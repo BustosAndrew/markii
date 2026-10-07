@@ -520,6 +520,17 @@ token. Cookie sessions are not counted. **The REST ceiling must stay above MCP's
 tools forward to these handlers with the caller's token, so an MCP read lands on both counters;
 a unit test pins the ordering.
 
+**The rest of G12, and the G5 storage allowance, are built as of 2026-10-07.** Merchant mail has
+a **daily sending cap** in `sendMerchantMail` (`lib/email/sending-cap.ts`) — trial 100, new paying
+accounts 1,000 for 30 days, established none, and **probation** at 100 for any account past AWS's
+review rates — because every merchant shares one SES account's reputation whatever their From line
+says; nothing is exempt, receipts included. **Storefronts are throttled in `proxy.ts`** (240/min per
+store and client address, `429` + `Retry-After`, keyed on the address because a user agent is
+borrowable), and `_sites` is now **inside** the proxy matcher so the path is no way around it.
+**Download links are throttled to 10 redemptions a day**, which is the real bandwidth control.
+**Storage is enforced at upload** (`409 QUOTA_EXCEEDED`) from `lib/plans.ts`; **delivery is reported
+and never billed**, because its meter counts bytes authorised, not delivered.
+
 **Stripe Tax on Markii's own subscription is built as of 2026-09-13** (G3). `automatic_tax` on every
 platform-account subscription create, change and preview — **no `Stripe-Account` header**, the
 opposite direction of money from §18.6 — decided from two facts that are reported apart and never

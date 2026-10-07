@@ -1,24 +1,54 @@
 import { describe, expect, it } from "vitest";
-import { MEDIA_QUOTAS, currentPeriodStart } from "./media-usage";
+import { planCatalog } from "../plans";
+import { currentPeriodStart, mediaQuotaFrom, storageAllows } from "./media-usage";
 
-/** G5 media quotas — the numbers, not the queries that measure against them. */
+/** G5 media quotas — the numbers and the fit rule, not the queries that measure against them. */
 
-describe("MEDIA_QUOTAS", () => {
-  it("matches the quotas G5 proposes", () => {
-    expect(MEDIA_QUOTAS.starter.storageBytes).toBe(10 * 1024 ** 3);
-    expect(MEDIA_QUOTAS.growth.storageBytes).toBe(50 * 1024 ** 3);
-    expect(MEDIA_QUOTAS.scale.storageBytes).toBe(250 * 1024 ** 3);
-    expect(MEDIA_QUOTAS.starter.deliveryBytes).toBe(50 * 1024 ** 3);
-    expect(MEDIA_QUOTAS.growth.deliveryBytes).toBe(250 * 1024 ** 3);
-    expect(MEDIA_QUOTAS.scale.deliveryBytes).toBe(1024 ** 4);
+const GIB = 1024 ** 3;
+const byPlan = Object.fromEntries(planCatalog().map((p) => [p.planId, mediaQuotaFrom(p.media)]));
+
+describe("mediaQuotaFrom", () => {
+  it("matches the plan table in docs/PRICING.md §3", () => {
+    expect(byPlan.starter).toEqual({ storageBytes: 10 * GIB, deliveryBytes: 50 * GIB });
+    expect(byPlan.growth).toEqual({ storageBytes: 50 * GIB, deliveryBytes: 250 * GIB });
+    expect(byPlan.scale).toEqual({ storageBytes: 250 * GIB, deliveryBytes: 1024 ** 4 });
   });
 
   it("allows more delivery than storage on every plan", () => {
     // G5's central finding: egress is the expensive half, and a plan that let
     // you store more than you could ever deliver would be gating the wrong one.
-    for (const plan of Object.values(MEDIA_QUOTAS)) {
-      expect(plan.deliveryBytes).toBeGreaterThan(plan.storageBytes);
+    for (const quota of Object.values(byPlan)) {
+      expect(quota.deliveryBytes).toBeGreaterThan(quota.storageBytes);
     }
+  });
+});
+
+describe("storageAllows", () => {
+  const quota = { storageBytes: 10 * GIB, deliveryBytes: 50 * GIB };
+
+  it("allows a file that fits", () => {
+    expect(storageAllows(5 * GIB, 1 * GIB, quota)).toEqual({ allowed: true });
+  });
+
+  it("allows a file that lands exactly on the allowance", () => {
+    expect(storageAllows(9 * GIB, 1 * GIB, quota)).toEqual({ allowed: true });
+  });
+
+  /**
+   * The rule that makes the quota a quota: starting under the line is not
+   * enough. Without it the merchant at 9.9 GB stores a 2 GB file and sits 19%
+   * over, and the allowance belongs to whoever uploads the largest file last.
+   */
+  it("refuses a file that starts under the line but would end over it", () => {
+    const check = storageAllows(9.9 * GIB, 2 * GIB, quota);
+    expect(check.allowed).toBe(false);
+    if (check.allowed) return;
+    expect(check.overByBytes).toBe(9.9 * GIB + 2 * GIB - 10 * GIB);
+    expect(check.quotaBytes).toBe(10 * GIB);
+  });
+
+  it("refuses anything once already over — a downgrade below what is stored", () => {
+    expect(storageAllows(40 * GIB, 1, quota).allowed).toBe(false);
   });
 });
 

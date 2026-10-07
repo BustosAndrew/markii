@@ -2662,8 +2662,15 @@ export const emailDeliveries = pgTable(
     /** Null when nothing was sent — see `status`. */
     providerMessageId: text("provider_message_id"),
     provider: text("provider", { enum: ["ses", "resend", "none"] }).notNull(),
+    /**
+     * `capped` is a send refused by the merchant sending cap (G12,
+     * `lib/email/sending-cap.ts`). Plain text with a TypeScript enum, so a new
+     * value needs no migration — and none of the three values that mean "it
+     * left" (`sent`, `bounced`, `complained`) may ever be reused for a refusal,
+     * because the cap counts them.
+     */
     status: text("status", {
-      enum: ["sent", "failed", "suppressed", "not_configured", "bounced", "complained"],
+      enum: ["sent", "failed", "suppressed", "not_configured", "bounced", "complained", "capped"],
     }).notNull(),
     /** The refusal or provider error, verbatim. */
     reason: text("reason"),

@@ -104,6 +104,9 @@ commerce and $79–105 for mid-tier; Markii undercuts both, hardest in the middl
 Chargeback Assist $19/mo; extra storefront $9/mo.
 **Media overage:** $0.20/GB stored, $0.12/GB delivered — a modest markup over cost, never a profit
 centre (`docs/DECISIONS.md` §G5).
+**Not charged today** (2026-10-07): storage is a hard allowance at upload, and delivery is shown
+but not billed, because the meter counts bytes authorised rather than delivered. Do not quote
+overage pricing as live.
 
 Reasoning behind each number:
 

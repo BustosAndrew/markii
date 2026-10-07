@@ -669,6 +669,23 @@ Contract `docs/API.md` §18. The largest phase. Order within it:
     revocation. The notice goes to Resend's sandbox in tests, because fixtures live at
     `@markii.shop`, where a bounce would land on Markii's own reputation.
 
+19. ~~**Abuse and quota controls** (G12, G5)~~ — done 2026-10-07, the three left open in G12.
+    **Merchant sending caps** in `sendMerchantMail` (`lib/email/sending-cap.ts` pure,
+    `sending-cap-guard.ts` the one query): trial 100/day, new paying accounts 1,000/day for 30
+    days, established uncapped, and probation at 100 for any account over AWS's review rates —
+    status `capped`, surfaced on `/api/settings/email` as `sendingLimit`. **Storefront fair use**
+    in `proxy.ts` (240/min per store and address, `429` + `Retry-After`), with `_sites` added to
+    the matcher so the path is not a way around it. **Counted after the response** through
+    `waitUntil` and refused from a per-instance memory of the refusal: awaited, the counter put
+    ~160 ms in front of every storefront request on a dev machine, on a path `lib/domains` had
+    made query-free on purpose; and **per-link download fair use** (10/day,
+    keyed on the grant id). **The G5 storage allowance is enforced** at upload from `lib/plans.ts`
+    (`MEDIA_QUOTAS` was a second copy of the numbers and is gone); delivery stays reported and
+    unbilled. Falsified three ways: the cap removed (the send went `not_configured`), the quota
+    check removed (`201`), `_sites` excluded again (the path request went uncounted). Building it
+    found `delivery.test.ts`'s `localDownload` double-prefixing `/_sites/{slug}` on
+    `ROOT_DOMAIN=localhost`, so six download tests had only passed against a real root domain.
+
 > **Two things this uncovered, both worth knowing.**
 >
 > `carts.customerId` was **never populated by anything** — so every order was recorded as a guest's,

@@ -49,9 +49,14 @@ export type DigitalAsset = {
 };
 
 /**
- * Advisory only — G5 quotas are unsigned-off and nothing blocks on them.
- * Shape matches `mediaUsageFor` (`lib/commerce/media-usage.ts`), not a guessed
- * rename: delivery is metered as authorised bytes in the current calendar month.
+ * Usage against the plan's G5 allowance (`docs/PRICING.md` §3). Shape matches
+ * `mediaUsageFor` (`lib/commerce/media-usage.ts`), not a guessed rename:
+ * delivery is metered as authorised bytes in the current calendar month.
+ *
+ * **The two quotas behave differently** — read `enforcement`, do not infer it:
+ * storage is `enforced` (an upload that would not fit answers `409
+ * QUOTA_EXCEEDED`; stored files keep serving), delivery is `reported` (shown,
+ * never refused, never billed). `quota` is always present on the live route.
  */
 export type MediaUsage = {
   storageBytes: number;
@@ -60,7 +65,20 @@ export type MediaUsage = {
   quota: { storageBytes: number; deliveryBytes: number } | null;
   storageRatio: number | null;
   deliveryRatio: number | null;
-  advisoryOnly: true;
+  enforcement: { storage: "enforced"; delivery: "reported" };
+};
+
+/**
+ * `details` on a `409 QUOTA_EXCEEDED` from {@link uploadDigitalAsset}. Show
+ * `resolution`; `overByBytes` is how much must be freed for this file to fit.
+ */
+export type StorageQuotaExceeded = {
+  quota: "storage";
+  storageBytes: number;
+  quotaBytes: number;
+  fileBytes: number;
+  overByBytes: number;
+  resolution: string;
 };
 
 export type DigitalAssetList = {
@@ -91,7 +109,8 @@ export function listDigitalAssets(
  * a merchant may sell any file type, and guessing a list here would block a
  * legitimate product with a client-side rule the server never asked for. Size
  * is left to the server too, since the ceiling is a plan entitlement rather
- * than a constant.
+ * than a constant: a file that would not fit the plan's storage allowance is
+ * refused `409 QUOTA_EXCEEDED` with {@link StorageQuotaExceeded} in `details`.
  */
 export async function uploadDigitalAsset(
   file: File,
@@ -108,10 +127,13 @@ export async function uploadDigitalAsset(
   if (!res.ok) {
     let code = "INTERNAL";
     let message = res.statusText || "Upload failed";
+    let details: unknown;
     try {
       const body = await res.json();
       code = body?.error?.code ?? code;
       message = body?.error?.message ?? message;
+      // Carried so a `QUOTA_EXCEEDED` refusal can show its `resolution`.
+      details = body?.error?.details;
     } catch {
       // Non-JSON body — keep the status text.
     }
@@ -121,7 +143,7 @@ export async function uploadDigitalAsset(
      * an operator's problem, and `isConfigurationRequired` is how a screen tells
      * that apart from "not built yet" (`./planned`).
      */
-    throw new ApiClientError(res.status, code, message);
+    throw new ApiClientError(res.status, code, message, details);
   }
 
   return (await res.json()) as DigitalAsset & { usage: MediaUsage };

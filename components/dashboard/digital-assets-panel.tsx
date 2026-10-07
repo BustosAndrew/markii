@@ -6,8 +6,10 @@ import {
   deleteAsset,
   type DigitalAsset,
   type DigitalAssetList,
+  type StorageQuotaExceeded,
   uploadDigitalAsset,
 } from "@/lib/api/delivery";
+import { ApiClientError } from "@/lib/api/types";
 import { isConfigurationRequired } from "@/lib/api/planned";
 import { publicErrorMessage } from "@/lib/api/public-copy";
 import { Badge } from "@/components/ui/badge";
@@ -35,10 +37,12 @@ function UsageCard({
   label,
   used,
   limit,
+  note,
 }: {
   label: string;
   used: number;
   limit: number | null;
+  note: string;
 }) {
   return (
     <div className="rounded-[var(--radius-card)] border border-border bg-surface p-4 shadow-[var(--shadow-sm)]">
@@ -47,8 +51,9 @@ function UsageCard({
         {formatBytes(used)}
       </p>
       <p className="mt-1 text-sm text-muted">
-        {limit == null ? "Advisory only" : `of ${formatBytes(limit)}`}
+        {limit == null ? "No allowance on record" : `of ${formatBytes(limit)}`}
       </p>
+      <p className="mt-1 text-xs text-muted">{note}</p>
     </div>
   );
 }
@@ -116,7 +121,13 @@ export function DigitalAssetsPanel({
               router.refresh();
             } catch (uploadError) {
               setConfigurationRequired(isConfigurationRequired(uploadError));
-              setError(publicErrorMessage(uploadError, "Upload failed."));
+              const message = publicErrorMessage(uploadError, "Upload failed.");
+              // A storage-quota refusal says what to do about it; show that too.
+              const resolution =
+                uploadError instanceof ApiClientError && uploadError.code === "QUOTA_EXCEEDED"
+                  ? (uploadError.details as StorageQuotaExceeded | undefined)?.resolution
+                  : undefined;
+              setError(resolution ? `${message} ${resolution}` : message);
             } finally {
               setBusy(false);
             }
@@ -164,17 +175,19 @@ export function DigitalAssetsPanel({
           label="Storage"
           used={usage.storageBytes}
           limit={usage.quota?.storageBytes ?? null}
+          note="Uploads that would go over your plan's allowance are refused. Stored files keep serving."
         />
         <UsageCard
           label="Delivery this month"
           used={usage.deliveryBytes}
           limit={usage.quota?.deliveryBytes ?? null}
+          note="Shown for reference. Downloads are never blocked or billed on this figure."
         />
       </section>
       <p className="text-xs text-muted">
-        Usage is advisory only
-        {usage.advisoryOnly ? " — nothing is blocked on these figures yet" : ""}. Delivery counts
-        bytes authorised for download in the current calendar month, not bytes proved delivered.
+        Delivery counts bytes authorised for download in the current calendar month, not bytes
+        proved delivered. Each download link has a daily fair-use limit, so a link shared publicly
+        cannot be downloaded without end.
       </p>
 
       <section className="rounded-[var(--radius-card)] border border-border bg-surface p-5 shadow-[var(--shadow-sm)]">
@@ -182,7 +195,7 @@ export function DigitalAssetsPanel({
           <div>
             <h2 className="text-base font-medium text-foreground">Uploaded assets</h2>
             <p className="mt-1 text-sm leading-6 text-muted">
-              Storage and egress are advisory usage figures. Nothing here reveals a file URL.
+              Storage counts against your plan&apos;s allowance. Nothing here reveals a file URL.
             </p>
           </div>
           <Badge variant="neutral">

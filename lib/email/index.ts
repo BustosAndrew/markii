@@ -3,6 +3,8 @@ import "server-only";
 import { eq } from "drizzle-orm";
 import { db, emailDeliveries, orders, sites } from "../db";
 import { resolveSender, tenantFallbackSender } from "./identity";
+import { cappedReason } from "./sending-cap";
+import { loadSendingCap } from "./sending-cap-guard";
 import { isResendConfigured, sendViaResend } from "./resend";
 import { getSesIdentity, isSesConfigured, sendViaSes } from "./ses";
 import { normalizeEmail, suppressionFor } from "./suppression";
@@ -28,15 +30,17 @@ export function sendPlatformMail(input: MailInput): Promise<SendResult> {
 /**
  * Mail sent **on a merchant's behalf**, from their own verified domain via SES.
  *
- * Four things happen in order, and each can stop the send:
+ * Five things happen in order, and each can stop the send:
  *
  * 1. **Suppression.** Checked first, because mailing a known-bad address costs
  *    the whole platform's sending reputation and nothing else here can undo it.
- * 2. **Sender resolution.** The merchant's own verified domain when it exists;
+ * 2. **The sending cap** (G12) — a daily ceiling for accounts whose reputation
+ *    is not yet established, or has gone bad (`./sending-cap`).
+ * 3. **Sender resolution.** The merchant's own verified domain when it exists;
  *    otherwise the storefront's `{slug}.{ROOT_DOMAIN}` address (D44). Never
  *    Resend, and never bare `markii.shop` — the stream split still holds.
- * 3. **The send itself**, via SES.
- * 4. **Recording the outcome** in `email_deliveries`, whatever it was. "Did the
+ * 4. **The send itself**, via SES.
+ * 5. **Recording the outcome** in `email_deliveries`, whatever it was. "Did the
  *    customer get their receipt?" is a support question that arrives days later.
  *
  * The result is a value, never a throw: a caller that swallowed an exception
@@ -108,6 +112,19 @@ export async function sendMerchantMail(
         ? `${primary} reported earlier mail as spam and will not be contacted again.`
         : `${primary} is suppressed (${suppressed.reason}${suppressed.detail ? `: ${suppressed.detail}` : ""}).`;
     await record("suppressed", "none", { reason });
+    return { sent: false, provider: "none", reason };
+  }
+
+  /**
+   * The sending cap (G12), after suppression so a suppressed address is never
+   * counted, and before anything reaches SES. Every merchant shares one SES
+   * account's reputation whatever their From line says, so the cap applies to
+   * verified domains and the storefront fallback alike.
+   */
+  const cap = await loadSendingCap(orgId);
+  if (cap && !cap.allowed) {
+    const reason = cappedReason(cap);
+    await record("capped", "none", { reason });
     return { sent: false, provider: "none", reason };
   }
 

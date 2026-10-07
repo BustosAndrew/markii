@@ -72,6 +72,13 @@ export class ApiError extends Error {
        * password" would tell someone to keep retyping the thing that was right.
        */
       | "RATE_LIMITED"
+      /**
+       * A plan allowance would be exceeded (G5 storage). Paired with 409, not
+       * 402: nothing is owed, and a screen reacting to 402 offers a subscribe
+       * button to a merchant who may already be on the largest plan. The fix
+       * is in `details` — free space, or move to a plan that holds more.
+       */
+      | "QUOTA_EXCEEDED"
       | "INTERNAL",
     public status: number,
     message: string,

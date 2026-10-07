@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { orgHandler } from "@/lib/auth/handler";
 import { emailStatus, fallbackSenderHealth, isSesConfigured, merchantEmailStatus } from "@/lib/email";
 import { dnsRecords, listIdentities } from "@/lib/email/identity";
+import { loadSendingCap } from "@/lib/email/sending-cap-guard";
 import { listSuppressions } from "@/lib/email/suppression";
 
 /**
@@ -20,10 +21,11 @@ import { listSuppressions } from "@/lib/email/suppression";
 export const GET = orgHandler(
   async (_req, { orgId }) => {
     const identities = await listIdentities(orgId);
-    const [merchant, suppressions, fallbackHealth] = await Promise.all([
+    const [merchant, suppressions, fallbackHealth, cap] = await Promise.all([
       merchantEmailStatus(orgId),
       listSuppressions(orgId),
       fallbackSenderHealth(),
+      loadSendingCap(orgId),
     ]);
 
     const platform = emailStatus();
@@ -82,6 +84,22 @@ export const GET = orgHandler(
        * the failure is visible before customers notice the silence.
        */
       fallbackSender: fallbackHealth,
+
+      /**
+       * The daily sending cap (G12). A capped send is recorded and shows on the
+       * order timeline as `email_failed`; this is where the merchant learns why
+       * and what lifts it. Null when the cap could not be read — the send path
+       * fails open in that case, so "unknown" is the honest answer, not "none".
+       */
+      sendingLimit: cap
+        ? {
+            tier: cap.tier,
+            dailyLimit: cap.dailyLimit,
+            sentLast24h: cap.sentLast24h,
+            remaining: cap.remaining,
+            reason: cap.reason,
+          }
+        : null,
     });
   },
   { permission: "org.read" },

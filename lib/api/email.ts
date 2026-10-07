@@ -97,6 +97,26 @@ export type EmailSettings = {
     dkimStatus: string | null;
     problem: string | null;
   };
+  /**
+   * The merchant's daily sending cap (G12), over a rolling 24 hours.
+   *
+   * - `trial` — no subscription yet; subscribing raises it.
+   * - `new` — paying, first 30 days; lifts on its own.
+   * - `probation` — recent bounce or complaint rates are high; lifts as they fall.
+   * - `established` — no cap (`dailyLimit` and `remaining` are null).
+   *
+   * A send over the cap is refused, recorded with status `capped`, and shows on
+   * the order timeline as `email_failed`. Show `reason` as-is — it says what
+   * lifts the cap. Null when the cap could not be read (sends are not blocked
+   * then); render nothing rather than "no cap".
+   */
+  sendingLimit: {
+    tier: "trial" | "new" | "probation" | "established";
+    dailyLimit: number | null;
+    sentLast24h: number;
+    remaining: number | null;
+    reason: string;
+  } | null;
 };
 
 export function getEmailSettings(init?: RequestInit) {

@@ -4,7 +4,10 @@ import { handler, notFound } from "@/lib/api";
 import { checkRedeemable } from "@/lib/commerce/delivery";
 import { siteHalted } from "@/lib/billing/standing-guard";
 import { db, digitalAssets, downloadEvents, downloadGrants, sites } from "@/lib/db";
+import { DOWNLOAD_RATE_LIMIT, rateLimitHeaders } from "@/lib/rate-limit";
+import { consumeRateLimit } from "@/lib/rate-limit-store";
 import { isStorageConfigured, signedDownloadUrl } from "@/lib/storage";
+import { downloadLimitKey, retryWindowCopy } from "@/lib/storefront/fair-use";
 
 /**
  * `GET /_sites/:site/download/:token` (§18.8) — redeem a download grant.
@@ -69,6 +72,49 @@ export const GET = handler(async (req, { params }) => {
         },
       },
       { status: 503 },
+    );
+  }
+
+  /**
+   * Download fair use (G12 × G5): redemptions of one link per day.
+   *
+   * The bandwidth control a merchant's own download limit cannot be. A link
+   * with no limit, once shared, would let anyone pull the file without end on
+   * Markii's egress bill. Keyed on the grant **id** — the token is a credential
+   * and the counter table holds none — so the grant is looked up first.
+   *
+   * Checked **before** the transaction, so a throttled attempt never touches
+   * `downloadCount`: the buyer loses a day's wait, never one of their downloads.
+   */
+  const [grantRef] = await db
+    .select({ id: downloadGrants.id })
+    .from(downloadGrants)
+    .where(eq(downloadGrants.token, token))
+    .limit(1);
+  if (!grantRef) throw notFound("Download");
+
+  const fairUse = await consumeRateLimit(downloadLimitKey(grantRef.id), DOWNLOAD_RATE_LIMIT);
+  if (!fairUse.allowed) {
+    return NextResponse.json(
+      {
+        error: {
+          code: "RATE_LIMITED",
+          message: `This download link has been used ${DOWNLOAD_RATE_LIMIT.limit} times today.`,
+          details: {
+            retryAfterSeconds: fairUse.retryAfterSeconds,
+            resolution:
+              `The link still works and this attempt was not counted against your downloads. ` +
+              `Try again in ${retryWindowCopy(fairUse.retryAfterSeconds)}.`,
+          },
+        },
+      },
+      {
+        status: 429,
+        headers: {
+          "cache-control": "no-store, private",
+          ...rateLimitHeaders(fairUse, DOWNLOAD_RATE_LIMIT),
+        },
+      },
     );
   }
 

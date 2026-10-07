@@ -59,7 +59,11 @@ describe("digital delivery", () => {
    */
   const localDownload = (publicUrl: string) => {
     const { pathname, search } = new URL(publicUrl);
-    return `${BASE_URL}/_sites/${slug}${pathname}${search}`;
+    // On `ROOT_DOMAIN=localhost` the link is already `/_sites/{slug}/…`
+    // (`tenantBaseUrl`), and prefixing it again 404'd every download test —
+    // the same environment dependence as above, in the other direction.
+    const path = pathname.startsWith(`/_sites/${slug}/`) ? pathname : `/_sites/${slug}${pathname}`;
+    return `${BASE_URL}${path}${search}`;
   };
 
   beforeAll(async () => {
@@ -190,6 +194,38 @@ describe("digital delivery", () => {
       downloadLimit: null,
       downloadExpiryDays: null,
     });
+  });
+
+  /**
+   * Download fair use (G12 × G5): a link with no download limit is still
+   * throttled per day, so a shared link cannot pull a file without end on
+   * Markii's egress. The counter is written directly rather than by ten
+   * redemptions — the route reading it is what is under test.
+   */
+  it("throttles a link used too often in a day without spending a download", async () => {
+    const paid = await buy();
+    const url = localDownload(paid.delivery.downloads[0].url);
+    expect((await fetch(url, { redirect: "manual" })).status).toBe(302);
+
+    const [g] = await sql`select id from download_grants where order_id = ${paid.orderId}`;
+    const key = `dl:${g.id}`;
+    // Keyed on the grant id; the token is a credential and must not be a key.
+    const [row] = await sql`select count from rate_limit_counters where key = ${key}`;
+    expect(row?.count).toBe(1);
+
+    await sql`update rate_limit_counters set count = 10 where key = ${key}`;
+    const throttled = await fetch(url, { redirect: "manual" });
+    expect(throttled.status).toBe(429);
+    expect(Number(throttled.headers.get("retry-after"))).toBeGreaterThan(0);
+    const body = await throttled.json();
+    expect(body.error.code).toBe("RATE_LIMITED");
+    expect(body.error.details.resolution).toContain("not counted");
+
+    // Throttled, not spent: the merchant's own download count is untouched.
+    const [grant] = await sql`select download_count from download_grants where id = ${g.id}`;
+    expect(grant.download_count).toBe(1);
+
+    await sql`delete from rate_limit_counters where key = ${key}`;
   });
 
   it("a merchant can give a legitimate buyer their downloads back", async () => {

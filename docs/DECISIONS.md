@@ -1335,6 +1335,13 @@ config flag. This — not latency — is the thing that would force multi-region
   are deliberately not counted: a dashboard render fans out a dozen calls, and sessions are
   gated on how they come to exist, not how often they read.
 - **Storefront fair-use bandwidth** on top of the G5 quotas; throttle rather than hard-cut.
+  ✅ **Built 2026-10-07**, in two places. `proxy.ts` counts every storefront request per store and
+  client address (`STOREFRONT_RATE_LIMIT`, 240/min) and answers `429` + `Retry-After` — the proxy
+  because an App Router page cannot set its own status. `_sites` came **into** the proxy matcher
+  for it, or a direct `/_sites/{slug}` request stepped around the throttle. And
+  `/download/:token` caps redemptions of one link per UTC day (`DOWNLOAD_RATE_LIMIT`, 10): the
+  actual bandwidth control, since a link with no merchant download limit, once shared, was
+  otherwise unbounded egress. A throttled download is not counted against the merchant's limit.
 - **Trial abuse:** email verification required, and since no card is taken at signup (D9), pair it
   with per-IP/per-domain signup limits and manual review above a threshold. ✅ **The limits are
   built (2026-09-13)** — `lib/auth/rate-limits.ts`, on sign-up, sign-in and password reset, for
@@ -1360,8 +1367,20 @@ config flag. This — not latency — is the thing that would force multi-region
   every session, and cannot be used by an operator on themselves.
 - **SES sending caps for new merchants** until sending reputation is established — this protects
   every other merchant's deliverability, which is the shared resource most easily poisoned.
+  ✅ **Built 2026-10-07** (`lib/email/sending-cap.ts`), in `sendMerchantMail` after suppression.
+  Rolling 24 hours, counted from `email_deliveries`: **trial** (no paying subscription) 100,
+  **new** (paying, < 30 days) 1,000, **established** none — and **probation** at 100 for *any*
+  account whose last 30 days crossed AWS's review rates (5% bounces, 0.1% complaints, ≥50 sends),
+  because reputation outranks tenure. "Established" is payment plus age plus a clean record, not
+  age alone: an account that never paid is still one email address of investment. **Nothing is
+  exempt, receipts included** — with free products, "receipt" means any address typed into a
+  checkout. A capped send is recorded as `capped` and reaches the order timeline.
 - **Scraping:** storefronts are *meant* to be crawled by agents, so the control is rate limiting and
-  bot identification, never blocking. Blocking crawlers would defeat the product.
+  bot identification, never blocking. Blocking crawlers would defeat the product. ✅ The storefront
+  throttle above is the rate limit. It keys on the **address, not the user agent**: a budget keyed
+  on `GPTBot` could be spent by anyone claiming to be it, which turns a spoofer into a way to block
+  the real crawler. Identification is used for what it is good for — the `429` body points agents
+  at `llms.txt` and `/api/search`, which answer most questions without crawling.
 
 ### Team & launch scope — G10
 
@@ -1425,7 +1444,14 @@ costing $0.25. Gate both, or the gate does nothing.
 
 This matters more than it would otherwise because the **D5 beachhead sells files for a living**.
 
-### Proposed quotas (needs sign-off alongside D1)
+### Quotas — ✅ enforced 2026-10-07 (storage); reported (delivery)
+
+These numbers are the plan table in `docs/PRICING.md` §3, signed off with the plan prices on
+2026-08-10; this heading said "needs sign-off" until 2026-10-07. **Storage is enforced at upload**
+(`409 QUOTA_EXCEEDED`; stored files keep serving). **Delivery is reported only and the overage
+below is not charged**, for either half: storage cannot go over except by downgrade, and the
+delivery meter counts bytes *authorised* rather than delivered, which `docs/API.md` §18.8 rules off
+a merchant's invoice. Billing delivery overage needs a delivered-bytes measurement first.
 
 | | Starter | Growth | Scale |
 |---|---|---|---|

@@ -490,6 +490,34 @@ The audit list carries both directions now — `undoneBy` on the original row, `
 so a history screen can strike through a reversed change and label its reversal without a second
 query. Both are `string | null` on `ActionInvocation`.
 
+### 🔴 New 2026-10-07 — the G5 storage allowance is enforced; `usage.advisoryOnly` is gone
+
+**Shape change on `GET`/`POST /api/digital-assets`.** `usage.advisoryOnly: true` is replaced by
+**`usage.enforcement: { storage: "enforced", delivery: "reported" }`**, and `usage.quota` is now
+always present (it was `null` on the live route — the plan was never passed in). `MediaUsage` in
+`lib/api/delivery.ts` is updated.
+
+- **Upload can answer `409 QUOTA_EXCEEDED`** when the file would not fit the plan's storage
+  allowance. `details` is `StorageQuotaExceeded` (`lib/api/delivery.ts`): show `resolution`.
+  `uploadDigitalAsset` now carries `details` on the thrown `ApiClientError` (it dropped them).
+  Not 402 — do not put a subscribe button on it; the merchant may already be on Scale.
+- **Delivery is shown, never enforced and never billed** — word it as a reference figure.
+- **Each download link is throttled to 10 redemptions a day** (`429` on the storefront route,
+  not counted against the merchant's own limit). Shopper-facing only; nothing to build.
+
+`components/dashboard/digital-assets-panel.tsx` was minimally updated so it compiles and stops
+saying "advisory": per-card notes, the quota resolution in the upload error. Restyle freely.
+
+### 🟢 New 2026-10-07 — `GET /api/settings/email` gained `sendingLimit` (G12)
+
+Every merchant now has a daily sending cap that lifts as their account establishes:
+`sendingLimit: { tier, dailyLimit, sentLast24h, remaining, reason } | null` (`EmailSettings` in
+`lib/api/email.ts`). A send over it is recorded as `capped` and shows on the order timeline as
+`email_failed` with the reason — so a merchant asking "why didn't my customer get a receipt?" has
+the answer in two places already. **Not yet on the email settings screen.** Worth a line there:
+`reason` is written to be shown as-is and says what lifts the cap; `established` has no cap
+(`dailyLimit` null) and needs no UI; `null` means unknown — render nothing.
+
 ### 🟢 New 2026-09-15 — a fourth held state: `standing.state === "suspended"` (G12)
 
 `AccountStanding` on `/api/me` and `/api/billing/subscription` (`lib/api/billing.ts`) has a new
