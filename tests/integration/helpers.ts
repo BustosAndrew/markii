@@ -21,6 +21,23 @@ export class Client {
   private cookie = "";
 
   /**
+   * This client's own address, sent as `x-forwarded-for` on every request.
+   *
+   * **The dev server is not addressless.** It records a direct request as coming
+   * from `::1`, so without this every client in a run shared one address — and a
+   * full run signs in more merchants than the per-address sign-in limit allows
+   * in fifteen minutes (`AUTH_RATE_LIMITS.signIn.ip`, 30). Eleven files failed
+   * in `beforeAll` with `429 RATE_LIMITED` for a reason that had nothing to do
+   * with what they test. One address per client is also what production looks
+   * like: each merchant arrives from their own network.
+   *
+   * TEST-NET-3 (RFC 5737), which never routes. Tests that need a particular
+   * address (`auth-rate-limit`, `org-audit`, `fair-use`) pass their own header,
+   * which wins.
+   */
+  readonly address = `203.0.113.${Math.floor(Math.random() * 254) + 1}`;
+
+  /**
    * Merges `Set-Cookie` into the jar instead of replacing it.
    *
    * **This used to overwrite the whole jar with whatever the last response
@@ -63,6 +80,7 @@ export class Client {
       method,
       headers: {
         "content-type": "application/json",
+        "x-forwarded-for": this.address,
         ...(this.cookie ? { cookie: this.cookie } : {}),
         ...headers,
       },
@@ -91,7 +109,10 @@ export class Client {
   async postForm<T = any>(path: string, form: FormData): Promise<ApiResult<T>> {
     const res = await fetch(`${BASE_URL}${path}`, {
       method: "POST",
-      headers: this.cookie ? { cookie: this.cookie } : {},
+      headers: {
+        "x-forwarded-for": this.address,
+        ...(this.cookie ? { cookie: this.cookie } : {}),
+      },
       body: form,
     });
     const text = await res.text();
@@ -112,7 +133,10 @@ export class Client {
    */
   async getRaw(path: string): Promise<{ status: number; headers: Headers; text: string }> {
     const res = await fetch(`${BASE_URL}${path}`, {
-      headers: this.cookie ? { cookie: this.cookie } : {},
+      headers: {
+        "x-forwarded-for": this.address,
+        ...(this.cookie ? { cookie: this.cookie } : {}),
+      },
     });
     return { status: res.status, headers: res.headers, text: await res.text() };
   }

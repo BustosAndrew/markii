@@ -5,9 +5,10 @@ import { Cleanup, Client, createTestStore, sql } from "./helpers";
 /**
  * Rate limits on the unauthenticated auth routes (G12).
  *
- * Every request here carries its own `x-forwarded-for`, because a dev server
- * has no proxy in front of it and would otherwise see no address at all — and
- * the limiter deliberately applies no address limit to an addressless caller.
+ * Every request here carries its own `x-forwarded-for`, so each test controls
+ * which address it is counted against. (A dev server is **not** addressless,
+ * as this used to say: it records a direct request as `::1`, which is why the
+ * shared `Client` now sends an address of its own — see `helpers.ts`.)
  * Addresses come from TEST-NET-2 (`198.51.100.0/24`), which is reserved and
  * never routed, so the counters this file writes cannot collide with anyone
  * real on the shared database.

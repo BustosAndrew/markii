@@ -349,7 +349,8 @@ rather than papered over.
 
 **Shopper auth mail via Supabase's Send Email Hook is built too** —
 `app/api/webhooks/supabase-email/route.ts` and `lib/email/auth-hook.ts`, signature-verified, routing
-staff mail to Resend and shopper mail to the merchant's SES sender. **Enabling the hook is a cutover,
+staff mail to Resend and shopper mail to the merchant's SES sender. **It is enabled (owner,
+2026-10-08)** — so Supabase SMTP is no longer a fallback. **Enabling the hook is a cutover,
 not a toggle**: Supabase stops sending auth mail project-wide the instant it is on, for both identity
 domains, so a bug there removes email rather than degrading it.
 
@@ -654,8 +655,9 @@ on a real invoice. Implement the exclusion in the same change as gift cards, not
 rail and subscription billing are written on top of it. The plan Prices are **provisioned by
 `pnpm stripe:prices --apply`** rather than by hand: it derives every amount from `lib/plans.ts`
 through `lib/billing/price-catalog.ts` — the same module `resolvePrice` verifies against — so the
-creator and the verifier cannot disagree. It refuses a live key (plan prices are still PROPOSED),
-reports a mismatched Price instead of editing it (Stripe amounts are immutable, so a "fix" would
+creator and the verifier cannot disagree. Against a live key its dry run reads freely and
+`--apply` additionally needs `--allow-live` (prices were signed off 2026-08-10, D42 — this line
+said it "refuses a live key" until 2026-10-08). It reports a mismatched Price instead of editing it (Stripe amounts are immutable, so a "fix" would
 change what existing subscribers pay), and is idempotent. **The six test-mode Prices exist as of
 2026-08-10.** The trap it removes: `docs/PRICING.md` quotes annual plans *per month*, so a
 hand-created `markii_starter_year` at `1500` instead of `18000` underbills by 12× and looks right in

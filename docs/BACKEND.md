@@ -94,9 +94,11 @@ threshold fees · **C** variants, inventory, collections, customers, cart, human
 tax, shipping rates, orders, refunds, **digital delivery** · rule-based readiness computation ·
 email plumbing (SES + Resend).
 
-**Out — do not build:** the site builder and CMS node model, MCP server, Channels, Agent Test Lab,
+**Out — do not build:** the site builder and CMS node model, Channels, Agent Test Lab,
 the analytics event model beyond crawls, Chargeback Assist, Agent Ops chat, native email campaigns,
-fulfillment logistics, POS.
+fulfillment logistics, POS. (The **MCP server** was on this list and was built anyway, on
+2026-09-07 — `docs/API.md` §22. It adds a surface over the registry, not a capability, which is
+why it was cheap enough to pull forward. Listed here as out until 2026-10-08.)
 
 ---
 
@@ -132,8 +134,13 @@ this is a driver and services swap. Full task list in `docs/DECISIONS.md` §"Dat
 > Vercel's filesystem is ephemeral. Buckets are provisioned by `pnpm storage:init`, **not** by the
 > migration chain — Supabase creates them through its Storage API, not DDL.
 >
-> ⏳ **Still needing credentials, not code:** SMTP config, regenerating seed data against the hosted
-> project, and dropping the Neon project.
+> ✅ **The three credential leftovers, checked 2026-10-08.** *Seed data* is on the hosted project
+> (`markii-demo` and its three stores, created 2026-08-01). *SMTP* is superseded: the Send Email
+> Hook is on (owner, 2026-10-08) and Supabase sends no auth mail itself while it is, so there is no
+> SMTP fallback either — a hook that cannot verify means no auth mail at all. Production answers an
+> unsigned hook request `403`, so its `SEND_EMAIL_HOOK_SECRET` is set. *Neon*: no connection string
+> or import remains; `@neondatabase/serverless` is only an optional peer `drizzle-orm` pulls into
+> the lockfile. Whether the Neon project itself is deleted is visible only in Neon's console.
 >
 > ⚠️ **Edge Config was not used.** `lib/domains/` caches in-process with a 5-minute TTL, which
 > removes the per-request query but means an invalidation only clears the instance that served the
@@ -556,8 +563,9 @@ Contract `docs/API.md` §18. The largest phase. Order within it:
 8. ~~**Membership gating** (§18.9) and the **shopper login** it required (§18.3)~~ — done 2026-08-03
    (D34). The blocker was neither of the two the docs named: there was **no shopper identity**, so
    gating would have enforced nothing. A refund revokes conferred memberships, scoped to the
-   refunded lines. **Content** gating is still Phase D (no content model), and memberships do
-   **not** auto-renew (Phase B recurring billing)
+   refunded lines. **Content** gating is still Phase D (no content model). Memberships **do**
+   auto-renew since 2026-08-10 — Stripe Subscriptions on the merchant's own Connect account,
+   extended by `invoice.paid` (`docs/API.md` §18.9); this said they did not until 2026-10-08
 9. ~~**Storefront search** (G6)~~ — done 2026-09-13. A stored generated `tsvector` on `products`
    (migration `0039`) with a GIN index; `lib/storefront/search.ts` ranks full-text matches and
    falls back to a substring match on name and SKU for what the `english` stemmer cannot see.
@@ -577,9 +585,11 @@ Contract `docs/API.md` §18. The largest phase. Order within it:
     **Supabase's own auth limits could not do this**: every auth call is server-side (D30), so
     Supabase sees Vercel's address for everyone, and one password-spraying run would spend the
     whole platform's allowance. The integration test carries its own `x-forwarded-for` per request
-    (TEST-NET-2), because a dev server has no proxy and an addressless caller gets no address limit
-    on purpose — and it waits for room in the window, since a fixed window that resets mid-loop
-    is the documented trade, not a bug.
+    (TEST-NET-2), so each test controls which address it is counted against — and it waits for
+    room in the window, since a fixed window that resets mid-loop is the documented trade, not a
+    bug. (This said a dev server is addressless. It is not: it records direct requests as `::1`,
+    so a full integration run shared one address and tripped the sign-in limit in eleven files'
+    setup. Since 2026-10-08 every test `Client` sends its own TEST-NET-3 address.)
 11. ~~**Stripe Tax on Markii's own subscription** (G3)~~ — done 2026-09-13. `automatic_tax` on
     every platform-account subscription create, change and preview, decided by
     `lib/billing/platform-tax.ts` from two facts reported apart: Tax active on the platform

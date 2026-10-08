@@ -192,9 +192,24 @@ describe("email", () => {
   // Sending: recorded, never claimed
   // -------------------------------------------------------------------------
 
+  /**
+   * Whether a send can reach SES at all — which takes **a sender** as well as
+   * credentials. This used to read `providerConfigured` alone, and on a dev
+   * server with SES credentials and `ROOT_DOMAIN=localhost` that is wrong: the
+   * test org has no verified domain, and the D44 fallback is off on a local
+   * root (`tenantFallbackSender`), so the send is honestly `not_configured`
+   * while the test expected it to have reached the provider.
+   */
+  const reachesProvider = (settings: any): boolean => {
+    if (!settings.providerConfigured) return false;
+    if ((settings.domains ?? []).some((d: any) => d.status === "verified")) return true;
+    const root = String(settings.fallbackSender?.domain ?? "");
+    return root !== "" && root !== "localhost" && !root.endsWith(".localhost");
+  };
+
   it("records what actually happened to the confirmation, never a false success", async () => {
     const status = await merchant.get("/api/settings/email");
-    const configured = Boolean(status.json.providerConfigured);
+    const configured = reachesProvider(status.json);
 
     const res = await merchant.invoke("orders.resendConfirmation", { orderId });
     expect(res.json.ok).toBe(true);
@@ -247,7 +262,7 @@ describe("email", () => {
 
   it("tells the merchant on the order timeline what actually happened to the email", async () => {
     const status = await merchant.get("/api/settings/email");
-    const configured = Boolean(status.json.providerConfigured);
+    const configured = reachesProvider(status.json);
 
     const detail = await merchant.get(`/api/orders/${orderId}`);
     const mailEvents = (detail.json.timeline ?? []).filter((e: any) =>

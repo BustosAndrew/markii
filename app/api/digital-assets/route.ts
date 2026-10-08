@@ -28,8 +28,17 @@ import { PRIVATE_BUCKET, isStorageConfigured, uploadFile } from "@/lib/storage";
  * need resumable uploads (TUS), which is a real gap for video sellers — and
  * G5 says not to host video anyway, so the honest answer to "my 8 GB course
  * won't upload" is an embed integration, not a bigger limit here.
+ *
+ * **One byte under 2 GiB, because that is what the columns hold.**
+ * `digital_assets.size_bytes` and `download_events.bytes` are 32-bit integers,
+ * and this was `2 * 1024 ** 3` — one more than either can store — so a file of
+ * exactly 2 GiB uploaded to Storage and then failed the insert, leaving an
+ * orphaned object and a 500. Widening both columns would mean a migration
+ * rewriting two tables to admit one extra byte; the limit moved instead. If
+ * the ceiling is ever raised past 2 GiB, both columns must go to `bigint` in
+ * the same change. The arithmetic over them already sums in `bigint`.
  */
-const MAX_BYTES = 2 * 1024 * 1024 * 1024;
+const MAX_BYTES = 2 ** 31 - 1;
 
 export const GET = orgHandler(
   async (req, { orgId, session }) => {

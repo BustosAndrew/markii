@@ -104,9 +104,24 @@ describe("storefront fair use (G12)", () => {
 
   it("answers 429 with Retry-After once the budget is spent, and points agents elsewhere", async () => {
     const key = `sf:${slug}:${ip}`;
-    // Spend the budget. The store increments before deciding, so a counter
-    // already at the default limit of 240 makes the next request the 241st.
-    await sql`update rate_limit_counters set count = 240 where key = ${key}`;
+    /**
+     * Spend the budget. The store increments before deciding, so a counter
+     * already at the default limit of 240 makes the next request the 241st.
+     *
+     * **The window has to be written too, not only the count.** The row was
+     * created by an earlier test, possibly in an earlier minute; a count of 240
+     * on an expired window is reset to 1 by the next request, and this test
+     * then polled for a 429 that could never come. It passed alone and failed
+     * in the full suite, where timing put the two tests in different minutes.
+     * Near a boundary it waits for the next minute, so the window cannot roll
+     * between the write and the requests that read it.
+     */
+    if (Date.now() % 60_000 > 40_000) {
+      await new Promise((r) => setTimeout(r, 60_000 - (Date.now() % 60_000) + 1_000));
+    }
+    const windowStart = new Date(Math.floor(Date.now() / 60_000) * 60_000);
+    await sql`update rate_limit_counters set count = 240, window_start = ${windowStart}
+              where key = ${key}`;
 
     /**
      * The request that crosses the limit is let through — the count is written

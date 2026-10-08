@@ -213,7 +213,11 @@ describe("digital delivery", () => {
     const [row] = await sql`select count from rate_limit_counters where key = ${key}`;
     expect(row?.count).toBe(1);
 
-    await sql`update rate_limit_counters set count = 10 where key = ${key}`;
+    // The window is written with the count: a count on an expired window is
+    // reset by the next request (the daily window rolls at UTC midnight).
+    const dayStart = new Date(Math.floor(Date.now() / 86_400_000) * 86_400_000);
+    await sql`update rate_limit_counters set count = 10, window_start = ${dayStart}
+              where key = ${key}`;
     const throttled = await fetch(url, { redirect: "manual" });
     expect(throttled.status).toBe(429);
     expect(Number(throttled.headers.get("retry-after"))).toBeGreaterThan(0);
