@@ -33,7 +33,7 @@ export default async function DeliveryPage({
     <div>
       <PageHeader
         title="Delivery"
-        description="Upload the files you sell, review advisory storage and egress usage, and keep assets private until a paid shopper redeems a download grant."
+        description="Upload the files you sell, review storage against your plan allowance, and keep assets private until a paid shopper redeems a download grant."
       />
 
       {sites.length > 1 ? (

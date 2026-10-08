@@ -54,7 +54,9 @@ export default async function DashboardOverviewPage() {
         title="Overview"
         description="Sites, agent traffic, and balances across your Markii stores."
         actions={
-          <ButtonLink href="/dashboard/websites/new">New website</ButtonLink>
+          data && data.sites.total === 0 ? undefined : (
+            <ButtonLink href="/dashboard/websites/new">New website</ButtonLink>
+          )
         }
       />
 

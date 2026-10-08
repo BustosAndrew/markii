@@ -60,6 +60,7 @@ export default async function SettingsEmailPage() {
     <SettingsShell title="Email" description={DESCRIPTION}>
       <div className="space-y-6">
         <CustomerEmailCard settings={data} />
+        <SendingLimitCard limit={data.sendingLimit} />
         <EmailDomains
           domains={data.domains}
           providerConfigured={data.providerConfigured}
@@ -138,6 +139,59 @@ function CustomerEmailCard({ settings }: { settings: EmailSettings }) {
         <p className="mt-4 rounded-[var(--radius-control)] bg-warning-bg px-3 py-2 text-sm leading-6 text-warning-text">
           {fallbackSender.problem ??
             "The shared storefront sender is not sending. This is a Markii incident, not something you can fix by verifying a domain."}
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+/**
+ * Daily sending cap (G12). `reason` is written to be shown as-is and says what
+ * lifts it. `established` (`dailyLimit` null) has no cap and needs no UI; `null`
+ * means the cap could not be read — render nothing rather than "no cap".
+ */
+function SendingLimitCard({ limit }: { limit: EmailSettings["sendingLimit"] }) {
+  if (!limit || limit.dailyLimit == null) return null;
+
+  const spent = limit.remaining === 0;
+  const badge =
+    spent || limit.tier === "probation"
+      ? ({ variant: "warning" as const, label: spent ? "Cap reached" : "Capped" })
+      : limit.tier === "trial"
+        ? ({ variant: "info" as const, label: "Trial cap" })
+        : ({ variant: "info" as const, label: "New-account cap" });
+
+  return (
+    <section className="rounded-[var(--radius-card)] border border-border bg-surface p-5 shadow-[var(--shadow-sm)]">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-base font-medium text-foreground">Daily sending cap</h2>
+          <p className="mt-1 text-sm leading-6 text-muted">
+            Customer mail over a rolling 24 hours — receipts, shipping notices, digital delivery.
+          </p>
+        </div>
+        <Badge variant={badge.variant}>{badge.label}</Badge>
+      </div>
+
+      <p className="mt-4 text-sm leading-6 text-foreground">{limit.reason}</p>
+
+      <p className="mt-2 text-sm text-muted">
+        <span className="tabular-nums font-medium text-foreground">{limit.sentLast24h}</span>
+        {" of "}
+        <span className="tabular-nums">{limit.dailyLimit}</span>
+        {" sent in the last 24 hours"}
+        {limit.remaining != null ? (
+          <>
+            {" · "}
+            <span className="tabular-nums">{limit.remaining}</span> remaining
+          </>
+        ) : null}
+      </p>
+
+      {spent ? (
+        <p className="mt-4 rounded-[var(--radius-control)] bg-warning-bg px-3 py-2 text-sm leading-6 text-warning-text">
+          Further customer mail is refused until the window rolls. Failed sends appear on the order
+          timeline as <span className="font-medium">email failed</span>.
         </p>
       ) : null}
     </section>

@@ -3475,7 +3475,9 @@ customers, and the damage would look exactly like a deliverability problem. So:
 what `lib/email/`'s own copy — "Verify a sending domain in Settings → Email" — points at; before it
 existed that instruction led nowhere. It renders the two streams separately, and **hides the
 add-domain form entirely when `providerConfigured` is false** rather than offering one that AWS
-would reject after the merchant filled it in.
+would reject after the merchant filled it in. **`sendingLimit` (G12) is on this screen** — `reason`
+as-is, counts against the rolling 24h cap; nothing is shown when the cap is `established` or could
+not be read.
 
 **Shopper auth mail is built** (`POST /api/webhooks/supabase-email`), and **dormant until the hook is
 enabled in the Supabase dashboard** — see below.

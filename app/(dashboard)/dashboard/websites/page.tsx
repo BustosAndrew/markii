@@ -41,7 +41,9 @@ export default async function WebsitesPage({
         title="Websites"
         description="Agent storefronts across your Markii account."
         actions={
-          <ButtonLink href="/dashboard/websites/new">New website</ButtonLink>
+          data && data.items.length === 0 ? undefined : (
+            <ButtonLink href="/dashboard/websites/new">New website</ButtonLink>
+          )
         }
       />
 

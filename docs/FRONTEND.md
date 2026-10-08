@@ -514,9 +514,9 @@ Every merchant now has a daily sending cap that lifts as their account establish
 `sendingLimit: { tier, dailyLimit, sentLast24h, remaining, reason } | null` (`EmailSettings` in
 `lib/api/email.ts`). A send over it is recorded as `capped` and shows on the order timeline as
 `email_failed` with the reason — so a merchant asking "why didn't my customer get a receipt?" has
-the answer in two places already. **Not yet on the email settings screen.** Worth a line there:
-`reason` is written to be shown as-is and says what lifts the cap; `established` has no cap
-(`dailyLimit` null) and needs no UI; `null` means unknown — render nothing.
+the answer in two places already. **On `/dashboard/settings/email` as of 2026-10-08.** Show
+`reason` as-is — it says what lifts the cap. `established` has no cap (`dailyLimit` null) and
+needs no UI; `null` means unknown — render nothing rather than "no cap".
 
 ### 🟢 New 2026-09-15 — a fourth held state: `standing.state === "suspended"` (G12)
 
