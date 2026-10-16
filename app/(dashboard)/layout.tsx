@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { DashboardSidebar } from "@/components/dashboard/sidebar";
 import { MobileNav } from "@/components/dashboard/mobile-nav";
 import { MfaStepUpProvider } from "@/components/auth/mfa-step-up-provider";
+import { AgentPanel } from "@/components/dashboard/agent-panel";
 import { TrialBanner } from "@/components/dashboard/trial-banner";
 import { loadOrError } from "@/lib/api/load";
 import { mfaPathForGate } from "@/lib/api/mfa-errors";
@@ -63,6 +64,7 @@ export default async function DashboardLayout({
           {me.data?.standing ? <TrialBanner standing={me.data.standing} /> : null}
           {children}
         </main>
+        <AgentPanel />
       </div>
     </MfaStepUpProvider>
   );

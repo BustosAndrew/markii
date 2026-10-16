@@ -546,8 +546,8 @@ Free with a cap: 1M tokens per org per month, through the Vercel AI Gateway
 `storeIds` included, and deviate on purpose from §21 rule 1 by querying directly for compact
 shapes. **Built alongside: `PATCH /api/products/:id` now delegates to `catalog.updateProduct`** —
 product editing had never been a registry action, so no product edit had been audited or
-undoable. Tested against a scripted model (`MARKII_AGENT_MOCK_MODEL=1`, CI sets it). **No screen
-yet**, and no `@ai-sdk/react`.
+undoable. Tested against a scripted model (`MARKII_AGENT_MOCK_MODEL=1`, CI sets it). **The
+dashboard panel is built** (`components/dashboard/agent-panel.tsx`, `@ai-sdk/react`).
 
 **Stripe Tax on Markii's own subscription is built as of 2026-09-13** (G3). `automatic_tax` on every
 platform-account subscription create, change and preview — **no `Stripe-Account` header**, the

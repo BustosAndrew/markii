@@ -78,7 +78,8 @@ API-independent work so you don't outrun the backend") no longer applies to A, B
 | **MCP server** | §22 | ✅ **LIVE (tools, prompts, resources), no extra screen** | Token-only at `/api/mcp`. Settings → Team mints the token. Session cookies are refused. Connecting a client: `docs/MCP.md` |
 | Add-on **purchase** | §17 | ⛔ Refuses `409` | Agent Ops / Chargeback Assist do not exist. Show them as unavailable — never as "coming soon with a buy button" |
 | Email delivery | §24 | ✅ LIVE, screen built | SES sends; `/dashboard/settings/email`. Unverified domains still send via the storefront fallback (D44) — do not say mail is not going out |
-| Site builder, Channels, Test Lab, Agent Ops chat | §19–21 | ⛔ Deferred | Out of launch scope — do not start. MCP (§22) is live; do not confuse it with Agent Ops chat |
+| **Catalog agent** | §27 | ✅ **LIVE, screen built** (beta) | Dockable panel on every dashboard page (`AgentPanel`). Propose-only; the merchant approves. MCP (§22) is a different surface — do not confuse them |
+| Site builder, Channels, Test Lab | §19–20 | ⛔ Deferred | Out of launch scope — do not start |
 | Platform admin | §26 | ✅ LIVE, screens built | `/admin` when `me.operator`. Suspend/reinstate and **Reset MFA** (`resetPlatformMfa`). Never on merchant nav for anyone else |
 
 ### MFA (D40) — built. What to preserve when touching it
@@ -490,22 +491,22 @@ The audit list carries both directions now — `undoneBy` on the original row, `
 so a history screen can strike through a reversed change and label its reversal without a second
 query. Both are `string | null` on `ActionInvocation`.
 
-### 🟢 New 2026-10-15 — merchant agents: the Catalog agent backend is live, no screen yet (D47)
+### 🟢 New 2026-10-15 — merchant agents: the Catalog agent is live, screen built (D47)
 
-`docs/API.md` §27, `lib/api/agents.ts` (`AGENTS_API_LIVE = true`). A dockable chat panel per
-`docs/AGENT-OPS.md` §5 is the screen to build; nothing renders it today.
+`docs/API.md` §27, `lib/api/agents.ts` (`AGENTS_API_LIVE = true`). The dockable panel is
+`components/dashboard/agent-panel.tsx`, mounted from the dashboard layout — not a nav page.
 
-- **The chat is `useChat`, not a service function.** Point its transport at
-  `agentChatEndpoint("catalog")` and send **only the new message** plus `sessionId`
+- **The chat is `useChat`, not a service function.** Transport posts to
+  `agentChatEndpoint("catalog")` and sends **only the new message** plus `sessionId`
   (`prepareSendMessagesRequest` → `{ sessionId, message: messages.at(-1) }`). The server owns the
   history; it refuses an assistant or tool part from the client. Read `x-agent-session-id` off the
-  first response and keep it. `@ai-sdk/react` is not installed yet — add it with the panel.
+  first response and keep it.
 - **Resuming:** `getAgentSession(id)` returns `messages` ready for `useChat({ messages })` and the
   session's `proposals` with their *current* status. Tool parts in the transcript named
   `propose_*` carry a `proposalId` in their output — join on it to put each card where the agent
   made it.
 - **Proposal cards render `diff`, never the model's prose.** `summary`/`rationale` are the agent's
-  words — label them so. Approve → `approveAgentProposal`; Reject → `rejectAgentProposal`.
+  words — labelled so. Approve → `approveAgentProposal`; Reject → `rejectAgentProposal`.
   `409` with `details.status === "stale"` means nothing was applied: offer "ask the agent again",
   not "retry". `403 MFA_REQUIRED` is the existing step-up modal; the proposal stays `pending`.
   An executed card gets **Undo** — `POST /api/actions/{actionId}/undo` with `{ invocationId }`,
@@ -516,6 +517,7 @@ query. Both are `string | null` on `ActionInvocation`.
 - Chat refusals arrive **before** the stream as JSON: `409 QUOTA_EXCEEDED`
   (`details.quota: "agent_tokens"`), `429 RATE_LIMITED`, `503 CONFIGURATION_REQUIRED`, and the
   standing codes. Cookie sessions only; a token gets `401`.
+- **Do not start** Inventory / Pricing / Orders agents, Test Lab, or the paid Agent Ops add-on.
 
 **One change with no visible effect:** `PATCH /api/products/:id` now delegates to the new
 `catalog.updateProduct` action. Same fields, refusals and response — but every product save is now
@@ -936,9 +938,11 @@ The team is two people, so launch is a deliberate subset of the full plan
 | **Commerce** (Phase C) | Products **with variants**, inventory, collections, customers, orders + timeline + refunds, discounts, tax & shipping settings, digital delivery |
 | **Storefront** | Cart, variant picker, checkout — plus **3–4 polished themes** |
 | **Readiness** | Score card, issues list, issue drawer |
+| **Catalog agent** | Dockable chat panel on every dashboard page; propose → approve. Beta |
 
 **Deferred past launch — do not start these:** the site builder, Channels, Agent Test Lab, the full
-analytics funnel, Agent Ops chat, native email campaigns.
+analytics funnel, native email campaigns. The Catalog agent chat (D47 / §27) is in launch scope
+and the dashboard panel is built; further merchant agents are not.
 
 ---
 

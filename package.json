@@ -28,6 +28,7 @@
   "dependencies": {
     "@ai-sdk/google": "^4.0.23",
     "@ai-sdk/openai": "^4.0.20",
+    "@ai-sdk/react": "^4.0.145",
     "@stripe/react-stripe-js": "^6.8.0",
     "@stripe/stripe-js": "^9.13.0",
     "@supabase/ssr": "^0.12.4",
