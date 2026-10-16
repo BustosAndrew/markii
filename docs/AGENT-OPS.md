@@ -3,9 +3,24 @@
 A chat-driven operations assistant that runs the merchant's store: inventory, catalog, pricing,
 storefront changes, and routine analysis. Sold as a paid add-on.
 
-> **Build order: last.** Explicit owner instruction, and technically correct — every tool this
-> agent uses is an action from the registry, over APIs that must exist and be stable first. See
-> `docs/PLAN.md` §7, Phase F.
+> **Build order changed — D47 (owner, 2026-10-15).** This said "build last". It is being built now,
+> as **a family of merchant agents, free in beta**, Catalog first: `docs/API.md` §27, code in
+> `lib/ops-agents/`. What is built, against the plan below:
+>
+> - ✅ §7 steps 1–4 for the catalog: chat, sessions, streaming, read tools, proposal cards over
+>   dry-run, and low/medium writes — `catalog.updateProduct` / `updateVariant` / `updateCollection` /
+>   `setCollectionProducts`, `inventory.adjust`. Prices are in, as proposals like everything else.
+> - ✅ §3's core: propose → approve → execute, with **execution as the approving person**, a stale
+>   check that refuses if the diff moved, undo through the ordinary registry undo, and an
+>   **agent-actor ban on execution in `invokeAction` itself**, so "agents only propose" is the
+>   registry's rule rather than the tool's.
+> - ✅ Caps: 1M tokens per org per month, 60 turns per person per hour, 20 proposals per turn.
+> - ❌ Not built: risk-tier settings (every proposal needs approval — there is no auto-allow),
+>   `/api/agent/audit` (the org audit log already shows every executed change), the paid add-on and
+>   its metering, CMS editing, and the other agents.
+> - **Routes are `/api/agents/*`, not the `/api/agent/*` drafted in §4**, because there is a family
+>   of agents; the proposal shape is §4's `AgentProposal` with `actionId`/`input` added and
+>   `undoToken` replaced by the invocation id.
 >
 > **What is *not* deferred:** the agent-native architecture itself — the shared action registry and
 > MCP server — ships in Phase D with the builder (`docs/API.md` §22). This add-on is the *chat

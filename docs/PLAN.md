@@ -79,7 +79,7 @@ Contracts live in `docs/API.md` §9–15. These stay planned and land in Phase D
 | **Site builder** | Block editor, component registry, themes, templates, custom code, versioning, publish |
 | **Content** | Pages, blog, navigation menus, SEO fields, redirects, forms |
 | **Disputes** | Chargeback visibility (included) + assisted response (add-on) — see §6 |
-| **Agent Ops** | Chat-driven operations assistant add-on — **built last**, see `docs/AGENT-OPS.md` |
+| **Agent Ops** | Chat-driven operations assistant — ~~built last~~ **being built now as free-beta merchant agents, Catalog first** (D47, 2026-10-15), see `docs/AGENT-OPS.md` and `docs/API.md` §27 |
 
 ## 3. Explicitly out of scope
 
@@ -296,7 +296,8 @@ inventory, cart, human checkout, customers, discounts, tax, orders, digital deli
 **polished themes** on the existing storefront renderer · the **rule-based readiness score**.
 
 **Deferred past launch:** **D** (site builder + action registry) · **E** (Channels, Test Lab, full
-analytics funnel) · **F** (Chargeback Assist, then Agent Ops chat).
+analytics funnel) · **F** (Chargeback Assist). Agent Ops chat was here and is being built now,
+as free-beta merchant agents (D47, 2026-10-15).
 
 Two calls worth understanding. **Deferring the builder** is significant — it is the headline feature
 — but a creator selling digital products needs a good-looking store far more than a drag-and-drop
@@ -319,7 +320,7 @@ Each phase is independently shippable. Phase A is blocking for everything.
 | **C — Commerce core** | Variants, inventory, collections, customers, cart, human checkout, discounts, tax + shipping rates, orders/refunds/manual fulfillment, **digital delivery** (secure/expiring downloads, download limits, licence keys, membership gating) | A real shopper can buy a real product end to end — digital or physical |
 | **D — Action layer + site builder** | `defineAction` registry, MCP server, node model, renderer, component registry, editor canvas, style system, custom code, templates, versioning, publish, content/blog/menus/SEO | A merchant builds and publishes a store visually — and an agent can do the same through MCP |
 | **E — AI commerce layer** | The v2 plan: readiness score, catalog health, channels, test lab, analytics funnel (`docs/API.md` §9–15) | The differentiator is live on top of a real platform |
-| **F — Add-ons** | Chargeback Assist, then **Agent Ops chat (last)** | Ops assistant proposes and executes approved changes safely |
+| **F — Add-ons** | Chargeback Assist. ~~Agent Ops chat (last)~~ — pulled forward by D47 | Ops assistant proposes and executes approved changes safely |
 
 **Sequencing notes.** B before C looks odd but isn't: metering hooks are far cheaper to design into
 the order pipeline than to retrofit, and nothing about C is billable without B. D can start in

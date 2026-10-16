@@ -2739,6 +2739,136 @@ export const stripeWebhookEvents = pgTable(
   ],
 );
 
+// ---------------------------------------------------------------------------
+// Merchant agents (docs/AGENT-OPS.md, D47)
+// ---------------------------------------------------------------------------
+
+/** The agents that exist. One per area, each with its own tools (D47). */
+export const AGENT_KINDS = ["catalog"] as const;
+export type AgentKind = (typeof AGENT_KINDS)[number];
+
+/**
+ * One merchant's conversation with one agent.
+ *
+ * **The transcript lives here and only here.** The chat route accepts the
+ * merchant's *new* message and loads everything before it from this row, so a
+ * client cannot hand the model an invented history — an earlier "tool result"
+ * saying a change was approved, say. Stored as the AI SDK's `UIMessage[]`
+ * because that is what the stream produces and what a screen renders; it is
+ * re-validated against the agent's current tools on every turn.
+ *
+ * **Private to the person who started it**, not the org: a transcript is what
+ * someone typed, and the audit trail of what actually changed is the
+ * invocation log, which the org's admins already read.
+ */
+export const agentSessions = pgTable(
+  "agent_sessions",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** The staff user's auth id. Sessions are per person. */
+    userId: text("user_id").notNull(),
+    agent: text("agent", { enum: AGENT_KINDS }).notNull(),
+    /** First line of the first message, for a session list. */
+    title: text("title"),
+    messages: jsonb("messages").$type<unknown[]>().notNull().default([]),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("agent_sessions_owner_idx").on(t.orgId, t.userId, t.updatedAt)],
+);
+
+export const AGENT_PROPOSAL_STATUSES = [
+  "pending",
+  /**
+   * Claimed by an approval in flight. The claim is a conditional update from
+   * `pending`, so two clicks on Approve cannot both execute; an approval that
+   * is refused for a reason the merchant can fix (a missing second factor)
+   * puts the proposal back to `pending`.
+   */
+  "approving",
+  "executed",
+  "rejected",
+  "failed",
+  /** The store changed between proposing and approving; the diff no longer holds. */
+  "stale",
+] as const;
+export type AgentProposalStatus = (typeof AGENT_PROPOSAL_STATUSES)[number];
+
+/**
+ * A change an agent proposed and a person has not yet decided on.
+ *
+ * **The proposal is a dry run, stored.** `diff` is what `invokeAction` produced
+ * with `dryRun: true` — the real action inside a rolled-back transaction — so
+ * the merchant approves exactly what the invocation would write, not a model's
+ * description of it. Approval re-runs the dry run and refuses as `stale` if
+ * the diff has moved, then invokes as the approving **person**: their
+ * permissions, their step-up, their name on the audit row.
+ *
+ * The agent never executes anything. Nothing here can make it.
+ */
+export const agentProposals = pgTable(
+  "agent_proposals",
+  {
+    id: text("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => agentSessions.id, { onDelete: "cascade" }),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    agent: text("agent", { enum: AGENT_KINDS }).notNull(),
+    actionId: text("action_id").notNull(),
+    /** The validated input the dry run accepted, and the input approval invokes. */
+    input: jsonb("input").$type<unknown>().notNull(),
+    diff: jsonb("diff").$type<DiffEntry[]>().notNull(),
+    riskTier: text("risk_tier", { enum: ["read", "low", "medium", "high"] }).notNull(),
+    /** The model's words. Shown as such — never as Markii's own claim. */
+    summary: text("summary").notNull(),
+    rationale: text("rationale"),
+    /** Distinct entities the diff touches. */
+    affectedCount: integer("affected_count").notNull(),
+    status: text("status", { enum: AGENT_PROPOSAL_STATUSES }).notNull().default("pending"),
+    /** The invocation approval produced — the audit row, and the undo handle. */
+    invocationId: text("invocation_id"),
+    /** Why execution failed, verbatim from the refusal. */
+    error: text("error"),
+    decidedByUserId: text("decided_by_user_id"),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("agent_proposals_session_idx").on(t.sessionId, t.createdAt),
+    index("agent_proposals_org_status_idx").on(t.orgId, t.status),
+  ],
+);
+
+/**
+ * Tokens spent, one row per agent turn — the beta usage cap's ledger.
+ *
+ * Append-only and per turn rather than a running total, for the reason the
+ * inventory ledger is: a sum over rows cannot drift from what happened, and a
+ * counter that a crashed turn failed to increment can.
+ */
+export const agentUsage = pgTable(
+  "agent_usage",
+  {
+    id: serial("id").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    sessionId: text("session_id").references(() => agentSessions.id, { onDelete: "set null" }),
+    agent: text("agent", { enum: AGENT_KINDS }).notNull(),
+    model: text("model").notNull(),
+    inputTokens: integer("input_tokens").notNull(),
+    outputTokens: integer("output_tokens").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("agent_usage_org_idx").on(t.orgId, t.createdAt)],
+);
+
 /**
  * A Stripe Tax answer, cached on the cart that asked for it (§18.6).
  *
@@ -2847,3 +2977,5 @@ export type EmailIdentity = typeof emailIdentities.$inferSelect;
 export type EmailSuppression = typeof emailSuppressions.$inferSelect;
 export type EmailDelivery = typeof emailDeliveries.$inferSelect;
 export type StripeWebhookEvent = typeof stripeWebhookEvents.$inferSelect;
+export type AgentSession = typeof agentSessions.$inferSelect;
+export type AgentProposal = typeof agentProposals.$inferSelect;

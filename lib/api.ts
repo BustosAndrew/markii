@@ -73,10 +73,11 @@ export class ApiError extends Error {
        */
       | "RATE_LIMITED"
       /**
-       * A plan allowance would be exceeded (G5 storage). Paired with 409, not
-       * 402: nothing is owed, and a screen reacting to 402 offers a subscribe
-       * button to a merchant who may already be on the largest plan. The fix
-       * is in `details` — free space, or move to a plan that holds more.
+       * An allowance would be exceeded — the G5 storage allowance, or the
+       * merchant agents' monthly beta allowance (D47). `details.quota` says
+       * which. Paired with 409, not 402: nothing is owed, and a screen reacting
+       * to 402 offers a subscribe button to a merchant who may already be on
+       * the largest plan. The fix is in `details`.
        */
       | "QUOTA_EXCEEDED"
       | "INTERNAL",

@@ -1,15 +1,10 @@
-import { and, eq, ne } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { badRequest, conflict, intParam, notFound } from "@/lib/api";
+import { invokeAction } from "@/lib/actions";
+import { intParam } from "@/lib/api";
 import { orgHandler } from "@/lib/auth/handler";
-import { ownSites, siteScope } from "@/lib/tenancy";
-import { categories, db, products, sites } from "@/lib/db";
-import {
-  assertTiersOnSite,
-  resolveProduct,
-  serializeProductDetail,
-  uniqueProductSlug,
-} from "@/lib/queries";
+import { db, products, type Product } from "@/lib/db";
+import { resolveProduct, serializeProductDetail } from "@/lib/queries";
 import { productUpdateSchema } from "@/lib/validation";
 
 export const GET = orgHandler(async (req, { params, orgId }) => {
@@ -19,70 +14,27 @@ export const GET = orgHandler(async (req, { params, orgId }) => {
   return NextResponse.json(await serializeProductDetail(product));
 });
 
-export const PATCH = orgHandler(async (req, { params, orgId }) => {
+/**
+ * `PATCH /api/products/:idOrSlug` — delegates to `catalog.updateProduct` (§22
+ * rule 1).
+ *
+ * This route wrote the catalog directly from v1 until 2026-10-15, so a product
+ * edit had no audit row, no dry run and no undo — and no agent could propose
+ * one, because a proposal *is* a dry run of a registry action. The contract is
+ * unchanged: same fields, same refusals, same response.
+ */
+export const PATCH = orgHandler(async (req, { params, orgId, session }) => {
   const { idOrSlug } = await params;
   const sp = new URL(req.url).searchParams;
   const product = await resolveProduct(idOrSlug, orgId, intParam(sp, "siteId"));
   const input = productUpdateSchema.parse(await req.json());
 
-  const siteChanged = input.siteId != null && input.siteId !== product.siteId;
-  const targetSiteId = input.siteId ?? product.siteId;
-  if (siteChanged) {
-    // Org-scoped: without `ownSites` this reassigns a product into another
-    // tenant's store — a cross-tenant *write*, not merely a read leak.
-    const [site] = await db
-      .select({ id: sites.id })
-      .from(sites)
-      .where(and(eq(sites.id, targetSiteId), ownSites(orgId)))
-      .limit(1);
-    if (!site) throw notFound("Target site");
-  }
-
-  // reassigning site clears the category unless a valid one on the target site is sent along
-  const categoryId = siteChanged
-    ? (input.categoryId ?? null)
-    : input.categoryId !== undefined
-      ? input.categoryId
-      : product.categoryId;
-  if (categoryId != null) {
-    const [cat] = await db
-      .select({ id: categories.id, siteId: categories.siteId })
-      .from(categories)
-      .where(and(eq(categories.id, categoryId), siteScope(orgId, categories.siteId)))
-      .limit(1);
-    if (!cat) throw notFound("Category");
-    if (cat.siteId !== targetSiteId) throw badRequest("category belongs to a different site");
-  }
-
-  /**
-   * Checked against the **target** site, so moving a product between stores
-   * cannot smuggle a tier from the old one along with it.
-   */
-  await assertTiersOnSite(orgId, targetSiteId, [
-    input.requiresTierId !== undefined ? input.requiresTierId : product.requiresTierId,
-    input.grantsTierId !== undefined ? input.grantsTierId : product.grantsTierId,
-  ]);
-
-  let slug = input.slug ?? product.slug;
-  if (input.slug && (input.slug !== product.slug || siteChanged)) {
-    const [taken] = await db
-      .select({ id: products.id })
-      .from(products)
-      .where(
-        and(eq(products.siteId, targetSiteId), eq(products.slug, slug), ne(products.id, product.id)),
-      )
-      .limit(1);
-    if (taken) throw conflict(`product slug "${slug}" already exists on this site`);
-  } else if (siteChanged) {
-    slug = await uniqueProductSlug(targetSiteId, product.slug);
-  }
-
-  const [row] = await db
-    .update(products)
-    .set({ ...input, siteId: targetSiteId, categoryId, slug, updatedAt: new Date() })
-    .where(eq(products.id, product.id))
-    .returning();
-  return NextResponse.json(await serializeProductDetail(row));
+  const outcome = await invokeAction<Product>(
+    "catalog.updateProduct",
+    { ...input, productId: product.id },
+    { actor: session.actor },
+  );
+  return NextResponse.json(await serializeProductDetail(outcome.result!));
 }, { permission: "catalog.write" });
 
 export const DELETE = orgHandler(async (req, { params, orgId }) => {

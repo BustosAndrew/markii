@@ -116,6 +116,32 @@ describe("high-risk actions refuse non-human actors", () => {
   });
 });
 
+describe("agents never execute (D47)", () => {
+  /**
+   * Below `high` a token may write — it is the merchant's own integration —
+   * but an agent may not, at any tier. Without this the "agents only propose"
+   * guarantee rested on a `dryRun: true` in the propose tools, and flipping it
+   * made the catalog agent write to a product.
+   */
+  it("refuses an agent running even a low-risk action", async () => {
+    allowEverything();
+    const err = (await invokeExpectingRefusal(LOW_ACTION, actor("agent"))) as ApiError;
+
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.code).toBe("HUMAN_APPROVAL_REQUIRED");
+    expect((err.details as { actorType: string }).actorType).toBe("agent");
+  });
+
+  it("still lets an agent dry-run, because proposing is its whole job", async () => {
+    allowEverything();
+    const err = await invokeExpectingRefusal(LOW_ACTION, actor("agent"), true);
+
+    if (err instanceof ApiError) {
+      expect(err.code).not.toBe("HUMAN_APPROVAL_REQUIRED");
+    }
+  });
+});
+
 describe("actors that are exempt", () => {
   /**
    * **The billing sweep depends on this.** `billing.invoiceAssessments` is

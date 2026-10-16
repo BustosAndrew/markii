@@ -38,10 +38,11 @@ carry an explicit status — **never call a `PLANNED` endpoint and never fake it
 | 18 | Commerce core (variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping, **memberships**) | partial — §18.1–18.6 ✅ LIVE, including the §18.4 card rail (Stripe Connect direct charges) and **§18.6 Stripe Tax** (2026-08-17); §18.5 gift cards are ⛔ **deferred** (D33). §18.7 order operations (incl. **processor-executed card refunds**), §18.8 digital delivery, and §18.9 membership gating + shopper login ✅ LIVE — **including recurring/auto-renewing membership billing** (Stripe Subscriptions on the merchant's own Connect account; this row claimed otherwise until 2026-08-18). `STRIPE_CONNECT_WEBHOOK_SECRET` is **set and verified in production** (2026-09-07) — this row called it outstanding for weeks after it was configured. `pnpm stripe:webhooks` confirms the Connect endpoint subscribes to all nine required events including `invoice.created`. Genuine Stripe-generated Connect delivery was proven 2026-09-08 through the CLI (`stripe trigger … --stripe-account`), which this row called unproven for five days after | C |
 | 19 | Site builder & content | 🟡 PLANNED | D |
 | 20 | Disputes & chargebacks | 🟡 PLANNED | F |
-| 21 | Agent Ops add-on | 🟡 PLANNED | F (last) |
+| 21 | Agent Ops add-on | ⤴ **Superseded by §27** (D47, 2026-10-15) — built as free beta merchant agents rather than a last-phase paid add-on; the add-on billing and the settings/audit endpoints remain unbuilt | F |
 | 22 | **Action registry & MCP** — agent-native architecture | ✅ LIVE (registry, invoke, dry-run, audit, **undo** — 2026-08-18, and the **MCP server** — 2026-09-07: tools, prompts **and resources**). `undoable` is now derived from an `inverse()` and refused if declared without one, which corrected four actions that claimed it falsely | **Registry: C · MCP: D** |
 | 24 | Email — sending domains, deliverability, suppression | ✅ LIVE — SES transport, templates, suppression list, bounce webhook, `/api/settings/email`, §22 actions. **Sending works as of 2026-08-11** (production access in `us-west-2`, verified by a live send). **Customer mail sends even before a merchant verifies a domain** (D44, 2026-08-16): without one it leaves from the storefront's own `accounts@{slug}.{ROOT_DOMAIN}` — still SES, still the store's name, **never bare `markii.shop` and never Resend**. A verified domain always wins when it exists. **The SNS → webhook hop has carried a real bounce end to end as of 2026-08-16** (`tests/integration/ses-suppression.test.ts`, gated on `MARKII_SES_TESTS=1`): a suppression row was written and **the next send to that address was refused**. This row claimed "never carried a real event" until 2026-08-18 | **C** |
 | 26 | Platform operations — org suspension | ✅ LIVE (2026-09-15, G12). Operator-only (`PLATFORM_OPERATOR_EMAILS`), registry actions `platform.suspendOrg` / `unsuspendOrg`, `403 ACCOUNT_SUSPENDED` to the merchant's writes, derived per request | — |
+| 27 | **Merchant agents** — Catalog agent | ✅ **LIVE, beta** (2026-10-15, D47). Chat that proposes catalog edits; a person approves each, and approval runs as them. Free with a monthly token cap. Supersedes §21's "build last" | **D47** |
 
 **v3 note.** Markii is now a full commerce platform (`docs/PLAN.md` v3). §16 was a **breaking change
 to everything above it**, and as of 2026-07-31 that change has landed: **every `/api/*` route
@@ -2956,17 +2957,21 @@ explicit merchant confirmation.
 
 ---
 
-## 21. Agent Ops add-on 🟡 PLANNED — Phase F (build last)
+## 21. Agent Ops add-on — superseded by §27 (D47, 2026-10-15)
 
-Full spec, safety model, and endpoint list in **`docs/AGENT-OPS.md`**.
-
-Summary: `/api/agent/chat` (streaming), `/api/agent/sessions`, `/api/agent/proposals/:id/approve|reject`,
-`/api/agent/executions/:id/undo`, `/api/agent/audit`, `/api/agent/usage`, `/api/agent/settings`.
+**The built version is §27**, under `/api/agents/*`: a family of merchant agents, Catalog first, free
+in beta. The remaining endpoints this section planned — `/api/agent/audit` (the org audit log, §16,
+already shows every executed change), `/api/agent/settings` (risk-tier policy), and the paid add-on —
+are **not built**. Full spec and safety model in **`docs/AGENT-OPS.md`**.
 
 Three contract rules that belong here rather than only in the spec:
 
-1. **Agent tools call `/api/*`, never `lib/db`** — the agent gets exactly the human's permissions,
-   validation, and audit trail, with no privileged path and no duplicated business rules.
+1. **Agent writes go through the registry, never `lib/db`; agent reads use the asker's own reach**
+   — the agent gets exactly the human's permissions, validation, and audit trail, with no
+   privileged path. *Amended 2026-10-15 (D47):* this said all agent tools call `/api/*`. The
+   Catalog agent's reads query the database with the same tenancy helpers the routes use, narrowed
+   further to the person's `storeIds`, because the dashboard's shapes cost tokens on every turn;
+   writes remain dry runs through `invokeAction`, and execution is a person's.
 2. **Every mutation is a proposal first.** High-risk capabilities (pricing, discounts, publishing,
    bulk edits, channel config) cannot be configured to auto-execute.
 3. **Retrieved content is data, never instruction.** Product descriptions, imported catalogs,
@@ -3138,6 +3143,9 @@ Invocation response:
    `high` action now gets **402-shaped `HUMAN_APPROVAL_REQUIRED` (403)**; `system` is exempt because
    the billing sweep runs `billing.invoiceAssessments`, which is `high`, at 03:00 with nobody to
    approve it. **Dry runs always pass** — rule 2 makes proposing the point.
+   **An `agent` actor may not execute at any tier** (2026-10-15, D47) — `HUMAN_APPROVAL_REQUIRED`
+   for a non-dry-run agent invocation of anything, so merchant agents only ever propose. Tokens
+   keep their below-`high` writes: a token is the merchant's own integration.
 4. **Identical permissions for humans, agents, and tokens.** An agent can never do something the
    staff member behind it could not.
 5. **Every invocation is audited** with actor identity, whether it came from a click, a chat turn,
@@ -3759,6 +3767,96 @@ panel (`resetPlatformMfa`; hide the control on the operator's own row). Its shel
 the merchant dashboard's and the only link into it is the operator-only "Platform admin" entry the
 sidebar shows when `me.operator` is true. `lib/api/admin.ts` (`ADMIN_API_LIVE`) is the typed
 service; `lib/api/server.ts` has the in-process wrappers.
+
+---
+
+## 27. Merchant agents — Catalog agent ✅ LIVE (beta, 2026-10-15, D47)
+
+> **Frontend:** `lib/api/agents.ts` (`AGENTS_API_LIVE = true`) covers everything except the stream;
+> the chat itself is `useChat` against `agentChatEndpoint("catalog")` — see `docs/FRONTEND.md`.
+> No screen exists yet.
+
+One agent per area, sharing one chat surface, one proposal flow, one audit trail and one beta cap.
+**Catalog is the first.** It reads the catalog and **proposes** edits; it applies nothing.
+
+| Method | Route | Notes |
+|---|---|---|
+| `GET` | `/api/agents` | Directory, `configured` (Markii's deployment can call a model), and the org's `allowance`. Two facts, never merged |
+| `POST` | `/api/agents/:agent/chat` | One turn. Body `{ sessionId?, message }` — the **new** message only, `role: "user"`, text parts only. Streams an AI SDK UI message stream; a new session's id is in `x-agent-session-id`. `catalog.read` |
+| `GET` | `/api/agents/sessions` | The caller's own sessions, newest first |
+| `GET` | `/api/agents/sessions/:id` | `messages` (`UIMessage[]`) and `proposals`. Another person's session is `404` |
+| `POST` | `/api/agents/proposals/:id/approve` | Re-runs the dry run as the approver; `409` with `details.status: "stale"` if the store changed; otherwise invokes **as the approver**. Returns `{ proposal, invocation: { id, undoable, diff } }` |
+| `POST` | `/api/agents/proposals/:id/reject` | Pending → rejected. Writes nothing |
+
+**Cookie sessions only.** An API token gets `401` on every route here — an MCP client brings its own
+model (`docs/MCP.md`) and needs none of this.
+
+**Refusals before the stream opens**, as ordinary JSON errors: `503 CONFIGURATION_REQUIRED` (no
+`AI_GATEWAY_API_KEY` / OIDC), the standing codes (`TRIAL_ENDED`, `PAYMENT_PAST_DUE`,
+`ACCOUNT_SUSPENDED`), `409 QUOTA_EXCEEDED` with `details.quota: "agent_tokens"` once the month's
+allowance is spent, and `429 RATE_LIMITED` (60 turns per person per hour).
+
+### How a proposal works
+
+```
+chat turn → propose_<action> tool → invokeAction(dryRun: true, actor: agent)
+          → agent_proposals row (input + the dry run's diff) → card in the chat
+merchant approves → dry run again as the merchant → same diff? → invokeAction as the merchant
+                                                  → different? → 409 stale, nothing applied
+```
+
+- **The propose tools are generated from the registry** (`lib/ops-agents/propose-tools.ts`): each
+  tool's input is the action's zod schema and its description the action's own. The Catalog agent's
+  allowlist — its whole write surface — is `catalog.updateProduct`, `catalog.updateVariant`,
+  `catalog.updateCollection`, `catalog.setCollectionProducts`, `inventory.adjust`
+  (`lib/ops-agents/catalog/allowlist.ts`). A unit test holds it to catalog-only, `catalog.write`,
+  undoable, no step-up.
+- **An agent cannot execute, at any tier** — `invokeAction` refuses a non-dry-run `agent` actor with
+  `HUMAN_APPROVAL_REQUIRED` (§22 rule 3). So the guarantee is the registry's, not one argument in
+  one file.
+- **The approving person is the actor.** Their permission, their step-up, their name on the audit
+  row; the agent appears nowhere in `action_invocations`. Undo is the ordinary
+  `POST /api/actions/{actionId}/undo` with `{ invocationId }`.
+- **At most 20 proposals per turn**; a proposal that would change nothing is not created and the
+  model is told so.
+
+```ts
+interface AgentProposal {
+  id: string; sessionId: string; agent: "catalog";
+  actionId: string; input: unknown;
+  riskTier: "read" | "low" | "medium" | "high";
+  summary: string; rationale: string | null;        // the model's words — label them so
+  diff: { entity: string; entityId: string; path: string; before: unknown; after: unknown }[];
+  affectedCount: number;
+  status: "pending" | "approving" | "executed" | "rejected" | "failed" | "stale";
+  invocationId: string | null; error: string | null;
+  decidedAt: string | null; createdAt: string;
+}
+```
+
+`MFA_REQUIRED`, `TRIAL_ENDED`, `PAYMENT_PAST_DUE` and `RATE_LIMITED` at approval leave the proposal
+`pending` — the merchant can fix those and approve again. Any other refusal marks it `failed` with
+the error verbatim.
+
+### Reads, the transcript, and the cap
+
+- **Reads use the asker's reach** — org *and* `staff.storeIds` (`lib/ops-agents/catalog/reads.ts`,
+  `siteScopeForStaff`) — and return compact shapes, because every field the model reads is paid for
+  on every turn it stays in context. Readiness issues come from the rule engine (§9), never the
+  model.
+- **The transcript is server-side** (`agent_sessions.messages`), re-validated against the agent's
+  current tools every turn. The client sends only its new message, so it cannot hand the model an
+  invented history.
+- **Beta allowance: 1,000,000 tokens per org per UTC month** (`AGENT_BETA_MONTHLY_TOKENS`), summed
+  from `agent_usage`, one row per turn. A turn in progress finishes; the next is refused. 12 model
+  steps and 2,000 output tokens per step per turn.
+- Model: `anthropic/claude-sonnet-5.5` through the Vercel AI Gateway (`CATALOG_AGENT_MODEL`).
+
+**Tested end to end** by `tests/integration/agents.test.ts` against a scripted model
+(`MARKII_AGENT_MOCK_MODEL=1`, refused unless `ROOT_DOMAIN` is localhost and `VERCEL` is unset):
+proposing writes nothing, approval writes as the person, a second approval is refused, undo
+restores, a stale proposal applies nothing, rejection writes nothing, a no-op creates no proposal,
+another merchant gets `404`, and the cap refuses.
 
 ---
 

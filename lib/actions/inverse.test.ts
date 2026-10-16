@@ -368,6 +368,44 @@ describe("action-specific inverses", () => {
     expect(result?.input).toEqual({ variantId: 7, priceMinor: 1500 });
   });
 
+  /**
+   * The catalog agent's main write. A move between stores records three
+   * columns at once, and undo has to put back all three — the product on its
+   * old store with only its new store's slug would 404 on both.
+   */
+  it("restores a product's previous price and copy against the real definition", () => {
+    const def = getAction("catalog.updateProduct");
+    const product = (path: string, before: unknown, after: unknown): DiffEntry => ({
+      entity: "product",
+      entityId: "42",
+      path,
+      before,
+      after,
+    });
+
+    const result = def?.inverse?.(
+      recorded({
+        input: { productId: 42, priceCents: 2400, description: "Agent copy" },
+        diff: [product("priceCents", 1900, 2400), product("description", null, "Agent copy")],
+      }),
+    );
+    expect(result?.input).toEqual({ productId: 42, priceCents: 1900, description: null });
+    // The replayed input must pass the action's own schema, or undo refuses itself.
+    expect(def?.input.safeParse(result?.input).success).toBe(true);
+
+    const moved = def?.inverse?.(
+      recorded({
+        input: { productId: 42, siteId: 9 },
+        diff: [
+          product("siteId", 3, 9),
+          product("categoryId", 11, null),
+          product("slug", "blue-tee", "blue-tee-2"),
+        ],
+      }),
+    );
+    expect(moved?.input).toEqual({ productId: 42, siteId: 3, categoryId: 11, slug: "blue-tee" });
+  });
+
   it("restores a subscription cancellation flag to what it was", () => {
     const result = getAction("billing.setCancellation")?.inverse?.(
       recorded({

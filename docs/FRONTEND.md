@@ -490,6 +490,37 @@ The audit list carries both directions now — `undoneBy` on the original row, `
 so a history screen can strike through a reversed change and label its reversal without a second
 query. Both are `string | null` on `ActionInvocation`.
 
+### 🟢 New 2026-10-15 — merchant agents: the Catalog agent backend is live, no screen yet (D47)
+
+`docs/API.md` §27, `lib/api/agents.ts` (`AGENTS_API_LIVE = true`). A dockable chat panel per
+`docs/AGENT-OPS.md` §5 is the screen to build; nothing renders it today.
+
+- **The chat is `useChat`, not a service function.** Point its transport at
+  `agentChatEndpoint("catalog")` and send **only the new message** plus `sessionId`
+  (`prepareSendMessagesRequest` → `{ sessionId, message: messages.at(-1) }`). The server owns the
+  history; it refuses an assistant or tool part from the client. Read `x-agent-session-id` off the
+  first response and keep it. `@ai-sdk/react` is not installed yet — add it with the panel.
+- **Resuming:** `getAgentSession(id)` returns `messages` ready for `useChat({ messages })` and the
+  session's `proposals` with their *current* status. Tool parts in the transcript named
+  `propose_*` carry a `proposalId` in their output — join on it to put each card where the agent
+  made it.
+- **Proposal cards render `diff`, never the model's prose.** `summary`/`rationale` are the agent's
+  words — label them so. Approve → `approveAgentProposal`; Reject → `rejectAgentProposal`.
+  `409` with `details.status === "stale"` means nothing was applied: offer "ask the agent again",
+  not "retry". `403 MFA_REQUIRED` is the existing step-up modal; the proposal stays `pending`.
+  An executed card gets **Undo** — `POST /api/actions/{actionId}/undo` with `{ invocationId }`,
+  i.e. the existing `undoInvocation` client — and a link to the audit entry.
+- **Before the panel opens:** `getAgentDirectory()` — `configured: false` is *configuration
+  required* (Markii's), `allowance.allowed: false` is "this month's beta allowance is used, resets
+  on …" (the org's). Two facts; do not merge them. Label the whole thing **Beta**.
+- Chat refusals arrive **before** the stream as JSON: `409 QUOTA_EXCEEDED`
+  (`details.quota: "agent_tokens"`), `429 RATE_LIMITED`, `503 CONFIGURATION_REQUIRED`, and the
+  standing codes. Cookie sessions only; a token gets `401`.
+
+**One change with no visible effect:** `PATCH /api/products/:id` now delegates to the new
+`catalog.updateProduct` action. Same fields, refusals and response — but every product save is now
+in the audit log and undoable from it.
+
 ### 🔴 New 2026-10-07 — the G5 storage allowance is enforced; `usage.advisoryOnly` is gone
 
 **Shape change on `GET`/`POST /api/digital-assets`.** `usage.advisoryOnly: true` is replaced by

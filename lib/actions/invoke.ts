@@ -128,6 +128,36 @@ export async function invokeAction<TResult = unknown>(
   }
 
   /**
+   * **An agent never executes anything, at any tier** (D47).
+   *
+   * The rule above stops agents and tokens at `high`. Merchant agents go
+   * further by design: everything they do is a proposal a person approves,
+   * and approval runs as that person. Until this line, that held only because
+   * the propose tools pass `dryRun: true` — one argument in one file, and
+   * flipping it in a test made the catalog agent write straight to a product.
+   * Here it is the registry's rule instead, so no future tool, agent, or
+   * refactor can quietly hand an agent the pen.
+   *
+   * Tokens are deliberately not included: a token is a merchant's own
+   * integration, run on purpose, and medium-risk writes are its job.
+   */
+  if (!dryRun && actor.type === "agent") {
+    throw new ApiError(
+      "HUMAN_APPROVAL_REQUIRED",
+      403,
+      `An agent cannot run "${def.id}" itself. It can propose the change; a person approves it.`,
+      {
+        actionId: def.id,
+        riskTier: def.riskTier,
+        actorType: actor.type,
+        resolution:
+          "Dry-run the action to produce a proposal, then have a staff member approve it — " +
+          "approval runs it as them.",
+      },
+    );
+  }
+
+  /**
    * Step-up (D40): a **fresh** second factor for anything that moves money or
    * grants access.
    *

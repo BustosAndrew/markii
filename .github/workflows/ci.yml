@@ -125,6 +125,11 @@ jobs:
           # network, so completions are accepted without verification — every
           # sale here is test data on a database thrown away at the end.
           DEMO_SKIP_PAYMENT_VERIFICATION=1
+          # The merchant-agent suite drives a scripted model rather than a paid
+          # one (lib/ops-agents/mock-model.ts). It also requires ROOT_DOMAIN to
+          # be localhost and VERCEL unset, so this line enables nothing on a
+          # real deployment.
+          MARKII_AGENT_MOCK_MODEL=1
           EOF
 
           # Confirm the substitutions landed without printing the keys.

@@ -1,8 +1,10 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { z } from "zod";
-import { badRequest, notFound } from "../../api";
-import { products, productOptions, variants } from "../../db";
-import { siteScope } from "../../tenancy";
+import { badRequest, conflict, notFound } from "../../api";
+import { categories, products, productOptions, sites, variants } from "../../db";
+import { assertTiersOnSite, uniqueProductSlug } from "../../queries";
+import { ownSites, siteScope } from "../../tenancy";
+import { productUpdateSchema } from "../../validation";
 import { planMatrix, type OptionSpec } from "../../commerce/variants";
 import { patchInverse } from "../inverse";
 import { defineAction } from "../registry";
@@ -197,6 +199,135 @@ export const updateVariant = defineAction({
       .where(eq(variants.id, variantId))
       .returning();
 
+    return row;
+  },
+});
+
+/**
+ * Whether two field values are the same, structurally. Arrays and objects
+ * arrive as fresh values on every call, so `!==` would report an unchanged
+ * image list as changed and fill the diff — and the proposal a merchant
+ * approves — with edits that are not edits.
+ */
+function sameValue(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+}
+
+export const updateProduct = defineAction({
+  id: "catalog.updateProduct",
+  description:
+    "Update a product's fields: name, description, price (priceCents, minor units of the store's " +
+    "currency), SKU, stock, images, category, slug, enabled, suggested products, add-ons, and " +
+    "membership tiers. Only the fields supplied change. Passing siteId moves the product to " +
+    "another of the organization's stores, which clears its category unless one on the target " +
+    "store is given. Use catalog.updateVariant for a variant's own price or SKU.",
+  input: productUpdateSchema.extend({ productId: z.number().int().positive() }),
+  permission: "catalog.write",
+  /**
+   * `medium`, not `high`, although price is among the fields. `high` would make
+   * every API-token caller of `PATCH /api/products/:id` — which now delegates
+   * here — answer `HUMAN_APPROVAL_REQUIRED`, breaking integrations that sync a
+   * catalog, and `catalog.updateVariant` already changes a variant's price at
+   * `low`. An agent cannot apply this either way: the catalog agent only ever
+   * dry-runs it, and a person runs the approved proposal.
+   */
+  riskTier: "medium",
+  undoable: true,
+  /**
+   * The previous value of every changed field, replayed. A move between stores
+   * records `siteId`, `categoryId` and `slug` together, so the replay moves it
+   * back with all three.
+   */
+  inverse: patchInverse({ actionId: "catalog.updateProduct", idField: "productId" }),
+  async run({ productId, ...input }, ctx) {
+    const product = await ownedProduct(ctx, productId);
+    const orgId = ctx.actor.orgId!;
+
+    const siteChanged = input.siteId != null && input.siteId !== product.siteId;
+    const targetSiteId = input.siteId ?? product.siteId;
+    if (siteChanged) {
+      // Org-scoped: without `ownSites` this reassigns a product into another
+      // tenant's store — a cross-tenant *write*, not merely a read leak.
+      const [site] = await ctx.db
+        .select({ id: sites.id })
+        .from(sites)
+        .where(and(eq(sites.id, targetSiteId), ownSites(orgId)))
+        .limit(1);
+      if (!site) throw notFound("Target site");
+    }
+
+    // Reassigning the store clears the category unless a valid one on the
+    // target store is sent along.
+    const categoryId = siteChanged
+      ? (input.categoryId ?? null)
+      : input.categoryId !== undefined
+        ? input.categoryId
+        : product.categoryId;
+    if (categoryId != null) {
+      const [cat] = await ctx.db
+        .select({ id: categories.id, siteId: categories.siteId })
+        .from(categories)
+        .where(and(eq(categories.id, categoryId), siteScope(orgId, categories.siteId)))
+        .limit(1);
+      if (!cat) throw notFound("Category");
+      if (cat.siteId !== targetSiteId) throw badRequest("category belongs to a different site");
+    }
+
+    /**
+     * Checked against the **target** store, so moving a product between stores
+     * cannot smuggle a tier from the old one along with it.
+     */
+    await assertTiersOnSite(orgId, targetSiteId, [
+      input.requiresTierId !== undefined ? input.requiresTierId : product.requiresTierId,
+      input.grantsTierId !== undefined ? input.grantsTierId : product.grantsTierId,
+    ]);
+
+    let slug = input.slug ?? product.slug;
+    if (input.slug && (input.slug !== product.slug || siteChanged)) {
+      const [taken] = await ctx.db
+        .select({ id: products.id })
+        .from(products)
+        .where(
+          and(eq(products.siteId, targetSiteId), eq(products.slug, slug), ne(products.id, product.id)),
+        )
+        .limit(1);
+      if (taken) throw conflict(`product slug "${slug}" already exists on this site`);
+    } else if (siteChanged) {
+      slug = await uniqueProductSlug(targetSiteId, product.slug);
+    }
+
+    const next: Record<string, unknown> = {
+      ...Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined)),
+      siteId: targetSiteId,
+      categoryId,
+      slug,
+    };
+
+    const current = product as Record<string, unknown>;
+    const changed = Object.entries(next).filter(([key, after]) => !sameValue(current[key], after));
+    for (const [key, after] of changed) {
+      ctx.recordDiff({
+        entity: "product",
+        entityId: String(product.id),
+        path: key,
+        before: current[key] ?? null,
+        after: after ?? null,
+      });
+    }
+
+    /**
+     * Nothing changed is not an error here, unlike `catalog.updateVariant`:
+     * `PATCH /api/products/:id` delegates to this and has always answered a
+     * no-op save with the product, which a form that saves every field relies
+     * on. The empty diff is the honest record of it.
+     */
+    if (changed.length === 0) return product;
+
+    const [row] = await ctx.db
+      .update(products)
+      .set({ ...Object.fromEntries(changed), updatedAt: new Date() })
+      .where(eq(products.id, product.id))
+      .returning();
     return row;
   },
 });

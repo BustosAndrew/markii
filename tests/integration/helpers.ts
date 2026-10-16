@@ -141,6 +141,28 @@ export class Client {
     return { status: res.status, headers: res.headers, text: await res.text() };
   }
 
+  /**
+   * A `POST` whose reply is a stream — the agent chat's UI message stream.
+   * The whole body is read, so anything the server does when the stream ends
+   * (saving the transcript, recording usage) has started by the time this
+   * returns.
+   */
+  async postRaw(
+    path: string,
+    body: unknown,
+  ): Promise<{ status: number; headers: Headers; text: string }> {
+    const res = await fetch(`${BASE_URL}${path}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-forwarded-for": this.address,
+        ...(this.cookie ? { cookie: this.cookie } : {}),
+      },
+      body: JSON.stringify(body),
+    });
+    return { status: res.status, headers: res.headers, text: await res.text() };
+  }
+
   get = <T = any>(p: string) => this.call<T>("GET", p);
   post = <T = any>(p: string, b?: unknown) => this.call<T>("POST", p, b);
   patch = <T = any>(p: string, b?: unknown) => this.call<T>("PATCH", p, b);

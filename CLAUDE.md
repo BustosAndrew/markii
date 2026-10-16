@@ -532,6 +532,23 @@ borrowable), and `_sites` is now **inside** the proxy matcher so the path is no 
 **Storage is enforced at upload** (`409 QUOTA_EXCEEDED`) from `lib/plans.ts`; **delivery is reported
 and never billed**, because its meter counts bytes authorised, not delivered.
 
+**Merchant agents are being built as of 2026-10-15 — the Catalog agent backend is live, in beta**
+(D47, `docs/API.md` §27, `lib/ops-agents/`). This reverses "Agent Ops ships last". A dashboard
+chat that reads the catalog and **proposes** edits; the merchant approves each one, and approval
+re-runs the dry run **as them**, refuses as `stale` if the diff moved, then invokes as them — so
+the audit row names a person and undo is the ordinary registry undo. **An `agent` actor cannot
+execute at any tier** (`invokeAction`), which makes "agents only propose" the registry's rule
+rather than one `dryRun: true` in the tool code — a falsification showed it rested on exactly
+that. Propose tools are **generated from the registry** (each tool's input is the action's own
+schema), and the agent's whole write surface is an allowlist a unit test holds to catalog-only.
+Free with a cap: 1M tokens per org per month, through the Vercel AI Gateway
+(`anthropic/claude-sonnet-5.5`; unset, `503 CONFIGURATION_REQUIRED`). Reads use the asker's reach,
+`storeIds` included, and deviate on purpose from §21 rule 1 by querying directly for compact
+shapes. **Built alongside: `PATCH /api/products/:id` now delegates to `catalog.updateProduct`** —
+product editing had never been a registry action, so no product edit had been audited or
+undoable. Tested against a scripted model (`MARKII_AGENT_MOCK_MODEL=1`, CI sets it). **No screen
+yet**, and no `@ai-sdk/react`.
+
 **Stripe Tax on Markii's own subscription is built as of 2026-09-13** (G3). `automatic_tax` on every
 platform-account subscription create, change and preview — **no `Stripe-Account` header**, the
 opposite direction of money from §18.6 — decided from two facts that are reported apart and never
@@ -693,8 +710,9 @@ Team is two people (one frontend, one backend), so launch is a **subset** of the
 + **3–4 storefront themes** + the **rule-based readiness score**. Roughly 4–6 months.
 
 **Deferred past launch — do not start:** the site builder and action registry (Phase D), Channels,
-Agent Test Lab, the analytics funnel (E), Chargeback Assist and Agent Ops chat (F), native email
-campaigns. Rationale in `docs/DECISIONS.md` §G10.
+Agent Test Lab, the analytics funnel (E), Chargeback Assist (F), native email campaigns. Rationale
+in `docs/DECISIONS.md` §G10. **Agent Ops chat came off this list on 2026-10-15 (D47)** — it is
+being built now as free-beta merchant agents, Catalog first (`docs/API.md` §27).
 
 ## Planning docs
 

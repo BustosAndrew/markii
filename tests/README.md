@@ -48,12 +48,16 @@ blocks a sale.
 `tests/integration/**/*.test.ts` drives real HTTP against a running dev server
 and asserts against a real database.
 
-**Prerequisites:** a dev server started with **two** env vars, and nothing else.
+**Prerequisites:** a dev server started with **three** env vars, and nothing else.
 
 ```bash
-DEMO_SKIP_PAYMENT_VERIFICATION=1 ROOT_DOMAIN=localhost pnpm dev   # in another terminal
+MARKII_AGENT_MOCK_MODEL=1 DEMO_SKIP_PAYMENT_VERIFICATION=1 ROOT_DOMAIN=localhost pnpm dev   # in another terminal
 pnpm test:integration
 ```
+
+`MARKII_AGENT_MOCK_MODEL=1` (2026-10-15) gives the merchant-agent suite a scripted model rather
+than a paid one; without it `agents.test.ts` refuses in `beforeAll` rather than spending tokens or
+passing vacuously. It is ignored unless `ROOT_DOMAIN` is localhost and `VERCEL` is unset.
 
 **`ROOT_DOMAIN=localhost` is not optional, and omitting it fails in a way that looks like a bug in
 the code under test.** Download URLs are built server-side from `{slug}.{ROOT_DOMAIN}`, so a

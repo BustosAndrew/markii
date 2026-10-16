@@ -95,8 +95,9 @@ tax, shipping rates, orders, refunds, **digital delivery** · rule-based readine
 email plumbing (SES + Resend).
 
 **Out — do not build:** the site builder and CMS node model, Channels, Agent Test Lab,
-the analytics event model beyond crawls, Chargeback Assist, Agent Ops chat, native email campaigns,
-fulfillment logistics, POS. (The **MCP server** was on this list and was built anyway, on
+the analytics event model beyond crawls, Chargeback Assist, native email campaigns,
+fulfillment logistics, POS. (**Agent Ops chat** left this list on 2026-10-15 — D47 builds it now as
+free-beta merchant agents, `docs/API.md` §27.) (The **MCP server** was on this list and was built anyway, on
 2026-09-07 — `docs/API.md` §22. It adds a surface over the registry, not a capability, which is
 why it was cheap enough to pull forward. Listed here as out until 2026-10-08.)
 
@@ -696,6 +697,17 @@ Contract `docs/API.md` §18. The largest phase. Order within it:
     found `delivery.test.ts`'s `localDownload` double-prefixing `/_sites/{slug}` on
     `ROOT_DOMAIN=localhost`, so six download tests had only passed against a real root domain.
 
+20. **Merchant agents — the Catalog agent** (D47) — backend live 2026-10-15, in beta; screen
+    pending. Not struck through because the family is open: Inventory, Pricing and Orders agents
+    are next in the same shape. `docs/API.md` §27 is the contract and `lib/ops-agents/` the code;
+    migration `0043` adds `agent_sessions`, `agent_proposals` and `agent_usage`. Three things to
+    keep when adding the next agent: **its write surface is an allowlist of registry action ids**
+    (`catalog/allowlist.ts`) with a unit test pinning it; **propose tools come from
+    `proposeTools()`**, never hand-written beside the action; and **reads take a `ReadScope`** with
+    the asker's `storeIds`. Prerequisite found on the way: product editing was never a registry
+    action (`PATCH /api/products/:id` wrote directly since v1); it is `catalog.updateProduct` now.
+    Create, delete and duplicate are still v1 routes outside the registry.
+
 > **Two things this uncovered, both worth knowing.**
 >
 > `carts.customerId` was **never populated by anything** — so every order was recorded as a guest's,
@@ -902,6 +914,7 @@ goes live — that badge is the frontend's only signal that something is callabl
 |---|---|
 | Forgetting an org filter on one route | Cross-tenant data leak |
 | Running `pnpm build` and `pnpm dev` against the same `.next` | Every page 500s with a Turbopack `0xc0000142`; route handlers keep working, so it reads as a code bug. `rm -rf .next` — see below |
+| Adding route folders while `pnpm dev` runs | Existing routes start answering Next's **HTML** 404 page — not the JSON envelope — and whole suites fail at `expected 404 to be 200` (45 tests, 2026-10-15, after `app/api/agents/*` was created under a running server; `.next/dev/types/validator.ts` was also left unparseable). An HTML 404 from a route that exists is the tell. Stop the server, `rm -rf .next`, restart |
 | Editing a registry module while `pnpm dev` runs | `Duplicate action id` on hot reload; every action 500s and tests fail at the wrong assertion, which reads as a real finding. Restart before trusting a red test — see above |
 | Any auth mutation running in the browser | The session cookie cannot be `HttpOnly` (D30) — XSS in merchant custom code reaches an admin session |
 | Computing fees from `orders` instead of usage records | Wrong invoices after any refund |
