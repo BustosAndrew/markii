@@ -3774,7 +3774,7 @@ service; `lib/api/server.ts` has the in-process wrappers.
 
 > **Frontend:** `lib/api/agents.ts` (`AGENTS_API_LIVE = true`) covers everything except the stream;
 > the chat itself is `useChat` against `agentChatEndpoint("catalog")` — see `docs/FRONTEND.md`.
-> Screen: dockable `AgentPanel` on every dashboard page (`components/dashboard/agent-panel.tsx`).
+> Screen: dockable `AgentPanel` on `/dashboard/catalog` (`components/dashboard/agent-panel.tsx`).
 
 One agent per area, sharing one chat surface, one proposal flow, one audit trail and one beta cap.
 **Catalog is the first.** It reads the catalog and **proposes** edits; it applies nothing.

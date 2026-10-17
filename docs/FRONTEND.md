@@ -78,7 +78,7 @@ API-independent work so you don't outrun the backend") no longer applies to A, B
 | **MCP server** | §22 | ✅ **LIVE (tools, prompts, resources), no extra screen** | Token-only at `/api/mcp`. Settings → Team mints the token. Session cookies are refused. Connecting a client: `docs/MCP.md` |
 | Add-on **purchase** | §17 | ⛔ Refuses `409` | Agent Ops / Chargeback Assist do not exist. Show them as unavailable — never as "coming soon with a buy button" |
 | Email delivery | §24 | ✅ LIVE, screen built | SES sends; `/dashboard/settings/email`. Unverified domains still send via the storefront fallback (D44) — do not say mail is not going out |
-| **Catalog agent** | §27 | ✅ **LIVE, screen built** (beta) | Dockable panel on every dashboard page (`AgentPanel`). Propose-only; the merchant approves. MCP (§22) is a different surface — do not confuse them |
+| **Catalog agent** | §27 | ✅ **LIVE, screen built** (beta) | Dockable panel on `/dashboard/catalog` (`AgentPanel`). Propose-only; the merchant approves. MCP (§22) is a different surface — do not confuse them |
 | Site builder, Channels, Test Lab | §19–20 | ⛔ Deferred | Out of launch scope — do not start |
 | Platform admin | §26 | ✅ LIVE, screens built | `/admin` when `me.operator`. Suspend/reinstate and **Reset MFA** (`resetPlatformMfa`). Never on merchant nav for anyone else |
 
@@ -494,7 +494,7 @@ query. Both are `string | null` on `ActionInvocation`.
 ### 🟢 New 2026-10-15 — merchant agents: the Catalog agent is live, screen built (D47)
 
 `docs/API.md` §27, `lib/api/agents.ts` (`AGENTS_API_LIVE = true`). The dockable panel is
-`components/dashboard/agent-panel.tsx`, mounted from the dashboard layout — not a nav page.
+`components/dashboard/agent-panel.tsx`, mounted on `/dashboard/catalog` — not a nav page, and not the rest of the dashboard.
 
 - **The chat is `useChat`, not a service function.** Transport posts to
   `agentChatEndpoint("catalog")` and sends **only the new message** plus `sessionId`
@@ -938,7 +938,7 @@ The team is two people, so launch is a deliberate subset of the full plan
 | **Commerce** (Phase C) | Products **with variants**, inventory, collections, customers, orders + timeline + refunds, discounts, tax & shipping settings, digital delivery |
 | **Storefront** | Cart, variant picker, checkout — plus **3–4 polished themes** |
 | **Readiness** | Score card, issues list, issue drawer |
-| **Catalog agent** | Dockable chat panel on every dashboard page; propose → approve. Beta |
+| **Catalog agent** | Dockable chat panel on Catalog; propose → approve. Beta |
 
 **Deferred past launch — do not start these:** the site builder, Channels, Agent Test Lab, the full
 analytics funnel, native email campaigns. The Catalog agent chat (D47 / §27) is in launch scope
