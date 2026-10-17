@@ -1,7 +1,6 @@
 "use client";
 
 import { Sparkles } from "lucide-react";
-import { usePathname } from "next/navigation";
 import { useCallback, useState } from "react";
 import {
   getAgentDirectory,
@@ -32,20 +31,11 @@ function newThread(): Thread {
   return { key: crypto.randomUUID(), sessionId: null, messages: [], proposals: [] };
 }
 
-function pageContextFromPath(pathname: string): string | null {
-  const product = pathname.match(/^\/dashboard\/products\/([^/]+)$/);
-  if (product && product[1] !== "new") {
-    return `product ${decodeURIComponent(product[1])}`;
-  }
-  return null;
-}
-
 function formatTokens(n: number): string {
   return n.toLocaleString();
 }
 
 export function AgentPanel() {
-  const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [directory, setDirectory] = useState<AgentDirectory | null>(null);
   const [sessions, setSessions] = useState<AgentSessionSummary[]>([]);
@@ -129,6 +119,10 @@ export function AgentPanel() {
         title="Catalog agent"
         description="Proposes catalog edits. Nothing is applied until you approve it."
         className="max-w-lg"
+        // The transcript and any in-flight reply live in `useChat`; unmounting
+        // on close would drop both while the session id survived, so the next
+        // message would continue a conversation the merchant could no longer see.
+        keepMounted
       >
         {loadError && !directory ? (
           <ErrorState title="Catalog agent" message={loadError} onRetry={() => void load()} />
@@ -206,7 +200,6 @@ export function AgentPanel() {
                   initialProposals={thread.proposals}
                   canSend={canSend}
                   disabledReason={disabledReason}
-                  pageContext={pageContextFromPath(pathname)}
                   onSessionId={handleSessionId}
                   onFinished={load}
                 />

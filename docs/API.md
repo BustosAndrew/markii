@@ -3830,9 +3830,15 @@ interface AgentProposal {
   affectedCount: number;
   status: "pending" | "approving" | "executed" | "rejected" | "failed" | "stale";
   invocationId: string | null; error: string | null;
+  undoneByInvocationId: string | null;              // the undo's own invocation, once undone
   decidedAt: string | null; createdAt: string;
 }
 ```
+
+`undoneByInvocationId` is read through a join to the approving invocation, not stored on the
+proposal, so an undo from anywhere — the card or the audit log — shows. It is populated on
+`GET /api/agents/sessions/:id`; the approve and reject responses always carry `null`, since nothing
+can have undone a change that was just made.
 
 `MFA_REQUIRED`, `TRIAL_ENDED`, `PAYMENT_PAST_DUE` and `RATE_LIMITED` at approval leave the proposal
 `pending` — the merchant can fix those and approve again. Any other refusal marks it `failed` with

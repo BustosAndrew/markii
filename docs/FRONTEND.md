@@ -510,7 +510,13 @@ query. Both are `string | null` on `ActionInvocation`.
   `409` with `details.status === "stale"` means nothing was applied: offer "ask the agent again",
   not "retry". `403 MFA_REQUIRED` is the existing step-up modal; the proposal stays `pending`.
   An executed card gets **Undo** — `POST /api/actions/{actionId}/undo` with `{ invocationId }`,
-  i.e. the existing `undoInvocation` client — and a link to the audit entry.
+  i.e. the existing `undoInvocation` client — and a link to the audit entry. Once
+  `proposal.undoneByInvocationId` is set (2026-10-17) the card reads **Undone** with no button —
+  it survives a reload and reflects an undo made from the audit log too.
+- **The panel's drawer stays mounted while closed** (`Drawer keepMounted`), because the transcript
+  and any in-flight reply live in `useChat`; unmounting on close dropped both while the session id
+  survived. The drawer's Escape now closes only the topmost dialog, so Escape on the undo confirm
+  or the step-up modal no longer closes the drawer behind it.
 - **Before the panel opens:** `getAgentDirectory()` — `configured: false` is *configuration
   required* (Markii's), `allowance.allowed: false` is "this month's beta allowance is used, resets
   on …" (the org's). Two facts; do not merge them. Label the whole thing **Beta**.

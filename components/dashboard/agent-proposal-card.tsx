@@ -61,9 +61,11 @@ export function AgentProposalCard({
 }) {
   const [busy, setBusy] = useState<"approve" | "reject" | "undo" | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [undone, setUndone] = useState(false);
+  // `already_undone` names no invocation, so that one case is held locally.
+  const [alreadyUndone, setAlreadyUndone] = useState(false);
   const [confirmUndo, setConfirmUndo] = useState(false);
 
+  const undone = proposal.undoneByInvocationId !== null || alreadyUndone;
   const status = STATUS_BADGE[proposal.status];
   const pending = proposal.status === "pending" || proposal.status === "approving";
   const deciding = proposal.status === "approving" || busy !== null;
@@ -103,13 +105,13 @@ export function AgentProposalCard({
     setBusy("undo");
     setError(null);
     try {
-      await undoInvocation(proposal.actionId, proposal.invocationId);
-      setUndone(true);
+      const outcome = await undoInvocation(proposal.actionId, proposal.invocationId);
+      onChange({ ...proposal, undoneByInvocationId: outcome.invocationId });
       setConfirmUndo(false);
     } catch (err) {
       const kind = undoKind(err);
       if (kind === "already_undone") {
-        setUndone(true);
+        setAlreadyUndone(true);
         setConfirmUndo(false);
         return;
       }

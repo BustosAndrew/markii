@@ -5,6 +5,7 @@ import { invokeAction } from "../actions";
 import { ApiError, conflict, notFound } from "../api";
 import type { AuthContext } from "../auth/session";
 import {
+  actionInvocations,
   agentProposals,
   agentSessions,
   db,
@@ -56,7 +57,15 @@ export async function createProposal(input: {
   return row;
 }
 
-export function serializeProposal(p: AgentProposal) {
+/**
+ * A proposal plus whether its applied change was later undone. The undo lives
+ * on the invocation, not the proposal — `undoInvocation` is the ordinary
+ * registry undo and knows nothing about agents — so it is read through a join
+ * rather than copied onto the proposal, where it could drift.
+ */
+export type ProposalWithUndo = AgentProposal & { undoneByInvocationId: string | null };
+
+export function serializeProposal(p: AgentProposal | ProposalWithUndo) {
   return {
     id: p.id,
     sessionId: p.sessionId,
@@ -74,18 +83,25 @@ export function serializeProposal(p: AgentProposal) {
      * with `{ invocationId }` — the receipt's Undo button needs both.
      */
     invocationId: p.invocationId,
+    /** The invocation that reversed it, once undone — the card then offers no second Undo. */
+    undoneByInvocationId: "undoneByInvocationId" in p ? p.undoneByInvocationId : null,
     error: p.error,
     decidedAt: p.decidedAt?.toISOString() ?? null,
     createdAt: p.createdAt.toISOString(),
   };
 }
 
-export async function proposalsForSession(sessionId: string): Promise<AgentProposal[]> {
-  return db
-    .select()
+export async function proposalsForSession(sessionId: string): Promise<ProposalWithUndo[]> {
+  const rows = await db
+    .select({
+      proposal: agentProposals,
+      undoneByInvocationId: actionInvocations.undoneByInvocationId,
+    })
     .from(agentProposals)
+    .leftJoin(actionInvocations, eq(actionInvocations.id, agentProposals.invocationId))
     .where(eq(agentProposals.sessionId, sessionId))
     .orderBy(asc(agentProposals.createdAt));
+  return rows.map((row) => ({ ...row.proposal, undoneByInvocationId: row.undoneByInvocationId ?? null }));
 }
 
 /**

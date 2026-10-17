@@ -20,7 +20,7 @@ export const GET = orgHandler(async (_req, { params, orgId, session }) => {
     agent: row.agent,
     title: row.title,
     messages: row.messages,
-    proposals: proposals.map(serializeProposal),
+    proposals: proposals.map((p) => serializeProposal(p)),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   });

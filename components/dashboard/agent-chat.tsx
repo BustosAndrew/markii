@@ -48,10 +48,13 @@ function proposalIdFromOutput(output: unknown): string | null {
   return null;
 }
 
-function proposeToolNote(output: unknown, errorText?: string): string | null {
-  if (errorText) return errorText;
+function proposeToolNote(output: unknown): string | null {
   if (!output || typeof output !== "object") return null;
   const row = output as { status?: unknown; message?: unknown };
+  if (row.status === "limit_reached") {
+    // The tool's message is addressed to the model; the merchant gets their own.
+    return "The agent reached its limit of proposals for one message. Ask it to continue for the rest.";
+  }
   if (row.status === "refused" || row.status === "no_change") {
     return typeof row.message === "string" ? row.message : "The change could not be prepared.";
   }
@@ -146,7 +149,6 @@ export function AgentChat({
   initialProposals,
   canSend,
   disabledReason,
-  pageContext,
   onSessionId,
   onFinished,
 }: {
@@ -155,7 +157,6 @@ export function AgentChat({
   initialProposals: AgentProposal[];
   canSend: boolean;
   disabledReason?: string;
-  pageContext: string | null;
   onSessionId: (id: string) => void;
   onFinished: () => void;
 }) {
@@ -201,12 +202,6 @@ export function AgentChat({
   return (
     <div>
       <div className="space-y-4">
-        {pageContext ? (
-          <p className="inline-flex rounded-full bg-hover px-2.5 py-0.5 text-xs font-medium text-muted">
-            Viewing {pageContext}
-          </p>
-        ) : null}
-
         {messages.length === 0 ? (
           <p className="text-sm leading-6 text-muted">
             Ask about products, collections, or stock. The agent proposes edits; nothing

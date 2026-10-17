@@ -67,6 +67,12 @@ export type AgentProposal = {
   status: AgentProposalStatus;
   /** Set once executed. Undo is `POST /api/actions/{actionId}/undo` with `{ invocationId }`. */
   invocationId: string | null;
+  /**
+   * The invocation that reversed this change, once it has been undone — from
+   * anywhere, the card or the audit log. Null otherwise. An undone card shows
+   * "Undone" and no Undo button.
+   */
+  undoneByInvocationId: string | null;
   error: string | null;
   decidedAt: string | null;
   createdAt: string;

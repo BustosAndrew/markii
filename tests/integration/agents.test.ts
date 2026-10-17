@@ -176,6 +176,11 @@ describe("catalog agent", () => {
     expect(undo.status, JSON.stringify(undo.json)).toBe(200);
     const [after] = await sql`select description from products where id = ${product.id}`;
     expect(after.description).toBeNull();
+
+    // A resumed session shows the card as undone, so it offers no second Undo.
+    const detail = await merchant.get(`/api/agents/sessions/${sessionId}`);
+    const resumed = detail.json.proposals.find((p: { id: string }) => p.id === proposal.id);
+    expect(resumed.undoneByInvocationId).toBe(undo.json.invocationId);
   });
 
   /**
