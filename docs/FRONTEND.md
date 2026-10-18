@@ -79,8 +79,8 @@ API-independent work so you don't outrun the backend") no longer applies to A, B
 | Add-on **purchase** | §17 | ⛔ Refuses `409` | Agent Ops / Chargeback Assist do not exist. Show them as unavailable — never as "coming soon with a buy button" |
 | Email delivery | §24 | ✅ LIVE, screen built | SES sends; `/dashboard/settings/email`. Unverified domains still send via the storefront fallback (D44) — do not say mail is not going out |
 | **Catalog agent** | §27 | ✅ **LIVE, screen built** (beta) | Dockable panel on `/dashboard/catalog` (`AgentPanel`). Propose-only; the merchant approves. MCP (§22) is a different surface — do not confuse them |
-| **Assistant** | §27 | ✅ **LIVE, no screen yet** (beta, 2026-10-17) | Dashboard-wide chat, read-only — answers questions, checks setup, routes to pages/agents. `agentChatEndpoint("assistant")` |
-| **Setup checklist** | §28 | ✅ **LIVE, no screen yet** (2026-10-17) | `getSetupStatus()` — `lib/api/setup.ts` (client) / `lib/api/server` (server components). Derived per call |
+| **Assistant** | §27 | ✅ **LIVE, screen built** (beta, 2026-10-17) | Dock on `/dashboard` only (`AssistantHost` on Overview). Read-only — answers questions, checks setup, routes to pages/agents. Reuses `AgentPanel` with `agent="assistant"`. Catalog agent stays on `/dashboard/catalog` only |
+| **Setup checklist** | §28 | ✅ **LIVE, screen built** (2026-10-17) | Overview card via `getSetupStatus()`. `firstRun` leads the page; `next` is the headline. No local ticks — refetch by revisiting |
 | Site builder, Channels, Test Lab | §19–20 | ⛔ Deferred | Out of launch scope — do not start |
 | Platform admin | §26 | ✅ LIVE, screens built | `/admin` when `me.operator`. Suspend/reinstate and **Reset MFA** (`resetPlatformMfa`). Never on merchant nav for anyone else |
 
@@ -493,30 +493,27 @@ The audit list carries both directions now — `undoneBy` on the original row, `
 so a history screen can strike through a reversed change and label its reversal without a second
 query. Both are `string | null` on `ActionInvocation`.
 
-### 🟢 New 2026-10-17 — the assistant and the setup checklist (D48); no screens yet
+### 🟢 New 2026-10-17 — the assistant and the setup checklist (D48); screens built
 
 `docs/API.md` §27 ("The assistant") and §28. Two new things to build against, and one small change
 already made to the Catalog panel.
 
-- **The assistant** is a dashboard-wide chat: `agentChatEndpoint("assistant")`,
+- **The assistant** is a chat on Overview: `agentChatEndpoint("assistant")`,
   the same `useChat` transport, session, refusal and allowance handling as the Catalog panel —
-  reuse `AgentPanel`'s plumbing rather than forking it. It **proposes nothing**, so its transcripts
+  `AgentPanel` takes `agent` and `AssistantHost` mounts it on `/dashboard`. It **proposes nothing**, so its transcripts
   never contain `propose_*` parts or cards; tool parts are reads (`setup_status`, `store_health`,
-  `read_help`, `get_plans`, `list_stores`) and can render as collapsed "checked your setup" rows or
-  not at all. `GET /api/agents` lists it with **`href: null`** (every page); Catalog now carries
-  `href: "/dashboard/catalog"`. Where it mounts is your call — a launcher in the dashboard shell is
-  what `href: null` means. Label it **Beta**; it shares the org's allowance with Catalog.
+  `read_help`, `get_plans`, `list_stores`) and render as collapsed "checked your setup" rows.
+  `GET /api/agents` lists it with **`href: null`**; the screen is Overview only, not the rest of the dashboard. Catalog still carries
+  `href: "/dashboard/catalog"` and stays on that page only. Label it **Beta**; it shares the org's allowance with Catalog.
 - **Links in its replies are dashboard paths** (`/dashboard/settings/shipping`). Render them as
   in-app links. The backend tests that every path it can be given exists.
-- **The setup checklist** — `getSetupStatus()` (`lib/api/setup.ts`; `lib/api/server` for server
-  components). Derived per call, so **refetch after any setup action**; there is no "mark done" or
-  "dismiss" endpoint and there should be no local tick state. `firstRun: true` is the signal to lead
-  the overview with setup and offer the assistant. `next` is the one step to headline. `status`
-  has three values — render `not_needed` as such (a downloads-only store has no shipping), not as
+- **The setup checklist** — `getSetupStatus()` on Overview (`SetupChecklistCard`). Derived per call, so **refetch after any setup action**; there is no "mark done" or
+  "dismiss" endpoint and there is no local tick state. `firstRun: true` leads
+  the overview with setup and offers the assistant. First-run lists Account (and each store) once — do not also headline `next`, which repeats a step already in that list. After first run, `next` is the compact card. `status`
+  has three values — `not_needed` is rendered as such (a downloads-only store has no shipping), not as
   done. `required: false` steps are "Recommended" and never block `readyToLaunch`. **`canAct:
-  false`** means the viewer's role cannot do the step: say "ask an owner or administrator", don't
-  render a CTA into a page that will refuse them. `agent: "catalog"` on a step → offer to open the
-  Catalog panel. `title` varies with state (`choose_plan` reads "Update your payment method" when
+  false`** means the viewer's role cannot do the step: "ask an owner or administrator", no
+  CTA into a page that will refuse them. `agent: "catalog"` on a step → link to Catalog (the panel lives there). `title` varies with state (`choose_plan` reads "Update your payment method" when
   past due) — render it, don't map ids to your own copy.
 - **Changed for you:** `listAgentSessions` now takes `{ agent }` as its first argument, and
   `AgentPanel` passes `{ agent: "catalog" }`. Without it, assistant conversations would have shown
@@ -976,6 +973,8 @@ The team is two people, so launch is a deliberate subset of the full plan
 | **Storefront** | Cart, variant picker, checkout — plus **3–4 polished themes** |
 | **Readiness** | Score card, issues list, issue drawer |
 | **Catalog agent** | Dockable chat panel on Catalog; propose → approve. Beta |
+| **Assistant** | Dock on Overview; read-only. Beta |
+| **Setup checklist** | Overview card from `GET /api/setup` |
 
 **Deferred past launch — do not start these:** the site builder, Channels, Agent Test Lab, the full
 analytics funnel, native email campaigns. The Catalog agent chat (D47 / §27) is in launch scope

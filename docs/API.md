@@ -3774,8 +3774,8 @@ service; `lib/api/server.ts` has the in-process wrappers.
 ## 27. Merchant agents — Catalog agent ✅ LIVE (beta, 2026-10-15, D47) · assistant ✅ LIVE (beta, 2026-10-17, D48)
 
 > **Frontend:** `lib/api/agents.ts` (`AGENTS_API_LIVE = true`) covers everything except the stream;
-> the chat itself is `useChat` against `agentChatEndpoint("catalog")` — see `docs/FRONTEND.md`.
-> Screen: dockable `AgentPanel` on `/dashboard/catalog` (`components/dashboard/agent-panel.tsx`).
+> the chat itself is `useChat` against `agentChatEndpoint(agent)` — see `docs/FRONTEND.md`.
+> Screens: Catalog `AgentPanel` on `/dashboard/catalog`; assistant `AssistantHost` on `/dashboard`.
 
 One agent per area, sharing one chat surface, one proposal flow, one audit trail and one beta cap.
 **Catalog is the first.** It reads the catalog and **proposes** edits; it applies nothing.
@@ -3904,7 +3904,7 @@ before one can be allowlisted.
 ## 28. Setup checklist ✅ LIVE (2026-10-17, D48)
 
 > **Frontend:** `lib/api/setup.ts` (`SETUP_API_LIVE = true`); server components use
-> `getSetupStatus` from `lib/api/server`.
+> `getSetupStatus` from `lib/api/server`. Screen: Overview (`SetupChecklistCard`).
 
 `GET /api/setup` — `org.read`, every role. **Derived per request from the live store; nothing is
 stored and nothing can be marked done.** Built on readiness's own `StoreFacts`

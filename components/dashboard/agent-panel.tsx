@@ -1,12 +1,22 @@
 "use client";
 
-import { Sparkles } from "lucide-react";
-import { useCallback, useState } from "react";
+import { MessageCircle, Sparkles } from "lucide-react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type MutableRefObject,
+  type ReactNode,
+} from "react";
 import {
   getAgentDirectory,
   listAgentSessions,
   getAgentSession,
   type AgentDirectory,
+  type AgentKind,
   type AgentProposal,
   type AgentSessionSummary,
 } from "@/lib/api/agents";
@@ -19,6 +29,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorState } from "@/components/ui/error-state";
 import { LocalDate } from "@/components/ui/local-date";
 import { Select } from "@/components/ui/field";
+import { cn } from "@/lib/utils";
 
 type Thread = {
   key: string;
@@ -35,7 +46,59 @@ function formatTokens(n: number): string {
   return n.toLocaleString();
 }
 
-export function AgentPanel() {
+const COPY: Record<
+  AgentKind,
+  {
+    title: string;
+    description: string;
+    launcherLabel: string;
+    launcherHint: string;
+    loadError: string;
+  }
+> = {
+  catalog: {
+    title: "Catalog agent",
+    description: "Proposes catalog edits. Nothing is applied until you approve it.",
+    launcherLabel: "Catalog agent",
+    launcherHint: "AI chat · Beta",
+    loadError: "Could not load the Catalog agent.",
+  },
+  assistant: {
+    title: "Assistant",
+    description: "Answers questions, checks setup, and points you to the right page. It cannot change your store.",
+    launcherLabel: "Assistant",
+    launcherHint: "AI chat · Beta",
+    loadError: "Could not load the assistant.",
+  },
+};
+
+const OpenAssistantContext = createContext<(() => void) | null>(null);
+
+export function useOpenAssistant() {
+  return useContext(OpenAssistantContext);
+}
+
+export function AssistantHost({ children }: { children: ReactNode }) {
+  const openRef = useRef<() => void>(() => {});
+  const open = useCallback(() => {
+    openRef.current();
+  }, []);
+  return (
+    <OpenAssistantContext.Provider value={open}>
+      {children}
+      <AgentPanel agent="assistant" openRef={openRef} />
+    </OpenAssistantContext.Provider>
+  );
+}
+
+export function AgentPanel({
+  agent,
+  openRef,
+}: {
+  agent: AgentKind;
+  openRef?: MutableRefObject<() => void>;
+}) {
+  const copy = COPY[agent];
   const [open, setOpen] = useState(false);
   const [directory, setDirectory] = useState<AgentDirectory | null>(null);
   const [sessions, setSessions] = useState<AgentSessionSummary[]>([]);
@@ -45,22 +108,26 @@ export function AgentPanel() {
   const load = useCallback(async () => {
     setLoadError(null);
     try {
-      // Catalog sessions only — an assistant session cannot be continued here.
       const [dir, listed] = await Promise.all([
         getAgentDirectory(),
-        listAgentSessions({ agent: "catalog" }),
+        listAgentSessions({ agent }),
       ]);
       setDirectory(dir);
       setSessions(listed.items);
     } catch (err) {
-      setLoadError(publicErrorMessage(err, "Could not load the Catalog agent."));
+      setLoadError(publicErrorMessage(err, copy.loadError));
     }
-  }, []);
+  }, [agent, copy.loadError]);
 
-  function openPanel() {
+  const openPanel = useCallback(() => {
     setOpen(true);
     void load();
-  }
+  }, [load]);
+
+  useEffect(() => {
+    if (!openRef) return;
+    openRef.current = openPanel;
+  }, [openRef, openPanel]);
 
   const handleSessionId = useCallback((id: string) => {
     setThread((current) =>
@@ -68,7 +135,7 @@ export function AgentPanel() {
     );
   }, []);
 
-  const catalog = directory?.agents.find((agent) => agent.id === "catalog");
+  const listed = directory?.agents.find((row) => row.id === agent);
   const configured = directory?.configured === true;
   const allowed = directory?.allowance.allowed === true;
   const canSend = configured && allowed;
@@ -92,26 +159,42 @@ export function AgentPanel() {
     }
   }
 
+  const Icon = agent === "catalog" ? Sparkles : MessageCircle;
+
   return (
     <>
       {open ? null : (
         <button
           type="button"
           onClick={openPanel}
-          className="fixed right-4 z-40 flex items-center gap-3 rounded-[var(--radius-card)] bg-brand px-3 py-2.5 text-left text-on-brand shadow-[var(--shadow-md)] transition-[background-color,box-shadow] hover:bg-brand-hover active:bg-brand-pressed focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand/20 bottom-[max(1.5rem,env(safe-area-inset-bottom))] lg:right-6"
+          className={cn(
+            "fixed right-4 z-40 flex items-center gap-3 rounded-[var(--radius-card)] px-3 py-2.5 text-left shadow-[var(--shadow-md)] transition-[background-color,box-shadow,border-color] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand/20 lg:right-6",
+            "bottom-[max(1.5rem,env(safe-area-inset-bottom))]",
+            agent === "catalog"
+              ? "bg-brand text-on-brand hover:bg-brand-hover active:bg-brand-pressed"
+              : "border border-border bg-surface text-foreground hover:bg-hover",
+          )}
         >
           <span
-            className="flex size-9 shrink-0 items-center justify-center rounded-[var(--radius-control)] bg-on-brand/15"
+            className={cn(
+              "flex size-9 shrink-0 items-center justify-center rounded-[var(--radius-control)]",
+              agent === "catalog" ? "bg-on-brand/15" : "bg-hover-soft",
+            )}
             aria-hidden
           >
-            <Sparkles className="size-4" />
+            <Icon className="size-4" />
           </span>
           <span className="min-w-0 pr-1">
             <span className="block text-sm font-semibold leading-5 tracking-tight">
-              Catalog agent
+              {copy.launcherLabel}
             </span>
-            <span className="block text-xs leading-4 text-on-brand/80">
-              AI chat · Beta
+            <span
+              className={cn(
+                "block text-xs leading-4",
+                agent === "catalog" ? "text-on-brand/80" : "text-muted",
+              )}
+            >
+              {copy.launcherHint}
             </span>
           </span>
         </button>
@@ -120,8 +203,8 @@ export function AgentPanel() {
       <Drawer
         open={open}
         onClose={() => setOpen(false)}
-        title="Catalog agent"
-        description="Proposes catalog edits. Nothing is applied until you approve it."
+        title={copy.title}
+        description={copy.description}
         className="max-w-lg"
         // The transcript and any in-flight reply live in `useChat`; unmounting
         // on close would drop both while the session id survived, so the next
@@ -129,15 +212,15 @@ export function AgentPanel() {
         keepMounted
       >
         {loadError && !directory ? (
-          <ErrorState title="Catalog agent" message={loadError} onRetry={() => void load()} />
+          <ErrorState title={copy.title} message={loadError} onRetry={() => void load()} />
         ) : !directory ? (
           <p className="text-sm text-muted">Loading…</p>
         ) : (
           <div>
             <div className="mb-4 flex flex-wrap items-center gap-2">
               <Badge variant="info">Beta</Badge>
-              {catalog ? (
-                <span className="text-sm text-muted">{catalog.name}</span>
+              {listed ? (
+                <span className="text-sm text-muted">{listed.name}</span>
               ) : null}
             </div>
 
@@ -199,6 +282,7 @@ export function AgentPanel() {
 
                 <AgentChat
                   key={thread.key}
+                  agent={agent}
                   sessionId={thread.sessionId}
                   initialMessages={thread.messages}
                   initialProposals={thread.proposals}

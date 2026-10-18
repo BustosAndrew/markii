@@ -489,7 +489,7 @@ export default async function CatalogPage({
           ) : null}
         </>
       ) : null}
-      <AgentPanel />
+      <AgentPanel agent="catalog" />
     </div>
   );
 }

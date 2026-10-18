@@ -1,9 +1,15 @@
 import Link from "next/link";
-import { getOverview, getReadinessOverview } from "@/lib/api/server";
+import { getOverview, getReadinessOverview, getSetupStatus } from "@/lib/api/server";
 import type { ReadinessReport } from "@/lib/api/readiness";
+import type { SetupChecklist } from "@/lib/api/setup";
 import { isPlannedError } from "@/lib/api/planned";
 import { ApiClientError } from "@/lib/api/types";
+import { AssistantHost } from "@/components/dashboard/agent-panel";
 import { ReadinessCard } from "@/components/dashboard/readiness-card";
+import {
+  SetupChecklistCard,
+  SetupChecklistError,
+} from "@/components/dashboard/setup-checklist";
 import { ButtonLink } from "@/components/ui/button";
 import { BarChart, DaySparkBars, Sparkline } from "@/components/ui/charts";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -17,6 +23,8 @@ export default async function DashboardOverviewPage() {
   let readinessReport: ReadinessReport | null = null;
   let readinessPlanned = false;
   let readinessError: string | null = null;
+  let setup: SetupChecklist | null = null;
+  let setupError: string | null = null;
 
   try {
     data = await getOverview();
@@ -42,6 +50,18 @@ export default async function DashboardOverviewPage() {
     }
   }
 
+  try {
+    setup = await getSetupStatus();
+  } catch (err) {
+    if (err instanceof ApiClientError) {
+      setupError = err.message;
+    } else if (err instanceof Error) {
+      setupError = err.message;
+    } else {
+      setupError = "Could not load setup status.";
+    }
+  }
+
   const sitesWithBalance =
     data?.finances.bySite.filter((s) => s.balanceCents > 0) ?? [];
   const topBalanceSites = [...sitesWithBalance]
@@ -49,6 +69,7 @@ export default async function DashboardOverviewPage() {
     .slice(0, 5);
 
   return (
+    <AssistantHost>
     <div>
       <PageHeader
         title="Overview"
@@ -62,7 +83,11 @@ export default async function DashboardOverviewPage() {
 
       {errorMessage ? <OverviewError message={errorMessage} /> : null}
 
-      {!errorMessage && data && data.sites.total === 0 ? (
+      <div className="space-y-6">
+        {setup ? <SetupChecklistCard checklist={setup} /> : null}
+        {setupError ? <SetupChecklistError message={setupError} /> : null}
+
+      {!errorMessage && data && data.sites.total === 0 && !setup?.firstRun ? (
         <EmptyState
           title="No websites yet"
           description="Create a site to import a catalog and deploy an agent-readable storefront."
@@ -176,7 +201,9 @@ export default async function DashboardOverviewPage() {
           </section>
         </div>
       ) : null}
+      </div>
     </div>
+    </AssistantHost>
   );
 }
 
