@@ -2743,8 +2743,14 @@ export const stripeWebhookEvents = pgTable(
 // Merchant agents (docs/AGENT-OPS.md, D47)
 // ---------------------------------------------------------------------------
 
-/** The agents that exist. One per area, each with its own tools (D47). */
-export const AGENT_KINDS = ["catalog"] as const;
+/**
+ * The agents that exist. One per area, each with its own tools (D47), plus
+ * the general assistant that answers questions and guides setup.
+ *
+ * The column is plain `text` with no check constraint, so adding a kind needs
+ * no migration — the enum is enforced here and at the route.
+ */
+export const AGENT_KINDS = ["catalog", "assistant"] as const;
 export type AgentKind = (typeof AGENT_KINDS)[number];
 
 /**

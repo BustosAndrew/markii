@@ -181,10 +181,13 @@ and every one of them attaches a catch at it.
 ✅ Sayable, with the verification date attached:
 - "Use any payment provider without a platform fee — Shopify and BigCommerce charge up to 2% for
   that, on every sale, from your first one."
-- "No transaction fee until you're doing real volume, then only on the portion above it — and we
+- "No Markii fee below your plan's sales threshold, then only on the portion above it — and we
   never force you onto a higher plan the way BigCommerce does at $30K."
-- "0% on digital products and memberships. Squarespace charges 5% at $29/mo and only drops to 0%
-  at $99/mo."
+- "0% on digital products and memberships below your plan's threshold. Squarespace charges 5% at
+  $29/mo and only drops to 0% at $99/mo."
+- *Corrected 2026-10-17 to "below the threshold": these two said "until you're doing real volume"
+  and an unqualified "0% on digital", D1's position. D39 set thresholds of $1k / $50k / $100k and
+  a digital rate above them, so the Starter line is crossed by almost every real merchant.*
 - "Unlimited staff seats on every plan. Shopify Basic includes none; Wix Core includes five."
 - "API and MCP access on every plan. Squarespace Basic has no API integrations at all."
 - "Your Stripe account, your rates — negotiate directly at volume." (Structural fact, not a number.)

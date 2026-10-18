@@ -16,6 +16,12 @@ import { limitFromEnv, type RateLimitPolicy } from "../rate-limit";
  */
 export const AGENT_MODELS = {
   catalog: process.env.CATALOG_AGENT_MODEL?.trim() || "anthropic/claude-sonnet-5.5",
+  /**
+   * The assistant reads short help topics and a checklist and writes a few
+   * sentences; it shares the org's beta allowance with the Catalog agent, so a
+   * cheaper model is a configuration change away.
+   */
+  assistant: process.env.ASSISTANT_AGENT_MODEL?.trim() || "anthropic/claude-sonnet-5.5",
 } as const;
 
 /**

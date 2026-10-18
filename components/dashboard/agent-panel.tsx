@@ -45,7 +45,11 @@ export function AgentPanel() {
   const load = useCallback(async () => {
     setLoadError(null);
     try {
-      const [dir, listed] = await Promise.all([getAgentDirectory(), listAgentSessions()]);
+      // Catalog sessions only — an assistant session cannot be continued here.
+      const [dir, listed] = await Promise.all([
+        getAgentDirectory(),
+        listAgentSessions({ agent: "catalog" }),
+      ]);
       setDirectory(dir);
       setSessions(listed.items);
     } catch (err) {

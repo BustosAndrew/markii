@@ -48,7 +48,16 @@ export async function ownedSession(
   return row;
 }
 
-export async function listSessions(owner: { orgId: string; userId: string }, limit = 50) {
+/**
+ * The person's sessions, newest first — optionally one agent's. Each panel
+ * asks for its own agent: a session continues only with the agent that
+ * started it, so listing another agent's in a panel offers a resume that
+ * answers `409`.
+ */
+export async function listSessions(
+  owner: { orgId: string; userId: string },
+  opts: { agent?: AgentKind; limit?: number } = {},
+) {
   return db
     .select({
       id: agentSessions.id,
@@ -58,9 +67,15 @@ export async function listSessions(owner: { orgId: string; userId: string }, lim
       updatedAt: agentSessions.updatedAt,
     })
     .from(agentSessions)
-    .where(and(eq(agentSessions.orgId, owner.orgId), eq(agentSessions.userId, owner.userId)))
+    .where(
+      and(
+        eq(agentSessions.orgId, owner.orgId),
+        eq(agentSessions.userId, owner.userId),
+        opts.agent ? eq(agentSessions.agent, opts.agent) : undefined,
+      ),
+    )
     .orderBy(desc(agentSessions.updatedAt))
-    .limit(limit);
+    .limit(opts.limit ?? 50);
 }
 
 /**

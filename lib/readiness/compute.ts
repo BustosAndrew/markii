@@ -56,7 +56,7 @@ export type ReadinessFilters = {
  * engine that issued a query per product would be the expensive thing this
  * design exists to avoid.
  */
-async function loadFacts(orgId: string, filters: ReadinessFilters) {
+export async function loadFacts(orgId: string, filters: ReadinessFilters) {
   const siteRows = await db
     .select()
     .from(sites)
@@ -265,6 +265,8 @@ function toIssue(
   };
 }
 
+export type ReadinessFacts = Awaited<ReturnType<typeof loadFacts>>;
+
 export type ComputedReadiness = {
   issues: ReadinessIssue[];
   report: AgentReadinessReport;
@@ -280,9 +282,15 @@ export type ComputedReadiness = {
 export async function computeReadiness(
   orgId: string,
   filters: ReadinessFilters = {},
+  /**
+   * Facts the caller already loaded with the same `filters` — the setup
+   * checklist reads store facts and issues together, and loading the catalog
+   * twice for one request is the cost this module exists to avoid.
+   */
+  preloaded?: ReadinessFacts,
 ): Promise<ComputedReadiness> {
   const now = new Date();
-  const { stores, productList } = await loadFacts(orgId, filters);
+  const { stores, productList } = preloaded ?? (await loadFacts(orgId, filters));
 
   const findings: RuleFinding[] = [
     // Store rules are skipped when the caller asked about one product — the

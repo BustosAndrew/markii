@@ -7,6 +7,7 @@ import {
   roundHalfEven,
   suggestUpgrade,
 } from "./fees";
+import { planCatalog } from "../plans";
 
 /**
  * The threshold fee engine (`docs/PRICING.md` §4.3) — pure, no database.
@@ -44,18 +45,30 @@ describe("roundHalfEven", () => {
 
 describe("computeThresholdFee", () => {
   it("reproduces the worked example from docs/PRICING.md §4.3", () => {
-    // Growth, $750k threshold, 0.4%. Merchant enters the month at $730k T12 and
-    // sells $60k: billable $40k, fee $160. The first $20k that month is free.
+    // Growth, physical goods: $50k threshold, 0.5% (D39). Merchant enters the
+    // month at $30k T12 and sells $60k: billable $40k, fee $200. The first $20k
+    // that month is free.
     const result = computeThresholdFee({
-      t12NetSalesMinor: 790_000_00,
+      t12NetSalesMinor: 90_000_00,
       periodNetSalesMinor: 60_000_00,
-      thresholdMinor: 750_000_00,
-      overageRateBps: 40,
+      thresholdMinor: 50_000_00,
+      overageRateBps: 50,
     });
     expect(result.excessAtEndMinor).toBe(40_000_00);
     expect(result.excessAtStartMinor).toBe(0);
     expect(result.billableMinor).toBe(40_000_00);
-    expect(result.feeMinor).toBe(160_00);
+    expect(result.feeMinor).toBe(200_00);
+  });
+
+  /**
+   * The example once quoted D1's $750k / 0.4% for two months after D39
+   * replaced them, and the test above kept passing because it hard-codes its
+   * own numbers. Pinning them to the live plan is what makes "verbatim" true.
+   */
+  it("uses the Growth plan's real physical threshold and rate in that example", () => {
+    const growth = planCatalog().find((p) => p.planId === "growth")!;
+    expect(growth.gmvThresholdMinor).toBe(50_000_00);
+    expect(growth.overageRateBps.physical).toBe(50);
   });
 
   it("charges nothing below the threshold", () => {

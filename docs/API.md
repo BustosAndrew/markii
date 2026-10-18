@@ -42,7 +42,8 @@ carry an explicit status — **never call a `PLANNED` endpoint and never fake it
 | 22 | **Action registry & MCP** — agent-native architecture | ✅ LIVE (registry, invoke, dry-run, audit, **undo** — 2026-08-18, and the **MCP server** — 2026-09-07: tools, prompts **and resources**). `undoable` is now derived from an `inverse()` and refused if declared without one, which corrected four actions that claimed it falsely | **Registry: C · MCP: D** |
 | 24 | Email — sending domains, deliverability, suppression | ✅ LIVE — SES transport, templates, suppression list, bounce webhook, `/api/settings/email`, §22 actions. **Sending works as of 2026-08-11** (production access in `us-west-2`, verified by a live send). **Customer mail sends even before a merchant verifies a domain** (D44, 2026-08-16): without one it leaves from the storefront's own `accounts@{slug}.{ROOT_DOMAIN}` — still SES, still the store's name, **never bare `markii.shop` and never Resend**. A verified domain always wins when it exists. **The SNS → webhook hop has carried a real bounce end to end as of 2026-08-16** (`tests/integration/ses-suppression.test.ts`, gated on `MARKII_SES_TESTS=1`): a suppression row was written and **the next send to that address was refused**. This row claimed "never carried a real event" until 2026-08-18 | **C** |
 | 26 | Platform operations — org suspension | ✅ LIVE (2026-09-15, G12). Operator-only (`PLATFORM_OPERATOR_EMAILS`), registry actions `platform.suspendOrg` / `unsuspendOrg`, `403 ACCOUNT_SUSPENDED` to the merchant's writes, derived per request | — |
-| 27 | **Merchant agents** — Catalog agent | ✅ **LIVE, beta** (2026-10-15, D47). Chat that proposes catalog edits; a person approves each, and approval runs as them. Free with a monthly token cap. Supersedes §21's "build last" | **D47** |
+| 27 | **Merchant agents** — Catalog agent, assistant | ✅ **LIVE, beta** (2026-10-15, D47). Chat that proposes catalog edits; a person approves each, and approval runs as them. Free with a monthly token cap. Supersedes §21's "build last". **The assistant** (2026-10-17, D48) — dashboard-wide, read-only: answers questions from curated help topics, reads the setup checklist, routes to pages and agents | **D47 · D48** |
+| 28 | **Setup checklist** — `GET /api/setup` | ✅ **LIVE** (2026-10-17, D48). First-run checklist derived per request from readiness's own store facts; backs the assistant's `setup_status` tool | **D48** |
 
 **v3 note.** Markii is now a full commerce platform (`docs/PLAN.md` v3). §16 was a **breaking change
 to everything above it**, and as of 2026-07-31 that change has landed: **every `/api/*` route
@@ -2138,8 +2139,8 @@ shows *not yet measured*, never `0`. Trial orgs see accrual with "would have bee
   threshold, so they are excluded **and counted**, making the gap visible rather than silent.
 
 **The engine is exact and tested against the published example.** `lib/billing/fees.test.ts`
-reproduces §4.3's worked case verbatim — Growth, $750k threshold, enters at $730k T12, sells $60k →
-$40k billable, **$160**. If that test ever fails, either the code or the published pricing is wrong.
+reproduces §4.3's worked case verbatim — Growth physical, $50k threshold at 0.5% (D39), enters at
+$30k T12, sells $60k → $40k billable, **$200**. (It used D1's $750k / 0.4% until 2026-10-17.) If that test ever fails, either the code or the published pricing is wrong.
 Rounding is **half-even**: half-up would bias every fee upward by half a minor unit on average,
 systematically in Markii's favour across every merchant and month.
 
@@ -3770,7 +3771,7 @@ service; `lib/api/server.ts` has the in-process wrappers.
 
 ---
 
-## 27. Merchant agents — Catalog agent ✅ LIVE (beta, 2026-10-15, D47)
+## 27. Merchant agents — Catalog agent ✅ LIVE (beta, 2026-10-15, D47) · assistant ✅ LIVE (beta, 2026-10-17, D48)
 
 > **Frontend:** `lib/api/agents.ts` (`AGENTS_API_LIVE = true`) covers everything except the stream;
 > the chat itself is `useChat` against `agentChatEndpoint("catalog")` — see `docs/FRONTEND.md`.
@@ -3778,12 +3779,13 @@ service; `lib/api/server.ts` has the in-process wrappers.
 
 One agent per area, sharing one chat surface, one proposal flow, one audit trail and one beta cap.
 **Catalog is the first.** It reads the catalog and **proposes** edits; it applies nothing.
+**The assistant** (`assistant`, D48) is the general-purpose one — see "The assistant" below.
 
 | Method | Route | Notes |
 |---|---|---|
-| `GET` | `/api/agents` | Directory, `configured` (Markii's deployment can call a model), and the org's `allowance`. Two facts, never merged |
+| `GET` | `/api/agents` | Directory (`id`, `name`, `description`, `beta`, **`href`** — the page an agent lives on, `null` for the dashboard-wide assistant), `configured` (Markii's deployment can call a model), and the org's `allowance`. Two facts, never merged |
 | `POST` | `/api/agents/:agent/chat` | One turn. Body `{ sessionId?, message }` — the **new** message only, `role: "user"`, text parts only. Streams an AI SDK UI message stream; a new session's id is in `x-agent-session-id`. `catalog.read` |
-| `GET` | `/api/agents/sessions` | The caller's own sessions, newest first |
+| `GET` | `/api/agents/sessions` | The caller's own sessions, newest first. `?agent=catalog` narrows to one agent (unknown → `404`) — a panel should pass it, since a session only continues with the agent that started it (`409` otherwise) |
 | `GET` | `/api/agents/sessions/:id` | `messages` (`UIMessage[]`) and `proposals`. Another person's session is `404` |
 | `POST` | `/api/agents/proposals/:id/approve` | Re-runs the dry run as the approver; `409` with `details.status: "stale"` if the store changed; otherwise invokes **as the approver**. Returns `{ proposal, invocation: { id, undoable, diff } }` |
 | `POST` | `/api/agents/proposals/:id/reject` | Pending → rejected. Writes nothing |
@@ -3863,6 +3865,87 @@ the error verbatim.
 proposing writes nothing, approval writes as the person, a second approval is refused, undo
 restores, a stale proposal applies nothing, rejection writes nothing, a no-op creates no proposal,
 another merchant gets `404`, and the cap refuses.
+
+### The assistant — D48
+
+`POST /api/agents/assistant/chat`, same body, stream, refusals, cap and rate limit as the Catalog
+agent — they share the org's allowance. Model `ASSISTANT_AGENT_MODEL` (default
+`anthropic/claude-sonnet-5.5`). Open to every role (`catalog.read`, which `READ_ONLY` holds).
+
+**Read-only, enforced by construction.** Its propose tools are generated from
+`ASSISTANT_PROPOSABLE_ACTIONS` (`lib/ops-agents/assistant/allowlist.ts`), which is **empty**, and a
+unit test holds it there; the integration suite confirms a call to another agent's
+`propose_catalog_updateProduct` reaches nothing. Its transcripts therefore never carry proposals.
+
+| Tool | What it reads |
+|---|---|
+| `setup_status` | The §28 checklist — the same function as `GET /api/setup` |
+| `store_health` | Readiness score, component scores and the top open findings (§9); a store-limited person must name a store |
+| `read_help` | One of the curated help topics in `lib/ops-agents/assistant/help.ts` |
+| `get_plans` | `planCatalog()`, formatted — **the only source of prices it may quote** |
+| `list_stores` | The asker's stores |
+
+**What it says is held to the docs, not to the model's general knowledge.** Product answers come
+from `help.ts`, every sentence of which is taken from this repo's decisions; a unit test keeps
+prices out of it (they come from `lib/plans.ts` through `get_plans`) and checks every link names a
+real dashboard page. It is told never to quote other platforms' pricing, never to invent a path,
+and to say it is not sure when the topics do not cover a question. **When a product fact changes,
+`help.ts` changes in the same commit** — it is a contract with merchants, like `lib/plans.ts`.
+
+**Why it proposes nothing, rather than proposing the setup steps.** Most of what it points at is
+*creating* rows — a shipping zone, a rate, a location — and **a proposed create can never be
+approved**: the dry run advances a Postgres sequence its rollback does not return, so approval's
+second dry run records a different `entityId` and `sameDiff` refuses it as `stale` every time.
+That applies to *any* agent given a create action. Proposals need a way to express "a new row"
+before one can be allowlisted.
+
+---
+
+## 28. Setup checklist ✅ LIVE (2026-10-17, D48)
+
+> **Frontend:** `lib/api/setup.ts` (`SETUP_API_LIVE = true`); server components use
+> `getSetupStatus` from `lib/api/server`.
+
+`GET /api/setup` — `org.read`, every role. **Derived per request from the live store; nothing is
+stored and nothing can be marked done.** Built on readiness's own `StoreFacts`
+(`loadFacts` in `lib/readiness/compute.ts`, now exported; `computeReadiness` accepts the preloaded
+facts so one request loads the catalog once), so the checklist and the Health page cannot disagree.
+Database reads only — no Stripe or DNS call. Scoped to the asker's `staff.storeIds`.
+
+```ts
+interface SetupChecklist {
+  firstRun: boolean;               // no store has ever been live or paused
+  account: SetupStep[];            // create_store, choose_plan
+  stores: { siteId: number; name: string; status: "draft" | "live" | "paused";
+            steps: SetupStep[]; requiredRemaining: number; readyToLaunch: boolean }[];
+  next: { siteId: number | null; step: SetupStep } | null;
+  complete: boolean;
+}
+interface SetupStep {
+  id: "create_store" | "add_products" | "payments" | "shipping" | "tax" | "go_live"
+    | "polish_catalog" | "customer_email" | "custom_domain" | "choose_plan";
+  title: string; status: "done" | "todo" | "not_needed"; required: boolean;
+  detail: string; href: string; permission: string; canAct: boolean;
+  agent: "catalog" | "assistant" | null;
+}
+```
+
+| Step | Required | Done when |
+|---|---|---|
+| `add_products` | ✓ | An enabled product exists |
+| `payments` | ✓ | Purchases on, and x402 with a wallet (store or org) **or** card with a connected Stripe account whose `chargesEnabled` is true — names Stripe's `requirementsDue` otherwise |
+| `shipping` | ✓ | `not_needed` unless something ships; then ≥1 zone and no zone without an enabled rate |
+| `tax` | ✓ | A `tax_settings` row exists — a decision was made, **including "none"** — and it can calculate (manual has rates; Stripe Tax has a connected account) |
+| `go_live` | ✓ | `status = live`; the detail names the unfinished prerequisites |
+| `polish_catalog` | | No product with an open/assigned critical or warning readiness finding. `agent: "catalog"` |
+| `customer_email` | | A verified sending domain; `not_needed` when SES is not configured (Markii's problem) |
+| `custom_domain` | | `domainStatus = verified` |
+| `choose_plan` | | Standing `subscribed`/`ungated`. Title changes for `past_due` ("Update your payment method") and `suspended` ("Contact Markii support") |
+
+`next` puts a held account (expired, past due, suspended) first, then `create_store`, then each
+store's first required step (drafts before live stores), then `choose_plan`, then recommendations.
+`readyToLaunch` ignores optional steps. Pure rules in `lib/setup/checklist.ts`, unit-tested; the
+integration suite checks it moves when the store does.
 
 ---
 

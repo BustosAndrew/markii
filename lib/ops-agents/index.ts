@@ -8,6 +8,7 @@ import {
   toUIMessageStream,
   validateUIMessages,
   type LanguageModel,
+  type ToolSet,
   type UIMessage,
 } from "ai";
 import { z } from "zod";
@@ -17,8 +18,11 @@ import { assertAccountStanding } from "../billing/standing-guard";
 import { AGENT_KINDS, type AgentKind } from "../db";
 import { consumeRateLimit } from "../rate-limit-store";
 import { rateLimitHeaders } from "../rate-limit";
+import { assistantInstructions, assistantTools } from "./assistant/agent";
+import { helpTopics } from "./assistant/help";
 import { catalogInstructions, catalogTools } from "./catalog/agent";
 import { listStores } from "./catalog/reads";
+import type { TurnContext } from "./propose-tools";
 import {
   AGENT_MAX_OUTPUT_TOKENS,
   AGENT_MAX_STEPS,
@@ -31,23 +35,75 @@ import { createSession, ownedSession, saveMessages, titleFrom } from "./sessions
 import { allowanceForOrg, recordUsage } from "./usage";
 
 /**
- * Merchant agents (D47). One agent per area — Catalog first — sharing this
- * turn loop, the proposal flow, the audit trail and the beta cap.
+ * Merchant agents (D47). One agent per area — Catalog first — plus the
+ * general assistant, all sharing this turn loop, the proposal flow, the audit
+ * trail and the beta cap.
  */
 
 export function isAgentKind(value: string): value is AgentKind {
   return (AGENT_KINDS as readonly string[]).includes(value);
 }
 
-/** What the dashboard shows about each agent before a conversation starts. */
-export const AGENT_DIRECTORY: Record<AgentKind, { name: string; description: string; beta: true }> = {
+/**
+ * What the dashboard shows about each agent before a conversation starts.
+ *
+ * `href` is the page an agent lives on; `null` means it belongs on every
+ * dashboard page, which is the assistant's whole point.
+ */
+export const AGENT_DIRECTORY: Record<
+  AgentKind,
+  { name: string; description: string; beta: true; href: string | null }
+> = {
+  assistant: {
+    name: "Assistant",
+    description:
+      "Answers questions about Markii, walks you through setting up your store, and points you to " +
+      "the right page or agent. Read-only — it changes nothing.",
+    beta: true,
+    href: null,
+  },
   catalog: {
     name: "Catalog agent",
     description:
       "Finds gaps in your catalog and proposes fixes — copy, prices, collections, stock — for you to approve.",
     beta: true,
+    href: "/dashboard/catalog",
   },
 };
+
+/**
+ * One agent's instructions and tools for a turn.
+ *
+ * Both take the turn, because propose tools write proposal rows to this
+ * session — the assistant's allowlist is empty, so it gets none.
+ */
+function agentSetup(
+  agent: AgentKind,
+  turn: TurnContext,
+  auth: AuthContext,
+  stores: Awaited<ReturnType<typeof listStores>>,
+): { instructions: string; tools: ToolSet } {
+  const scope = { orgId: auth.org.id, storeIds: auth.storeIds };
+  switch (agent) {
+    case "catalog":
+      return {
+        instructions: catalogInstructions({ stores, currency: auth.org.currency }),
+        tools: catalogTools(turn, scope),
+      };
+    case "assistant": {
+      const topics = helpTopics({ rootDomain: process.env.ROOT_DOMAIN?.trim() || "markii.shop" });
+      return {
+        instructions: assistantInstructions({
+          stores,
+          currency: auth.org.currency,
+          role: auth.role,
+          topics,
+        }),
+        tools: assistantTools(turn, auth, scope, topics),
+      };
+    }
+  }
+}
 
 /**
  * The merchant's new message — and only that.
@@ -167,7 +223,7 @@ export async function runAgentTurn(
       request: auth.actor.request,
     },
   };
-  const tools = catalogTools(turn, scope);
+  const { instructions, tools } = agentSetup(agent, turn, auth, stores);
 
   /**
    * The stored history is re-validated against **today's** tools. A tool
@@ -184,7 +240,7 @@ export async function runAgentTurn(
   const modelId = typeof model === "string" ? model : "mock";
   const result = streamText({
     model,
-    instructions: catalogInstructions({ stores, currency: auth.org.currency }),
+    instructions,
     messages: await convertToModelMessages(messages, { tools }),
     tools,
     stopWhen: isStepCount(AGENT_MAX_STEPS),

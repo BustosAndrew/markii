@@ -131,11 +131,17 @@ Reasoning behind each number:
 - **Human support on every plan**, with response *targets* (not contractual SLAs) that scale by
   tier. Severity outranks plan: a Starter merchant with a broken checkout is served before a Scale
   merchant with a styling question (`docs/DECISIONS.md` §G4).
-- **0% on digital goods, stated as a headline.** This is the one place a competitor's pricing is
-  actively punitive (Squarespace: 5% at $29/mo, 0% only at $99/mo) and it targets a definable
-  audience — creators, membership sites, digital-product sellers.
-- **Thresholds** at $150k/$750k/$3M sit far above BigCommerce's $30k/$100k caps. The threshold
-  should feel like a milestone a merchant is proud to hit, not a tripwire.
+- **Digital goods are priced against the one punitive competitor fee.** Squarespace charges 5% on
+  digital goods and memberships at $29/mo and 0% only at $99/mo; Markii charges 3% / 1.5% / 0.5%,
+  and only on digital sales above the threshold (D39). It targets a definable audience —
+  creators, membership sites, digital-product sellers. *Corrected 2026-10-17: this bullet said "0%
+  on digital goods", D1's position, which D39 replaced.*
+- **Thresholds are $1k / $50k / $100k, counted separately for physical and digital** (D39 —
+  *corrected 2026-10-17; this bullet still quoted D1's superseded $150k/$750k/$3M*). They are a
+  fee line, not a cap: BigCommerce forces a plan upgrade at $30k/$100k, while above Markii's
+  threshold a merchant pays the marginal fee and the upgrade stays their choice. At $1k, Starter's
+  line is crossed by essentially every real merchant — D39 records that "no fee until you're big"
+  is no longer the claim.
 - **Storefront count is the remaining upsell lever** — defensible because each store carries real
   infrastructure cost, unlike seats.
 
@@ -250,9 +256,10 @@ markii_fee = round_half_even(billable × plan_rate)
 merchant crosses, only the sliver past the threshold is charged, never the whole month and never
 retroactively.
 
-**Worked example** (Growth, $750k threshold, 0.4%): merchant enters the month at $730k T12 and
-sells $60k. `excess_at_end = 40k`, `excess_at_start = 0`, `billable = 40k`, fee = **$160**. The
-first $20k of that month is still free.
+**Worked example** (Growth, physical goods: $50k threshold, 0.5%): merchant enters the month at
+$30k T12 and sells $60k. `excess_at_end = 40k`, `excess_at_start = 0`, `billable = 40k`, fee =
+**$200**. The first $20k of that month is still free. (Corrected 2026-10-17 from D1's $750k / 0.4%
+figures, which D39 superseded; `lib/billing/fees.test.ts` reproduces this version.)
 
 For scale: the same merchant on **Shopify Grow** using Stripe would pay 1% on *all* $60k — **$600**
 that month, every month, with no threshold at all. That contrast is the product.

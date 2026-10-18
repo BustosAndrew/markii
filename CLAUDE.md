@@ -549,6 +549,17 @@ product editing had never been a registry action, so no product edit had been au
 undoable. Tested against a scripted model (`MARKII_AGENT_MOCK_MODEL=1`, CI sets it). **The
 dashboard panel is built** (`components/dashboard/agent-panel.tsx`, `@ai-sdk/react`).
 
+**The assistant and the setup checklist are built as of 2026-10-17** (D48, §27–28; no screens
+yet). `assistant` is a dashboard-wide agent that answers questions, walks new merchants through
+setup and routes them to pages and agents — **read-only by construction**: its allowlist is empty
+and fed through the same `proposeTools`. **No agent can be given a create action yet**: a dry run
+advances a Postgres sequence its rollback does not return, so the approval's second dry run gets a
+different `entityId` and `sameDiff` refuses it as `stale` every time. Its product knowledge is
+`lib/ops-agents/assistant/help.ts` — **a contract with merchants like `lib/plans.ts`; change it in
+the same commit as the fact it states**. Prices are kept out of it (unit-tested) and come from
+`get_plans`. `GET /api/setup` (`lib/setup/`) derives the checklist per request from readiness's own
+`StoreFacts`, so it and the Health page cannot disagree.
+
 **Stripe Tax on Markii's own subscription is built as of 2026-09-13** (G3). `automatic_tax` on every
 platform-account subscription create, change and preview — **no `Stripe-Account` header**, the
 opposite direction of money from §18.6 — decided from two facts that are reported apart and never

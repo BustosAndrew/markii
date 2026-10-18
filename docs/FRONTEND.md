@@ -79,6 +79,8 @@ API-independent work so you don't outrun the backend") no longer applies to A, B
 | Add-on **purchase** | §17 | ⛔ Refuses `409` | Agent Ops / Chargeback Assist do not exist. Show them as unavailable — never as "coming soon with a buy button" |
 | Email delivery | §24 | ✅ LIVE, screen built | SES sends; `/dashboard/settings/email`. Unverified domains still send via the storefront fallback (D44) — do not say mail is not going out |
 | **Catalog agent** | §27 | ✅ **LIVE, screen built** (beta) | Dockable panel on `/dashboard/catalog` (`AgentPanel`). Propose-only; the merchant approves. MCP (§22) is a different surface — do not confuse them |
+| **Assistant** | §27 | ✅ **LIVE, no screen yet** (beta, 2026-10-17) | Dashboard-wide chat, read-only — answers questions, checks setup, routes to pages/agents. `agentChatEndpoint("assistant")` |
+| **Setup checklist** | §28 | ✅ **LIVE, no screen yet** (2026-10-17) | `getSetupStatus()` — `lib/api/setup.ts` (client) / `lib/api/server` (server components). Derived per call |
 | Site builder, Channels, Test Lab | §19–20 | ⛔ Deferred | Out of launch scope — do not start |
 | Platform admin | §26 | ✅ LIVE, screens built | `/admin` when `me.operator`. Suspend/reinstate and **Reset MFA** (`resetPlatformMfa`). Never on merchant nav for anyone else |
 
@@ -490,6 +492,35 @@ makes an audit trail untrustworthy.
 The audit list carries both directions now — `undoneBy` on the original row, `undoOf` on the undo —
 so a history screen can strike through a reversed change and label its reversal without a second
 query. Both are `string | null` on `ActionInvocation`.
+
+### 🟢 New 2026-10-17 — the assistant and the setup checklist (D48); no screens yet
+
+`docs/API.md` §27 ("The assistant") and §28. Two new things to build against, and one small change
+already made to the Catalog panel.
+
+- **The assistant** is a dashboard-wide chat: `agentChatEndpoint("assistant")`,
+  the same `useChat` transport, session, refusal and allowance handling as the Catalog panel —
+  reuse `AgentPanel`'s plumbing rather than forking it. It **proposes nothing**, so its transcripts
+  never contain `propose_*` parts or cards; tool parts are reads (`setup_status`, `store_health`,
+  `read_help`, `get_plans`, `list_stores`) and can render as collapsed "checked your setup" rows or
+  not at all. `GET /api/agents` lists it with **`href: null`** (every page); Catalog now carries
+  `href: "/dashboard/catalog"`. Where it mounts is your call — a launcher in the dashboard shell is
+  what `href: null` means. Label it **Beta**; it shares the org's allowance with Catalog.
+- **Links in its replies are dashboard paths** (`/dashboard/settings/shipping`). Render them as
+  in-app links. The backend tests that every path it can be given exists.
+- **The setup checklist** — `getSetupStatus()` (`lib/api/setup.ts`; `lib/api/server` for server
+  components). Derived per call, so **refetch after any setup action**; there is no "mark done" or
+  "dismiss" endpoint and there should be no local tick state. `firstRun: true` is the signal to lead
+  the overview with setup and offer the assistant. `next` is the one step to headline. `status`
+  has three values — render `not_needed` as such (a downloads-only store has no shipping), not as
+  done. `required: false` steps are "Recommended" and never block `readyToLaunch`. **`canAct:
+  false`** means the viewer's role cannot do the step: say "ask an owner or administrator", don't
+  render a CTA into a page that will refuse them. `agent: "catalog"` on a step → offer to open the
+  Catalog panel. `title` varies with state (`choose_plan` reads "Update your payment method" when
+  past due) — render it, don't map ids to your own copy.
+- **Changed for you:** `listAgentSessions` now takes `{ agent }` as its first argument, and
+  `AgentPanel` passes `{ agent: "catalog" }`. Without it, assistant conversations would have shown
+  in the Catalog panel and resuming one answers `409` (a session only continues with its own agent).
 
 ### 🟢 New 2026-10-15 — merchant agents: the Catalog agent is live, screen built (D47)
 

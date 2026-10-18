@@ -18,7 +18,7 @@ Markii is a **commerce platform** in the Shopify/Squarespace category: a merchan
 
 Two things separate it from the incumbents:
 
-1. **No penalty for using your own payment provider, and no cut of digital goods.** Shopify and BigCommerce each charge up to 2% for using a processor that isn't theirs, from the first sale; Squarespace charges 5% on digital content and memberships until $99/mo (verified 2026-07-29, `docs/COMPETITORS.md`). Markii charges 0% on any processor and 0% on digital, on every plan — plus no Markii transaction fee at all until a merchant crosses an annual sales threshold, then only on the portion above it, with no forced plan upgrade.
+1. **No penalty for using your own payment provider, and no cut of digital goods below the threshold.** Shopify and BigCommerce each charge up to 2% for using a processor that isn't theirs, from the first sale; Squarespace charges 5% on digital content and memberships until $99/mo (verified 2026-07-29, `docs/COMPETITORS.md`). Markii charges 0% for using any processor, on every plan, and no Markii fee on digital or physical sales below the plan's annual threshold — counted separately for each — then only on the portion above it, with no forced plan upgrade (D39, `docs/PRICING.md` §3).
 2. **Storefronts AI agents can read and buy from.** Semantic HTML, JSON-LD, `llms.txt`, `agent.md`, an Agent Readiness Score, and agent-originated order tracking — built in rather than bolted on.
 3. **An agent-native admin.** Every capability is one shared action serving the human UI, the API, agent tools, and an MCP server alike — so a merchant can edit visually while a developer drives the same store from Claude Code, under identical permissions and audit trail.
 

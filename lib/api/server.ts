@@ -36,6 +36,7 @@ import { GET as customerGET } from "@/app/api/customers/[id]/route";
 import { GET as customerOrdersGET } from "@/app/api/customers/[id]/orders/route";
 import { GET as customerMembershipsGET } from "@/app/api/customers/[id]/memberships/route";
 import { GET as meGET } from "@/app/api/me/route";
+import { GET as setupGET } from "@/app/api/setup/route";
 import { GET as orgAuditGET } from "@/app/api/org/audit/route";
 import { GET as orgSessionsGET } from "@/app/api/org/sessions/route";
 import { GET as staffGET } from "@/app/api/org/staff/route";
@@ -77,6 +78,7 @@ import type {
 } from "./org";
 import type { OrderDetail, OrdersQuery, OrdersResponse } from "./orders";
 import type { ReadinessIssue, ReadinessReport } from "./readiness";
+import type { SetupChecklist } from "./setup";
 import type { AnalyticsOverview, AnalyticsQuery, AnalyticsSiteDetail } from "./analytics";
 import type { FinancesOverview, FinancesQuery, FinancesSiteDetail } from "./finances";
 import type { IntegrationsResponse } from "./integrations";
@@ -366,6 +368,9 @@ export const listMembershipTiers = (query?: { siteId?: number }) =>
  * just changed.
  */
 export const getMe = cache(() => call<MeResponse>(meGET, "/api/me"));
+
+/** The first-run setup checklist (§28). Derived per call — refetch, never patch locally. */
+export const getSetupStatus = () => call<SetupChecklist>(setupGET, "/api/setup");
 
 export const listStaff = () => call<{ items: StaffMember[] }>(staffGET, "/api/org/staff");
 

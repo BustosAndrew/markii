@@ -5,7 +5,7 @@ import type { DiffEntry } from "./actions";
 const AGENTS_SECTION = "API §27";
 
 /**
- * Merchant agents (§27, D47) — the Catalog agent first, in beta.
+ * Merchant agents (§27, D47) — the Catalog agent and the assistant, in beta.
  *
  * **The chat itself is not a function here.** `POST /api/agents/:agent/chat`
  * streams an AI SDK UI message stream, which is `useChat`'s job — see
@@ -20,7 +20,12 @@ const AGENTS_SECTION = "API §27";
 
 const AGENTS_API_LIVE = true;
 
-export type AgentKind = "catalog";
+/**
+ * `assistant` is the dashboard-wide guide (2026-10-17): answers questions,
+ * reads the setup checklist, points to pages and agents. It **proposes
+ * nothing**, so its transcripts never carry proposal cards.
+ */
+export type AgentKind = "catalog" | "assistant";
 
 export type AgentAllowance = {
   usedTokens: number;
@@ -33,7 +38,11 @@ export type AgentAllowance = {
 };
 
 export type AgentDirectory = {
-  agents: { id: AgentKind; name: string; description: string; beta: true }[];
+  /**
+   * `href` is the page the agent lives on (`/dashboard/catalog`); `null` means
+   * every dashboard page — the assistant.
+   */
+  agents: { id: AgentKind; name: string; description: string; beta: true; href: string | null }[];
   /** Markii's deployment can call a model. False → show *configuration required*, not an error. */
   configured: boolean;
   /** This org's month. A separate fact from `configured`; never merge them into one "available". */
@@ -111,9 +120,14 @@ export function getAgentDirectory(init?: RequestInit) {
   );
 }
 
-export function listAgentSessions(init?: RequestInit) {
+/**
+ * The caller's sessions. **Pass `agent` from a panel** — a session only
+ * continues with the agent that started it, so an unfiltered list in the
+ * Catalog panel would offer assistant conversations that answer `409`.
+ */
+export function listAgentSessions(query?: { agent?: AgentKind }, init?: RequestInit) {
   return callWhenLive(AGENTS_API_LIVE, AGENTS_SECTION, () =>
-    apiGet<{ items: AgentSessionSummary[] }>("/api/agents/sessions", undefined, init),
+    apiGet<{ items: AgentSessionSummary[] }>("/api/agents/sessions", query, init),
   );
 }
 

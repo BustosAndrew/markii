@@ -276,3 +276,148 @@ describe("catalog agent", () => {
     expect(audits[0].diff[0].path).toBe("sku");
   });
 });
+
+/**
+ * The assistant (§27) and the setup checklist it reads (§28). Same scripted
+ * model; what is under test is that the checklist reflects the real store as
+ * it changes, that the assistant's tools run against it, and that it has no
+ * way to propose anything — not even through another agent's tool name.
+ */
+describe("assistant and setup checklist", () => {
+  const merchant = new Client();
+  const cleanup = new Cleanup();
+  let orgId: string;
+
+  async function ask(text: string, session?: string) {
+    return merchant.postRaw("/api/agents/assistant/chat", {
+      ...(session ? { sessionId: session } : {}),
+      message: userMessage(text),
+    });
+  }
+
+  beforeAll(async () => {
+    const { email } = await signUpMerchant(merchant, "assist");
+    cleanup.merchantEmails.push(email);
+    orgId = (await merchant.get("/api/me")).json.org.id;
+  }, 180_000);
+
+  afterAll(async () => {
+    await cleanup.run();
+  }, 120_000);
+
+  it("starts a new merchant at creating a store", async () => {
+    const res = await merchant.get("/api/setup");
+    expect(res.status, JSON.stringify(res.json)).toBe(200);
+    expect(res.json.firstRun).toBe(true);
+    expect(res.json.complete).toBe(false);
+    expect(res.json.stores).toEqual([]);
+    expect(res.json.next.step.id).toBe("create_store");
+    expect(res.json.next.step.canAct).toBe(true);
+    // A new account is inside its free month.
+    const plan = res.json.account.find((s: any) => s.id === "choose_plan");
+    expect(plan.status).toBe("todo");
+  });
+
+  /** Derived, never stored: the checklist moves the moment the store does. */
+  it("follows the store as it is set up", async () => {
+    const store = await createTestStore(cleanup, "assist", { orgId });
+    let res = await merchant.get("/api/setup");
+    const steps = () => res.json.stores.find((s: any) => s.siteId === store.site.id).steps;
+    expect(res.json.firstRun).toBe(false); // the helper's store is live
+    expect(steps().find((s: any) => s.id === "payments").status).toBe("done"); // x402 + wallet
+    expect(steps().find((s: any) => s.id === "tax").status).toBe("todo"); // never decided
+
+    const tax = await merchant.post("/api/actions/tax.updateSettings", {
+      siteId: store.site.id,
+      provider: "none",
+    });
+    expect(tax.status, JSON.stringify(tax.json)).toBe(200);
+    res = await merchant.get("/api/setup");
+    expect(steps().find((s: any) => s.id === "tax").status).toBe("done");
+  });
+
+  it("lists the assistant as dashboard-wide", async () => {
+    const res = await merchant.get("/api/agents");
+    const assistant = res.json.agents.find((a: any) => a.id === "assistant");
+    expect(assistant).toMatchObject({ beta: true, href: null });
+  });
+
+  it("answers from the checklist and the help topics, proposing nothing", async () => {
+    const res = await ask(
+      mock({
+        toolCalls: [
+          { toolName: "setup_status", input: {} },
+          { toolName: "read_help", input: { topic: "payments" } },
+          { toolName: "get_plans", input: {} },
+        ],
+        text: "Your next step is shipping.",
+      }),
+    );
+    expect(res.status, res.text.slice(0, 300)).toBe(200);
+    const sessionId = res.headers.get("x-agent-session-id")!;
+    const [session] = await sql`select agent from agent_sessions where id = ${sessionId}`;
+    expect(session.agent).toBe("assistant");
+
+    // The tools ran against the real store: the stream carries their output.
+    expect(res.text).toContain("create_store");
+    expect(res.text).toContain("Stripe Connect");
+    expect(res.text).toContain("$19.00");
+
+    const proposals = await sql`select id from agent_proposals where org_id = ${orgId}`;
+    expect(proposals).toHaveLength(0);
+  });
+
+  /** Another agent's propose tool is not in the assistant's set, so the call reaches nothing. */
+  it("cannot reach the Catalog agent's propose tools", async () => {
+    const [product] = await sql`select p.id, p.name from products p join sites s on s.id = p.site_id
+                                where s.org_id = ${orgId} limit 1`;
+    await ask(
+      mock({
+        toolCalls: [
+          {
+            toolName: "propose_catalog_updateProduct",
+            input: { input: { productId: product.id, name: "Renamed by the assistant" }, summary: "x" },
+          },
+        ],
+      }),
+    );
+    const proposals = await sql`select id from agent_proposals where org_id = ${orgId}`;
+    expect(proposals).toHaveLength(0);
+    const [row] = await sql`select name from products where id = ${product.id}`;
+    expect(row.name).toBe(product.name);
+  });
+
+  it("refuses to continue another agent's session", async () => {
+    const res = await merchant.postRaw("/api/agents/catalog/chat", { message: userMessage("hi") });
+    const catalogSession = res.headers.get("x-agent-session-id")!;
+    const cross = await ask("hello", catalogSession);
+    expect(cross.status).toBe(409);
+  });
+});
+
+describe("session lists per agent", () => {
+  const merchant = new Client();
+  const cleanup = new Cleanup();
+
+  beforeAll(async () => {
+    const { email } = await signUpMerchant(merchant, "agentlist");
+    cleanup.merchantEmails.push(email);
+  }, 180_000);
+  afterAll(async () => cleanup.run(), 120_000);
+
+  /** A panel lists only sessions it can continue; an assistant session in the Catalog panel would 409. */
+  it("filters by agent and refuses an unknown one", async () => {
+    await merchant.postRaw("/api/agents/assistant/chat", { message: userMessage("hello") });
+    await merchant.postRaw("/api/agents/catalog/chat", { message: userMessage("hello") });
+
+    const catalog = await merchant.get("/api/agents/sessions?agent=catalog");
+    expect(catalog.status).toBe(200);
+    expect(catalog.json.items.length).toBeGreaterThan(0);
+    expect(catalog.json.items.every((s: any) => s.agent === "catalog")).toBe(true);
+
+    const all = await merchant.get("/api/agents/sessions");
+    expect(new Set(all.json.items.map((s: any) => s.agent))).toEqual(new Set(["catalog", "assistant"]));
+
+    expect((await merchant.get("/api/agents/sessions?agent=nope")).status).toBe(404);
+  });
+});
