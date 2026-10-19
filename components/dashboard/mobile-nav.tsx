@@ -3,12 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { Menu, X } from "lucide-react";
+import { AgentsNavMenu } from "@/components/dashboard/agents-nav";
 import {
   SidebarBrand,
   OperatorLink,
   SidebarNav,
   SidebarOrgCard,
-  useCurrentSection,
 } from "@/components/dashboard/sidebar";
 import type { MeResponse } from "@/lib/api/org";
 
@@ -20,7 +20,6 @@ const PANEL_ID = "dashboard-mobile-nav";
  */
 export function MobileNav({ me }: { me: MeResponse | null }) {
   const pathname = usePathname();
-  const section = useCurrentSection();
   const panelRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
@@ -98,9 +97,9 @@ export function MobileNav({ me }: { me: MeResponse | null }) {
           <Menu className="size-5" />
         </button>
         <SidebarBrand className="shrink-0" />
-        <span className="ml-auto truncate text-sm font-medium text-muted">
-          {section}
-        </span>
+        <div className="ml-auto">
+          <AgentsNavMenu />
+        </div>
       </header>
 
       {open ? (

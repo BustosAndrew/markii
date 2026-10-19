@@ -550,7 +550,7 @@ undoable. Tested against a scripted model (`MARKII_AGENT_MOCK_MODEL=1`, CI sets 
 dashboard panel is built** (`components/dashboard/agent-panel.tsx`, `@ai-sdk/react`).
 
 **The assistant and the setup checklist are built as of 2026-10-17** (D48, §27–28). The
-screens are the Overview assistant dock and the Overview setup card. `assistant` is a dashboard-wide agent that answers questions, walks new merchants through
+screens are the Overview setup card and both agent drawers, opened from **Agents** in the dashboard header. `assistant` is a dashboard-wide agent that answers questions, walks new merchants through
 setup and routes them to pages and agents — **read-only by construction**: its allowlist is empty
 and fed through the same `proposeTools`. **No agent can be given a create action yet**: a dry run
 advances a Postgres sequence its rollback does not return, so the approval's second dry run gets a

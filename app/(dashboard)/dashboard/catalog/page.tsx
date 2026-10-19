@@ -13,7 +13,6 @@ import { firstParam, loadOrError, parseLimit, parsePage } from "@/lib/api/load";
 import { canWriteCatalog } from "@/lib/api/org";
 import { formatCents } from "@/lib/api/money";
 import type { Category } from "@/lib/api/types";
-import { AgentPanel } from "@/components/dashboard/agent-panel";
 import { CollectionsTable } from "@/components/dashboard/collections-table";
 import { InventoryActions } from "@/components/dashboard/inventory-actions";
 import { RouteTabs } from "@/components/dashboard/route-tabs";
@@ -489,7 +488,6 @@ export default async function CatalogPage({
           ) : null}
         </>
       ) : null}
-      <AgentPanel agent="catalog" />
     </div>
   );
 }

@@ -78,8 +78,8 @@ API-independent work so you don't outrun the backend") no longer applies to A, B
 | **MCP server** | §22 | ✅ **LIVE (tools, prompts, resources), no extra screen** | Token-only at `/api/mcp`. Settings → Team mints the token. Session cookies are refused. Connecting a client: `docs/MCP.md` |
 | Add-on **purchase** | §17 | ⛔ Refuses `409` | Agent Ops / Chargeback Assist do not exist. Show them as unavailable — never as "coming soon with a buy button" |
 | Email delivery | §24 | ✅ LIVE, screen built | SES sends; `/dashboard/settings/email`. Unverified domains still send via the storefront fallback (D44) — do not say mail is not going out |
-| **Catalog agent** | §27 | ✅ **LIVE, screen built** (beta) | Dockable panel on `/dashboard/catalog` (`AgentPanel`). Propose-only; the merchant approves. MCP (§22) is a different surface — do not confuse them |
-| **Assistant** | §27 | ✅ **LIVE, screen built** (beta, 2026-10-17) | Dock on `/dashboard` only (`AssistantHost` on Overview). Read-only — answers questions, checks setup, routes to pages/agents. Reuses `AgentPanel` with `agent="assistant"`. Catalog agent stays on `/dashboard/catalog` only |
+| **Catalog agent** | §27 | ✅ **LIVE, screen built** (beta) | Opened from **Agents** in the dashboard header (`AgentsNavMenu`). Propose-only; the merchant approves. MCP (§22) is a different surface — do not confuse them |
+| **Assistant** | §27 | ✅ **LIVE, screen built** (beta, 2026-10-17) | Opened from **Agents** in the dashboard header. Read-only — answers questions, checks setup, routes to pages/agents. Reuses `AgentPanel` with `agent="assistant"` |
 | **Setup checklist** | §28 | ✅ **LIVE, screen built** (2026-10-17) | Overview card via `getSetupStatus()`. `firstRun` leads the page; `next` is the headline. No local ticks — refetch by revisiting |
 | Site builder, Channels, Test Lab | §19–20 | ⛔ Deferred | Out of launch scope — do not start |
 | Platform admin | §26 | ✅ LIVE, screens built | `/admin` when `me.operator`. Suspend/reinstate and **Reset MFA** (`resetPlatformMfa`). Never on merchant nav for anyone else |
@@ -498,13 +498,13 @@ query. Both are `string | null` on `ActionInvocation`.
 `docs/API.md` §27 ("The assistant") and §28. Two new things to build against, and one small change
 already made to the Catalog panel.
 
-- **The assistant** is a chat on Overview: `agentChatEndpoint("assistant")`,
+- **The assistant** is selected from **Agents** in the dashboard header: `agentChatEndpoint("assistant")`,
   the same `useChat` transport, session, refusal and allowance handling as the Catalog panel —
-  `AgentPanel` takes `agent` and `AssistantHost` mounts it on `/dashboard`. It **proposes nothing**, so its transcripts
+  `AgentPanel` takes `agent` and `AgentsHost` mounts both panels from the dashboard layout. It **proposes nothing**, so its transcripts
   never contain `propose_*` parts or cards; tool parts are reads (`setup_status`, `store_health`,
   `read_help`, `get_plans`, `list_stores`) and render as collapsed "checked your setup" rows.
-  `GET /api/agents` lists it with **`href: null`**; the screen is Overview only, not the rest of the dashboard. Catalog still carries
-  `href: "/dashboard/catalog"` and stays on that page only. Label it **Beta**; it shares the org's allowance with Catalog.
+  `GET /api/agents` lists it with **`href: null`**. Catalog still carries
+  `href: "/dashboard/catalog"`. Label it **Beta**; it shares the org's allowance with Catalog. Neither agent uses a page dock.
 - **Links in its replies are dashboard paths** (`/dashboard/settings/shipping`). Render them as
   in-app links. The backend tests that every path it can be given exists.
 - **The setup checklist** — `getSetupStatus()` on Overview (`SetupChecklistCard`). Derived per call, so **refetch after any setup action**; there is no "mark done" or
@@ -513,7 +513,7 @@ already made to the Catalog panel.
   has three values — `not_needed` is rendered as such (a downloads-only store has no shipping), not as
   done. `required: false` steps are "Recommended" and never block `readyToLaunch`. **`canAct:
   false`** means the viewer's role cannot do the step: "ask an owner or administrator", no
-  CTA into a page that will refuse them. `agent: "catalog"` on a step → link to Catalog (the panel lives there). `title` varies with state (`choose_plan` reads "Update your payment method" when
+  CTA into a page that will refuse them. `agent: "catalog"` on a step → open the Catalog agent from the nav. `title` varies with state (`choose_plan` reads "Update your payment method" when
   past due) — render it, don't map ids to your own copy.
 - **Changed for you:** `listAgentSessions` now takes `{ agent }` as its first argument, and
   `AgentPanel` passes `{ agent: "catalog" }`. Without it, assistant conversations would have shown
@@ -521,8 +521,7 @@ already made to the Catalog panel.
 
 ### 🟢 New 2026-10-15 — merchant agents: the Catalog agent is live, screen built (D47)
 
-`docs/API.md` §27, `lib/api/agents.ts` (`AGENTS_API_LIVE = true`). The dockable panel is
-`components/dashboard/agent-panel.tsx`, mounted on `/dashboard/catalog` — not a nav page, and not the rest of the dashboard.
+`docs/API.md` §27, `lib/api/agents.ts` (`AGENTS_API_LIVE = true`). Both agents open from **Agents** in the dashboard header (`AgentsNavMenu`); the drawers are mounted by `AgentsHost` in the dashboard layout.
 
 - **The chat is `useChat`, not a service function.** Transport posts to
   `agentChatEndpoint("catalog")` and sends **only the new message** plus `sessionId`
@@ -972,8 +971,8 @@ The team is two people, so launch is a deliberate subset of the full plan
 | **Commerce** (Phase C) | Products **with variants**, inventory, collections, customers, orders + timeline + refunds, discounts, tax & shipping settings, digital delivery |
 | **Storefront** | Cart, variant picker, checkout — plus **3–4 polished themes** |
 | **Readiness** | Score card, issues list, issue drawer |
-| **Catalog agent** | Dockable chat panel on Catalog; propose → approve. Beta |
-| **Assistant** | Dock on Overview; read-only. Beta |
+| **Catalog agent** | Header **Agents** menu; propose → approve. Beta |
+| **Assistant** | Header **Agents** menu; read-only. Beta |
 | **Setup checklist** | Overview card from `GET /api/setup` |
 
 **Deferred past launch — do not start these:** the site builder, Channels, Agent Test Lab, the full

@@ -4,7 +4,6 @@ import type { ReadinessReport } from "@/lib/api/readiness";
 import type { SetupChecklist } from "@/lib/api/setup";
 import { isPlannedError } from "@/lib/api/planned";
 import { ApiClientError } from "@/lib/api/types";
-import { AssistantHost } from "@/components/dashboard/agent-panel";
 import { ReadinessCard } from "@/components/dashboard/readiness-card";
 import {
   SetupChecklistCard,
@@ -69,7 +68,6 @@ export default async function DashboardOverviewPage() {
     .slice(0, 5);
 
   return (
-    <AssistantHost>
     <div>
       <PageHeader
         title="Overview"
@@ -203,7 +201,6 @@ export default async function DashboardOverviewPage() {
       ) : null}
       </div>
     </div>
-    </AssistantHost>
   );
 }
 

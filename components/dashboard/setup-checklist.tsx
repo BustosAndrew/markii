@@ -1,5 +1,5 @@
 import type { SetupChecklist, SetupStep, StoreSetup } from "@/lib/api/setup";
-import { AskAssistantButton } from "@/components/dashboard/ask-assistant-button";
+import { AskAgentButton, AskAssistantButton } from "@/components/dashboard/ask-assistant-button";
 import { Badge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
 import { StatusDot } from "@/components/ui/status-dot";
@@ -29,9 +29,7 @@ function StepActions({ step }: { step: SetupStep }) {
         Continue
       </ButtonLink>
       {step.agent === "catalog" ? (
-        <ButtonLink href="/dashboard/catalog" variant="secondary" className="px-3 py-1.5 text-sm">
-          Ask the Catalog agent
-        </ButtonLink>
+        <AskAgentButton agent="catalog" label="Ask the Catalog agent" />
       ) : null}
       {step.agent === "assistant" ? <AskAssistantButton /> : null}
     </div>

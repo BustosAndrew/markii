@@ -1,6 +1,5 @@
 "use client";
 
-import { MessageCircle, Sparkles } from "lucide-react";
 import {
   createContext,
   useCallback,
@@ -8,7 +7,6 @@ import {
   useEffect,
   useRef,
   useState,
-  type MutableRefObject,
   type ReactNode,
 } from "react";
 import {
@@ -29,7 +27,6 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorState } from "@/components/ui/error-state";
 import { LocalDate } from "@/components/ui/local-date";
 import { Select } from "@/components/ui/field";
-import { cn } from "@/lib/utils";
 
 type Thread = {
   key: string;
@@ -51,52 +48,72 @@ const COPY: Record<
   {
     title: string;
     description: string;
-    launcherLabel: string;
-    launcherHint: string;
     loadError: string;
   }
 > = {
   catalog: {
     title: "Catalog agent",
     description: "Proposes catalog edits. Nothing is applied until you approve it.",
-    launcherLabel: "Catalog agent",
-    launcherHint: "AI chat · Beta",
     loadError: "Could not load the Catalog agent.",
   },
   assistant: {
     title: "Assistant",
     description: "Answers questions, checks setup, and points you to the right page. It cannot change your store.",
-    launcherLabel: "Assistant",
-    launcherHint: "AI chat · Beta",
     loadError: "Could not load the assistant.",
   },
 };
 
-const OpenAssistantContext = createContext<(() => void) | null>(null);
+type AgentsContextValue = {
+  openAgent: (kind: AgentKind) => void;
+};
 
-export function useOpenAssistant() {
-  return useContext(OpenAssistantContext);
+const AgentsContext = createContext<AgentsContextValue | null>(null);
+
+export function useOpenAgent() {
+  return useContext(AgentsContext);
 }
 
-export function AssistantHost({ children }: { children: ReactNode }) {
-  const openRef = useRef<() => void>(() => {});
-  const open = useCallback(() => {
-    openRef.current();
+export function useOpenAssistant() {
+  const agents = useOpenAgent();
+  if (!agents) return null;
+  return () => agents.openAgent("assistant");
+}
+
+export function AgentsHost({ children }: { children: ReactNode }) {
+  const openers = useRef<Partial<Record<AgentKind, () => void>>>({});
+  const closers = useRef<Partial<Record<AgentKind, () => void>>>({});
+
+  const register = useCallback((kind: AgentKind, open: () => void, close: () => void) => {
+    openers.current[kind] = open;
+    closers.current[kind] = close;
+    return () => {
+      delete openers.current[kind];
+      delete closers.current[kind];
+    };
   }, []);
+
+  const openAgent = useCallback((kind: AgentKind) => {
+    (Object.keys(closers.current) as AgentKind[]).forEach((id) => {
+      if (id !== kind) closers.current[id]?.();
+    });
+    openers.current[kind]?.();
+  }, []);
+
   return (
-    <OpenAssistantContext.Provider value={open}>
+    <AgentsContext.Provider value={{ openAgent }}>
       {children}
-      <AgentPanel agent="assistant" openRef={openRef} />
-    </OpenAssistantContext.Provider>
+      <AgentPanel agent="assistant" register={register} />
+      <AgentPanel agent="catalog" register={register} />
+    </AgentsContext.Provider>
   );
 }
 
 export function AgentPanel({
   agent,
-  openRef,
+  register,
 }: {
   agent: AgentKind;
-  openRef?: MutableRefObject<() => void>;
+  register?: (kind: AgentKind, open: () => void, close: () => void) => () => void;
 }) {
   const copy = COPY[agent];
   const [open, setOpen] = useState(false);
@@ -124,10 +141,12 @@ export function AgentPanel({
     void load();
   }, [load]);
 
+  const closePanel = useCallback(() => setOpen(false), []);
+
   useEffect(() => {
-    if (!openRef) return;
-    openRef.current = openPanel;
-  }, [openRef, openPanel]);
+    if (!register) return;
+    return register(agent, openPanel, closePanel);
+  }, [agent, register, openPanel, closePanel]);
 
   const handleSessionId = useCallback((id: string) => {
     setThread((current) =>
@@ -159,48 +178,8 @@ export function AgentPanel({
     }
   }
 
-  const Icon = agent === "catalog" ? Sparkles : MessageCircle;
-
   return (
-    <>
-      {open ? null : (
-        <button
-          type="button"
-          onClick={openPanel}
-          className={cn(
-            "fixed right-4 z-40 flex items-center gap-3 rounded-[var(--radius-card)] px-3 py-2.5 text-left shadow-[var(--shadow-md)] transition-[background-color,box-shadow,border-color] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand/20 lg:right-6",
-            "bottom-[max(1.5rem,env(safe-area-inset-bottom))]",
-            agent === "catalog"
-              ? "bg-brand text-on-brand hover:bg-brand-hover active:bg-brand-pressed"
-              : "border border-border bg-surface text-foreground hover:bg-hover",
-          )}
-        >
-          <span
-            className={cn(
-              "flex size-9 shrink-0 items-center justify-center rounded-[var(--radius-control)]",
-              agent === "catalog" ? "bg-on-brand/15" : "bg-hover-soft",
-            )}
-            aria-hidden
-          >
-            <Icon className="size-4" />
-          </span>
-          <span className="min-w-0 pr-1">
-            <span className="block text-sm font-semibold leading-5 tracking-tight">
-              {copy.launcherLabel}
-            </span>
-            <span
-              className={cn(
-                "block text-xs leading-4",
-                agent === "catalog" ? "text-on-brand/80" : "text-muted",
-              )}
-            >
-              {copy.launcherHint}
-            </span>
-          </span>
-        </button>
-      )}
-
-      <Drawer
+    <Drawer
         open={open}
         onClose={() => setOpen(false)}
         title={copy.title}
@@ -295,7 +274,6 @@ export function AgentPanel({
             )}
           </div>
         )}
-      </Drawer>
-    </>
+    </Drawer>
   );
 }
