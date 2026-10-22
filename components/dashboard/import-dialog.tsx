@@ -10,6 +10,8 @@ import {
   type ImportedCategory,
   type ImportedItem,
   type ImportAllocation,
+  type ImportFailure,
+  type ImportWarning,
 } from "@/lib/api/import";
 import { ApiClientError, type Site } from "@/lib/api/types";
 import { formatCents } from "@/lib/api/money";
@@ -33,6 +35,8 @@ export function ImportDialog({
     items: ImportedItem[];
     categories: ImportedCategory[];
     source: string;
+    failed: ImportFailure[];
+    warnings: ImportWarning[];
   }) => void;
 }) {
   const router = useRouter();
@@ -41,13 +45,15 @@ export function ImportDialog({
   const [source, setSource] = useState("");
   const [items, setItems] = useState<ImportedItem[]>([]);
   const [categories, setCategories] = useState<ImportedCategory[]>([]);
-  const [failed, setFailed] = useState<{ row?: number; reason: string }[]>([]);
+  const [failed, setFailed] = useState<ImportFailure[]>([]);
+  const [warnings, setWarnings] = useState<ImportWarning[]>([]);
   const [siteByTempId, setSiteByTempId] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [commitFailed, setCommitFailed] = useState<
     { tempId: string; reason: string }[]
   >([]);
+  const [commitWarnings, setCommitWarnings] = useState<ImportWarning[]>([]);
   const [createdCount, setCreatedCount] = useState(0);
 
   const defaultSiteId = String(sites[0]?.id ?? "");
@@ -64,6 +70,8 @@ export function ImportDialog({
     setItems([]);
     setCategories([]);
     setFailed([]);
+    setWarnings([]);
+    setCommitWarnings([]);
     setSiteByTempId({});
     setError(null);
     setBusy(false);
@@ -93,12 +101,15 @@ export function ImportDialog({
       setItems(result.imported);
       setCategories(result.categories);
       setFailed(result.failed ?? []);
+      setWarnings(result.warnings ?? []);
 
       if (onParsedDraft) {
         onParsedDraft({
           items: result.imported,
           categories: result.categories,
           source: result.source,
+          failed: result.failed ?? [],
+          warnings: result.warnings ?? [],
         });
         handleClose();
         return;
@@ -156,6 +167,7 @@ export function ImportDialog({
         allocations,
       });
       setCommitFailed(result.failed ?? []);
+      setCommitWarnings(result.warnings ?? []);
       setCreatedCount(result.createdProducts.length);
       setStep("done");
       router.refresh();
@@ -380,13 +392,15 @@ export function ImportDialog({
                   <ul className="mt-1.5 space-y-1 text-sm text-warning-text/90">
                     {failed.map((f, i) => (
                       <li key={`${f.row}-${i}`}>
-                        {f.row != null ? `Row ${f.row}: ` : ""}
+                        {f.row != null ? `Row ${f.row}: ` : f.name ? `${f.name}: ` : ""}
                         {f.reason}
                       </li>
                     ))}
                   </ul>
                 </div>
               ) : null}
+
+              <ImportWarnings warnings={warnings} />
             </div>
           ) : null}
 
@@ -411,15 +425,16 @@ export function ImportDialog({
                 <div className="rounded-[var(--radius-control)] border border-warning-text/30 bg-warning-bg px-4 py-3">
                   <p className="text-sm font-medium text-warning-text">
                     {commitFailed.length}{" "}
-                    {commitFailed.length === 1 ? "item" : "items"} skipped
+                    {commitFailed.length === 1 ? "item needs" : "items need"} attention
                   </p>
                   <ul className="mt-1.5 space-y-1 text-sm text-warning-text/90">
-                    {commitFailed.map((f) => (
-                      <li key={f.tempId}>{f.reason}</li>
+                    {commitFailed.map((f, i) => (
+                      <li key={`${f.tempId}-${i}`}>{f.reason}</li>
                     ))}
                   </ul>
                 </div>
               ) : null}
+              <ImportWarnings warnings={[...warnings, ...commitWarnings]} />
             </div>
           ) : null}
 
@@ -450,6 +465,24 @@ export function ImportDialog({
           ) : null}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * What the import could not know — unknown stock, a catalogue cut short,
+ * variants left behind. The server writes the copy; render it verbatim.
+ */
+export function ImportWarnings({ warnings }: { warnings: ImportWarning[] }) {
+  if (warnings.length === 0) return null;
+  return (
+    <div className="rounded-[var(--radius-control)] border border-warning-text/30 bg-warning-bg px-4 py-3">
+      <p className="text-sm font-medium text-warning-text">Check before you go live</p>
+      <ul className="mt-1.5 list-disc space-y-1 pl-4 text-sm text-warning-text/90">
+        {warnings.map((w) => (
+          <li key={w.code}>{w.message}</li>
+        ))}
+      </ul>
     </div>
   );
 }

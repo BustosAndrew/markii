@@ -493,6 +493,31 @@ The audit list carries both directions now — `undoneBy` on the original row, `
 so a history screen can strike through a reversed change and label its reversal without a second
 query. Both are `string | null` on `ActionInvocation`.
 
+### 🟢 New 2026-10-22 — imports stop inventing data; two components changed for you (D49)
+
+`docs/API.md` §5, `lib/api/import.ts`. The parse response and commit response changed shape, and I
+made two small changes to your components so nothing regressed — review them.
+
+- **`ImportParseResult.warnings`** (new) and **`ImportCommitResult.warnings`** (new): merchant
+  copy, render verbatim. `STOCK_UNKNOWN` matters most — those products are staged at stock 0 and
+  cannot be bought until the merchant sets a count. `failed` entries may now carry `name` (store
+  imports) instead of `row` (CSV).
+- **`ImportedItem`** gained `stockKnown`, `options`, `variants`. Treat it as opaque and send it back
+  to `commitImport` — variants only reach the database through the commit route.
+- **Changed in `import-dialog.tsx`:** warnings render at the allocate and done steps through a new
+  exported `ImportWarnings`; failed rows show the product name when there is no row number; the
+  done step's "N items skipped" reads "need attention", because a failure can now mean "created,
+  but its variants were not". `onParsedDraft` also passes `failed` and `warnings`.
+- **Changed in `create-website-wizard.tsx`:** imported products are committed through
+  `commitImport` (allocated to the new site, categories by `categoryId`) instead of re-created with
+  `createProduct`, which had been dropping their currency, SKU and variants. Hand-added and template
+  products still use `createProduct`. tempIds are prefixed per import so two imports cannot collide.
+  Skipped items and warnings show on the catalog step; commit problems keep the merchant on the save
+  step with a notice, like a failed domain claim. `PreviewDraftProduct` gained `importTempId`.
+- **Not done, worth a screen:** a per-product "stock not set" marker in the wizard's draft list
+  (`stockKnown === false`), and a currency column — the list formats every price as dollars via
+  `formatCents`, which is wrong for a EUR import even though the stored value is right.
+
 ### 🟢 New 2026-10-17 — the assistant and the setup checklist (D48); screens built
 
 `docs/API.md` §27 ("The assistant") and §28. Two new things to build against, and one small change

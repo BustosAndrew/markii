@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   getTemplate,
@@ -22,12 +22,18 @@ import {
 } from "@/lib/api/types";
 import { THEMES } from "@/lib/storefront/themes";
 import { formatCents } from "@/lib/api/money";
-import type { ImportedCategory, ImportedItem } from "@/lib/api/import";
+import {
+  commitImport,
+  type ImportedCategory,
+  type ImportedItem,
+  type ImportFailure,
+  type ImportWarning,
+} from "@/lib/api/import";
 import { Button } from "@/components/ui/button";
 import { FieldError, Input, Label, Textarea } from "@/components/ui/field";
 import { Toggle } from "@/components/ui/toggle";
 import { PageHeader } from "@/components/ui/page-header";
-import { ImportDialog } from "@/components/dashboard/import-dialog";
+import { ImportDialog, ImportWarnings } from "@/components/dashboard/import-dialog";
 import { PreviewPanes } from "@/components/dashboard/preview-panes";
 
 function slugify(value: string) {
@@ -59,6 +65,19 @@ export function CreateWebsiteWizard({ sites }: { sites: Site[] }) {
    */
   const [domainNote, setDomainNote] = useState<string | null>(null);
   const [hostNote, setHostNote] = useState<string | null>(null);
+  /** Imported products the commit could not create in full — shown, never swallowed. */
+  const [importNote, setImportNote] = useState<string[] | null>(null);
+  /**
+   * Staged items by (batch-prefixed) tempId. Imported products are committed
+   * through `/api/import/commit`, which is what keeps their currency, SKU and
+   * variants — re-creating them with `createProduct` dropped all three.
+   */
+  const [importedItems, setImportedItems] = useState<Record<string, ImportedItem>>({});
+  const [importFindings, setImportFindings] = useState<{
+    failed: ImportFailure[];
+    warnings: ImportWarning[];
+  }>({ failed: [], warnings: [] });
+  const importBatch = useRef(0);
   const [savedSlug, setSavedSlug] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
   const [previewTab, setPreviewTab] = useState<
@@ -123,12 +142,19 @@ export function CreateWebsiteWizard({ sites }: { sites: Site[] }) {
   function applyImported(payload: {
     items: ImportedItem[];
     categories: ImportedCategory[];
+    failed: ImportFailure[];
+    warnings: ImportWarning[];
   }) {
+    // Every import numbers from imp_1; a second import must not overwrite the first.
+    importBatch.current += 1;
+    const prefix = `b${importBatch.current}_`;
+    const items = payload.items.map((item) => ({ ...item, tempId: `${prefix}${item.tempId}` }));
+
     const categories = payload.categories.map((c) => ({
       name: c.name,
       slug: slugify(c.name),
     }));
-    const products: PreviewDraftProduct[] = payload.items.map((item) => ({
+    const products: PreviewDraftProduct[] = items.map((item) => ({
       name: item.name,
       slug: item.slug || slugify(item.name),
       priceCents: item.priceCents,
@@ -138,6 +164,15 @@ export function CreateWebsiteWizard({ sites }: { sites: Site[] }) {
         : undefined,
       stock: item.stock,
       images: item.images,
+      importTempId: item.tempId,
+    }));
+    setImportedItems((prev) => ({
+      ...prev,
+      ...Object.fromEntries(items.map((i) => [i.tempId, i])),
+    }));
+    setImportFindings((prev) => ({
+      failed: [...prev.failed, ...payload.failed],
+      warnings: [...prev.warnings, ...payload.warnings],
     }));
     setDraft((prev) => ({
       ...prev,
@@ -254,7 +289,40 @@ export function CreateWebsiteWizard({ sites }: { sites: Site[] }) {
         categoryIdBySlug.set(created.slug, created.id);
       }
 
-      for (const product of draft.products) {
+      const fromImport = draft.products.filter(
+        (p) => p.importTempId && importedItems[p.importTempId],
+      );
+      const byHand = draft.products.filter((p) => !fromImport.includes(p));
+
+      let importIncomplete = false;
+      if (fromImport.length > 0) {
+        const result = await commitImport({
+          // The staged item, with whatever the draft shows on top of it.
+          items: fromImport.map((p) => ({
+            ...importedItems[p.importTempId!],
+            name: p.name,
+            slug: p.slug || slugify(p.name),
+            priceCents: p.priceCents,
+            description: p.description ?? null,
+            images: p.images ?? [],
+          })),
+          categories: [],
+          allocations: fromImport.map((p) => ({
+            tempId: p.importTempId!,
+            siteId: site.id,
+            categoryId: p.categorySlug ? categoryIdBySlug.get(p.categorySlug) : undefined,
+          })),
+        });
+        if (result.failed.length > 0 || result.warnings.length > 0) {
+          importIncomplete = true;
+          setImportNote([
+            ...result.failed.map((f) => f.reason),
+            ...result.warnings.map((w) => w.message),
+          ]);
+        }
+      }
+
+      for (const product of byHand) {
         await createProduct({
           siteId: site.id,
           name: product.name,
@@ -285,7 +353,7 @@ export function CreateWebsiteWizard({ sites }: { sites: Site[] }) {
       // Navigating away on a failed domain claim or host attach would erase the
       // only notice the merchant gets that one part of what they asked for did
       // not happen.
-      if (domainFailed || hostFailed) {
+      if (domainFailed || hostFailed || importIncomplete) {
         setSavedSlug(site.slug);
         setBusy(false);
         return;
@@ -418,6 +486,28 @@ export function CreateWebsiteWizard({ sites }: { sites: Site[] }) {
                 {draft.products.length === 1 ? "product" : "products"}
               </p>
             </div>
+
+            {importFindings.failed.length > 0 ? (
+              <div className="mt-3 rounded-[var(--radius-control)] border border-warning-text/30 bg-warning-bg px-4 py-3">
+                <p className="text-sm font-medium text-warning-text">
+                  {importFindings.failed.length} imported{" "}
+                  {importFindings.failed.length === 1 ? "item was" : "items were"} skipped
+                </p>
+                <ul className="mt-1.5 space-y-1 text-sm text-warning-text/90">
+                  {importFindings.failed.map((f, i) => (
+                    <li key={i}>
+                      {f.row != null ? `Row ${f.row}: ` : f.name ? `${f.name}: ` : ""}
+                      {f.reason}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {importFindings.warnings.length > 0 ? (
+              <div className="mt-3">
+                <ImportWarnings warnings={importFindings.warnings} />
+              </div>
+            ) : null}
 
             {draft.categories.length > 0 ? (
               <ul className="mt-3 flex flex-wrap gap-1.5">
@@ -629,7 +719,17 @@ export function CreateWebsiteWizard({ sites }: { sites: Site[] }) {
               <p>{hostNote} Do not share the storefront address until the host is attached.</p>
             </div>
           ) : null}
-          {domainNote || hostNote ? (
+          {importNote ? (
+            <div className="rounded-[var(--radius-control)] bg-warning-bg px-3 py-3 text-sm leading-6 text-warning-text">
+              <p className="font-medium">The site was saved. Some imported products need attention:</p>
+              <ul className="mt-1 list-disc pl-4">
+                {importNote.map((n, i) => (
+                  <li key={i}>{n}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {domainNote || hostNote || importNote ? (
             savedSlug ? (
               <Button
                 variant="secondary"

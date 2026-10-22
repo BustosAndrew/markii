@@ -156,7 +156,12 @@ Abandoned-cart reminders are off by default and switched on per store — one re
 
 Categories organise a store's catalog; collections are curated (manual) or rule-based groups that appear on the storefront once published.
 
-You can import a catalog from a Shopify or WooCommerce store, or from a site's sitemap, when creating a store.
+You can import a catalog from a CSV file, a Shopify or WooCommerce store, or a site's product pages — when creating a store or from the Catalog page. What an import brings across:
+- Shopify products keep all their variants (sizes, colours) with their own prices and SKUs. Option combinations the original store never sold are created too, with no stock.
+- WooCommerce products with variations come in as the base product only; add the options afterwards.
+- Stock counts usually are not published by the source store, so those products come in at 0 and cannot be bought until you set the real quantity. The import tells you which ones.
+- Prices keep the source store's currency. Prices in currencies without two decimal places (such as yen) cannot be imported yet.
+- Up to 1,000 products per store import; for more, use a CSV export.
 
 The Catalog agent can review your catalog and propose fixes — descriptions, prices, collections, stock — for you to approve one by one.`,
       links: [

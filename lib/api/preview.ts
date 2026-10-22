@@ -9,6 +9,8 @@ export type PreviewDraftProduct = {
   categorySlug?: string;
   stock?: number;
   images?: string[];
+  /** Set when the product came from an import; the wizard commits it through `/api/import/commit`. */
+  importTempId?: string;
 };
 
 export type PreviewDraftCategory = {

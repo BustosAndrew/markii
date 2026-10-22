@@ -560,6 +560,15 @@ the same commit as the fact it states**. Prices are kept out of it (unit-tested)
 `get_plans`. `GET /api/setup` (`lib/setup/`) derives the checklist per request from readiness's own
 `StoreFacts`, so it and the Health page cannot disagree.
 
+**The importer stopped inventing data on 2026-10-22** (D49, `docs/API.md` §5). Unknown stock
+stages at 0 with `stockKnown: false` — it used to be 10; Shopify's currency is read from the store
+or the import refuses — it used to be USD; Shopify and WooCommerce page to 1,000 products with a
+warning past it; Shopify variants land through one `catalog.setProductOptions` call (`initialValues`);
+redirects are re-checked hop by hop. **Currencies without two decimals are refused at import** —
+and that guards a bug that is *not* fixed: `priceCents` is displayed ÷100 for every currency but
+charged as the currency's own minor unit, so a JPY product shows one price and charges 100× another.
+That is a money change across display, JSON-LD and checkout, and it is still open.
+
 **Stripe Tax on Markii's own subscription is built as of 2026-09-13** (G3). `automatic_tax` on every
 platform-account subscription create, change and preview — **no `Stripe-Account` header**, the
 opposite direction of money from §18.6 — decided from two facts that are reported apart and never

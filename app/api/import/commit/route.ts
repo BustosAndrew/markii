@@ -1,8 +1,10 @@
 import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { slugify } from "@/lib/api";
+import { ApiError, slugify } from "@/lib/api";
+import { invokeAction } from "@/lib/actions";
 import { orgHandler } from "@/lib/auth/handler";
 import { categories, db, products, sites, type Category, type Product } from "@/lib/db";
+import { importableCurrency } from "@/lib/importer";
 import { ownSites } from "@/lib/tenancy";
 import { serializeCategories, serializeProducts, uniqueCategorySlug } from "@/lib/queries";
 import { importCommitSchema } from "@/lib/validation";
@@ -11,8 +13,14 @@ import { importCommitSchema } from "@/lib/validation";
  * Phase 2 of the CSV/scrape popup: the user has allocated staged items to sites
  * (and optionally categories). The same tempId may appear in several allocations —
  * that's the drag-to-duplicate behavior.
+ *
+ * **Variants go through the registry.** A staged item carrying `options` and
+ * `variants` gets them from one `catalog.setProductOptions` invocation, as the
+ * person committing — audited, permission-checked, standing-checked. The
+ * product row itself is still a direct insert, as `POST /api/products` is:
+ * product creation has never been a registry action.
  */
-export const POST = orgHandler(async (req, { orgId }) => {
+export const POST = orgHandler(async (req, { orgId, session }) => {
   const input = importCommitSchema.parse(await req.json());
 
   const itemByTempId = new Map(input.items.map((i) => [i.tempId, i]));
@@ -29,6 +37,8 @@ export const POST = orgHandler(async (req, { orgId }) => {
   const createdCategories: Category[] = [];
   const createdProducts: Product[] = [];
   const failed: { tempId: string; reason: string }[] = [];
+  /** Grid combinations the source never sold, created out of stock by the option matrix. */
+  const extraVariants: { tempId: string; count: number }[] = [];
   // staged category tempId + target site → created category id
   const createdCategoryIds = new Map<string, number>();
 
@@ -127,6 +137,19 @@ export const POST = orgHandler(async (req, { orgId }) => {
       categoryId = await createStagedCategory(staged, alloc.siteId);
     }
 
+    /**
+     * Re-checked here, not only at parse: this route accepts items from the
+     * client, and a zero-decimal currency would display one price and charge
+     * another (`importableCurrency`).
+     */
+    if (!importableCurrency(item.currency)) {
+      failed.push({
+        tempId: alloc.tempId,
+        reason: `prices in ${item.currency} cannot be imported yet — only currencies with two decimal places are supported`,
+      });
+      continue;
+    }
+
     const slug = item.slug ?? slugify(item.name);
     const [taken] = await db
       .select({ id: products.id })
@@ -154,6 +177,36 @@ export const POST = orgHandler(async (req, { orgId }) => {
       })
       .returning();
     createdProducts.push(row);
+
+    if (item.options?.length && item.variants?.length) {
+      try {
+        const outcome = await invokeAction<{ withoutInitialValues: number }>(
+          "catalog.setProductOptions",
+          {
+            productId: row.id,
+            options: item.options.map((o, i) => ({ name: o.name, position: i, values: o.values })),
+            defaultPriceMinor: item.priceCents,
+            // Two-decimal currencies only (checked above), so cents and minor units coincide.
+            initialValues: item.variants.map((v) => ({
+              optionValues: v.optionValues,
+              priceMinor: v.priceCents,
+              compareAtMinor: v.compareAtCents ?? null,
+              sku: v.sku ?? null,
+            })),
+          },
+          { actor: session.actor },
+        );
+        const extra = outcome.result?.withoutInitialValues ?? 0;
+        if (extra > 0) extraVariants.push({ tempId: alloc.tempId, count: extra });
+      } catch (e) {
+        failed.push({
+          tempId: alloc.tempId,
+          reason: `the product was created, but its variants were not: ${
+            e instanceof ApiError ? e.message : "the option matrix could not be built"
+          }`,
+        });
+      }
+    }
   }
 
   return NextResponse.json(
@@ -161,6 +214,18 @@ export const POST = orgHandler(async (req, { orgId }) => {
       createdProducts: await serializeProducts(createdProducts),
       createdCategories: await serializeCategories(createdCategories),
       failed,
+      warnings: extraVariants.length
+        ? [
+            {
+              code: "EXTRA_VARIANTS",
+              message:
+                `${extraVariants.reduce((n, e) => n + e.count, 0)} option combination(s) did not exist ` +
+                "in the source store. They were created with no stock, so they show as sold out — " +
+                "delete them or set stock.",
+              tempIds: extraVariants.map((e) => e.tempId),
+            },
+          ]
+        : [],
     },
     { status: 201 },
   );

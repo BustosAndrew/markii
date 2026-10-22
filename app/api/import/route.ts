@@ -8,7 +8,7 @@ import { importUrlSchema } from "@/lib/validation";
  * Phase 1 of the CSV/scrape popup: parse only, nothing is saved.
  * Send either multipart form-data with a `file` (CSV) or JSON `{ "url": "..." }`.
  */
-export const POST = orgHandler(async (req) => {
+export const POST = orgHandler(async (req, { session }) => {
   const contentType = req.headers.get("content-type") ?? "";
   let result: ImportResult;
 
@@ -16,7 +16,7 @@ export const POST = orgHandler(async (req) => {
     const form = await req.formData();
     const file = form.get("file");
     if (!(file instanceof File)) throw badRequest('multipart field "file" is required');
-    result = importFromCsv(await file.text());
+    result = importFromCsv(await file.text(), { defaultCurrency: session.org.currency });
   } else {
     const { url } = importUrlSchema.parse(await req.json());
     result = await importFromUrl(url);

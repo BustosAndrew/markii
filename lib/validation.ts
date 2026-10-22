@@ -224,9 +224,28 @@ export const importItemSchema = z.object({
   currency: z.string().length(3).default("USD"),
   sku: z.string().nullish(),
   stock: z.number().int().nonnegative().default(0),
+  /** Informational — the staged stock is 0 when this is false. Not stored. */
+  stockKnown: z.boolean().optional(),
   description: z.string().nullish(),
-  images: z.array(z.string()).default([]),
+  images: z.array(z.string()).max(20).default([]),
   categoryName: z.string().nullish(),
+  /** Option axes and variants (Shopify imports). Built through `catalog.setProductOptions`. */
+  options: z
+    .array(z.object({ name: z.string().min(1).max(60), values: z.array(z.string().min(1).max(120)).min(1).max(100) }))
+    .max(3)
+    .optional(),
+  variants: z
+    .array(
+      z.object({
+        title: z.string().max(255).optional(),
+        optionValues: z.record(z.string(), z.string().min(1).max(120)),
+        priceCents: z.number().int().nonnegative(),
+        compareAtCents: z.number().int().nonnegative().nullish(),
+        sku: z.string().max(120).nullish(),
+      }),
+    )
+    .max(250)
+    .optional(),
 });
 
 export const importCategorySchema = z.object({

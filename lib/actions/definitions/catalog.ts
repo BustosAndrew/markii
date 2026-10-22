@@ -5,7 +5,7 @@ import { categories, products, productOptions, sites, variants } from "../../db"
 import { assertTiersOnSite, uniqueProductSlug } from "../../queries";
 import { ownSites, siteScope } from "../../tenancy";
 import { productUpdateSchema } from "../../validation";
-import { planMatrix, type OptionSpec } from "../../commerce/variants";
+import { optionKey, planMatrix, type OptionSpec } from "../../commerce/variants";
 import { patchInverse } from "../inverse";
 import { defineAction } from "../registry";
 import type { ActionContext } from "../types";
@@ -42,12 +42,34 @@ export const setProductOptions = defineAction({
   description:
     "Replace a product's option axes (e.g. Size, Color) and regenerate its variant matrix. " +
     "Existing variants that still match a valid combination keep their price, SKU, and stock. " +
-    "Combinations that no longer exist are reported as orphaned and are NOT deleted.",
+    "Combinations that no longer exist are reported as orphaned and are NOT deleted. " +
+    "`initialValues` sets price, compare-at price and SKU on variants this call creates; it " +
+    "never touches a variant that already existed.",
   input: z.object({
     productId: z.number().int().positive(),
     options: z.array(optionSchema).max(3),
     /** Default price for newly created variants, in minor units (D31). */
     defaultPriceMinor: z.number().int().nonnegative().optional(),
+    /**
+     * Starting values for variants **created by this call**, matched on their
+     * option values. Kept variants are never changed by it, so re-running an
+     * option edit cannot overwrite prices a merchant has since set.
+     *
+     * Exists for imports (§5): a Shopify product with twelve variants arrives
+     * as one audited invocation rather than one plus twelve `updateVariant`s,
+     * which would bury the audit log under a 1,000-product migration.
+     */
+    initialValues: z
+      .array(
+        z.object({
+          optionValues: z.record(z.string(), z.string().min(1).max(120)),
+          priceMinor: z.number().int().nonnegative().optional(),
+          compareAtMinor: z.number().int().nonnegative().nullish(),
+          sku: z.string().max(120).nullish(),
+        }),
+      )
+      .max(250)
+      .optional(),
   }),
   permission: "catalog.write",
   /** Bulk edit across a product's variants — a human should see the diff first. */
@@ -101,20 +123,30 @@ export const setProductOptions = defineAction({
     }
 
     const price = input.defaultPriceMinor ?? product.priceCents;
+    const initial = new Map((input.initialValues ?? []).map((v) => [optionKey(v.optionValues), v]));
     const created = plan.create.length
       ? await ctx.db
           .insert(variants)
           .values(
-            plan.create.map((c) => ({
-              productId: product.id,
-              title: c.title,
-              optionValues: c.optionValues,
-              priceMinor: price,
-              position: c.position,
-            })),
+            plan.create.map((c) => {
+              const init = initial.get(optionKey(c.optionValues));
+              return {
+                productId: product.id,
+                title: c.title,
+                optionValues: c.optionValues,
+                priceMinor: init?.priceMinor ?? price,
+                compareAtMinor: init?.compareAtMinor ?? null,
+                sku: init?.sku ?? null,
+                position: c.position,
+              };
+            }),
           )
           .returning()
       : [];
+    /** Created combinations no initial value described — e.g. a grid cell the source store never sold. */
+    const withoutInitialValues = initial.size
+      ? created.filter((c) => !initial.has(optionKey(c.optionValues))).length
+      : 0;
 
     for (const c of created) {
       ctx.recordDiff({
@@ -140,6 +172,7 @@ export const setProductOptions = defineAction({
     return {
       productId: product.id,
       created: created.length,
+      withoutInitialValues,
       kept: plan.keep.length,
       orphaned: plan.orphaned.map((o) => ({ id: o.id, title: o.title })),
     };

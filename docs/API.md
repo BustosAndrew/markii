@@ -676,18 +676,53 @@ Response (`200`, even with partial failures):
   "source": "shopify",
   "imported": [
     { "tempId": "imp_1", "name": "Blue Tee", "slug": "blue-tee",
-      "priceCents": 1999, "currency": "USD", "sku": "TEE-BLU-M", "stock": 25,
-      "description": "…", "images": ["https://…"], "categoryName": "Shirts" }
+      "priceCents": 1999, "currency": "EUR", "sku": null, "stock": 0, "stockKnown": false,
+      "description": "Plain text…", "images": ["https://…"], "categoryName": "Shirts",
+      "options": [ { "name": "Size", "values": ["S", "M"] } ],
+      "variants": [ { "title": "S", "optionValues": { "Size": "S" }, "priceCents": 1999,
+                      "compareAtCents": null, "sku": "TEE-S" } ] }
   ],
   "categories": [ { "tempId": "cat_1", "name": "Shirts" } ],
-  "failed": [ { "row": 7, "reason": "price is not a number" } ]
+  "failed": [ { "row": 7, "reason": "price is not a number, or has fractions of a cent" },
+              { "name": "Yen Bowl", "reason": "prices in JPY cannot be imported yet — …" } ],
+  "warnings": [ { "code": "STOCK_UNKNOWN", "message": "12 products came without a stock count…",
+                  "tempIds": ["imp_1", "…"] } ]
 }
 ```
 
 `422 IMPORT_FAILED` only if **nothing** could be parsed (bad CSV / unreachable URL /
 unrecognized platform) — message explains why. Scrape URLs are SSRF-filtered: `localhost`,
 `*.local`/`*.internal`, cloud-metadata hosts, and any hostname resolving to a private or
-link-local address are rejected with `400 VALIDATION_ERROR`.
+link-local address are rejected with `400 VALIDATION_ERROR`. **Redirects are followed by hand
+and every hop is re-checked** (since 2026-10-22) — previously a public host could `302` the
+importer into private space. DNS rebinding between check and connect remains a residual risk.
+
+**What the importer will not invent** (2026-10-22 — each of these used to be guessed):
+
+- **Stock.** A source that publishes no quantity is staged at `stock: 0` with `stockKnown: false`
+  and a `STOCK_UNKNOWN` warning — never a made-up 10. Shopify's public feed rarely carries
+  quantities; WooCommerce's carries one only when stock is low; "out of stock" is a known 0.
+- **Currency.** Shopify's currency is read from `/meta.json` (then `/cart.js`); if neither says,
+  the import refuses rather than labelling prices USD. WooCommerce gives it per product; JSON-LD
+  must state `priceCurrency` or the product is refused. A CSV with no `currency` column uses the
+  **organization's** currency and says so (`CURRENCY_ASSUMED`).
+- **Unsupported currencies are refused** — anything whose minor unit is not cents (JPY, KRW,
+  KWD…), at parse **and** at commit. The legacy `priceCents` field is displayed ÷100 for every
+  currency but charged as the currency's own minor unit, so such a product would show one price and
+  charge another (see D49). Lift this when the two readers agree.
+- **Prices** are parsed as decimal strings into integers — no float arithmetic — and a price with
+  real sub-cent precision (`19.995`) is refused rather than rounded.
+- **Catalogue size.** Shopify and WooCommerce are paged up to **1,000 products**
+  (`MAX_IMPORT_PRODUCTS`); past that a `TRUNCATED` warning says so. It used to read one page (250 /
+  100) and stop silently. CSV has no cap.
+- **Variants.** Shopify products keep every variant (`options` + `variants`: price, compare-at,
+  SKU). WooCommerce variations need a request per product and are **not** imported — the base
+  product is, with a `VARIANTS_NOT_IMPORTED` warning naming them.
+- **Descriptions** are converted from HTML to plain text with paragraph breaks and decoded
+  entities.
+
+Warning codes: `STOCK_UNKNOWN`, `TRUNCATED`, `VARIANTS_NOT_IMPORTED`, `IMAGES_TRUNCATED` (more than
+20 images), `CURRENCY_ASSUMED`. `message` is merchant-facing copy; render it verbatim.
 
 ### `POST /api/import/commit`
 The allocation step. Frontend sends where each staged item should land (drag-and-drop /
@@ -715,8 +750,22 @@ category to every site its products land on.
 
 ```json
 { "createdProducts": [ Product, ... ], "createdCategories": [ Category, ... ],
-  "failed": [ { "tempId": "imp_3", "reason": "duplicate slug on site 1" } ] }
+  "failed": [ { "tempId": "imp_3", "reason": "duplicate slug on site 1" } ],
+  "warnings": [ { "code": "EXTRA_VARIANTS", "message": "2 option combination(s) did not exist…",
+                  "tempIds": ["imp_1"] } ] }
 ```
+
+An allocation may name an existing **`categoryId`** on its site instead of a `categoryTempId`
+(the wizard uses this for the categories it has just created).
+
+**Variants are built through the registry**: an item with `options` and `variants` gets them from
+one `catalog.setProductOptions` invocation as the person committing — audited, permission- and
+standing-checked — using that action's `initialValues` (2026-10-22) to set each variant's price,
+compare-at price and SKU in the same call. The option matrix is the full grid, so combinations the
+source never sold are created with no stock and reported as `EXTRA_VARIANTS`. If the variant step is
+refused, the product still exists and `failed` says *"the product was created, but its variants were
+not: …"*. The product row itself is still a direct insert, as `POST /api/products` is — product
+creation has never been a registry action. Items in an unsupported currency are refused here too.
 
 ---
 
