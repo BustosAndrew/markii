@@ -5,9 +5,13 @@ export type PreviewDraftProduct = {
   name: string;
   slug?: string;
   priceCents: number;
+  /** ISO code from the source. Preview already accepts this; omitting it labels every price USD. */
+  currency?: string;
   description?: string;
   categorySlug?: string;
   stock?: number;
+  /** False → the source published no count. Not sent to preview; used in the draft list. */
+  stockKnown?: boolean;
   images?: string[];
   /** Set when the product came from an import; the wizard commits it through `/api/import/commit`. */
   importTempId?: string;

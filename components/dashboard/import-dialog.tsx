@@ -16,6 +16,7 @@ import {
 import { ApiClientError, type Site } from "@/lib/api/types";
 import { formatCents } from "@/lib/api/money";
 import { assertCsvFile, assertPublicHttpsUrl } from "@/lib/validate-import";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { FieldError, Input, Label, Select } from "@/components/ui/field";
 
@@ -336,11 +337,13 @@ export function ImportDialog({
               ) : null}
 
               <div className="overflow-x-auto rounded-[var(--radius-control)] border border-border">
-                <table className="w-full min-w-[560px] text-left text-sm">
+                <table className="w-full min-w-[720px] text-left text-sm">
                   <thead className="bg-surface-elevated text-muted">
                     <tr>
                       <th className="px-3 py-2 font-medium">Item</th>
                       <th className="px-3 py-2 font-medium">Price</th>
+                      <th className="px-3 py-2 font-medium">Currency</th>
+                      <th className="px-3 py-2 font-medium">Stock</th>
                       <th className="px-3 py-2 font-medium">Assign site</th>
                     </tr>
                   </thead>
@@ -351,10 +354,25 @@ export function ImportDialog({
                           <p className="font-medium text-foreground">{item.name}</p>
                           <p className="text-xs text-muted">
                             {item.categoryName || "Uncategorized"}
+                            {item.variants?.length
+                              ? ` · ${item.variants.length} ${item.variants.length === 1 ? "variant" : "variants"}`
+                              : ""}
                           </p>
                         </td>
                         <td className="px-3 py-2 tabular-nums text-muted">
                           {formatCents(item.priceCents, item.currency ?? "USD")}
+                        </td>
+                        <td className="px-3 py-2 font-mono text-xs text-muted">
+                          {item.currency ?? "USD"}
+                        </td>
+                        <td className="px-3 py-2">
+                          {item.stockKnown === false ? (
+                            <Badge variant="warning">Stock not set</Badge>
+                          ) : (
+                            <span className="tabular-nums text-muted">
+                              {item.stock ?? "—"}
+                            </span>
+                          )}
                         </td>
                         <td className="px-3 py-2">
                           <Select

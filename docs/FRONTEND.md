@@ -513,10 +513,11 @@ made two small changes to your components so nothing regressed — review them.
   `createProduct`, which had been dropping their currency, SKU and variants. Hand-added and template
   products still use `createProduct`. tempIds are prefixed per import so two imports cannot collide.
   Skipped items and warnings show on the catalog step; commit problems keep the merchant on the save
-  step with a notice, like a failed domain claim. `PreviewDraftProduct` gained `importTempId`.
-- **Not done, worth a screen:** a per-product "stock not set" marker in the wizard's draft list
-  (`stockKnown === false`), and a currency column — the list formats every price as dollars via
-  `formatCents`, which is wrong for a EUR import even though the stored value is right.
+  step with a notice, like a failed domain claim. `PreviewDraftProduct` gained `importTempId`,
+  `currency`, and `stockKnown`.
+- **Draft list and allocate table (2026-10-23):** each imported row shows its own currency
+  (`formatCents(price, currency)` plus the code) and a **Stock not set** marker when
+  `stockKnown === false`. Do not format imported prices as dollars.
 
 ### 🟢 New 2026-10-17 — the assistant and the setup checklist (D48); screens built
 

@@ -29,6 +29,7 @@ import {
   type ImportFailure,
   type ImportWarning,
 } from "@/lib/api/import";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { FieldError, Input, Label, Textarea } from "@/components/ui/field";
 import { Toggle } from "@/components/ui/toggle";
@@ -158,11 +159,13 @@ export function CreateWebsiteWizard({ sites }: { sites: Site[] }) {
       name: item.name,
       slug: item.slug || slugify(item.name),
       priceCents: item.priceCents,
+      currency: item.currency,
       description: item.description ?? undefined,
       categorySlug: item.categoryName
         ? slugify(item.categoryName)
         : undefined,
       stock: item.stock,
+      stockKnown: item.stockKnown,
       images: item.images,
       importTempId: item.tempId,
     }));
@@ -557,9 +560,15 @@ export function CreateWebsiteWizard({ sites }: { sites: Site[] }) {
                         {p.name}
                       </p>
                       <p className="text-xs text-muted">
-                        {formatCents(p.priceCents)}
+                        {formatCents(p.priceCents, p.currency ?? "USD")}
+                        {p.currency ? ` · ${p.currency}` : ""}
                         {p.categorySlug ? ` · ${p.categorySlug}` : ""}
                       </p>
+                      {p.stockKnown === false ? (
+                        <Badge variant="warning" className="mt-1">
+                          Stock not set
+                        </Badge>
+                      ) : null}
                     </div>
                     <Button
                       type="button"
