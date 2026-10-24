@@ -53,6 +53,14 @@ export type StagedProduct = {
   /** Option axes (≤ 3). Absent for a single-variant product. */
   options?: { name: string; values: string[] }[];
   variants?: StagedVariant[];
+  /**
+   * Provenance, stored on the product at commit (`products.import_*`).
+   * `sourceId` is the source platform's own product id — Shopify and
+   * WooCommerce have one; CSV rows and scraped pages do not.
+   */
+  source: ImportResult["source"];
+  sourceId: string | null;
+  sourceUrl: string | null;
 };
 
 export type ImportWarningCode =
@@ -75,6 +83,14 @@ export type ImportResult = {
 
 /** The most products one import stages. Past it the result says so; CSV has no cap. */
 export const MAX_IMPORT_PRODUCTS = 1_000;
+/**
+ * WooCommerce variation reads one import may make. The Store API lists a
+ * variable product's variation ids but not their prices, so each variation is
+ * a request of its own; past this budget the remaining variable products come
+ * in as their base product, with a warning naming them.
+ */
+export const MAX_VARIATION_FETCHES = 500;
+const VARIATION_CONCURRENCY = 6;
 /** Product images accepted per product (`productCreateSchema` allows 20). */
 const MAX_IMAGES = 20;
 
@@ -324,6 +340,9 @@ export function importFromCsv(text: string, opts: { defaultCurrency: string }): 
       description: htmlToText(col(row, "description")),
       images,
       categoryName: col(row, "category") || null,
+      source: "csv",
+      sourceId: null,
+      sourceUrl: null,
     });
   });
 
@@ -493,6 +512,7 @@ export function fromShopify(
   data: any,
   currency: string,
   startIndex = 0,
+  origin: string | null = null,
 ): { items: StagedProduct[]; failed: ImportResult["failed"]; clipped: string[] } {
   const items: StagedProduct[] = [];
   const failed: ImportResult["failed"] = [];
@@ -565,6 +585,9 @@ export function fromShopify(
       images,
       categoryName: p.product_type || null,
       ...staged,
+      source: "shopify",
+      sourceId: p.id != null ? String(p.id) : null,
+      sourceUrl: origin && p.handle ? `${origin}/products/${p.handle}` : null,
     });
   }
   return { items, failed, clipped };
@@ -606,7 +629,7 @@ async function importShopify(origin: string, first: any): Promise<ImportResult |
   let pageNo = 1;
   let truncated = false;
   while (page) {
-    const parsed = fromShopify(page, currency, items.length);
+    const parsed = fromShopify(page, currency, items.length, origin);
     items.push(...parsed.items);
     failed.push(...parsed.failed);
     clipped.push(...parsed.clipped);
@@ -641,10 +664,92 @@ function truncatedWarning(): ImportWarning {
 
 // ---------- WooCommerce ----------
 
-/** One Store API page → staged products. Currency comes per product from the API itself. */
+/** A variable product's variation ids, as the Store API lists them. */
+export function wooVariationIds(p: any): number[] {
+  return (Array.isArray(p?.variations) ? p.variations : [])
+    .map((v: any) => v?.id)
+    .filter((id: unknown): id is number => Number.isInteger(id));
+}
+
+/**
+ * A WooCommerce variable product's options and variants, from the parent's
+ * attribute terms and each variation's own record.
+ *
+ * **All or nothing.** If any variation is missing (not fetched, or failed),
+ * names an attribute value of "any" — WooCommerce's wildcard, which has no
+ * single cell in an option matrix — or is priced in another currency, this
+ * returns null and the product comes in as its base, flagged. A product with
+ * some of its variants would be a product a shopper cannot buy in the size
+ * the merchant actually stocks.
+ */
+export function wooVariants(
+  p: any,
+  variationsById: Map<number, any>,
+  currency: string,
+): { options: { name: string; values: string[] }[]; variants: StagedVariant[] } | null {
+  const attrs: any[] = (Array.isArray(p?.attributes) ? p.attributes : []).filter(
+    (a: any) => a?.has_variations && a?.name && Array.isArray(a.terms) && a.terms.length > 0,
+  );
+  const refs: any[] = Array.isArray(p?.variations) ? p.variations : [];
+  if (attrs.length === 0 || attrs.length > 3 || refs.length === 0) return null;
+
+  const label = (raw: unknown) => htmlToText(String(raw)) ?? String(raw);
+  const options = attrs.map((a) => ({
+    name: label(a.name),
+    values: [...new Set<string>(a.terms.map((t: any) => label(t.name)))],
+  }));
+
+  const variants: StagedVariant[] = [];
+  for (const ref of refs) {
+    const v = variationsById.get(ref?.id);
+    if (!v) return null;
+
+    const optionValues: Record<string, string> = {};
+    for (const pick of Array.isArray(ref.attributes) ? ref.attributes : []) {
+      const wanted = String(pick?.name ?? "").toLowerCase();
+      const i = attrs.findIndex(
+        (a) => String(a.name).toLowerCase() === wanted || String(a.taxonomy ?? "").toLowerCase() === wanted,
+      );
+      const value = String(pick?.value ?? "");
+      if (i < 0 || !value) return null; // unknown attribute, or "any"
+      const term = attrs[i].terms.find(
+        (t: any) => t.slug === value || String(t.name).toLowerCase() === value.toLowerCase(),
+      );
+      if (!term) return null;
+      optionValues[options[i].name] = label(term.name);
+    }
+    if (Object.keys(optionValues).length !== options.length) return null;
+
+    if (String(v.prices?.currency_code ?? "").toUpperCase() !== currency) return null;
+    const minor = Number.isInteger(v.prices?.currency_minor_unit) ? v.prices.currency_minor_unit : 2;
+    const read = (raw: unknown) =>
+      /^\d+$/.test(String(raw ?? "")) ? toTwoDecimals(Number(raw), minor) : null;
+    const price = read(v.prices?.price);
+    if (price == null) return null;
+    const regular = read(v.prices?.regular_price);
+
+    variants.push({
+      title: Object.values(optionValues).join(" / "),
+      optionValues,
+      priceCents: price,
+      compareAtCents: regular != null && regular > price ? regular : null,
+      sku: v.sku ? String(v.sku) : null,
+    });
+  }
+  return { options, variants };
+}
+
+/**
+ * Store API products → staged products. Currency comes per product from the
+ * API itself. `variationsById` holds the variation records `importWoo`
+ * fetched; a variable product whose variations are all there comes in with
+ * its variants, any other comes in as its base and is listed in
+ * `withVariations`.
+ */
 export function fromWoo(
   data: any,
   startIndex = 0,
+  variationsById: Map<number, any> = new Map(),
 ): {
   items: StagedProduct[];
   failed: ImportResult["failed"];
@@ -682,8 +787,11 @@ export function fromWoo(
       (p.images ?? []).map((i: any) => i?.src).filter(Boolean),
     );
     if (wasClipped) clipped.push(tempId);
-    if (p.type === "variable" || (Array.isArray(p.variations) && p.variations.length > 0)) {
-      withVariations.push(tempId);
+    let staged: Pick<StagedProduct, "options" | "variants"> = {};
+    if (p.type === "variable" || wooVariationIds(p).length > 0) {
+      const built = wooVariants(p, variationsById, currency);
+      if (built) staged = built;
+      else withVariations.push(tempId);
     }
 
     /**
@@ -700,44 +808,74 @@ export function fromWoo(
       slug: slugify(p.slug || name),
       priceCents,
       currency,
-      sku: p.sku || null,
+      // A variable product's parent SKU names no sellable thing; each variant carries its own.
+      sku: staged.variants ? null : p.sku || null,
       stock,
       stockKnown,
       description: htmlToText(p.description || p.short_description),
       images,
       categoryName: p.categories?.[0]?.name ? (htmlToText(p.categories[0].name) ?? null) : null,
+      ...staged,
+      source: "woocommerce",
+      sourceId: p.id != null ? String(p.id) : null,
+      sourceUrl: typeof p.permalink === "string" && /^https?:\/\//.test(p.permalink) ? p.permalink : null,
     });
   }
   return { items, failed, clipped, withVariations };
 }
 
+/** `fn` over `inputs`, at most `limit` at a time, results in input order. */
+async function mapLimit<T, R>(inputs: T[], limit: number, fn: (input: T) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(inputs.length);
+  let next = 0;
+  async function worker() {
+    while (next < inputs.length) {
+      const i = next++;
+      out[i] = await fn(inputs[i]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, inputs.length) }, worker));
+  return out;
+}
+
 async function importWoo(origin: string, first: any): Promise<ImportResult | null> {
   const PAGE = 100;
-  const items: StagedProduct[] = [];
-  const failed: ImportResult["failed"] = [];
-  const clipped: string[] = [];
-  const withVariations: string[] = [];
+  const raws: any[] = [];
   let page = first;
   let pageNo = 1;
   let truncated = false;
-  while (page) {
-    const parsed = fromWoo(page, items.length);
-    items.push(...parsed.items);
-    failed.push(...parsed.failed);
-    clipped.push(...parsed.clipped);
-    withVariations.push(...parsed.withVariations);
-    if (!Array.isArray(page) || page.length < PAGE) break;
-    if (items.length >= MAX_IMPORT_PRODUCTS) {
+  while (Array.isArray(page)) {
+    raws.push(...page);
+    if (page.length < PAGE) break;
+    if (raws.length >= MAX_IMPORT_PRODUCTS) {
       truncated = true;
       break;
     }
     pageNo += 1;
     page = await fetchJson(`${origin}/wp-json/wc/store/v1/products?per_page=${PAGE}&page=${pageNo}`);
   }
-  if (items.length > MAX_IMPORT_PRODUCTS) {
-    items.length = MAX_IMPORT_PRODUCTS;
+  if (raws.length > MAX_IMPORT_PRODUCTS) {
+    raws.length = MAX_IMPORT_PRODUCTS;
     truncated = true;
   }
+
+  // Variations: whole products only, within the budget, in catalogue order.
+  const wanted: number[] = [];
+  for (const p of raws) {
+    const ids = wooVariationIds(p);
+    if (ids.length === 0) continue;
+    if (wanted.length + ids.length > MAX_VARIATION_FETCHES) break;
+    wanted.push(...ids);
+  }
+  const records = await mapLimit(wanted, VARIATION_CONCURRENCY, (id) =>
+    fetchJson(`${origin}/wp-json/wc/store/v1/products/${id}`),
+  );
+  const variationsById = new Map<number, any>();
+  records.forEach((r, i) => {
+    if (r && typeof r === "object") variationsById.set(wanted[i], r);
+  });
+
+  const { items, failed, clipped, withVariations } = fromWoo(raws, 0, variationsById);
   if (!items.length && !failed.length) return null;
 
   const warnings = commonWarnings(items, clipped);
@@ -745,8 +883,10 @@ async function importWoo(origin: string, first: any): Promise<ImportResult | nul
     warnings.push({
       code: "VARIANTS_NOT_IMPORTED",
       message:
-        `${withVariations.length} product(s) have variations (sizes, colours) in WooCommerce. Only ` +
-        "the base product was imported — add the options on each product after importing.",
+        `${withVariations.length} product(s) have variations (sizes, colours) in WooCommerce that ` +
+        "could not all be read — some were unavailable, used an \"any\" value, or the import reached " +
+        `its limit of ${MAX_VARIATION_FETCHES} variations. Those came in as the base product; add ` +
+        "their options after importing.",
       tempIds: withVariations,
     });
   }
@@ -756,7 +896,7 @@ async function importWoo(origin: string, first: any): Promise<ImportResult | nul
 
 // ---------- JSON-LD scrape ----------
 
-export function productsFromJsonLd(html: string): {
+export function productsFromJsonLd(html: string, pageUrl: string | null = null): {
   items: Omit<StagedProduct, "tempId">[];
   failed: ImportResult["failed"];
 } {
@@ -801,6 +941,10 @@ export function productsFromJsonLd(html: string): {
           description: htmlToText(node.description ? String(node.description) : null),
           images,
           categoryName: node.category ? String(node.category) : null,
+          source: "scrape",
+          sourceId: null,
+          sourceUrl:
+            typeof node.url === "string" && /^https?:\/\//.test(node.url) ? node.url : pageUrl,
         });
       }
     } catch {
@@ -816,7 +960,7 @@ async function fromScrape(
 ): Promise<{ items: StagedProduct[]; failed: ImportResult["failed"] }> {
   const html = await fetchText(startUrl);
   if (!html) return { items: [], failed: [] };
-  const first = productsFromJsonLd(html);
+  const first = productsFromJsonLd(html, startUrl);
   const found = [...first.items];
   const failed = [...first.failed];
 
@@ -836,7 +980,7 @@ async function fromScrape(
   for (const link of [...links].slice(0, 8)) {
     const page = await fetchText(link);
     if (page) {
-      const more = productsFromJsonLd(page);
+      const more = productsFromJsonLd(page, link);
       found.push(...more.items);
       failed.push(...more.failed);
     }

@@ -493,6 +493,22 @@ The audit list carries both directions now — `undoneBy` on the original row, `
 so a history screen can strike through a reversed change and label its reversal without a second
 query. Both are `string | null` on `ActionInvocation`.
 
+### 🟢 New 2026-10-23 — import provenance, WooCommerce variations, wizard currency (D49)
+
+- **`Product` gained `importSource`, `importSourceId`, `importSourceUrl`, `importedAt`** (all null
+  for a product made in Markii). Read-only. Worth an "Imported from Shopify" line with a link on
+  the product page; nothing renders it yet.
+- **WooCommerce imports now carry `options`/`variants`** like Shopify. Nothing to change — the
+  allocate table already counts variants.
+- **A re-run of the same store import** now lists already-imported products in commit `failed`
+  ("already imported on site N as …"). Expected, not an error to alarm about.
+- **Changed in the wizard (review):** it takes an `orgCurrency` prop (from `getMe` in
+  `websites/new/page.tsx`), used for hand-added and template products, which were being created in
+  USD. A yen or other zero-decimal org still gets USD there until D49's display/charge mismatch is
+  fixed — otherwise a hand-added product would show one price and charge 100× another. Hand-added
+  products are now staged at **stock 0 with "Stock not set"** — the form asks for no quantity and
+  used to invent 10. The draft list no longer repeats the currency code after the formatted price.
+
 ### 🟢 New 2026-10-22 — imports stop inventing data; two components changed for you (D49)
 
 `docs/API.md` §5, `lib/api/import.ts`. The parse response and commit response changed shape, and I

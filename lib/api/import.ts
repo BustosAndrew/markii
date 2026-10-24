@@ -33,6 +33,10 @@ export type ImportedItem = {
   categoryName?: string | null;
   options?: { name: string; values: string[] }[];
   variants?: ImportedVariant[];
+  /** Provenance — pass through untouched. Stored on the product as `importSource` etc. */
+  source?: "csv" | "shopify" | "woocommerce" | "scrape";
+  sourceId?: string | null;
+  sourceUrl?: string | null;
 };
 
 export type ImportWarning = {

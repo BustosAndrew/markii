@@ -110,6 +110,14 @@ export type Product = {
   enabled: boolean;
   suggestedProductIds: number[];
   addOns: { productId: number; mandatory: boolean }[];
+  /**
+   * Where an imported product came from (§5, D49) — all null for a product
+   * made in Markii. Read-only: no route accepts these.
+   */
+  importSource: "csv" | "shopify" | "woocommerce" | "scrape" | null;
+  importSourceId: string | null;
+  importSourceUrl: string | null;
+  importedAt: string | null;
   digitalAssets?: {
     attachmentId: number;
     assetId: number;

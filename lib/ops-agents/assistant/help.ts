@@ -158,10 +158,12 @@ Categories organise a store's catalog; collections are curated (manual) or rule-
 
 You can import a catalog from a CSV file, a Shopify or WooCommerce store, or a site's product pages — when creating a store or from the Catalog page. What an import brings across:
 - Shopify products keep all their variants (sizes, colours) with their own prices and SKUs. Option combinations the original store never sold are created too, with no stock.
-- WooCommerce products with variations come in as the base product only; add the options afterwards.
+- WooCommerce products keep their variations too, up to 500 variations per import. A product whose variations cannot all be read — or that uses WooCommerce's "any" option value — comes in as the base product, and the import names it.
 - Stock counts usually are not published by the source store, so those products come in at 0 and cannot be bought until you set the real quantity. The import tells you which ones.
 - Prices keep the source store's currency. Prices in currencies without two decimal places (such as yen) cannot be imported yet.
 - Up to 1,000 products per store import; for more, use a CSV export.
+- Running the same store import again skips products it already brought in, even if they were renamed at the source.
+- Each imported product records where it came from: the platform, its page there, and when it was imported.
 
 The Catalog agent can review your catalog and propose fixes — descriptions, prices, collections, stock — for you to approve one by one.`,
       links: [

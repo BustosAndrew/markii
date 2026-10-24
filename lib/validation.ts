@@ -246,6 +246,10 @@ export const importItemSchema = z.object({
     )
     .max(250)
     .optional(),
+  /** Provenance, written to `products.import_*` and never accepted by any other route. */
+  source: z.enum(["csv", "shopify", "woocommerce", "scrape"]).optional(),
+  sourceId: z.string().max(100).nullish(),
+  sourceUrl: z.string().max(2000).nullish(),
 });
 
 export const importCategorySchema = z.object({

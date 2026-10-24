@@ -716,8 +716,16 @@ importer into private space. DNS rebinding between check and connect remains a r
   (`MAX_IMPORT_PRODUCTS`); past that a `TRUNCATED` warning says so. It used to read one page (250 /
   100) and stop silently. CSV has no cap.
 - **Variants.** Shopify products keep every variant (`options` + `variants`: price, compare-at,
-  SKU). WooCommerce variations need a request per product and are **not** imported — the base
-  product is, with a `VARIANTS_NOT_IMPORTED` warning naming them.
+  SKU). **WooCommerce variations are imported too** (2026-10-23): the Store API lists a variable
+  product's variation ids but not their prices, so each variation is read from
+  `/wp-json/wc/store/v1/products/{id}`, six at a time, up to **500 per import**
+  (`MAX_VARIATION_FETCHES`), whole products only. Options come from the parent's attribute terms.
+  **All or nothing per product**: a variation that cannot be read, a WooCommerce "any" value (no
+  single cell in an option grid) or a variation in another currency brings the product in as its
+  base, named in a `VARIANTS_NOT_IMPORTED` warning.
+- **Provenance.** Every staged item carries `source`, `sourceId` (the platform's own product id —
+  Shopify and WooCommerce only) and `sourceUrl` (its page there). The commit stores them on the
+  product.
 - **Descriptions** are converted from HTML to plain text with paragraph breaks and decoded
   entities.
 
@@ -766,6 +774,14 @@ source never sold are created with no stock and reported as `EXTRA_VARIANTS`. If
 refused, the product still exists and `failed` says *"the product was created, but its variants were
 not: …"*. The product row itself is still a direct insert, as `POST /api/products` is — product
 creation has never been a registry action. Items in an unsupported currency are refused here too.
+
+**Provenance and re-import** (migration 0044, 2026-10-23). The commit writes `products.import_source`,
+`import_source_id`, `import_source_url` (http(s) only) and `imported_at`; **no other route accepts
+them**, so an edit cannot make a product look imported. They come back on every `Product` as
+`importSource`, `importSourceId`, `importSourceUrl`, `importedAt` — all null for a product made in
+Markii. An item whose `source` + `sourceId` already exists on the target site is refused with
+*"already imported on site N as "…" (#id)"* — so re-running an import skips what it brought in even
+when the source renamed the product (the slug check alone would have duplicated it).
 
 ---
 

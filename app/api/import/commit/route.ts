@@ -150,6 +150,32 @@ export const POST = orgHandler(async (req, { orgId, session }) => {
       continue;
     }
 
+    /**
+     * A re-run of the same import recognises what it already brought in by the
+     * source's own id, not only by slug — a product renamed at the source would
+     * otherwise come in a second time under its new slug.
+     */
+    if (item.source && item.sourceId) {
+      const [already] = await db
+        .select({ id: products.id, name: products.name })
+        .from(products)
+        .where(
+          and(
+            eq(products.siteId, alloc.siteId),
+            eq(products.importSource, item.source),
+            eq(products.importSourceId, item.sourceId),
+          ),
+        )
+        .limit(1);
+      if (already) {
+        failed.push({
+          tempId: alloc.tempId,
+          reason: `already imported on site ${alloc.siteId} as "${already.name}" (#${already.id})`,
+        });
+        continue;
+      }
+    }
+
     const slug = item.slug ?? slugify(item.name);
     const [taken] = await db
       .select({ id: products.id })
@@ -174,6 +200,11 @@ export const POST = orgHandler(async (req, { orgId, session }) => {
         sku: item.sku ?? null,
         stock: item.stock,
         images: item.images,
+        importSource: item.source ?? null,
+        importSourceId: item.source ? (item.sourceId ?? null) : null,
+        importSourceUrl:
+          item.sourceUrl && /^https?:\/\//.test(item.sourceUrl) ? item.sourceUrl : null,
+        importedAt: new Date(),
       })
       .returning();
     createdProducts.push(row);

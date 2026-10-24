@@ -307,6 +307,23 @@ export const products = pgTable(
       (): SQL =>
         sql`setweight(to_tsvector('english', coalesce(${products.name}, '')), 'A') || setweight(to_tsvector('english', coalesce(${products.sku}, '')), 'A') || setweight(to_tsvector('english', regexp_replace(coalesce(${products.description}, ''), '<[^>]*>', ' ', 'g')), 'B')`,
     ),
+    /**
+     * Where an imported product came from (§5, D49). All null for a product
+     * made in Markii. Written once, by `/api/import/commit`, and by nothing
+     * else — no route accepts these fields, so a later edit cannot make a
+     * product look imported or launder where it came from.
+     *
+     * `importSourceId` is the source platform's own id (Shopify product id,
+     * WooCommerce product id), which is what lets a re-run of the same import
+     * recognise a product it already brought in rather than duplicating it
+     * under a slug that happened to change. CSV rows and scraped pages have no
+     * stable id, so theirs is null and they fall back to the slug check.
+     */
+    importSource: text("import_source", { enum: ["csv", "shopify", "woocommerce", "scrape"] }),
+    /** The product's page at the source, when there is one. */
+    importSourceUrl: text("import_source_url"),
+    importSourceId: text("import_source_id"),
+    importedAt: timestamp("imported_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -317,6 +334,10 @@ export const products = pgTable(
     index("products_requires_tier_idx").on(t.requiresTierId),
     index("products_grants_tier_idx").on(t.grantsTierId),
     index("products_search_idx").using("gin", t.searchVector),
+    /** Re-import lookup: has this site already brought in that source product? */
+    index("products_import_source_idx")
+      .on(t.siteId, t.importSource, t.importSourceId)
+      .where(sql`${t.importSourceId} is not null`),
   ],
 );
 

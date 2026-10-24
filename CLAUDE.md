@@ -563,8 +563,10 @@ the same commit as the fact it states**. Prices are kept out of it (unit-tested)
 **The importer stopped inventing data on 2026-10-22** (D49, `docs/API.md` §5). Unknown stock
 stages at 0 with `stockKnown: false` — it used to be 10; Shopify's currency is read from the store
 or the import refuses — it used to be USD; Shopify and WooCommerce page to 1,000 products with a
-warning past it; Shopify variants land through one `catalog.setProductOptions` call (`initialValues`);
-redirects are re-checked hop by hop. **Currencies without two decimals are refused at import** —
+warning past it; Shopify **and WooCommerce** variants land through one `catalog.setProductOptions`
+call (`initialValues`; Woo variations are one request each, 500 per import, all-or-nothing);
+redirects are re-checked hop by hop. **Provenance is stored** (migration 0044, `products.import_*`,
+written only by `/api/import/commit`), and a re-import is recognised by the source's own id. **Currencies without two decimals are refused at import** —
 and that guards a bug that is *not* fixed: `priceCents` is displayed ÷100 for every currency but
 charged as the currency's own minor unit, so a JPY product shows one price and charges 100× another.
 That is a money change across display, JSON-LD and checkout, and it is still open.

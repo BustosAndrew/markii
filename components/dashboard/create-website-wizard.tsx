@@ -54,7 +54,18 @@ const emptyDraft: PreviewDraft = {
 
 type Step = 1 | 2 | 3 | 4;
 
-export function CreateWebsiteWizard({ sites }: { sites: Site[] }) {
+/**
+ * `orgCurrency` prices everything the merchant adds by hand or from the
+ * template. Imported products keep their source's currency. Without it, hand-
+ * added products were created in USD whatever the organization sells in.
+ */
+export function CreateWebsiteWizard({
+  sites,
+  orgCurrency,
+}: {
+  sites: Site[];
+  orgCurrency: string;
+}) {
   const router = useRouter();
   const [step, setStep] = useState<Step>(1);
   const [draft, setDraft] = useState<PreviewDraft>(emptyDraft);
@@ -189,7 +200,10 @@ export function CreateWebsiteWizard({ sites }: { sites: Site[] }) {
     setError(null);
     try {
       const template = await getTemplate();
-      setDraft(template);
+      setDraft({
+        ...template,
+        products: template.products.map((p) => ({ ...p, currency: p.currency ?? orgCurrency })),
+      });
       setStep(2);
     } catch (err) {
       setError(
@@ -232,7 +246,10 @@ export function CreateWebsiteWizard({ sites }: { sites: Site[] }) {
           priceCents,
           description: productDesc.trim() || undefined,
           categorySlug: prev.categories[0]?.slug,
-          stock: 10,
+          currency: orgCurrency,
+          // The form asks for no quantity, so none is invented: 0 and flagged, like an import.
+          stock: 0,
+          stockKnown: false,
           images: [],
         },
       ],
@@ -332,6 +349,7 @@ export function CreateWebsiteWizard({ sites }: { sites: Site[] }) {
           slug: product.slug || slugify(product.name),
           description: product.description ?? null,
           priceCents: product.priceCents,
+          currency: product.currency ?? orgCurrency,
           stock: product.stock ?? 0,
           images: product.images ?? [],
           enabled: true,
@@ -560,8 +578,7 @@ export function CreateWebsiteWizard({ sites }: { sites: Site[] }) {
                         {p.name}
                       </p>
                       <p className="text-xs text-muted">
-                        {formatCents(p.priceCents, p.currency ?? "USD")}
-                        {p.currency ? ` · ${p.currency}` : ""}
+                        {formatCents(p.priceCents, p.currency ?? orgCurrency)}
                         {p.categorySlug ? ` · ${p.categorySlug}` : ""}
                       </p>
                       {p.stockKnown === false ? (

@@ -71,6 +71,54 @@ describe("import commit", () => {
     expect(audits[0]).toMatchObject({ actor_type: "user", ok: true });
   });
 
+  /**
+   * Provenance is stored, and a second run of the same import recognises the
+   * product by the source's own id — even when the slug has changed since.
+   */
+  it("records where a product came from and refuses to import it twice", async () => {
+    const item = {
+      tempId: "imp_p",
+      name: "Sourced Mug",
+      slug: `sourced-mug-${stamp}`,
+      priceCents: 1500,
+      currency: "USD",
+      source: "shopify",
+      sourceId: `src-${stamp}`,
+      sourceUrl: "https://shop.test/products/sourced-mug",
+    };
+    const first = await merchant.post("/api/import/commit", {
+      items: [item],
+      categories: [],
+      allocations: [{ tempId: "imp_p", siteId }],
+    });
+    expect(first.status, JSON.stringify(first.json)).toBe(201);
+    const created = first.json.createdProducts[0];
+    expect(created).toMatchObject({
+      importSource: "shopify",
+      importSourceId: `src-${stamp}`,
+      importSourceUrl: "https://shop.test/products/sourced-mug",
+    });
+    expect(created.importedAt).toBeTruthy();
+
+    const again = await merchant.post("/api/import/commit", {
+      items: [{ ...item, slug: `renamed-mug-${stamp}` }],
+      categories: [],
+      allocations: [{ tempId: "imp_p", siteId }],
+    });
+    expect(again.status).toBe(201);
+    expect(again.json.createdProducts).toEqual([]);
+    expect(again.json.failed[0].reason).toMatch(new RegExp(`already imported .*#${created.id}`));
+  });
+
+  /** Provenance is written by the import commit alone; editing a product cannot set it. */
+  it("does not let a product edit claim an import source", async () => {
+    const [made] = await sql`select id from products where site_id = ${siteId} and import_source is null limit 1`;
+    const res = await merchant.patch(`/api/products/${made.id}`, { importSource: "shopify", importSourceId: "x" });
+    expect([200, 400]).toContain(res.status);
+    const [row] = await sql`select import_source, import_source_id from products where id = ${made.id}`;
+    expect(row).toEqual({ import_source: null, import_source_id: null });
+  });
+
   /** A yen product would display one price and charge another; the commit refuses it too. */
   it("refuses an item in a currency without two decimals, even when sent directly", async () => {
     const res = await merchant.post("/api/import/commit", {

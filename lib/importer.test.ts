@@ -23,7 +23,9 @@ const {
   importableCurrency,
   parsePriceToCents,
   productsFromJsonLd,
+  wooVariants,
   MAX_IMPORT_PRODUCTS,
+  MAX_VARIATION_FETCHES,
 } = await import("./importer");
 
 describe("parsePriceToCents", () => {
@@ -334,5 +336,159 @@ describe("fetching a store", () => {
     const fetched = fetchMock.mock.calls.map((c) => String(c[0]));
     expect(fetched.some((u) => u.includes("metadata.evil.test"))).toBe(false);
     for (const call of fetchMock.mock.calls) expect(call[1]?.redirect).toBe("manual");
+  });
+});
+
+// ---------- WooCommerce variations and provenance (2026-10-23) ----------
+
+/** A variable WooCommerce product, as the Store API lists it: ids and picks, no prices. */
+const variable = (overrides: Record<string, unknown> = {}) => ({
+  id: 40,
+  name: "Hoodie",
+  slug: "hoodie",
+  permalink: "https://woo.test/product/hoodie/",
+  type: "variable",
+  prices: { price: "3000", currency_code: "USD", currency_minor_unit: 2 },
+  is_in_stock: true,
+  sku: "HOOD",
+  images: [],
+  categories: [],
+  attributes: [
+    {
+      name: "Size",
+      taxonomy: "pa_size",
+      has_variations: true,
+      terms: [
+        { name: "Small", slug: "small" },
+        { name: "Large", slug: "large" },
+      ],
+    },
+  ],
+  variations: [
+    { id: 41, attributes: [{ name: "Size", value: "small" }] },
+    { id: 42, attributes: [{ name: "Size", value: "large" }] },
+  ],
+  ...overrides,
+});
+
+const variation = (price: string, extra: Record<string, unknown> = {}) => ({
+  prices: { price, regular_price: price, currency_code: "USD", currency_minor_unit: 2 },
+  ...extra,
+});
+
+describe("WooCommerce variations", () => {
+  it("builds options from attribute terms and each variant from its own record", () => {
+    const byId = new Map<number, unknown>([
+      [41, variation("3000", { sku: "HOOD-S" })],
+      [
+        42,
+        variation("3500", {
+          sku: "HOOD-L",
+          prices: { price: "3500", regular_price: "4000", currency_code: "USD", currency_minor_unit: 2 },
+        }),
+      ],
+    ]);
+    const { items, withVariations } = fromWoo([variable()], 0, byId);
+    expect(withVariations).toEqual([]);
+    expect(items[0].options).toEqual([{ name: "Size", values: ["Small", "Large"] }]);
+    expect(items[0].variants).toEqual([
+      { title: "Small", optionValues: { Size: "Small" }, priceCents: 3000, compareAtCents: null, sku: "HOOD-S" },
+      { title: "Large", optionValues: { Size: "Large" }, priceCents: 3500, compareAtCents: 4000, sku: "HOOD-L" },
+    ]);
+    // The parent SKU names nothing sellable once variants carry their own.
+    expect(items[0].sku).toBeNull();
+  });
+
+  /** Some of a product's variants is a product a shopper cannot buy in the size you stock. */
+  it("is all or nothing: a missing variation brings in the base product, flagged", () => {
+    const r = fromWoo([variable()], 0, new Map([[41, variation("3000")]]));
+    expect(r.items[0].variants).toBeUndefined();
+    expect(r.withVariations).toEqual([r.items[0].tempId]);
+  });
+
+  it("refuses the wildcard value, which has no cell in an option grid", () => {
+    const p = variable({ variations: [{ id: 41, attributes: [{ name: "Size", value: "" }] }] });
+    expect(wooVariants(p, new Map([[41, variation("3000")]]), "USD")).toBeNull();
+  });
+
+  it("refuses a variation priced in another currency", () => {
+    const eur = { prices: { price: "3000", currency_code: "EUR", currency_minor_unit: 2 } };
+    expect(wooVariants(variable(), new Map<number, unknown>([[41, eur], [42, variation("3000")]]), "USD")).toBeNull();
+  });
+});
+
+describe("provenance", () => {
+  it("records each source's own id and page", () => {
+    const shop = fromShopify({ products: [shopifyProduct({ id: 7001 })] }, "USD", 0, "https://shop.test");
+    expect(shop.items[0]).toMatchObject({
+      source: "shopify",
+      sourceId: "7001",
+      sourceUrl: "https://shop.test/products/tee",
+    });
+
+    const woo = fromWoo([variable({ type: "simple", variations: [] })]);
+    expect(woo.items[0]).toMatchObject({
+      source: "woocommerce",
+      sourceId: "40",
+      sourceUrl: "https://woo.test/product/hoodie/",
+    });
+
+    const csv = importFromCsv("name,price\nA,1", { defaultCurrency: "USD" });
+    expect(csv.imported[0]).toMatchObject({ source: "csv", sourceId: null, sourceUrl: null });
+  });
+
+  it("gives a scraped product the page it was found on", () => {
+    const html = `<script type="application/ld+json">${JSON.stringify({
+      "@type": "Product",
+      name: "Lamp",
+      offers: { price: "5", priceCurrency: "USD" },
+    })}</script>`;
+    expect(productsFromJsonLd(html, "https://x.test/p/lamp").items[0]).toMatchObject({
+      source: "scrape",
+      sourceId: null,
+      sourceUrl: "https://x.test/p/lamp",
+    });
+  });
+});
+
+describe("fetching WooCommerce variations", () => {
+  const fetchMock = vi.fn();
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+  afterEach(() => vi.unstubAllGlobals());
+  const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
+  const variationCalls = () => fetchMock.mock.calls.filter((c) => /\/products\/\d+$/.test(String(c[0])));
+
+  it("reads each variation once and brings the product in with its variants", async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.includes("products.json")) return new Response("", { status: 404 });
+      if (url.includes("/products?per_page")) return json([variable()]);
+      if (url.endsWith("/products/41")) return json(variation("3000"));
+      if (url.endsWith("/products/42")) return json(variation("3200"));
+      return new Response("", { status: 404 });
+    });
+    const r = await importFromUrl("https://woo.test/");
+    expect(r.source).toBe("woocommerce");
+    expect(r.imported[0].variants?.map((v) => v.priceCents)).toEqual([3000, 3200]);
+    expect(r.warnings.map((w) => w.code)).not.toContain("VARIANTS_NOT_IMPORTED");
+    expect(variationCalls()).toHaveLength(2);
+  });
+
+  /** The budget bounds an import's requests; past it products come in as their base, named. */
+  it("stops reading variations at the budget and names the products left as their base", async () => {
+    const many = Array.from({ length: MAX_VARIATION_FETCHES + 1 }, (_, i) => ({
+      id: 1000 + i,
+      attributes: [{ name: "Size", value: "small" }],
+    }));
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.includes("products.json")) return new Response("", { status: 404 });
+      if (url.includes("/products?per_page")) return json([variable({ variations: many })]);
+      return json(variation("3000"));
+    });
+    const r = await importFromUrl("https://woo.test/");
+    expect(variationCalls()).toHaveLength(0);
+    expect(r.warnings.find((w) => w.code === "VARIANTS_NOT_IMPORTED")?.tempIds).toEqual([r.imported[0].tempId]);
   });
 });

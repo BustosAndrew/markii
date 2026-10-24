@@ -10,7 +10,11 @@ export type PreviewDraftProduct = {
   description?: string;
   categorySlug?: string;
   stock?: number;
-  /** False → the source published no count. Not sent to preview; used in the draft list. */
+  /**
+   * False → no real count is known (an import that published none, or a product added by
+   * hand, whose form asks for none). Sent with the draft and ignored by preview, whose schema
+   * drops unknown fields; the draft list reads it.
+   */
   stockKnown?: boolean;
   images?: string[];
   /** Set when the product came from an import; the wizard commits it through `/api/import/commit`. */
