@@ -56,8 +56,22 @@ describe("parsePriceToCents", () => {
 });
 
 describe("importableCurrency", () => {
-  it("accepts two-decimal currencies, USDC included", () => {
-    for (const c of ["USD", "EUR", "GBP", "CAD", "USDC"]) expect(importableCurrency(c), c).toBe(true);
+  it("accepts two-decimal ISO currencies", () => {
+    for (const c of ["USD", "EUR", "GBP", "CAD"]) expect(importableCurrency(c), c).toBe(true);
+  });
+
+  /**
+   * Every product schema requires a three-letter code, so a staged USDC row
+   * failed the wizard's whole preview and would have failed the commit batch.
+   */
+  it("refuses USDC, which no product schema accepts", async () => {
+    const { bundleProductSchema, importItemSchema } = await import("./validation");
+    expect(importableCurrency("USDC")).toBe(false);
+    expect(bundleProductSchema.safeParse({ name: "x", currency: "USDC" }).success).toBe(false);
+    expect(importItemSchema.safeParse({ tempId: "a", name: "x", currency: "USDC" }).success).toBe(false);
+    const r = importFromCsv("name,price,currency\nCoin,5,USDC\nMug,5,USD", { defaultCurrency: "USD" });
+    expect(r.imported.map((i) => i.currency)).toEqual(["USD"]);
+    expect(r.failed[0]).toMatchObject({ row: 2, name: "Coin" });
   });
 
   /**

@@ -90,9 +90,15 @@ const MAX_IMAGES = 20;
  * factor of 100 or 10, so an imported yen product would show one price and
  * charge another. Refusing is better than creating that store. Lift this when
  * the two readers agree (`docs/API.md` §5).
+ *
+ * **Three-letter ISO codes only.** `USDC` once passed here, but every product
+ * schema — preview, import commit, product create — requires exactly three
+ * letters, so one USDC row failed the wizard's whole preview and would have
+ * failed the whole commit batch. x402 settles in USDC; products are priced in
+ * a currency.
  */
 export function importableCurrency(code: string): boolean {
-  return /^[A-Z]{3,4}$/.test(code) && currencyExponent(code) === 2;
+  return /^[A-Z]{3}$/.test(code) && currencyExponent(code) === 2;
 }
 
 /**
@@ -332,7 +338,7 @@ export function importFromCsv(text: string, opts: { defaultCurrency: string }): 
 }
 
 function unsupportedCurrencyReason(currency: string): string {
-  return /^[A-Z]{3,4}$/.test(currency)
+  return /^[A-Z]{3}$/.test(currency)
     ? `prices in ${currency} cannot be imported yet — only currencies with two decimal places are supported`
     : `"${currency}" is not a currency code`;
 }
