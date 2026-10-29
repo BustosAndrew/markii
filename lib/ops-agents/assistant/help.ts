@@ -57,7 +57,7 @@ Recommended after that: fill catalog gaps (the Catalog agent can propose fixes),
       body: `Payment methods are peers — pick any combination per store.
 
 - Card, through Stripe Connect. You connect your own Stripe account; charges are made on it, payouts go straight to you, and your rates and dashboard are Stripe's. Markii takes no cut of the charge and never holds your funds. Stripe's processing fee is Stripe's. Stripe may ask for verification documents before it enables charges — until it does, card payments are not offered at checkout.
-- x402 (USDC). Payment goes to a wallet address you set, on the store or as your organization's default.
+- x402 (USDC). Payment goes to a wallet address you set, on the store or as your organization's default. USDC is tied to the US dollar, so x402 is only offered for products priced in USD; for other currencies shoppers pay by card.
 - PayPal is not available yet.
 
 Markii charges no platform fee for using your own payment provider, on any plan.
@@ -160,7 +160,7 @@ You can import a catalog from a CSV file, a Shopify or WooCommerce store, or a s
 - Shopify products keep all their variants (sizes, colours) with their own prices and SKUs. Option combinations the original store never sold are created too, with no stock.
 - WooCommerce products keep their variations too, up to 500 variations per import. A product whose variations cannot all be read — or that uses WooCommerce's "any" option value — comes in as the base product, and the import names it.
 - Stock counts usually are not published by the source store, so those products come in at 0 and cannot be bought until you set the real quantity. The import tells you which ones.
-- Prices keep the source store's currency. Prices in currencies without two decimal places (such as yen) cannot be imported yet.
+- Prices keep the source store's currency, including currencies without decimal places such as yen. A price more precise than its currency allows is not rounded; that product is listed as not imported.
 - Up to 1,000 products per store import; for more, use a CSV export.
 - Running the same store import again skips products it already brought in, even if they were renamed at the source.
 - Each imported product records where it came from: the platform, its page there, and when it was imported.

@@ -331,19 +331,29 @@ describe("MCP protocol conformance", () => {
     it("refuses once the window is spent, and says how long to wait", async () => {
       const { consumeRateLimit } = await import("@/lib/rate-limit-store");
       const tiny = { limit: 3, windowMs: 60_000 };
+      /**
+       * One clock for every call. Three calls still crossed a minute boundary
+       * in a slow full-suite run (2026-10-29: the second call answered 2, a new
+       * window), because windows are aligned to the wall clock. Pinning `now`
+       * puts all four in the same window whatever the latency.
+       */
+      const now = new Date();
 
-      expect((await consumeRateLimit(probeKey, tiny)).remaining).toBe(2);
-      expect((await consumeRateLimit(probeKey, tiny)).remaining).toBe(1);
+      try {
+        expect((await consumeRateLimit(probeKey, tiny, now)).remaining).toBe(2);
+        expect((await consumeRateLimit(probeKey, tiny, now)).remaining).toBe(1);
 
-      const last = await consumeRateLimit(probeKey, tiny);
-      expect(last.allowed).toBe(true);
-      expect(last.remaining).toBe(0);
+        const last = await consumeRateLimit(probeKey, tiny, now);
+        expect(last.allowed).toBe(true);
+        expect(last.remaining).toBe(0);
 
-      const over = await consumeRateLimit(probeKey, tiny);
-      expect(over.allowed).toBe(false);
-      expect(over.retryAfterSeconds).toBeGreaterThanOrEqual(1);
-
-      await sql`delete from rate_limit_counters where key = ${probeKey}`;
+        const over = await consumeRateLimit(probeKey, tiny, now);
+        expect(over.allowed).toBe(false);
+        expect(over.retryAfterSeconds).toBeGreaterThanOrEqual(1);
+      } finally {
+        // In `finally`: a failure here left the row behind and failed the next test too.
+        await sql`delete from rate_limit_counters where key = ${probeKey}`;
+      }
     }, 90_000);
 
     /**
@@ -355,15 +365,17 @@ describe("MCP protocol conformance", () => {
       const { consumeRateLimit } = await import("@/lib/rate-limit-store");
       const tiny = { limit: 3, windowMs: 60_000 };
 
-      await consumeRateLimit(probeKey, tiny, new Date(Date.now() - 5 * 60_000));
-      const fresh = await consumeRateLimit(probeKey, tiny);
-      expect(fresh.remaining).toBe(tiny.limit - 1);
+      try {
+        await consumeRateLimit(probeKey, tiny, new Date(Date.now() - 5 * 60_000));
+        const fresh = await consumeRateLimit(probeKey, tiny);
+        expect(fresh.remaining).toBe(tiny.limit - 1);
 
-      const [{ n }] = await sql`select count(*)::int as n from rate_limit_counters
-        where key = ${probeKey}`;
-      expect(n).toBe(1);
-
-      await sql`delete from rate_limit_counters where key = ${probeKey}`;
+        const [{ n }] = await sql`select count(*)::int as n from rate_limit_counters
+          where key = ${probeKey}`;
+        expect(n).toBe(1);
+      } finally {
+        await sql`delete from rate_limit_counters where key = ${probeKey}`;
+      }
     }, 90_000);
   });
 

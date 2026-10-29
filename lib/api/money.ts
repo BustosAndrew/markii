@@ -1,8 +1,3 @@
-const currencyDisplay: Record<string, string> = {
-  USD: "USD",
-  USDC: "USDC",
-};
-
 /**
  * Codes `Intl` cannot resolve as ISO 4217. Markii denominates USDC in
  * 2-decimal minor units; `lib/x402.ts` converts that to the token's 6-decimal
@@ -84,32 +79,31 @@ export function decimalMinor(amountMinor: number, currency: string): string {
 }
 
 /**
- * Legacy `*Cents` fields from API §1–8 only, which are USD/USDC-shaped by
- * design. Anything with a `Minor` suffix uses {@link formatMinor} (D31).
+ * The inverse of {@link decimalMinor}: a typed decimal (`"19.99"`, `"1500"`)
+ * → integer minor units of `currency`, by string work. Null for anything that
+ * is not a plain non-negative amount, or that has more decimals than the
+ * currency does (`"1500.5"` yen) — rounding a price is the merchant's call,
+ * not a form's.
+ */
+export function parseDecimalToMinor(value: string, currency: string): number | null {
+  const exponent = currencyExponent(currency);
+  const m = /^(\d+)(?:\.(\d*))?$/.exec(value.trim());
+  if (!m || (m[2] ?? "").length > exponent) return null;
+  const minor = Number(m[1]) * 10 ** exponent + Number((m[2] ?? "").padEnd(exponent, "0") || "0");
+  return Number.isSafeInteger(minor) ? minor : null;
+}
+
+/**
+ * Legacy `*Cents` fields from API §1–8. Despite the name they hold the
+ * currency's **own** minor unit — checkout has always charged them that way
+ * (`unitPriceOf`), and display now agrees, so this is {@link formatMinor}
+ * under its old name. It divided by 100 for every currency until 2026-10-29,
+ * which showed a yen product at 1/100 of what it charged (D49).
  */
 export function formatCents(
   cents: number,
   currency = "USD",
   locale = "en-US",
 ): string {
-  const amount = cents / 100;
-  const code = currencyDisplay[currency] ?? currency;
-
-  if (code === "USDC") {
-    return `${new Intl.NumberFormat(locale, {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(amount)} USDC`;
-  }
-
-  try {
-    return new Intl.NumberFormat(locale, {
-      style: "currency",
-      currency: code,
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(amount);
-  } catch {
-    return `${amount.toFixed(2)} ${code}`;
-  }
+  return formatMinor(cents, currency, locale);
 }

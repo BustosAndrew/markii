@@ -15,7 +15,13 @@ import {
 } from "@/lib/commerce/reservations";
 import { cartLines, carts, checkoutSessions, db, orders, variants } from "@/lib/db";
 import { defaultWallet } from "@/lib/integrations";
-import { buildChallenge, decodePaymentHeader, verifyOnChain } from "@/lib/x402";
+import {
+  buildChallenge,
+  decodePaymentHeader,
+  verifyOnChain,
+  X402_CURRENCY_MESSAGE,
+  x402SettlesCurrency,
+} from "@/lib/x402";
 import { checkoutSchema } from "@/lib/validation";
 import { loadSite, storefrontHalted } from "@/lib/storefront";
 
@@ -88,6 +94,11 @@ async function checkout(req: Request, siteSlug: string, input: unknown) {
       { error: "store has no stock location configured for this product" },
       { status: 503 },
     );
+  }
+
+  // Before the challenge: an agent that settles a non-USD price has paid at a rate nobody chose.
+  if (!x402SettlesCurrency(product.currency)) {
+    return NextResponse.json({ error: X402_CURRENCY_MESSAGE, currency: product.currency }, { status: 409 });
   }
 
   const payTo = site.walletAddress ?? (await defaultWallet(site.orgId));

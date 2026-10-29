@@ -2,6 +2,7 @@ import { desc, eq } from "drizzle-orm";
 import { orgHandler } from "@/lib/auth/handler";
 import { db, orders, products } from "@/lib/db";
 import { resolveSite, serializeOrders, transactionFilters } from "@/lib/queries";
+import { decimalMinor } from "@/lib/api/money";
 
 const csvCell = (v: unknown): string => {
   const s = v == null ? "" : String(v);
@@ -29,7 +30,7 @@ export const GET = orgHandler(async (req, { params, orgId }) => {
       o.createdAt instanceof Date ? o.createdAt.toISOString() : o.createdAt,
       o.product?.name ?? "",
       o.quantity,
-      (o.amountCents / 100).toFixed(2),
+      decimalMinor(o.amountCents, o.currency),
       o.currency,
       o.provider,
       o.status,

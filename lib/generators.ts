@@ -1,5 +1,6 @@
 import type { Product as SchemaProduct, WithContext } from "schema-dts";
 import { slugify, tenantBaseUrl } from "@/lib/api";
+import { decimalMinor } from "@/lib/api/money";
 import type { Category, Collection, Product, Site } from "@/lib/db";
 import { getTheme, themeDocumentStylesheet } from "@/lib/storefront/themes";
 
@@ -92,8 +93,15 @@ export function bundleFromDb(
   };
 }
 
+/**
+ * A legacy `priceCents` amount for storefront text. `priceCents` is the
+ * currency's own minor unit — that is how checkout has always charged it — so
+ * the decimal places come from the currency (¥1500 is `1500 JPY`, not
+ * `15.00 JPY`). Until 2026-10-29 this divided by 100 for every currency and a
+ * yen product showed one price while charging 100× another (D49).
+ */
 export function formatPrice(cents: number, currency: string): string {
-  const value = (cents / 100).toFixed(2);
+  const value = decimalMinor(cents, currency);
   return currency === "USD" || currency === "USDC" ? `$${value}` : `${value} ${currency}`;
 }
 
@@ -196,6 +204,9 @@ export function generateAgentMd(
 4. Retry the same request with header
    \`X-PAYMENT: base64({"txHash":"0x...","from":"0x..."})\`.
 5. On verification you receive \`200\` with a fulfillment receipt and the order id.
+
+USDC is pegged to the US dollar, so x402 takes **USD prices only**; a product priced in another
+currency answers \`409\` rather than settle at a rate nobody chose.
 `
     : `## Purchase
 
@@ -255,7 +266,8 @@ export function productJsonLd(
     url: `${baseUrl}/p/${product.slug}`,
     offers: {
       "@type": "Offer",
-      price: (product.priceCents / 100).toFixed(2),
+      // The currency's own decimals, as the price is charged (see formatPrice).
+      price: decimalMinor(product.priceCents, product.currency),
       priceCurrency: product.currency,
       availability:
         product.stock > 0 ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",

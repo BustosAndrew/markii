@@ -30,11 +30,7 @@ export type StagedProduct = {
   tempId: string;
   name: string;
   slug: string;
-  /**
-   * Two-decimal minor units, the legacy `Cents` shape (§1–8, D31). Only
-   * currencies with two decimals are staged at all — see
-   * {@link importableCurrency}.
-   */
+  /** Minor units of `currency` — its own exponent, so ¥1,500 is 1500 (D49). */
   priceCents: number;
   currency: string;
   sku: string | null;
@@ -97,35 +93,35 @@ const MAX_IMAGES = 20;
 // ---------- money ----------
 
 /**
- * Whether prices in this currency can be imported.
+ * Whether prices in this currency can be imported: a three-letter ISO code.
  *
- * **Only two-decimal currencies, for now.** The legacy `priceCents` field is
- * read two ways: the storefront divides it by 100 for every currency, while
- * checkout hands it to Stripe as the currency's own minor unit. For USD or
- * EUR those agree; for JPY (no decimals) or KWD (three) they disagree by a
- * factor of 100 or 10, so an imported yen product would show one price and
- * charge another. Refusing is better than creating that store. Lift this when
- * the two readers agree (`docs/API.md` §5).
+ * Until 2026-10-29 this also required two decimals, because the legacy
+ * `priceCents` field was displayed ÷100 for every currency while checkout
+ * charged it as the currency's own minor unit — a yen product showed one price
+ * and charged 100× another. Display now reads the currency's exponent too
+ * (`formatCents`, `formatPrice`, JSON-LD), so every `*Cents` field means the
+ * currency's own minor unit everywhere and the refusal is gone (D49).
  *
- * **Three-letter ISO codes only.** `USDC` once passed here, but every product
- * schema — preview, import commit, product create — requires exactly three
- * letters, so one USDC row failed the wizard's whole preview and would have
- * failed the whole commit batch. x402 settles in USDC; products are priced in
- * a currency.
+ * **Three letters only.** `USDC` once passed here, but every product schema —
+ * preview, import commit, product create — requires exactly three letters, so
+ * one USDC row failed the wizard's whole preview and would have failed the
+ * whole commit batch. x402 settles in USDC; products are priced in a currency.
  */
 export function importableCurrency(code: string): boolean {
-  return /^[A-Z]{3}$/.test(code) && currencyExponent(code) === 2;
+  return /^[A-Z]{3}$/.test(code);
 }
 
 /**
  * A decimal price — `"19.99"`, `19.9`, `"1,299.00"`, `"19,99"` — as integer
- * two-decimal minor units, without floating-point arithmetic.
+ * minor units of a currency with `exponent` decimals (2 for USD, 0 for JPY,
+ * 3 for KWD), without floating-point arithmetic.
  *
  * Returns null for anything that is not a non-negative amount, or that has
- * real precision below a cent (`"19.995"`): rounding a price is a decision
- * about money, and an importer should not be the one making it.
+ * real precision below the currency's minor unit (`"19.995"` in USD, `"1500.5"`
+ * in JPY): rounding a price is a decision about money, and an importer should
+ * not be the one making it.
  */
-export function parsePriceToCents(value: unknown): number | null {
+export function parsePriceToMinor(value: unknown, exponent = 2): number | null {
   if (value == null || value === "") return null;
   let s = (typeof value === "number" ? String(value) : String(value)).trim();
   if (/e/i.test(s)) return null;
@@ -146,24 +142,28 @@ export function parsePriceToCents(value: unknown): number | null {
   if (!m) return null;
   const whole = m[1];
   let frac = m[2] ?? "";
-  if (frac.length > 2) {
-    if (/[^0]/.test(frac.slice(2))) return null;
-    frac = frac.slice(0, 2);
+  if (frac.length > exponent) {
+    if (/[^0]/.test(frac.slice(exponent))) return null;
+    frac = frac.slice(0, exponent);
   }
-  const cents = Number(whole) * 100 + Number(frac.padEnd(2, "0"));
-  return Number.isSafeInteger(cents) ? cents : null;
+  const minor = Number(whole) * 10 ** exponent + Number(frac.padEnd(exponent, "0") || "0");
+  return Number.isSafeInteger(minor) ? minor : null;
 }
 
 /**
- * Integer minor units in some exponent → two-decimal minor units, exactly.
- * Null when it cannot be done without rounding (more than two decimals that
- * are not all zero).
+ * Integer minor units in the source's exponent → the currency's own exponent,
+ * exactly. WooCommerce reports its own `currency_minor_unit`, which a store can
+ * set differently from ISO (yen shown with two decimals). Null when it cannot
+ * be done without rounding.
  */
-function toTwoDecimals(raw: number, exponent: number): number | null {
+function convertExponent(raw: number, from: number, to: number): number | null {
   if (!Number.isSafeInteger(raw) || raw < 0) return null;
-  if (exponent === 2) return raw;
-  if (exponent < 2) return raw * 10 ** (2 - exponent);
-  const divisor = 10 ** (exponent - 2);
+  if (from === to) return raw;
+  if (from < to) {
+    const out = raw * 10 ** (to - from);
+    return Number.isSafeInteger(out) ? out : null;
+  }
+  const divisor = 10 ** (from - to);
   return raw % divisor === 0 ? raw / divisor : null;
 }
 
@@ -307,18 +307,22 @@ export function importFromCsv(text: string, opts: { defaultCurrency: string }): 
       failed.push({ row: rowNum, reason: "missing name" });
       return;
     }
-    const priceCents = parsePriceToCents(col(row, "price"));
-    if (priceCents == null) {
-      failed.push({ row: rowNum, name, reason: "price is not a number, or has fractions of a cent" });
-      return;
-    }
     const stated = col(row, "currency").toUpperCase();
-    if (!stated) assumedCurrency++;
     const currency = stated || fallbackCurrency;
     if (!importableCurrency(currency)) {
       failed.push({ row: rowNum, name, reason: unsupportedCurrencyReason(currency) });
       return;
     }
+    const priceCents = parsePriceToMinor(col(row, "price"), currencyExponent(currency));
+    if (priceCents == null) {
+      failed.push({
+        row: rowNum,
+        name,
+        reason: `price is not a number, or is more precise than ${currency} allows`,
+      });
+      return;
+    }
+    if (!stated) assumedCurrency++;
 
     const rawStock = col(row, "stock");
     const stock = /^\d+$/.test(rawStock) ? parseInt(rawStock, 10) : null;
@@ -357,9 +361,7 @@ export function importFromCsv(text: string, opts: { defaultCurrency: string }): 
 }
 
 function unsupportedCurrencyReason(currency: string): string {
-  return /^[A-Z]{3}$/.test(currency)
-    ? `prices in ${currency} cannot be imported yet — only currencies with two decimal places are supported`
-    : `"${currency}" is not a currency code`;
+  return `"${currency}" is not a currency code`;
 }
 
 // ---------- SSRF protection ----------
@@ -517,12 +519,13 @@ export function fromShopify(
   const items: StagedProduct[] = [];
   const failed: ImportResult["failed"] = [];
   const clipped: string[] = [];
+  const exponent = currencyExponent(currency);
 
   for (const p of data?.products ?? []) {
     if (!p?.title) continue;
     const rawVariants: any[] = Array.isArray(p.variants) ? p.variants : [];
     const first = rawVariants[0];
-    const priceCents = parsePriceToCents(first?.price);
+    const priceCents = parsePriceToMinor(first?.price, exponent);
     if (priceCents == null) {
       failed.push({ name: p.title, reason: "no readable price" });
       continue;
@@ -559,13 +562,13 @@ export function fromShopify(
           const value = v?.[`option${i + 1}`];
           if (value != null) optionValues[o.name] = String(value).trim();
         });
-        const vPrice = parsePriceToCents(v?.price);
+        const vPrice = parsePriceToMinor(v?.price, exponent);
         if (vPrice == null || Object.keys(optionValues).length !== options.length) continue;
         variants.push({
           title: String(v?.title ?? Object.values(optionValues).join(" / ")),
           optionValues,
           priceCents: vPrice,
-          compareAtCents: parsePriceToCents(v?.compare_at_price),
+          compareAtCents: parsePriceToMinor(v?.compare_at_price, exponent),
           sku: v?.sku ? String(v.sku) : null,
         });
       }
@@ -723,7 +726,7 @@ export function wooVariants(
     if (String(v.prices?.currency_code ?? "").toUpperCase() !== currency) return null;
     const minor = Number.isInteger(v.prices?.currency_minor_unit) ? v.prices.currency_minor_unit : 2;
     const read = (raw: unknown) =>
-      /^\d+$/.test(String(raw ?? "")) ? toTwoDecimals(Number(raw), minor) : null;
+      /^\d+$/.test(String(raw ?? "")) ? convertExponent(Number(raw), minor, currencyExponent(currency)) : null;
     const price = read(v.prices?.price);
     if (price == null) return null;
     const regular = read(v.prices?.regular_price);
@@ -776,7 +779,9 @@ export function fromWoo(
     }
     const raw = /^\d+$/.test(String(p.prices?.price ?? "")) ? Number(p.prices.price) : NaN;
     const minorUnit = Number.isInteger(p.prices?.currency_minor_unit) ? p.prices.currency_minor_unit : 2;
-    const priceCents = Number.isFinite(raw) ? toTwoDecimals(raw, minorUnit) : null;
+    const priceCents = Number.isFinite(raw)
+      ? convertExponent(raw, minorUnit, currencyExponent(currency))
+      : null;
     if (priceCents == null) {
       failed.push({ name, reason: "no readable price" });
       continue;
@@ -913,18 +918,23 @@ export function productsFromJsonLd(html: string, pageUrl: string | null = null):
         if (!node.name) continue;
         const name = String(node.name);
         const offer = Array.isArray(node.offers) ? node.offers[0] : node.offers;
-        const priceCents = parsePriceToCents(offer?.price ?? offer?.lowPrice);
-        if (priceCents == null) {
+        const currency = String(offer?.priceCurrency ?? "").toUpperCase();
+        const rawPrice = offer?.price ?? offer?.lowPrice;
+        if (rawPrice == null || rawPrice === "") {
           failed.push({ name, reason: "no readable price" });
           continue;
         }
-        const currency = String(offer?.priceCurrency ?? "").toUpperCase();
         if (!currency) {
           failed.push({ name, reason: "the page does not say which currency the price is in" });
           continue;
         }
         if (!importableCurrency(currency)) {
           failed.push({ name, reason: unsupportedCurrencyReason(currency) });
+          continue;
+        }
+        const priceCents = parsePriceToMinor(rawPrice, currencyExponent(currency));
+        if (priceCents == null) {
+          failed.push({ name, reason: "no readable price" });
           continue;
         }
         const availability = String(offer?.availability ?? "");

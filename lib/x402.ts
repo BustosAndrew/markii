@@ -4,7 +4,25 @@ import { baseSepolia } from "viem/chains";
 /** Circle USDC on Base Sepolia. */
 export const USDC_BASE_SEPOLIA = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
 
-/** Cents (2 decimals) → USDC base units (6 decimals). */
+/**
+ * Whether a price in `currency` can be settled in USDC.
+ *
+ * {@link usdcUnits} reads an amount as US cents, because USDC is pegged to the
+ * dollar. That is only true of a USD (or USDC) price: there is no FX source
+ * here, so a €19.99 product would be charged 19.99 USDC and a ¥1,500 one 15
+ * USDC. The rail refuses those prices rather than settle them at a rate nobody
+ * chose — the same rule the threshold-fee invoicer follows for currencies.
+ */
+export function x402SettlesCurrency(currency: string): boolean {
+  const code = currency.toUpperCase();
+  return code === "USD" || code === "USDC";
+}
+
+export const X402_CURRENCY_MESSAGE =
+  "x402 settles in USDC, which is pegged to the US dollar, so it can only take USD prices. " +
+  "Pay by card, or ask the store to price in USD.";
+
+/** Cents (2 decimals) → USDC base units (6 decimals). USD-priced amounts only — see {@link x402SettlesCurrency}. */
 export function usdcUnits(amountCents: number): bigint {
   return BigInt(amountCents) * 10_000n;
 }

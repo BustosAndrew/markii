@@ -566,10 +566,18 @@ or the import refuses — it used to be USD; Shopify and WooCommerce page to 1,0
 warning past it; Shopify **and WooCommerce** variants land through one `catalog.setProductOptions`
 call (`initialValues`; Woo variations are one request each, 500 per import, all-or-nothing);
 redirects are re-checked hop by hop. **Provenance is stored** (migration 0044, `products.import_*`,
-written only by `/api/import/commit`), and a re-import is recognised by the source's own id. **Currencies without two decimals are refused at import** —
-and that guards a bug that is *not* fixed: `priceCents` is displayed ÷100 for every currency but
-charged as the currency's own minor unit, so a JPY product shows one price and charges 100× another.
-That is a money change across display, JSON-LD and checkout, and it is still open.
+written only by `/api/import/commit`), and a re-import is recognised by the source's own id —
+**unique per site** since migration 0045, so two racing commits cannot duplicate a product.
+
+**The legacy `*Cents` fields are the currency's own minor unit, everywhere, as of 2026-10-29**
+(D50). Checkout always charged `priceCents` that way; display divided by 100 for every currency, so
+a ¥1,500 product read ¥15. Display was moved to match the charge — **not the reverse, so no amount
+anyone is charged changed** — through `formatCents` (now `formatMinor`), storefront `formatPrice`,
+JSON-LD `offers.price`, Google Merchant sync and the finances CSV; the product form and wizard parse
+typed prices with `parseDecimalToMinor`. The importer accepts any three-letter currency again.
+**x402 takes USD prices only**: `usdcUnits` reads an amount as US cents and there is no FX source,
+so it used to settle €19.99 as 19.99 USDC; a non-USD price is now refused before the challenge.
+USDC payment for USD prices is unchanged.
 
 **Stripe Tax on Markii's own subscription is built as of 2026-09-13** (G3). `automatic_tax` on every
 platform-account subscription create, change and preview — **no `Stripe-Account` header**, the

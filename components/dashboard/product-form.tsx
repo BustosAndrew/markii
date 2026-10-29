@@ -11,22 +11,13 @@ import {
   updateProduct,
 } from "@/lib/api/products";
 import type { TaxProvider } from "@/lib/api/tax-shipping";
+import { currencyExponent, decimalMinor, parseDecimalToMinor } from "@/lib/api/money";
 import { uploadProductImage } from "@/lib/api/uploads";
 import { ApiClientError, type Category, type Product, type Site } from "@/lib/api/types";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { FieldError, Input, Label, Select, Textarea } from "@/components/ui/field";
 import { Toggle } from "@/components/ui/toggle";
-
-function dollarsToCents(value: string) {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return null;
-  return Math.round(n * 100);
-}
-
-function centsToDollars(cents: number) {
-  return (cents / 100).toFixed(2);
-}
 
 type TierOption = Pick<MembershipTier, "id" | "name" | "siteId">;
 
@@ -52,8 +43,10 @@ export function ProductForm({
   const [name, setName] = useState(product?.name ?? "");
   const [slug, setSlug] = useState(product?.slug ?? "");
   const [description, setDescription] = useState(product?.description ?? "");
+  // New products take the API's default; an existing one keeps its own currency.
+  const currency = product?.currency ?? "USD";
   const [price, setPrice] = useState(
-    product ? centsToDollars(product.priceCents) : "",
+    product ? decimalMinor(product.priceCents, currency) : "",
   );
   const [sku, setSku] = useState(product?.sku ?? "");
   const [stock, setStock] = useState(String(product?.stock ?? 0));
@@ -104,9 +97,14 @@ export function ProductForm({
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    const priceCents = dollarsToCents(price);
+    // `priceCents` is the currency's own minor unit (D49): 19.99 USD is 1999, 1500 JPY is 1500.
+    const priceCents = parseDecimalToMinor(price, currency);
     if (!siteId || !name.trim() || priceCents === null) {
-      setError("Site, name, and a valid price are required.");
+      setError(
+        currencyExponent(currency) === 0
+          ? `Site, name, and a valid price are required — ${currency} has no decimal places.`
+          : "Site, name, and a valid price are required.",
+      );
       return;
     }
     const parsedDuration = grantsDurationDays.trim()
@@ -231,13 +229,13 @@ export function ProductForm({
 
       <div className="grid gap-4 sm:grid-cols-3">
         <div>
-          <Label htmlFor="price">Price (USD)</Label>
+          <Label htmlFor="price">Price ({currency})</Label>
           <Input
             id="price"
             inputMode="decimal"
             value={price}
             onChange={(e) => setPrice(e.target.value)}
-            placeholder="19.99"
+            placeholder={currencyExponent(currency) === 0 ? "1500" : "19.99"}
             required
           />
         </div>

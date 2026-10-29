@@ -493,6 +493,31 @@ The audit list carries both directions now — `undoneBy` on the original row, `
 so a history screen can strike through a reversed change and label its reversal without a second
 query. Both are `string | null` on `ActionInvocation`.
 
+### 🟢 New 2026-10-29 — `*Cents` are minor units now; x402 is USD-only; provenance rendered (D50)
+
+**Done for you, review it:**
+
+- **`formatCents` now formats in the currency's own decimals** — it is `formatMinor` under its old
+  name. `priceCents` was always *charged* as the currency's minor unit; display divided by 100, so
+  ¥1,500 read ¥15. Nothing changes for USD/EUR/GBP. **Stop treating `Cents` as hundredths
+  anywhere**: no `/100`, no `* 100`.
+- **New `parseDecimalToMinor(value, currency)`** in `lib/api/money.ts` — the inverse of
+  `decimalMinor`. Use it for any typed price. It refuses more decimals than the currency has
+  (`19.999` USD, `1500.5` JPY) instead of rounding.
+- **`product-form.tsx`**: price label and placeholder follow the product's currency (`Price (JPY)`),
+  and parsing uses the helper above. It used to say "(USD)" for every product.
+- **`create-website-wizard.tsx`**: hand-added prices parse in the org currency; the zero-decimal
+  fallback to USD in `websites/new/page.tsx` is gone.
+- **Product page shows provenance** — "Imported from Shopify on … · view original", from the four
+  `import*` fields, in `products/[slug]/page.tsx`. Nothing for products made in Markii.
+- **x402 is USD-only.** `checkout/session` with `rail: "x402"` answers `409` (rail `unavailable`)
+  for a non-USD cart, and the storefront hides "Buy via agent" for non-USD products. The cart
+  island (`cart-checkout.tsx`) leaves x402 out of the picker for a non-USD cart and says
+  "This store cannot take payment in EUR right now" when no rail is left. Any other rail picker
+  should offer x402 only when `currency` is USD.
+- **New commit `failed` reason**: *"already imported, or slug … taken, … by a concurrent import"*
+  — same meaning as "already imported", just from a race.
+
 ### 🟢 New 2026-10-23 — import provenance, WooCommerce variations, wizard currency (D49)
 
 - **`Product` gained `importSource`, `importSourceId`, `importSourceUrl`, `importedAt`** (all null
@@ -1212,8 +1237,8 @@ storefront customer accounts in Phase C.
 **Money formatting derives its exponent from the currency.** Never hardcode `/100` or
 `minimumFractionDigits: 2` — `Organization.currency` is merchant-set, and JPY/KRW have no minor
 digits, so a fixed divisor renders them 100× wrong (D31). `formatCents` in `lib/api/money.ts` is
-USD-shaped by design and stays that way for the legacy §1–8 `Cents` fields; everything with a
-`Minor` suffix needs the currency-aware formatter.
+currency-aware too since 2026-10-29 (D50) — the legacy §1–8 `Cents` fields are the currency's own
+minor unit, like everything with a `Minor` suffix.
 
 **Every data surface covers loading, empty, error, partial, and permission states.** Not optional —
 this is the definition of done.

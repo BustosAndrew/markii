@@ -137,16 +137,9 @@ export const POST = orgHandler(async (req, { orgId, session }) => {
       categoryId = await createStagedCategory(staged, alloc.siteId);
     }
 
-    /**
-     * Re-checked here, not only at parse: this route accepts items from the
-     * client, and a zero-decimal currency would display one price and charge
-     * another (`importableCurrency`).
-     */
+    /** Re-checked here, not only at parse: this route accepts items from the client. */
     if (!importableCurrency(item.currency)) {
-      failed.push({
-        tempId: alloc.tempId,
-        reason: `prices in ${item.currency} cannot be imported yet — only currencies with two decimal places are supported`,
-      });
+      failed.push({ tempId: alloc.tempId, reason: `"${item.currency}" is not a currency code` });
       continue;
     }
 
@@ -187,26 +180,41 @@ export const POST = orgHandler(async (req, { orgId, session }) => {
       continue;
     }
 
-    const [row] = await db
-      .insert(products)
-      .values({
-        siteId: alloc.siteId,
-        categoryId,
-        name: item.name,
-        slug,
-        description: item.description ?? null,
-        priceCents: item.priceCents,
-        currency: item.currency,
-        sku: item.sku ?? null,
-        stock: item.stock,
-        images: item.images,
-        importSource: item.source ?? null,
-        importSourceId: item.source ? (item.sourceId ?? null) : null,
-        importSourceUrl:
-          item.sourceUrl && /^https?:\/\//.test(item.sourceUrl) ? item.sourceUrl : null,
-        importedAt: new Date(),
-      })
-      .returning();
+    /**
+     * The two lookups above are the friendly answer; the unique indexes on
+     * slug and on source id are the guarantee. Two commits of one import
+     * racing each other both pass the lookups, and the loser lands here.
+     */
+    let row: Product;
+    try {
+      [row] = await db
+        .insert(products)
+        .values({
+          siteId: alloc.siteId,
+          categoryId,
+          name: item.name,
+          slug,
+          description: item.description ?? null,
+          priceCents: item.priceCents,
+          currency: item.currency,
+          sku: item.sku ?? null,
+          stock: item.stock,
+          images: item.images,
+          importSource: item.source ?? null,
+          importSourceId: item.source ? (item.sourceId ?? null) : null,
+          importSourceUrl:
+            item.sourceUrl && /^https?:\/\//.test(item.sourceUrl) ? item.sourceUrl : null,
+          importedAt: new Date(),
+        })
+        .returning();
+    } catch (e) {
+      if (!isUniqueViolation(e)) throw e;
+      failed.push({
+        tempId: alloc.tempId,
+        reason: `already imported, or slug "${slug}" taken, on site ${alloc.siteId} by a concurrent import`,
+      });
+      continue;
+    }
     createdProducts.push(row);
 
     if (item.options?.length && item.variants?.length) {
@@ -216,8 +224,8 @@ export const POST = orgHandler(async (req, { orgId, session }) => {
           {
             productId: row.id,
             options: item.options.map((o, i) => ({ name: o.name, position: i, values: o.values })),
+            // `priceCents` is already the currency's own minor unit (D49), so no conversion.
             defaultPriceMinor: item.priceCents,
-            // Two-decimal currencies only (checked above), so cents and minor units coincide.
             initialValues: item.variants.map((v) => ({
               optionValues: v.optionValues,
               priceMinor: v.priceCents,
@@ -261,3 +269,10 @@ export const POST = orgHandler(async (req, { orgId, session }) => {
     { status: 201 },
   );
 }, { permission: "catalog.write" });
+
+/** Postgres unique violation (23505) — Drizzle wraps the driver's error, so look at both. */
+function isUniqueViolation(e: unknown): boolean {
+  const code = (x: unknown) =>
+    typeof x === "object" && x !== null ? (x as { code?: string }).code : undefined;
+  return code(e) === "23505" || code((e as { cause?: unknown } | null)?.cause) === "23505";
+}

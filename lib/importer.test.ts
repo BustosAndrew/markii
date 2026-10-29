@@ -21,14 +21,14 @@ const {
   importFromCsv,
   importFromUrl,
   importableCurrency,
-  parsePriceToCents,
+  parsePriceToMinor,
   productsFromJsonLd,
   wooVariants,
   MAX_IMPORT_PRODUCTS,
   MAX_VARIATION_FETCHES,
 } = await import("./importer");
 
-describe("parsePriceToCents", () => {
+describe("parsePriceToMinor", () => {
   it.each([
     ["19.99", 1999],
     ["19.9", 1990],
@@ -41,25 +41,41 @@ describe("parsePriceToCents", () => {
     ["0", 0],
     ["19.990", 1999],
   ])("reads %j as %i", (input, cents) => {
-    expect(parsePriceToCents(input)).toBe(cents);
+    expect(parsePriceToMinor(input)).toBe(cents);
   });
 
   /** Rounding a price is a decision about money; the importer refuses instead. */
   it.each([["19.995"], ["-5"], ["abc"], [""], [null], ["1e3"]])("refuses %j", (input) => {
-    expect(parsePriceToCents(input)).toBeNull();
+    expect(parsePriceToMinor(input)).toBeNull();
   });
 
   /** 0.1 + 0.2 style drift is impossible: the arithmetic is on integers. */
   it("never drifts on values that are inexact in binary", () => {
-    expect(parsePriceToCents("0.29")).toBe(29);
-    expect(parsePriceToCents("1.15")).toBe(115);
-    expect(parsePriceToCents("4.35")).toBe(435);
+    expect(parsePriceToMinor("0.29")).toBe(29);
+    expect(parsePriceToMinor("1.15")).toBe(115);
+    expect(parsePriceToMinor("4.35")).toBe(435);
+  });
+
+  /** The currency's own minor unit (D49): ¥1,500 is 1500, 5.125 KWD is 5125 fils. */
+  it("reads into the currency's own exponent", () => {
+    expect(parsePriceToMinor("1,500", 0)).toBe(1500);
+    expect(parsePriceToMinor("1500.00", 0)).toBe(1500);
+    expect(parsePriceToMinor("5.125", 3)).toBe(5125);
+    expect(parsePriceToMinor("5.1", 3)).toBe(5100);
+  });
+
+  it("refuses precision the currency does not have", () => {
+    expect(parsePriceToMinor("1500.5", 0)).toBeNull();
+    expect(parsePriceToMinor("5.1255", 3)).toBeNull();
   });
 });
 
 describe("importableCurrency", () => {
-  it("accepts two-decimal ISO currencies", () => {
-    for (const c of ["USD", "EUR", "GBP", "CAD"]) expect(importableCurrency(c), c).toBe(true);
+  /** Display and checkout both read `priceCents` in the currency's own minor unit now (D49). */
+  it("accepts any three-letter code, whatever its decimals", () => {
+    for (const c of ["USD", "EUR", "GBP", "CAD", "JPY", "KRW", "KWD", "BHD"]) {
+      expect(importableCurrency(c), c).toBe(true);
+    }
   });
 
   /**
@@ -76,13 +92,8 @@ describe("importableCurrency", () => {
     expect(r.failed[0]).toMatchObject({ row: 2, name: "Coin" });
   });
 
-  /**
-   * Storefront display and checkout read `priceCents` differently for these;
-   * an imported yen product would show one price and charge 100× another.
-   */
-  it("refuses currencies whose minor unit is not cents", () => {
-    for (const c of ["JPY", "KRW", "KWD", "BHD"]) expect(importableCurrency(c), c).toBe(false);
-    expect(importableCurrency("usd")).toBe(false);
+  it("refuses anything that is not three upper-case letters", () => {
+    for (const c of ["usd", "US", "US1", ""]) expect(importableCurrency(c), c).toBe(false);
   });
 });
 
@@ -117,11 +128,20 @@ describe("CSV", () => {
     expect(r.warnings.find((w) => w.code === "STOCK_UNKNOWN")?.tempIds).toEqual(["imp_1"]);
   });
 
-  it("refuses a row in an unsupported currency and keeps the rest", () => {
-    const r = importFromCsv("name,price,currency\nA,100,JPY\nB,1,USD", { defaultCurrency: "USD" });
+  it("refuses a row in something that is not a currency and keeps the rest", () => {
+    const r = importFromCsv("name,price,currency\nA,100,YENS\nB,1,USD", { defaultCurrency: "USD" });
     expect(r.imported.map((i) => i.name)).toEqual(["B"]);
     expect(r.failed[0]).toMatchObject({ row: 2, name: "A" });
-    expect(r.failed[0].reason).toMatch(/JPY cannot be imported yet/);
+    expect(r.failed[0].reason).toMatch(/not a currency code/);
+  });
+
+  /** ¥1,500 stages as 1500, not 150000: the price is read in the row's own currency. */
+  it("reads a yen price in yen, and refuses fractions of a yen", () => {
+    const r = importFromCsv('name,price,currency\nTea,"1,500",JPY\nOdd,1500.5,JPY', {
+      defaultCurrency: "USD",
+    });
+    expect(r.imported.map((i) => [i.name, i.priceCents, i.currency])).toEqual([["Tea", 1500, "JPY"]]);
+    expect(r.failed[0]).toMatchObject({ row: 3, name: "Odd" });
   });
 });
 
@@ -227,12 +247,22 @@ describe("WooCommerce", () => {
     ]);
   });
 
-  it("refuses an unsupported currency and flags products with variations", () => {
+  it("reads a yen store in yen, including one configured with two decimals", () => {
     const r = fromWoo([
       woo({ prices: { price: "1000", currency_code: "JPY", currency_minor_unit: 0 } }),
-      woo({ slug: "v", type: "variable", variations: [{ id: 9 }] }),
+      woo({ slug: "b", prices: { price: "150000", currency_code: "JPY", currency_minor_unit: 2 } }),
+      woo({ slug: "c", prices: { price: "150050", currency_code: "JPY", currency_minor_unit: 2 } }),
     ]);
-    expect(r.failed[0].reason).toMatch(/JPY/);
+    expect(r.items.map((i) => [i.priceCents, i.currency])).toEqual([
+      [1000, "JPY"],
+      [1500, "JPY"],
+    ]);
+    // ¥1,500.50 has no exact yen amount; refused rather than rounded.
+    expect(r.failed).toHaveLength(1);
+  });
+
+  it("flags products whose variations could not be read", () => {
+    const r = fromWoo([woo({ slug: "v", type: "variable", variations: [{ id: 9 }] })]);
     expect(r.withVariations).toEqual([r.items[0].tempId]);
   });
 });

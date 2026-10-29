@@ -1,6 +1,5 @@
 import { getMe, listSites } from "@/lib/api/server";
 import { loadOrError } from "@/lib/api/load";
-import { currencyExponent } from "@/lib/api/money";
 import { CreateWebsiteWizard } from "@/components/dashboard/create-website-wizard";
 
 export default async function NewWebsitePage() {
@@ -10,14 +9,12 @@ export default async function NewWebsitePage() {
   ]);
 
   /**
-   * The organization's currency prices hand-added products — but only when it
-   * has two decimals. `priceCents` is displayed ÷100 yet charged in the
-   * currency's own minor unit (D49, open), so a yen product would show ¥1,500
-   * and charge ¥150,000. Until that is fixed such orgs keep the old USD
-   * default: mislabelled, but charged as displayed.
+   * The organization's currency prices hand-added and template products. Any
+   * three-letter code works now that display and checkout both read
+   * `priceCents` in the currency's own minor unit (D49).
    */
   const orgCurrency = meResult.data?.org.currency?.toUpperCase() ?? "USD";
-  const usable = /^[A-Z]{3}$/.test(orgCurrency) && currencyExponent(orgCurrency) === 2;
+  const usable = /^[A-Z]{3}$/.test(orgCurrency);
 
   return (
     <CreateWebsiteWizard

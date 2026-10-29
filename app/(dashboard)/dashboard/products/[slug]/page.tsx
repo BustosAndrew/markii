@@ -14,6 +14,38 @@ import { ProductDeliveryPanel } from "@/components/dashboard/product-delivery-pa
 import { ProductForm } from "@/components/dashboard/product-form";
 import { VariantEditor } from "@/components/dashboard/variant-editor";
 import { PageHeader } from "@/components/ui/page-header";
+import type { Product } from "@/lib/api/types";
+
+const IMPORT_SOURCE_LABEL: Record<NonNullable<Product["importSource"]>, string> = {
+  shopify: "Shopify",
+  woocommerce: "WooCommerce",
+  csv: "a CSV file",
+  scrape: "a product page",
+};
+
+/** "Imported from Shopify on 10/23/2026 · view original" — nothing for a product made in Markii. */
+function ImportProvenance({ product }: { product: Product }) {
+  if (!product.importSource) return null;
+  return (
+    <p className="mb-4 text-sm text-muted">
+      Imported from {IMPORT_SOURCE_LABEL[product.importSource]}
+      {product.importedAt ? ` on ${new Date(product.importedAt).toLocaleDateString()}` : ""}
+      {product.importSourceUrl ? (
+        <>
+          {" · "}
+          <a
+            href={product.importSourceUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline underline-offset-2 hover:text-foreground"
+          >
+            view original
+          </a>
+        </>
+      ) : null}
+    </p>
+  );
+}
 
 export default async function ProductDetailPage({
   params,
@@ -73,6 +105,7 @@ export default async function ProductDetailPage({
           Some related lists failed to load. You can still edit core fields.
         </p>
       )}
+      <ImportProvenance product={product} />
       <ProductForm
         mode="edit"
         product={product}

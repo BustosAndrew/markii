@@ -10,6 +10,7 @@ import { levelsForVariants } from "@/lib/commerce/queries";
 import { membershipGateFor } from "@/lib/commerce/memberships";
 import { db, productOptions, variants } from "@/lib/db";
 import { formatPrice, productJsonLd } from "@/lib/generators";
+import { x402SettlesCurrency } from "@/lib/x402";
 import { loadSite, storefrontHalted } from "@/lib/storefront";
 
 type Props = { params: Promise<{ site: string; productSlug: string }> };
@@ -172,7 +173,8 @@ export default async function ProductPage({ params }: Props) {
             {!locked &&
             site.agentDiscovery &&
             site.purchasesEnabled &&
-            site.paymentProviders?.x402 ? (
+            site.paymentProviders?.x402 &&
+            x402SettlesCurrency(product.currency) ? (
               <>
                 <h2>Buy via agent</h2>
                 <pre className="sf-buy">{`POST ${baseUrl}/api/checkout

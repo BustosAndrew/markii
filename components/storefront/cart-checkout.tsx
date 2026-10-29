@@ -296,10 +296,16 @@ export function CartCheckout({
       ? cart.tax.breakdown.reduce((sum, row) => sum + row.amountMinor, 0)
       : null;
 
+  /**
+   * x402 settles in dollar-pegged USDC with no FX, so it is offered for USD
+   * carts only — the server refuses the rest (`x402SettlesCurrency` in
+   * `lib/x402.ts`, not imported here because it would ship viem to shoppers).
+   */
+  const x402Settles = ["USD", "USDC"].includes(cart.currency.toUpperCase());
   const availableRails = (
     [
       rails.stripe ? ("stripe" as const) : null,
-      rails.x402 ? ("x402" as const) : null,
+      rails.x402 && x402Settles ? ("x402" as const) : null,
     ] as const
   ).filter(Boolean) as ("stripe" | "x402")[];
 
@@ -549,10 +555,12 @@ export function CartCheckout({
               </label>
             ))}
           </fieldset>
-        ) : (
+        ) : availableRails.length === 1 ? (
           <p className="sf-muted">
             Paying with {availableRails[0] === "stripe" ? "card" : "USDC (x402)"}
           </p>
+        ) : (
+          <p className="sf-muted">This store cannot take payment in {cart.currency} right now.</p>
         )}
 
         {!stripePay && !x402Pay ? (

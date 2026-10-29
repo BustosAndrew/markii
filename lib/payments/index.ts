@@ -1,5 +1,6 @@
 import { defaultWallet, getIntegration } from "../integrations";
 import { createPaymentIntent } from "./stripe-charges";
+import { X402_CURRENCY_MESSAGE, x402SettlesCurrency } from "../x402";
 
 /**
  * Payment rails (§18.4).
@@ -167,7 +168,20 @@ async function startStripe(
  * transaction hash. The challenge itself is built by the storefront route,
  * which owns the resource URL; this only resolves where the money goes.
  */
-async function startX402(orgId: string, siteWallet: string | null): Promise<PaymentStart> {
+async function startX402(
+  orgId: string,
+  siteWallet: string | null,
+  charge?: { currency: string },
+): Promise<PaymentStart> {
+  if (charge && !x402SettlesCurrency(charge.currency)) {
+    return {
+      ok: false,
+      rail: "x402",
+      code: "unavailable",
+      message: X402_CURRENCY_MESSAGE,
+      resolution: "Price products in USD to take x402, or offer card through Stripe.",
+    };
+  }
   const payTo = siteWallet ?? (await defaultWallet(orgId));
   if (!payTo) {
     return {
@@ -203,7 +217,7 @@ export async function startPayment(input: {
 }): Promise<PaymentStart> {
   return input.rail === "stripe"
     ? startStripe(input.orgId, input.charge)
-    : startX402(input.orgId, input.siteWallet);
+    : startX402(input.orgId, input.siteWallet, input.charge);
 }
 
 /** Rails a store can actually take money on right now, with why-not for the rest. */

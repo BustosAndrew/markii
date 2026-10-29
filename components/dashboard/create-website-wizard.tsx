@@ -21,7 +21,7 @@ import {
   type ThemeId,
 } from "@/lib/api/types";
 import { THEMES } from "@/lib/storefront/themes";
-import { formatCents } from "@/lib/api/money";
+import { currencyExponent, formatCents, parseDecimalToMinor } from "@/lib/api/money";
 import {
   commitImport,
   type ImportedCategory,
@@ -230,9 +230,14 @@ export function CreateWebsiteWizard({
 
   function addProduct() {
     const name = productName.trim();
-    const priceCents = Math.round(Number(productPrice) * 100);
-    if (!name || !Number.isFinite(priceCents)) {
-      setError("Product name and a valid price are required.");
+    // The org currency's own minor unit (D49): 19.99 USD is 1999, 1500 JPY is 1500.
+    const priceCents = parseDecimalToMinor(productPrice, orgCurrency);
+    if (!name || priceCents == null) {
+      setError(
+        currencyExponent(orgCurrency) === 0
+          ? `Product name and a valid price are required — ${orgCurrency} has no decimal places.`
+          : "Product name and a valid price are required.",
+      );
       return;
     }
     setError(null);
@@ -482,7 +487,7 @@ export function CreateWebsiteWizard({
               <Input
                 value={productPrice}
                 onChange={(e) => setProductPrice(e.target.value)}
-                placeholder="Price e.g. 19.99"
+                placeholder={`Price (${orgCurrency}) e.g. ${currencyExponent(orgCurrency) === 0 ? "1500" : "19.99"}`}
                 inputMode="decimal"
               />
               <Textarea

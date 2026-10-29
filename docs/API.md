@@ -79,9 +79,11 @@ Mode flag with a persistent indicator, and must never be presented as production
   comes from the currency, not from a constant: USD has 2 decimals, **JPY and KRW have 0**, BHD and
   KWD have 3. Any formatter that hardcodes `/100` or forces two fraction digits renders JPY 100×
   wrong. Derive it — `Intl.NumberFormat(locale, { style: "currency", currency })` already knows the
-  exponent when you don't override `minimumFractionDigits`. The legacy `Cents` fields in §1–8 stay
-  as they are and remain USD-shaped; the rule binds everything from §16 onward, where
-  `Organization.currency` is merchant-set.
+  exponent when you don't override `minimumFractionDigits`. **The legacy `Cents` fields in §1–8
+  keep their names but are minor units too** (D49, 2026-10-29): checkout always charged
+  `priceCents` as the currency's own minor unit, and display now agrees, so ¥1,500 is
+  `priceCents: 1500`. They were described as "USD-shaped" until then, and every reader that
+  believed it divided by 100.
 - **Dates:** ISO 8601 strings (`2026-07-24T18:00:00.000Z`). Date-range filters are
   `?from=` / `?to=` (ISO date or datetime; inclusive).
 - **Pagination:** `?page=1&limit=20` (default `page=1`, `limit=20`, max `limit=100`).
@@ -188,6 +190,12 @@ Launch themes (`studio` · `atlas` · `noir` · `bloom`) are applied by the fixe
   enabled: boolean,
   suggestedProductIds: number[],
   addOns: [{ productId: number, mandatory: boolean }],
+  // Import provenance (§5, migration 0044) — all null for a product made in Markii.
+  // Read-only: written by /api/import/commit alone, never copied by duplicate.
+  importSource: "csv" | "shopify" | "woocommerce" | "scrape" | null,
+  importSourceId: string | null, // the source platform's own id (Shopify/WooCommerce only)
+  importSourceUrl: string | null,
+  importedAt: string | null,
   site: { id, name, slug },      // detail responses only
   category: { id, name, slug, parentId } | null,
   suggestedProducts: [{ id, name, slug, priceCents, images }], // detail only
@@ -684,7 +692,7 @@ Response (`200`, even with partial failures):
   ],
   "categories": [ { "tempId": "cat_1", "name": "Shirts" } ],
   "failed": [ { "row": 7, "reason": "price is not a number, or has fractions of a cent" },
-              { "name": "Yen Bowl", "reason": "prices in JPY cannot be imported yet — …" } ],
+              { "name": "Odd Bowl", "reason": "\"YENS\" is not a currency code" } ],
   "warnings": [ { "code": "STOCK_UNKNOWN", "message": "12 products came without a stock count…",
                   "tempIds": ["imp_1", "…"] } ]
 }
@@ -706,12 +714,15 @@ importer into private space. DNS rebinding between check and connect remains a r
   the import refuses rather than labelling prices USD. WooCommerce gives it per product; JSON-LD
   must state `priceCurrency` or the product is refused. A CSV with no `currency` column uses the
   **organization's** currency and says so (`CURRENCY_ASSUMED`).
-- **Unsupported currencies are refused** — anything whose minor unit is not cents (JPY, KRW,
-  KWD…), at parse **and** at commit. The legacy `priceCents` field is displayed ÷100 for every
-  currency but charged as the currency's own minor unit, so such a product would show one price and
-  charge another (see D49). Lift this when the two readers agree.
-- **Prices** are parsed as decimal strings into integers — no float arithmetic — and a price with
-  real sub-cent precision (`19.995`) is refused rather than rounded.
+- **Any three-letter currency is accepted**, JPY and KWD included (2026-10-29). Until then
+  anything whose minor unit was not cents was refused, because `priceCents` was displayed ÷100 but
+  charged as the currency's own minor unit (D49); display now reads the exponent too. `USDC` is not
+  a pricing currency (no product schema accepts four letters) — x402 *settles* in it.
+- **Prices** are parsed as decimal strings into integers of the **currency's own minor unit** —
+  `"1,500"` JPY is 1500, `"19.99"` USD is 1999 — with no float arithmetic, and a price more precise
+  than the currency allows (`19.995` USD, `1500.5` JPY) is refused rather than rounded. A
+  WooCommerce store whose configured decimals differ from ISO (yen shown with two) is converted
+  exactly or refused.
 - **Catalogue size.** Shopify and WooCommerce are paged up to **1,000 products**
   (`MAX_IMPORT_PRODUCTS`); past that a `TRUNCATED` warning says so. It used to read one page (250 /
   100) and stop silently. CSV has no cap.
@@ -773,7 +784,8 @@ compare-at price and SKU in the same call. The option matrix is the full grid, s
 source never sold are created with no stock and reported as `EXTRA_VARIANTS`. If the variant step is
 refused, the product still exists and `failed` says *"the product was created, but its variants were
 not: …"*. The product row itself is still a direct insert, as `POST /api/products` is — product
-creation has never been a registry action. Items in an unsupported currency are refused here too.
+creation has never been a registry action. An item whose `currency` is not three upper-case letters
+is refused here too.
 
 **Provenance and re-import** (migration 0044, 2026-10-23). The commit writes `products.import_source`,
 `import_source_id`, `import_source_url` (http(s) only) and `imported_at`; **no other route accepts
@@ -781,7 +793,11 @@ them**, so an edit cannot make a product look imported. They come back on every 
 `importSource`, `importSourceId`, `importSourceUrl`, `importedAt` — all null for a product made in
 Markii. An item whose `source` + `sourceId` already exists on the target site is refused with
 *"already imported on site N as "…" (#id)"* — so re-running an import skips what it brought in even
-when the source renamed the product (the slug check alone would have duplicated it).
+when the source renamed the product (the slug check alone would have duplicated it). **Migration
+0045 makes it a guarantee** (`products_import_source_uq`, unique per site + source + source id):
+two commits of one import racing each other both pass the lookup, and the loser is reported in
+`failed` (*"already imported, or slug … taken, … by a concurrent import"*) instead of duplicating
+the product or answering `500`.
 
 ---
 
@@ -2432,7 +2448,7 @@ a cart can never be created against a different store than the one being browsed
 | `POST` | `/api/cart/:token/shipping-rates` | Quote the merchant's rates for an address (§18.6) |
 | `POST` | `/api/checkout/session` | Freeze the quote → reserve inventory → start payment on a rail |
 | `POST` | `/api/checkout/session/:id/complete` | Verify payment → Order → redemptions → **UsageRecord (§17)** |
-| `GET`/`POST` | `/api/checkout` | The x402 one-shot (402 challenge → pay → present hash) |
+| `GET`/`POST` | `/api/checkout` | The x402 one-shot (402 challenge → pay → present hash). **USD prices only** (2026-10-29): USDC is dollar-pegged and there is no FX source, so a product priced in any other currency answers `409` before a challenge is issued — it used to quote €19.99 as 19.99 USDC. `checkout/session` refuses the `x402` rail the same way (`409`, rail `unavailable`), and the product page's "Buy via agent" block and the cart's x402 option are hidden for such prices |
 | `GET` | `/api/search?q=…&limit=…` | **Catalogue search (G6, ✅ LIVE 2026-09-13).** Postgres full-text over name, SKU and description with a substring fallback, best match first; enabled products only, gated ones flagged `membersOnly`. Advertised in `agent.md` and `llms.txt` so a buyer agent retrieves instead of crawling. `q` required (400 when empty — an empty list would read as an answer about the catalogue); `limit` clamped to 1–50. Money as `priceMinor` + `currency`. Same query, same filters as the `/search` page |
 
 Money is **always recomputed server-side**; no request body has a price, total, or discount field to

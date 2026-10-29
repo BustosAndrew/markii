@@ -6,6 +6,7 @@ import { ownSites } from "@/lib/tenancy";
 import { db, products, sites } from "@/lib/db";
 import { getIntegration, upsertIntegration } from "@/lib/integrations";
 import { storefrontUrl } from "@/lib/queries";
+import { decimalMinor } from "@/lib/api/money";
 
 /** Push live sites' enabled products to Google Merchant Center (Content API v2.1). */
 export const POST = orgHandler(async (_req, { orgId }) => {
@@ -51,7 +52,7 @@ export const POST = orgHandler(async (_req, { orgId }) => {
           channel: "online",
           availability: p.stock > 0 ? "in stock" : "out of stock",
           condition: "new",
-          price: { value: (p.priceCents / 100).toFixed(2), currency: p.currency },
+          price: { value: decimalMinor(p.priceCents, p.currency), currency: p.currency },
         },
       });
       synced++;

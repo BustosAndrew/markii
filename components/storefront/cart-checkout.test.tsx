@@ -211,3 +211,42 @@ describe("storefront cart totals", () => {
     expect(screen.getByText("$117.45")).toBeTruthy();
   });
 });
+
+/**
+ * x402 settles in dollar-pegged USDC with no FX (D50). Offering it on a
+ * non-USD cart sends the shopper into a `409` from the server — a checkout
+ * that cannot proceed and does not say why until they have tried.
+ */
+describe("storefront cart rails", () => {
+  const eurCart = () => {
+    const cart = cartWith({ amountMinor: 0, state: "none", breakdown: [] }, 10800);
+    cart.currency = "EUR";
+    return cart;
+  };
+
+  function renderWithRails(cart: StorefrontCart, rails: { stripe: boolean; x402: boolean }) {
+    getCart.mockResolvedValue(cart);
+    render(<CartCheckout homeHref="/" accountHref="/account" rails={rails} />);
+    return waitFor(() => expect(screen.getByText("Subtotal")).toBeTruthy());
+  }
+
+  it("offers USDC (x402) on a USD cart", async () => {
+    await renderWithRails(cartWith({ amountMinor: 0, state: "none", breakdown: [] }, 10800), {
+      stripe: true,
+      x402: true,
+    });
+    expect(screen.getByText("USDC (x402)")).toBeTruthy();
+  });
+
+  it("leaves x402 out of the choice on a EUR cart", async () => {
+    await renderWithRails(eurCart(), { stripe: true, x402: true });
+    expect(document.body.textContent).not.toMatch(/x402/);
+    expect(document.body.textContent).toMatch(/Paying with card/);
+  });
+
+  it("says so when no rail can take the cart's currency", async () => {
+    await renderWithRails(eurCart(), { stripe: false, x402: true });
+    expect(document.body.textContent).toMatch(/cannot take payment in EUR/);
+    expect(document.body.textContent).not.toMatch(/Paying with USDC/);
+  });
+});

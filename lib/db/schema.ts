@@ -334,8 +334,12 @@ export const products = pgTable(
     index("products_requires_tier_idx").on(t.requiresTierId),
     index("products_grants_tier_idx").on(t.grantsTierId),
     index("products_search_idx").using("gin", t.searchVector),
-    /** Re-import lookup: has this site already brought in that source product? */
-    index("products_import_source_idx")
+    /**
+     * One product per source product per site. Unique, not just an index: the
+     * commit route's lookup is the friendly refusal, but two commits of one
+     * import racing each other both pass it, and only this stops the second.
+     */
+    uniqueIndex("products_import_source_uq")
       .on(t.siteId, t.importSource, t.importSourceId)
       .where(sql`${t.importSourceId} is not null`),
   ],
