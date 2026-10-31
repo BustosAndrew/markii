@@ -304,9 +304,13 @@ auth_token = "env(SUPABASE_AUTH_SMS_TWILIO_AUTH_TOKEN)"
 max_enrolled_factors = 10
 
 # Control MFA via App Authenticator (TOTP)
+# On, because merchant MFA is mandatory (D40): every staff sign-up enrols TOTP,
+# so with this off no merchant can be created and CI's integration job failed
+# on every commit from 2026-08-07 (MFA landed) until this was switched on.
+# The hosted project has it on; this file only drives local and CI stacks.
 [auth.mfa.totp]
-enroll_enabled = false
-verify_enabled = false
+enroll_enabled = true
+verify_enabled = true
 
 # Configure MFA via Phone Messaging
 [auth.mfa.phone]

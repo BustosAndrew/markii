@@ -110,6 +110,10 @@ jobs:
           # `eval` is what makes them usable, and is why this is one step rather
           # than a write into $GITHUB_ENV (which would keep the quotes literal).
           eval "$(supabase status -o env)"
+          # Per run and never stored: the cron routes refuse when it is unset or
+          # under 32 characters (D41), and cron-billing.test.ts refuses to run
+          # without one rather than proving only the 503 path.
+          CRON_SECRET="$(openssl rand -hex 32)"
 
           cat > .env.local <<EOF
           # Local Postgres, no pooler in front of it — the app's transaction-mode
@@ -130,6 +134,7 @@ jobs:
           # be localhost and VERCEL unset, so this line enables nothing on a
           # real deployment.
           MARKII_AGENT_MOCK_MODEL=1
+          CRON_SECRET=${CRON_SECRET}
           EOF
 
           # Confirm the substitutions landed without printing the keys.
