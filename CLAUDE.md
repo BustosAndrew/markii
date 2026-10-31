@@ -579,6 +579,18 @@ typed prices with `parseDecimalToMinor`. The importer accepts any three-letter c
 so it used to settle €19.99 as 19.99 USDC; a non-USD price is now refused before the challenge.
 USDC payment for USD prices is unchanged.
 
+**The site builder's foundation is built as of 2026-10-31** (Phase D, D51, `docs/API.md` §19,
+`lib/builder/`). Pages are versioned JSON node trees (`site_documents`, migration 0046) with draft and
+published copies; the storefront reads only published, and a site with no published home renders
+the fixed layout exactly as before. Every edit is a `builder.*` registry action; **`builder.publish`
+is `high`** and site-wide. **D51 amends D47 by one hole**: actions flagged `agentExecution: "draft"` —
+draft edits only, all `low` and undoable — may be run by an agent for real, so the brand agent can
+redesign a draft the merchant watches; publish, discard, restore and deletes stay human-only, held
+by `defineAction` and a pinned test. **One writer at a time**: a brand-agent turn holds a lease on
+the design and every other writer gets `409 AGENT_EDITING` until it is stopped or expires. Rich text
+is a Markdown subset parsed to a tree and rendered through React — never `dangerouslySetInnerHTML`.
+The editor, live preview and brand agent are M2–M3 and **not built yet**.
+
 **Stripe Tax on Markii's own subscription is built as of 2026-09-13** (G3). `automatic_tax` on every
 platform-account subscription create, change and preview — **no `Stripe-Account` header**, the
 opposite direction of money from §18.6 — decided from two facts that are reported apart and never
@@ -739,10 +751,12 @@ Team is two people (one frontend, one backend), so launch is a **subset** of the
 **Phase A** (auth/orgs) + **B** (billing, threshold fees) + **C** (commerce core, digital delivery)
 + **3–4 storefront themes** + the **rule-based readiness score**. Roughly 4–6 months.
 
-**Deferred past launch — do not start:** the site builder and action registry (Phase D), Channels,
+**Deferred past launch — do not start:** Channels,
 Agent Test Lab, the analytics funnel (E), Chargeback Assist (F), native email campaigns. Rationale
 in `docs/DECISIONS.md` §G10. **Agent Ops chat came off this list on 2026-10-15 (D47)** — it is
-being built now as free-beta merchant agents, Catalog first (`docs/API.md` §27).
+being built now as free-beta merchant agents, Catalog first (`docs/API.md` §27). **The site builder
+came off it on 2026-10-31 (D51)** — the owner asked for a brand agent that redesigns a storefront
+beside a live preview, and chose the full `docs/BUILDER.md` builder to carry it.
 
 ## Planning docs
 

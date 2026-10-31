@@ -78,7 +78,7 @@ export default async function CollectionPage({ params }: Props) {
   };
 
   return (
-    <ThemeRoot themeId={themeId}>
+    <ThemeRoot themeId={themeId} theme={data.theme}>
       <script
         type="application/ld+json"
         // Trusted: built from the merchant's own catalog by this route.

@@ -74,7 +74,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
   const topCategories = bundle.categories.filter((c) => !c.parentSlug);
 
   return (
-    <ThemeRoot themeId={site.themeId ?? "studio"}>
+    <ThemeRoot themeId={site.themeId ?? "studio"} theme={data.theme}>
       <SiteHeader
         siteName={site.name}
         homeHref={`${baseUrl}/`}

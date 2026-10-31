@@ -140,8 +140,14 @@ export async function invokeAction<TResult = unknown>(
    *
    * Tokens are deliberately not included: a token is a merchant's own
    * integration, run on purpose, and medium-risk writes are its job.
+   *
+   * **One exception (D51):** an action marked `agentExecution: "draft"` — an
+   * edit to an unpublished builder draft — may run for real, so the brand
+   * agent can redesign a draft the merchant watches in the live preview.
+   * Nothing a shopper sees is in that set; `defineAction` and a registry test
+   * keep it that way.
    */
-  if (!dryRun && actor.type === "agent") {
+  if (!dryRun && actor.type === "agent" && def.agentExecution !== "draft") {
     throw new ApiError(
       "HUMAN_APPROVAL_REQUIRED",
       403,

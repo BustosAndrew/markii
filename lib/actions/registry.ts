@@ -42,6 +42,18 @@ export function defineAction<TInput, TResult>(
   if (typeof def.inverse === "function" && def.undoable !== true) {
     throw new Error(`Action "${def.id}" defines inverse() but does not declare undoable: true.`);
   }
+  /**
+   * D51's exception, held to its shape at module load: only low-risk,
+   * step-up-free edits to a builder draft may be executed by an agent.
+   */
+  if (def.agentExecution !== undefined) {
+    if (def.agentExecution !== "draft" || !def.id.startsWith("builder.")) {
+      throw new Error(`Action "${def.id}" cannot allow agent execution: only builder.* draft edits may (D51).`);
+    }
+    if (def.riskTier !== "low" || def.requiresStepUp) {
+      throw new Error(`Action "${def.id}" allows agent execution but is not a low-risk, step-up-free edit (D51).`);
+    }
+  }
   registry.set(def.id, def as unknown as ActionDefinition<never, unknown>);
   return def;
 }
@@ -103,6 +115,8 @@ export function describeAction(def: ActionDefinition<never, unknown>) {
      * so an agent knows before invoking that a human gate is coming.
      */
     requiresHumanApproval: def.riskTier === "high",
+    /** True only for builder draft edits the brand agent may make itself (D51). */
+    agentMayExecute: def.agentExecution === "draft",
     input: inputSchemaFor(def),
   };
 }

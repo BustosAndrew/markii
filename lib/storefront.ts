@@ -1,17 +1,22 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { accountStanding, storefrontHeld, type AccountStanding } from "@/lib/billing/standing";
 import {
   categories,
   db,
   organizations,
   products,
+  siteDesigns,
+  siteDocuments,
   sites,
   type Category,
   type Collection,
   type Product,
   type Site,
 } from "@/lib/db";
+import { resolveTheme } from "@/lib/builder/tokens";
+import type { PageNode, PageSeo } from "@/lib/builder/types";
 import { publishedCollectionsFor } from "@/lib/storefront/collections";
+import type { ThemeTokens } from "@/lib/storefront/themes";
 import { bundleFromDb, type Bundle } from "@/lib/generators";
 import { storefrontUrl } from "@/lib/queries";
 
@@ -23,6 +28,12 @@ export type SiteData = {
   colls: Collection[];
   bundle: Bundle;
   baseUrl: string;
+  /**
+   * The published theme with the site's published design tokens applied
+   * (D51). Every page hands it to `ThemeRoot`, so a published palette or font
+   * reaches the whole storefront, not only builder pages.
+   */
+  theme: ThemeTokens;
   /**
    * The owning organization's standing with Markii, derived on this request.
    *
@@ -83,6 +94,11 @@ export async function loadSite(siteSlug: string): Promise<SiteData | null> {
   const cats = await db.select().from(categories).where(eq(categories.siteId, site.id));
   const prods = await db.select().from(products).where(eq(products.siteId, site.id));
   const colls = await publishedCollectionsFor(site.id);
+  const [design] = await db
+    .select({ publishedTokens: siteDesigns.publishedTokens })
+    .from(siteDesigns)
+    .where(eq(siteDesigns.siteId, site.id))
+    .limit(1);
   return {
     site,
     cats,
@@ -90,8 +106,32 @@ export async function loadSite(siteSlug: string): Promise<SiteData | null> {
     colls,
     bundle: bundleFromDb(site, cats, prods, colls),
     baseUrl: storefrontUrl(site),
+    theme: resolveTheme(site.themeId, design?.publishedTokens),
     standing,
     /** A lapsed trial, the last rung of dunning (D10), or a platform suspension (G12) — Markii's hold, not the merchant's. */
     billingHold: storefrontHeld(standing),
   };
+}
+
+export type PublishedPage = { id: number; handle: string; title: string; seo: PageSeo; tree: PageNode };
+
+/**
+ * A page as **published** — the storefront never reads a draft (D51). Null
+ * when the site has no published page by that handle, which for the home page
+ * means "render the fixed storefront" (`docs/BUILDER.md` §14).
+ */
+export async function publishedPage(siteId: number, handle: string): Promise<PublishedPage | null> {
+  const [doc] = await db
+    .select({
+      id: siteDocuments.id,
+      handle: siteDocuments.publishedHandle,
+      title: siteDocuments.publishedTitle,
+      seo: siteDocuments.publishedSeo,
+      tree: siteDocuments.publishedTree,
+    })
+    .from(siteDocuments)
+    .where(and(eq(siteDocuments.siteId, siteId), eq(siteDocuments.kind, "page"), eq(siteDocuments.publishedHandle, handle)))
+    .limit(1);
+  if (!doc?.tree || !doc.handle) return null;
+  return { id: doc.id, handle: doc.handle, title: doc.title ?? doc.handle, seo: doc.seo ?? {}, tree: doc.tree };
 }

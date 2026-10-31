@@ -59,7 +59,7 @@ export default async function SearchPage({ params, searchParams }: Props) {
   const themeId = site.themeId ?? "studio";
 
   return (
-    <ThemeRoot themeId={themeId}>
+    <ThemeRoot themeId={themeId} theme={data.theme}>
       <SiteHeader
         siteName={site.name}
         homeHref={`${baseUrl}/`}

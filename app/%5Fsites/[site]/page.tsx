@@ -1,24 +1,26 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
+import { StorefrontBuilderPage } from "@/components/storefront/builder-page";
 import { ProductCard } from "@/components/storefront/product-card";
 import { SiteHeader } from "@/components/storefront/site-header";
 import { StorePaused } from "@/components/storefront/paused";
 import { ThemeRoot } from "@/components/storefront/theme-root";
 import { logTraffic } from "@/lib/agents";
-import { loadSite, storefrontHalted } from "@/lib/storefront";
+import { loadSite, publishedPage, storefrontHalted } from "@/lib/storefront";
 
 type Props = { params: Promise<{ site: string }> };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const data = await loadSite((await params).site);
   if (!data) return {};
+  const seo = (await publishedPage(data.site.id, "home"))?.seo;
   return {
-    title: data.site.name,
-    description: data.site.agentDiscovery
-      ? `${data.site.name} — agent-readable store`
-      : data.site.name,
-    robots: data.site.indexed ? undefined : { index: false },
+    title: seo?.title || data.site.name,
+    description:
+      seo?.description ||
+      (data.site.agentDiscovery ? `${data.site.name} — agent-readable store` : data.site.name),
+    robots: data.site.indexed && !seo?.noindex ? undefined : { index: false },
     other: data.site.googleSiteVerification
       ? { "google-site-verification": data.site.googleSiteVerification }
       : undefined,
@@ -47,10 +49,17 @@ export default async function StorePage({ params }: Props) {
     userAgent: (await headers()).get("user-agent"),
   });
 
+  /**
+   * A published home design wins (D51); without one this is the fixed
+   * storefront it has always been (`docs/BUILDER.md` §14 fallback).
+   */
+  const home = await publishedPage(site.id, "home");
+  if (home) return <StorefrontBuilderPage data={data} tree={home.tree} />;
+
   const topCategories = bundle.categories.filter((c) => !c.parentSlug);
 
   return (
-    <ThemeRoot themeId={themeId}>
+    <ThemeRoot themeId={themeId} theme={data.theme}>
       <SiteHeader
         siteName={site.name}
         homeHref={`${baseUrl}/`}

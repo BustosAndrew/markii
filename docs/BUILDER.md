@@ -330,6 +330,11 @@ from reading products directly to reading the published tree plus catalog data.
 
 ## 15. Build order
 
+**Started 2026-10-31 (D51).** M1 — steps 1–4 below plus the publish half of step 11 (atomic
+publish, version snapshots, restore, pre-publish checks) — is built: `lib/builder/`,
+`lib/actions/definitions/builder.ts`, `docs/API.md` §19. Next are the editor and live preview (M2),
+then the brand agent (M3). Cache invalidation is moot for now: `loadSite` reads per request.
+
 0. **Action registry + `defineAction` primitive** — built back in **Phase C** (`docs/BACKEND.md` §1),
    so it already exists and commerce mutations already use it
 1. Builder-specific actions registered against it
@@ -356,7 +361,9 @@ Phase F with the chat UI.
   before the theme system hardens, since export shape constrains it.
 - Do merchants get raw template-language access, or only the four custom-code levels?
 - Theme marketplace; theme export/import between stores.
-- Concurrent-editing conflict policy: last-write-wins with warning, or per-node locking?
-- Whether agents may auto-execute low-risk builder actions (spacing, alt text) without a proposal —
-  and whether that is per-store configurable.
+- ~~Concurrent-editing conflict policy~~ — **decided 2026-10-31 (D51): one writer at a time.** Writes
+  to a site are serialised on its design row, and while the brand agent works it holds a lease that
+  refuses every other writer (`AGENT_EDITING`) until stopped or expired.
+- ~~Whether agents may auto-execute low-risk builder actions~~ — **decided 2026-10-31 (D51): yes, on
+  the draft only**, for the brand agent; publishing stays human. Not per-store configurable.
 - Multi-language content model — deferred, but the node model must not foreclose it.

@@ -36,7 +36,7 @@ carry an explicit status — **never call a `PLANNED` endpoint and never fake it
 | 16 | Accounts, organizations, staff | partial — `/api/auth/*`, `/api/me`, `/api/org`, `/api/org/staff*`, `/api/org/tokens*`, `/api/org/switch`, **org scoping of §1–8**, and **MFA** (`/api/auth/mfa*`, enrol · challenge · recover, D40) are ✅ LIVE; the **audit log** (`/api/org/audit`, 2026-09-06) and **sessions** (`/api/org/sessions*`, 2026-09-07) are ✅ LIVE. **§16 is complete** — every `*_API_LIVE` constant in `lib/api/org.ts` is now `true`. (Tokens and org switching were listed as planned until 2026-08-03, and **MFA until 2026-08-18** — all three were already routed.) Frontend: `/dashboard/settings/account`, `/dashboard/settings/team`, `/dashboard/settings/audit`, the sidebar org switcher, `/mfa/*` | **A** |
 | 17 | Billing, plans, metering, threshold fees | ✅ **LIVE, and merchants are charged** (corrected 2026-08-18 — this row claimed "nothing is charged" long after it did). Usage ledger, threshold fee engine, meter, plan catalog, entitlements, period-close assessments, the **Stripe webhook** (verified + idempotent, platform **and** Connect handlers), subscriptions, plan changes with a Stripe-computed proration preview, cancellation at period end, payment methods, invoice history, and **threshold-fee invoicing onto the same invoice**. Scheduled monthly (§25). Add-on *purchase* alone refuses `409` — Agent Ops and Chargeback Assist are Phase F and do not exist | B |
 | 18 | Commerce core (variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping, **memberships**) | partial — §18.1–18.6 ✅ LIVE, including the §18.4 card rail (Stripe Connect direct charges) and **§18.6 Stripe Tax** (2026-08-17); §18.5 gift cards are ⛔ **deferred** (D33). §18.7 order operations (incl. **processor-executed card refunds**), §18.8 digital delivery, and §18.9 membership gating + shopper login ✅ LIVE — **including recurring/auto-renewing membership billing** (Stripe Subscriptions on the merchant's own Connect account; this row claimed otherwise until 2026-08-18). `STRIPE_CONNECT_WEBHOOK_SECRET` is **set and verified in production** (2026-09-07) — this row called it outstanding for weeks after it was configured. `pnpm stripe:webhooks` confirms the Connect endpoint subscribes to all nine required events including `invoice.created`. Genuine Stripe-generated Connect delivery was proven 2026-09-08 through the CLI (`stripe trigger … --stripe-account`), which this row called unproven for five days after | C |
-| 19 | Site builder & content | 🟡 PLANNED | D |
+| 19 | Site builder & content | partial ✅ (M1 foundation) · editor/preview/brand agent 🟡 | D |
 | 20 | Disputes & chargebacks | 🟡 PLANNED | F |
 | 21 | Agent Ops add-on | ⤴ **Superseded by §27** (D47, 2026-10-15) — built as free beta merchant agents rather than a last-phase paid add-on; the add-on billing and the settings/audit endpoints remain unbuilt | F |
 | 22 | **Action registry & MCP** — agent-native architecture | ✅ LIVE (registry, invoke, dry-run, audit, **undo** — 2026-08-18, and the **MCP server** — 2026-09-07: tools, prompts **and resources**). `undoable` is now derived from an `inverse()` and refused if declared without one, which corrected four actions that claimed it falsely | **Registry: C · MCP: D** |
@@ -2972,33 +2972,58 @@ memberships* above.)
 
 ---
 
-## 19. Site builder & content 🟡 PLANNED — Phase D
+## 19. Site builder & content — partial ✅ LIVE (M1 foundation, 2026-10-31) · editor, preview, brand agent 🟡 — Phase D, D51
 
 Architecture in **`docs/BUILDER.md`**. Pages are versioned JSON node trees, never HTML strings.
+**Reads are REST; every write is a registry action** (`POST /api/actions/builder.*`), so the
+editor, the brand agent and MCP clients share one mutation path. Typed client: `lib/api/builder.ts`
+(`BUILDER_API_LIVE = true`).
+
+**Draft vs published.** Edits change the draft; the storefront reads only what `builder.publish`
+copied live. A site with no design, or no published home, renders the fixed storefront exactly as
+before (`docs/BUILDER.md` §14). Publishing is **site-wide and atomic** — every page, the theme and
+its tokens — and writes a version snapshot.
 
 | Method | Route | Notes |
 |---|---|---|
-| `GET`/`POST` | `/api/pages` | List/create page or template documents |
-| `GET`/`PATCH`/`DELETE` | `/api/pages/:id` | Draft edits; `PATCH` bumps draft version |
-| `POST` | `/api/pages/:id/publish` | Atomic publish; runs pre-publish checks; invalidates cache tags |
-| `GET` | `/api/pages/:id/versions` · `POST /api/pages/:id/versions/:v/restore` | History, diff, restore |
-| `POST` | `/api/pages/:id/preview` | Render draft tree → HTML for the canvas/preview link |
-| `GET` | `/api/blocks` | Component registry: schemas + editor panel specs (drives the UI) |
-| `GET`/`PUT` | `/api/themes/:id` | Theme tokens, global regions, theme CSS |
-| `GET`/`POST` | `/api/menus` · `/api/redirects` · `/api/blog/posts` | Navigation, redirects, content |
-| `POST` | `/api/media` | Asset upload → media library (supersedes §4's `/api/uploads`) |
+| `GET` | `/api/builder/blocks` | Block registry as data: each block's props JSON Schema, defaults, `editorPanel` (generate the inspector from it), semantics; presets; token scales (fonts, radius, maxWidth) |
+| `GET` | `/api/builder/sites/:idOrSlug` | The design: `{ started: false }`, or draft `themeId`, `tokens`, `contrast` warnings, `revision`, `publishedRevision`, `hasUnpublishedChanges`, `publishedVersion`, `publishedAt`, `agentLock`, `pages[]` (`id, handle, title, deleted, published, path`) |
+| `GET` | `/api/builder/sites/:idOrSlug/pages/:pageId` | One page: draft `tree`, `seo`, and `published` (the live copy) or null |
+| `GET` | `/api/builder/sites/:idOrSlug/revision` | `{ started, revision, publishedRevision, agentLock }` — one indexed read; poll it to reload the preview |
+| `GET` | `/api/builder/sites/:idOrSlug/checks` | Pre-publish checks on the draft: `{ results[], blocking }` |
+| `GET` | `/api/builder/sites/:idOrSlug/versions` | Published versions, newest first |
 
-Publish response includes check results:
+All `cms.read`. Writes are `cms.write`:
 
-```json
-{ "published": true, "version": 12,
-  "checks": { "errors": [], "warnings": [
-    { "code": "MISSING_ALT", "nodeId": "n_18", "message": "Image has no alt text" },
-    { "code": "HEADING_SKIP", "nodeId": "n_22", "message": "h2 followed by h4" } ] } }
-```
+| Action | Risk | Agent may run (D51) | What |
+|---|---|---|---|
+| `builder.startDesign` | low | — | Create the design: draft theme + a home page that reproduces today's storefront. Idempotent |
+| `builder.addBlock` · `insertNodes` · `insertPreset` | low | ✅ | Add one block / whole subtrees / a preset (hero, imageWithText, featureRow, faqSection, productShowcase) |
+| `builder.removeNodes` · `moveNode` · `duplicateNode` | low | ✅ | Structure edits |
+| `builder.setProps` · `setStyles` | low | ✅ | Block content (validated by the block's schema) / style **tokens** per breakpoint (`base`, `sm` 640, `md` 768, `lg` 1024; `null` clears) |
+| `builder.setTheme` · `setThemeTokens` | low | ✅ | Base theme / token overrides (hex colours, curated fonts, radius and width scales; `null` resets). Result carries WCAG contrast warnings |
+| `builder.createPage` · `updatePage` | low | ✅ | Pages at `/pages/{handle}`; title, handle, SEO. Home's handle is fixed |
+| `builder.deletePage` · `restorePage` | medium | — | Soft delete in the draft; a deleted page keeps serving until publish |
+| `builder.publish` | **high** | — | Atomic publish; tokens and agents get `HUMAN_APPROVAL_REQUIRED` |
+| `builder.discardDraft` · `restoreVersion` | medium | — | Draft back to live / a version copied into the draft. Not undoable |
 
-Errors block publishing; warnings inform. Custom code is sanitized server-side on save and must
-never be injectable into `llms.txt`, `agent.md`, `sitemap.xml`, or checkout.
+Every draft write answers with the new `revision` (null when nothing changed). All are undoable
+through `POST /api/actions/:id/undo` except publish, discard and restore.
+
+**Refusals to handle by code:**
+- `409 AGENT_EDITING` — the brand agent holds the site's edit lease (owner, 2026-10-31: one writer
+  at a time; the agent holds the pen while a turn runs). Applies to every non-agent writer — the
+  dashboard, the HTTP API, MCP tokens — and to an agent whose turn was stopped. Expires on its own.
+- `409 CONFLICT`, `details.reason: "design_not_started"` — call `builder.startDesign`.
+- `409 CONFLICT`, `details.reason: "checks_failed"`, `details.checks` — publish blocked by errors.
+- `400 VALIDATION_ERROR` — an edit the registry refuses (nesting, schema, limits: 500 blocks, depth
+  12); `404` — a stale node id.
+
+**Storefront.** `/` renders the published home design when there is one; `/pages/{handle}` serves
+published pages; the published theme tokens reach every storefront page through `ThemeRoot`.
+Published HTML carries no editor attributes and no builder JavaScript; FAQ blocks publish
+`FAQPage` JSON-LD. **Not built yet:** the editor screen and live preview (M2), the brand agent
+(M3), templates/bindings/global regions (M4), generators from the tree (M5), custom code (M6).
 
 ---
 

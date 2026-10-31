@@ -3,10 +3,10 @@ import {
   getTheme,
   themeStylesheet,
   type ThemeId,
+  type ThemeTokens,
 } from "@/lib/storefront/themes";
 
-function themeStyle(themeId?: string | null): CSSProperties {
-  const t = getTheme(themeId);
+function themeStyle(t: ThemeTokens): CSSProperties {
   return {
     ["--sf-bg" as string]: t.background,
     ["--sf-surface" as string]: t.surface,
@@ -32,12 +32,18 @@ function themeStyle(themeId?: string | null): CSSProperties {
 
 export function ThemeRoot({
   themeId,
+  theme: resolved,
   children,
 }: {
   themeId?: string | null;
+  /**
+   * The site's published theme with its design-token overrides applied
+   * (`loadSite` → `data.theme`, D51). Wins over `themeId` when given.
+   */
+  theme?: ThemeTokens;
   children: ReactNode;
 }) {
-  const theme = getTheme(themeId);
+  const theme = resolved ?? getTheme(themeId);
   return (
     <>
       <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -47,7 +53,7 @@ export function ThemeRoot({
       <div
         className="sf-shell"
         data-theme={theme.id as ThemeId}
-        style={themeStyle(themeId)}
+        style={themeStyle(theme)}
       >
         {children}
       </div>

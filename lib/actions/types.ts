@@ -36,7 +36,18 @@ export type ActorRequest = { ip: string | null; userAgent: string | null };
 
 export type ActorIdentity =
   | { type: "user"; id: string; orgId: string | null }
-  | { type: "agent"; id: string; orgId: string | null; onBehalfOfUserId: string }
+  | {
+      type: "agent";
+      id: string;
+      orgId: string | null;
+      onBehalfOfUserId: string;
+      /**
+       * The conversation the agent is acting in. The builder's edit lease is
+       * held by a session (D51), so a stopped turn — whose session no longer
+       * holds it — cannot land one more change.
+       */
+      sessionId?: string;
+    }
   | { type: "token"; id: string; orgId: string | null }
   /**
    * Migrations, seeds, and the scheduled billing sweep.
@@ -171,6 +182,19 @@ export type ActionDefinition<TInput = unknown, TResult = unknown> = {
    * per-route check would leave exactly that gap.
    */
   requiresStepUp?: boolean;
+  /**
+   * The one exception to "an agent never executes anything" (D47), opened by
+   * D51 for the brand agent: an action marked `"draft"` may be run by an
+   * `agent` actor for real, not only as a dry run.
+   *
+   * **Only for edits to an unpublished draft** — nothing a shopper sees. So
+   * the guarantee moves from "agents never write" to "agents never change what
+   * shoppers see": publishing, restoring, discarding, deleting and custom code
+   * stay human-only. `defineAction` refuses the flag on anything that is not a
+   * `low`, step-up-free `builder.*` action, and a registry test pins the exact
+   * set, so widening it is a reviewed change rather than one line.
+   */
+  agentExecution?: "draft";
   /**
    * Whether this action can be undone (§22).
    *

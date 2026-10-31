@@ -43,7 +43,7 @@ export default async function CategoryPage({ params }: Props) {
   const themeId = site.themeId ?? "studio";
 
   return (
-    <ThemeRoot themeId={themeId}>
+    <ThemeRoot themeId={themeId} theme={data.theme}>
       <SiteHeader
         siteName={site.name}
         homeHref={`${baseUrl}/`}

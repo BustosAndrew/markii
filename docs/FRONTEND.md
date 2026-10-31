@@ -493,6 +493,24 @@ The audit list carries both directions now — `undoneBy` on the original row, `
 so a history screen can strike through a reversed change and label its reversal without a second
 query. Both are `string | null` on `ActionInvocation`.
 
+### 🟢 New 2026-10-31 — site builder foundation (D51): typed client ready, no screens yet
+
+`docs/API.md` §19, `lib/api/builder.ts` (`BUILDER_API_LIVE = true`). The editor screen, live preview
+and brand agent come next (M2–M3); nothing here needs a screen yet, but the contract is live.
+
+- **Reads:** `getBlockRegistry`, `getDesign`, `getDesignPage`, `getDesignRevision` (poll it),
+  `getDesignChecks`, `listDesignVersions`. **Writes** are registry actions wrapped as `startDesign`,
+  `addBlock`, `insertPreset`, `setNodeProps`, `setNodeStyles`, `setDesignTokens`, `publishDesign`… —
+  each returns the new `revision`.
+- **Generate the inspector from `editorPanel`** on each block in `getBlockRegistry` — field kinds
+  `text`, `markdown`, `number`, `select`, `boolean`, `link`, `image`, `product`, `category`,
+  `collection`, `stringList`, `items`. Do not hand-build per-block forms.
+- **New error code `AGENT_EDITING` (409)**: the brand agent holds the pen. Make the editor read-only
+  and offer Stop; do not show it as a generic conflict.
+- **`ThemeRoot` takes `theme`** (the resolved published theme, `data.theme` from `loadSite`) — every
+  storefront page passes it so published design tokens apply site-wide. `themeId` still works alone.
+- **`ProductCard` takes optional `showPrice`** (default true).
+
 ### 🟢 New 2026-10-29 — `*Cents` are minor units now; x402 is USD-only; provenance rendered (D50)
 
 **Done for you, review it:**

@@ -42,7 +42,7 @@ export default async function CollectionsPage({ params }: Props) {
   const themeId = site.themeId ?? "studio";
 
   return (
-    <ThemeRoot themeId={themeId}>
+    <ThemeRoot themeId={themeId} theme={data.theme}>
       <SiteHeader
         siteName={site.name}
         homeHref={`${baseUrl}/`}

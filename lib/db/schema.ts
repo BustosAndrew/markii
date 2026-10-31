@@ -1,4 +1,6 @@
 import { sql, type SQL } from "drizzle-orm";
+import type { DesignTokens } from "@/lib/builder/tokens";
+import type { PageNode, PageSeo } from "@/lib/builder/types";
 import {
   boolean,
   customType,
@@ -2804,6 +2806,12 @@ export const agentSessions = pgTable(
     agent: text("agent", { enum: AGENT_KINDS }).notNull(),
     /** First line of the first message, for a session list. */
     title: text("title"),
+    /**
+     * The storefront a brand-agent conversation is about (D51). Null for the
+     * org-wide agents. One design conversation belongs to one site, so the
+     * editor reopens it with that site's context rather than another's.
+     */
+    siteId: integer("site_id").references(() => sites.id, { onDelete: "cascade" }),
     messages: jsonb("messages").$type<unknown[]>().notNull().default([]),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -3010,3 +3018,131 @@ export type EmailDelivery = typeof emailDeliveries.$inferSelect;
 export type StripeWebhookEvent = typeof stripeWebhookEvents.$inferSelect;
 export type AgentSession = typeof agentSessions.$inferSelect;
 export type AgentProposal = typeof agentProposals.$inferSelect;
+
+// ---------------------------------------------------------------------------
+// Site builder (Phase D, D51) — docs/BUILDER.md §4, §12
+// ---------------------------------------------------------------------------
+
+/**
+ * A site's design: which theme and token overrides it uses, in draft and as
+ * published, and the counter every draft write bumps.
+ *
+ * **Created the first time the builder opens** (`builder.startDesign`). A site
+ * without a row has never been designed and renders the fixed storefront
+ * (`docs/BUILDER.md` §14). The published theme id stays on `sites.themeId`,
+ * where every storefront page already reads it; publishing copies the draft
+ * one there.
+ *
+ * `draftRevision` serialises writers: every builder action takes this row
+ * `FOR UPDATE` first, so a merchant and the brand agent cannot lose each
+ * other's edit, and the live preview polls it to know when to reload.
+ */
+export const siteDesigns = pgTable("site_designs", {
+  siteId: integer("site_id")
+    .primaryKey()
+    .references(() => sites.id, { onDelete: "cascade" }),
+  draftThemeId: text("draft_theme_id", { enum: ["studio", "atlas", "noir", "bloom"] }).notNull(),
+  draftTokens: jsonb("draft_tokens").$type<DesignTokens>().notNull().default({}),
+  publishedTokens: jsonb("published_tokens").$type<DesignTokens>().notNull().default({}),
+  draftRevision: integer("draft_revision").notNull().default(0),
+  /** `draftRevision` at the last publish; unequal means there are unpublished changes. */
+  publishedRevision: integer("published_revision").notNull().default(0),
+  publishedVersion: integer("published_version").notNull().default(0),
+  publishedAt: timestamp("published_at", { withTimezone: true }),
+  /**
+   * The brand agent holds the pen while a turn runs (owner, 2026-10-31): any
+   * other writer is refused `AGENT_EDITING` until the lease is released or
+   * expires. A lease rather than a flag, so a crashed turn frees the site.
+   */
+  agentLockSessionId: text("agent_lock_session_id"),
+  agentLockExpiresAt: timestamp("agent_lock_expires_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * One page (or, from M4, template or global region) as a versioned node tree —
+ * **never an HTML string** (`docs/BUILDER.md` §4).
+ *
+ * The draft columns are what the editor and the agent change; the
+ * `published*` columns are what the storefront reads, and only `builder.publish`
+ * writes them. A page deleted in draft keeps serving until the next publish.
+ */
+export const siteDocuments = pgTable(
+  "site_documents",
+  {
+    id: serial("id").primaryKey(),
+    siteId: integer("site_id")
+      .notNull()
+      .references(() => sites.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: ["page", "template", "region"] }).notNull().default("page"),
+    handle: text("handle").notNull(),
+    title: text("title").notNull(),
+    seo: jsonb("seo").$type<PageSeo>().notNull().default({}),
+    draftTree: jsonb("draft_tree").$type<PageNode>().notNull(),
+    draftDeleted: boolean("draft_deleted").notNull().default(false),
+    publishedHandle: text("published_handle"),
+    publishedTitle: text("published_title"),
+    publishedSeo: jsonb("published_seo").$type<PageSeo>(),
+    publishedTree: jsonb("published_tree").$type<PageNode>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("site_documents_site_kind_handle_uq").on(t.siteId, t.kind, t.handle),
+    index("site_documents_published_idx").on(t.siteId, t.kind, t.publishedHandle),
+  ],
+);
+
+/**
+ * A snapshot of everything a publish made live, for history and restore.
+ * Restore copies a snapshot into the **draft**; it never publishes by itself.
+ */
+export const siteDesignVersions = pgTable(
+  "site_design_versions",
+  {
+    id: serial("id").primaryKey(),
+    siteId: integer("site_id")
+      .notNull()
+      .references(() => sites.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    snapshot: jsonb("snapshot")
+      .$type<{
+        themeId: string;
+        tokens: DesignTokens;
+        documents: { id: number; kind: string; handle: string; title: string; seo: PageSeo; tree: PageNode }[];
+      }>()
+      .notNull(),
+    note: text("note"),
+    /** `user:…` or `token:…` — who pressed publish. Agents cannot publish. */
+    publishedBy: text("published_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("site_design_versions_site_version_uq").on(t.siteId, t.version)],
+);
+
+/**
+ * A live-preview session: the opaque token the editor's preview frame trades
+ * for a cookie on the preview host (M2). Stored hashed; short-lived.
+ */
+export const sitePreviewSessions = pgTable(
+  "site_preview_sessions",
+  {
+    id: text("id").primaryKey(),
+    tokenHash: text("token_hash").notNull(),
+    siteId: integer("site_id")
+      .notNull()
+      .references(() => sites.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("site_preview_sessions_token_uq").on(t.tokenHash),
+    index("site_preview_sessions_site_idx").on(t.siteId),
+  ],
+);
+
+export type SiteDesign = typeof siteDesigns.$inferSelect;
+export type SiteDocument = typeof siteDocuments.$inferSelect;
+export type SiteDesignVersion = typeof siteDesignVersions.$inferSelect;

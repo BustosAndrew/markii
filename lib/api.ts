@@ -80,6 +80,13 @@ export class ApiError extends Error {
        * the largest plan. The fix is in `details`.
        */
       | "QUOTA_EXCEEDED"
+      /**
+       * The brand agent is editing this site's draft right now (D51), and only
+       * one writer holds the pen at a time. Paired with 409. **Not
+       * `CONFLICT`**, because the fix is specific and the editor offers it:
+       * stop the agent, then edit.
+       */
+      | "AGENT_EDITING"
       | "INTERNAL",
     public status: number,
     message: string,
