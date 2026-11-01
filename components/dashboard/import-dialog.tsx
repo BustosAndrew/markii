@@ -58,6 +58,12 @@ export function ImportDialog({
   const [createdCount, setCreatedCount] = useState(0);
 
   const defaultSiteId = String(sites[0]?.id ?? "");
+  const alreadyImported = commitFailed.filter((f) =>
+    f.reason.startsWith("already imported"),
+  );
+  const commitNeedsAttention = commitFailed.filter(
+    (f) => !f.reason.startsWith("already imported"),
+  );
 
   const allocationsReady = useMemo(() => {
     if (items.length === 0) return false;
@@ -439,14 +445,33 @@ export function ImportDialog({
                   They are live in your inventory and ready to assign or edit.
                 </p>
               </div>
-              {commitFailed.length > 0 ? (
+              {alreadyImported.length > 0 ? (
+                <div className="rounded-[var(--radius-control)] border border-border bg-surface-elevated px-4 py-3">
+                  <p className="text-sm font-medium text-foreground">
+                    Already in the catalog
+                  </p>
+                  <p className="mt-1 text-sm text-muted">
+                    A re-import skips products this store already brought in. That
+                    is expected.
+                  </p>
+                  <ul className="mt-1.5 space-y-1 text-sm text-muted">
+                    {alreadyImported.map((f, i) => (
+                      <li key={`${f.tempId}-${i}`}>{f.reason}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {commitNeedsAttention.length > 0 ? (
                 <div className="rounded-[var(--radius-control)] border border-warning-text/30 bg-warning-bg px-4 py-3">
                   <p className="text-sm font-medium text-warning-text">
-                    {commitFailed.length}{" "}
-                    {commitFailed.length === 1 ? "item needs" : "items need"} attention
+                    {commitNeedsAttention.length}{" "}
+                    {commitNeedsAttention.length === 1
+                      ? "item needs"
+                      : "items need"}{" "}
+                    attention
                   </p>
                   <ul className="mt-1.5 space-y-1 text-sm text-warning-text/90">
-                    {commitFailed.map((f, i) => (
+                    {commitNeedsAttention.map((f, i) => (
                       <li key={`${f.tempId}-${i}`}>{f.reason}</li>
                     ))}
                   </ul>

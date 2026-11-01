@@ -81,7 +81,8 @@ API-independent work so you don't outrun the backend") no longer applies to A, B
 | **Catalog agent** | §27 | ✅ **LIVE, screen built** (beta) | Opened from **Agents** in the dashboard header (`AgentsNavMenu`). Propose-only; the merchant approves. MCP (§22) is a different surface — do not confuse them |
 | **Assistant** | §27 | ✅ **LIVE, screen built** (beta, 2026-10-17) | Opened from **Agents** in the dashboard header. Read-only — answers questions, checks setup, routes to pages/agents. Reuses `AgentPanel` with `agent="assistant"` |
 | **Setup checklist** | §28 | ✅ **LIVE, screen built** (2026-10-17) | Overview card via `getSetupStatus()`. `firstRun` leads the page; `next` is the headline. No local ticks — refetch by revisiting |
-| Site builder, Channels, Test Lab | §19–20 | ⛔ Deferred | Out of launch scope — do not start |
+| Site builder | §19 | ✅ Foundation LIVE, **no screens** (D51) | Typed client `lib/api/builder.ts`. Editor, live preview, and brand agent are M2–M3 — do not start them |
+| Channels, Test Lab | §10 · §12 · §20 | ⛔ Deferred | Out of launch scope — do not start |
 | Platform admin | §26 | ✅ LIVE, screens built | `/admin` when `me.operator`. Suspend/reinstate and **Reset MFA** (`resetPlatformMfa`). Never on merchant nav for anyone else |
 
 ### MFA (D40) — built. What to preserve when touching it
@@ -524,6 +525,8 @@ and brand agent come next (M2–M3); nothing here needs a screen yet, but the co
   (`19.999` USD, `1500.5` JPY) instead of rounding.
 - **`product-form.tsx`**: price label and placeholder follow the product's currency (`Price (JPY)`),
   and parsing uses the helper above. It used to say "(USD)" for every product.
+  **Create** now takes `orgCurrency` from `GET /api/me` and sends `currency` on
+  `createProduct` — a new product used to parse and store as USD regardless of the org.
 - **`create-website-wizard.tsx`**: hand-added prices parse in the org currency; the zero-decimal
   fallback to USD in `websites/new/page.tsx` is gone.
 - **Product page shows provenance** — "Imported from Shopify on … · view original", from the four
@@ -534,7 +537,8 @@ and brand agent come next (M2–M3); nothing here needs a screen yet, but the co
   "This store cannot take payment in EUR right now" when no rail is left. Any other rail picker
   should offer x402 only when `currency` is USD.
 - **New commit `failed` reason**: *"already imported, or slug … taken, … by a concurrent import"*
-  — same meaning as "already imported", just from a race.
+  — same meaning as "already imported", just from a race. The import done step lists those
+  separately as "Already in the catalog", not as items that need attention.
 
 ### 🟢 New 2026-10-23 — import provenance, WooCommerce variations, wizard currency (D49)
 

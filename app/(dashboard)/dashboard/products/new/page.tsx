@@ -1,4 +1,4 @@
-import { getTaxSettings } from "@/lib/api/server";
+import { getMe, getTaxSettings } from "@/lib/api/server";
 import { listCategories } from "@/lib/api/server";
 import { listMembershipTiers } from "@/lib/api/server";
 import { listSites } from "@/lib/api/server";
@@ -8,7 +8,7 @@ import { FetchError } from "@/components/dashboard/fetch-error";
 import { ProductForm } from "@/components/dashboard/product-form";
 
 export default async function NewProductPage() {
-  const [sitesResult, categoriesResult, tiersResult] = await Promise.all([
+  const [sitesResult, categoriesResult, tiersResult, meResult] = await Promise.all([
     loadOrError(() =>
       listSites({ limit: 100, sort: "name" }),
     ),
@@ -16,6 +16,7 @@ export default async function NewProductPage() {
       listCategories({ limit: 100 }),
     ),
     loadOrError(() => listMembershipTiers()),
+    loadOrError(() => getMe()),
   ]);
 
   if (sitesResult.error || !sitesResult.data) {
@@ -47,7 +48,7 @@ export default async function NewProductPage() {
     <div>
       <PageHeader
         title="New product"
-        description="Add a product to a site. Price is stored as integer cents."
+        description="Add a product to a site. Price is in the store's currency, in that currency's own minor units."
       />
       <ProductForm
         mode="create"
@@ -59,6 +60,7 @@ export default async function NewProductPage() {
           siteId: tier.siteId,
         }))}
         taxProviders={taxProviders}
+        orgCurrency={meResult.data?.org.currency ?? "USD"}
       />
     </div>
   );

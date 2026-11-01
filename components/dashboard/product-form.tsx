@@ -28,6 +28,7 @@ export function ProductForm({
   categories,
   tiers,
   taxProviders = {},
+  orgCurrency = "USD",
 }: {
   mode: "create" | "edit";
   product?: Product;
@@ -37,14 +38,17 @@ export function ProductForm({
   tiers: TierOption[];
   /** Per-storefront tax provider, loaded on the server. Missing keys mean unknown. */
   taxProviders?: Record<number, TaxProvider>;
+  /** Org billing currency — new products are priced in this, not hardcoded USD (D50). */
+  orgCurrency?: string;
 }) {
   const router = useRouter();
   const [siteId, setSiteId] = useState(String(product?.siteId ?? sites[0]?.id ?? ""));
   const [name, setName] = useState(product?.name ?? "");
   const [slug, setSlug] = useState(product?.slug ?? "");
   const [description, setDescription] = useState(product?.description ?? "");
-  // New products take the API's default; an existing one keeps its own currency.
-  const currency = product?.currency ?? "USD";
+  // Edit keeps the product's currency. Create follows the org — the API default
+  // is USD, so omitting this would label a yen price in dollars (D50).
+  const currency = (product?.currency ?? orgCurrency).toUpperCase();
   const [price, setPrice] = useState(
     product ? decimalMinor(product.priceCents, currency) : "",
   );
@@ -130,6 +134,7 @@ export function ProductForm({
         slug: slug.trim() || undefined,
         description: description.trim() || null,
         priceCents,
+        currency,
         sku: sku.trim() || null,
         stock: Number(stock) || 0,
         categoryId: categoryId ? Number(categoryId) : null,

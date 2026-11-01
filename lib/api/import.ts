@@ -20,7 +20,7 @@ export type ImportedItem = {
   tempId: string;
   name: string;
   slug?: string;
-  /** Two-decimal minor units. Only two-decimal currencies are ever staged. */
+  /** The currency's own minor units (D50). Any three-letter ISO code may appear. */
   priceCents: number;
   currency?: string;
   sku?: string | null;
