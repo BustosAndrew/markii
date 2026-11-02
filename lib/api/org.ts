@@ -56,6 +56,11 @@ export function canWriteBilling(role: StaffRole | null | undefined): boolean {
   return role === "owner" || role === "administrator";
 }
 
+/** `cms.write` — owner, administrator, and developer. Gates editing a site's design (D51). */
+export function canWriteCms(role: StaffRole | null | undefined): boolean {
+  return role === "owner" || role === "administrator" || role === "developer";
+}
+
 /** `catalog.write` — owner, administrator, and catalog manager. */
 export function canWriteCatalog(role: StaffRole | null | undefined): boolean {
   return role === "owner" || role === "administrator" || role === "catalog_manager";

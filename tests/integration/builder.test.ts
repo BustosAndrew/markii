@@ -149,8 +149,9 @@ describe("site builder", () => {
   });
 
   it("refuses a person's edit while the brand agent holds the lease, and allows it after", async () => {
-    // A turn holding the lease, as M3's agent turn will set it.
-    await sql`update site_designs set agent_lock_session_id = 'as_testlease000000000000', agent_lock_expires_at = now() + interval '1 minute'
+    // A turn holding the lease, as the agent turn sets it. Timestamps come from the app's clock,
+    // as in real use — the database's `now()` can sit seconds away from it.
+    await sql`update site_designs set agent_lock_session_id = 'as_testlease000000000000', agent_lock_expires_at = ${new Date(Date.now() + 60_000)}
               where site_id = ${siteId}`;
     const refused = await act("builder.setTheme", { siteId, themeId: "noir" });
     expect(refused.status).toBe(409);
@@ -158,7 +159,7 @@ describe("site builder", () => {
     expect((await merchant.get(`/api/builder/sites/${siteId}/revision`)).json.agentLock.active).toBe(true);
 
     // An expired lease frees the site without anyone releasing it.
-    await sql`update site_designs set agent_lock_expires_at = now() - interval '1 second' where site_id = ${siteId}`;
+    await sql`update site_designs set agent_lock_expires_at = ${new Date(Date.now() - 60_000)} where site_id = ${siteId}`;
     const allowed = await act("builder.setTheme", { siteId, themeId: "noir" });
     expect(allowed.status, JSON.stringify(allowed.json)).toBe(200);
   });
@@ -180,6 +181,66 @@ describe("site builder", () => {
     const publish = await viaToken("builder.publish", { siteId });
     expect(publish.status).toBe(403);
     expect(publish.json.error.code).toBe("HUMAN_APPROVAL_REQUIRED");
+  });
+
+  describe("live preview (M2)", () => {
+    let previewPath: string;
+
+    beforeAll(async () => {
+      const minted = await merchant.post(`/api/builder/sites/${siteId}/preview-session`, {});
+      expect(minted.status, JSON.stringify(minted.json)).toBe(201);
+      previewPath = new URL(minted.json.url).pathname;
+      // A draft-only change the storefront must not show.
+      const intro = (await homePage()).tree.children[0];
+      await act("builder.setProps", { siteId, pageId: homeId, nodeId: intro.children[0].id, props: { text: "Only in the preview" } });
+    });
+
+    it("renders the draft with the editor's hooks, while the storefront stays as published", async () => {
+      const preview = await shopper.getRaw(previewPath);
+      expect(preview.status).toBe(200);
+      expect(preview.text).toContain("Only in the preview");
+      expect(preview.text).toContain("data-mk-node");
+      expect(preview.text).toContain("markii:location");
+      expect(preview.headers.get("referrer-policy")).toBe("no-referrer");
+      expect(preview.headers.get("x-robots-tag")).toContain("noindex");
+
+      const live = await storefront();
+      expect(live.text).not.toContain("Only in the preview");
+      expect(live.text).not.toContain("markii:location");
+    });
+
+    it("keeps links inside the preview", async () => {
+      const preview = await shopper.getRaw(previewPath);
+      expect(preview.text).toContain(`${previewPath}/p/test-product-one`);
+      const product = await shopper.getRaw(`${previewPath}/p/test-product-one`);
+      expect(product.status).toBe(200);
+      expect(product.text).toContain("markii:location");
+    });
+
+    it("refuses storefront API calls — no cart or checkout against a draft", async () => {
+      const cart = await shopper.postRaw(`${previewPath}/api/cart`, {});
+      expect(cart.status).toBe(403);
+    });
+
+    it("does not count the merchant's preview as traffic", async () => {
+      const count = async () => Number((await sql`select count(*)::int n from agent_traffic where site_id = ${siteId}`)[0].n);
+      const before = await count();
+      await shopper.getRaw(previewPath);
+      await shopper.getRaw(`${previewPath}/p/test-product-one`);
+      expect(await count()).toBe(before);
+    });
+
+    it("answers 404 to a token that was never minted, has expired, or belongs to another site", async () => {
+      const forged = previewPath.replace(/\/preview\/t\/[^/]+\//, `/preview/t/${"B".repeat(43)}/`);
+      expect((await shopper.getRaw(forged)).status).toBe(404);
+
+      const other = await createTestStore(cleanup, "builder-other-site", { orgId });
+      const crossSite = previewPath.replace(new RegExp(`/${slug}$`), `/${other.slug}`);
+      expect((await shopper.getRaw(crossSite)).status).toBe(404);
+
+      await sql`update site_preview_sessions set expires_at = ${new Date(Date.now() - 1000)} where site_id = ${siteId}`;
+      expect((await shopper.getRaw(previewPath)).status).toBe(404);
+    });
   });
 
   it("does not let another org read or edit this design", async () => {

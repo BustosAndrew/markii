@@ -3,7 +3,7 @@ import type { CheckResult } from "@/lib/builder/checks";
 import type { DesignTokens } from "@/lib/builder/tokens";
 import type { Breakpoint, PageNode, PageSeo, StyleProps } from "@/lib/builder/types";
 import { invokeAction } from "./actions";
-import { apiGet } from "./client";
+import { apiGet, apiPost } from "./client";
 import { callWhenLive } from "./planned";
 
 /**
@@ -122,6 +122,16 @@ export const getDesignChecks = (site: string | number, init?: RequestInit) =>
 
 export const listDesignVersions = (site: string | number, init?: RequestInit) =>
   callWhenLive(BUILDER_API_LIVE, SECTION, () => apiGet<{ items: DesignVersion[] }>(`/api/builder/sites/${site}/versions`, undefined, init));
+
+/**
+ * A two-hour live-preview URL for the editor's iframe (M2). Not a registry
+ * action — its result is a credential, which the audit log must not hold.
+ * Re-mint before `expiresAt`; an expired preview answers 404.
+ */
+export const createPreviewSession = (site: string | number) =>
+  callWhenLive(BUILDER_API_LIVE, SECTION, () =>
+    apiPost<{ url: string; expiresAt: string }>(`/api/builder/sites/${site}/preview-session`, {}),
+  );
 
 // ---------- writes (registry actions) ----------
 

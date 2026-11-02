@@ -1,4 +1,10 @@
 import { NextResponse, type NextFetchEvent, type NextRequest } from "next/server";
+import {
+  PREVIEW_TOKEN_HEADER,
+  parsePreviewRequest,
+  previewHost,
+  type PreviewRequest,
+} from "./lib/builder/preview-url";
 import { normalizeHost, resolveCustomDomain } from "./lib/domains";
 import { storefrontSlugFromPath } from "./lib/storefront/fair-use";
 import { throttleStorefront } from "./lib/storefront/fair-use-guard";
@@ -14,6 +20,38 @@ export const config = {
   matcher: ["/((?!_next|uploads|favicon\\.ico|icon\\.svg).*)"],
 };
 
+/**
+ * The builder's live preview (D51): `/t/{token}/{slug}/…` on the preview host
+ * (or `/preview/t/…` where subdomains do not work) becomes the storefront page
+ * with the token attached. The token is only *carried* here; `loadSite`
+ * checks it against the database, so a request that invents the header gains
+ * nothing.
+ *
+ * Storefront API calls are refused outright — no cart, checkout, sign-in or
+ * download happens against a draft — and nothing here is throttled or logged
+ * as traffic, because the only visitor is the merchant at the editor.
+ */
+function previewResponse(req: NextRequest, preview: PreviewRequest): NextResponse {
+  const guard = {
+    "referrer-policy": "no-referrer",
+    "x-robots-tag": "noindex, nofollow",
+    "cache-control": "no-store",
+  };
+  if (preview.rest === "/api" || preview.rest.startsWith("/api/")) {
+    return NextResponse.json(
+      { error: { code: "FORBIDDEN", message: "Checkout, carts and accounts are turned off in the design preview." } },
+      { status: 403, headers: guard },
+    );
+  }
+  const url = req.nextUrl.clone();
+  url.pathname = `/_sites/${preview.slug}${preview.rest}`;
+  const headers = new Headers(req.headers);
+  headers.set(PREVIEW_TOKEN_HEADER, preview.token);
+  const res = NextResponse.rewrite(url, { request: { headers } });
+  for (const [k, v] of Object.entries(guard)) res.headers.set(k, v);
+  return res;
+}
+
 /** Signed-in-only areas of the platform. Everything else is public. */
 function isProtectedPath(pathname: string) {
   return pathname === "/dashboard" || pathname.startsWith("/dashboard/");
@@ -21,6 +59,12 @@ function isProtectedPath(pathname: string) {
 
 export async function proxy(req: NextRequest, event: NextFetchEvent) {
   const waitUntil = (work: Promise<unknown>) => event.waitUntil(work);
+
+  const requestHost = normalizeHost(req.headers.get("host") ?? "");
+  const preview = parsePreviewRequest(requestHost, req.nextUrl.pathname);
+  if (preview) return previewResponse(req, preview);
+  // The preview host serves previews and nothing else — never a store whose slug is "preview".
+  if (requestHost === previewHost()) return new NextResponse("Not found", { status: 404 });
 
   /**
    * A storefront addressed by path. Answered before the platform-host branch so

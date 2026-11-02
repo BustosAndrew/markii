@@ -494,6 +494,23 @@ The audit list carries both directions now — `undoneBy` on the original row, `
 so a history screen can strike through a reversed change and label its reversal without a second
 query. Both are `string | null` on `ActionInvocation`.
 
+### 🟢 New 2026-11-01 — the design editor and live preview are built (D51 M2) — review them
+
+`/dashboard/websites/[slug]/design`, `components/builder/`. Built backend-side to land M2 in one
+change; it is yours to restyle and reshape. What it relies on, and what not to break:
+
+- **It holds no copy of the design.** Every edit is an action; afterwards it re-reads the page and
+  reloads the preview. It polls `getDesignRevision` every 2s, so edits from elsewhere (another tab,
+  MCP, the brand agent in M3) appear the same way.
+- **The preview is an iframe on another origin** (`createPreviewSession` → `url`). It talks back
+  only by `postMessage`: `markii:select { nodeId }` and `markii:location { path }`; the editor sends
+  `markii:highlight { nodeId, scroll }`. Check `event.origin` against the preview URL's origin.
+  Re-mint before the two hours are up (the editor does at 90 minutes).
+- **Read-only when `agentLock.active`** or the role lacks `cms.write` (`canWriteCms` in
+  `lib/api/org.ts`). `AGENT_EDITING` from any action means the same thing.
+- **Undo/redo** is a client stack over `undoInvocation`; redo is the undo of the undo.
+- The website page has an **Edit design** button.
+
 ### 🟢 New 2026-10-31 — site builder foundation (D51): typed client ready, no screens yet
 
 `docs/API.md` §19, `lib/api/builder.ts` (`BUILDER_API_LIVE = true`). The editor screen, live preview

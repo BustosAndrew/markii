@@ -7,14 +7,14 @@ import { SiteHeader } from "@/components/storefront/site-header";
 import { StorePaused } from "@/components/storefront/paused";
 import { ThemeRoot } from "@/components/storefront/theme-root";
 import { logTraffic } from "@/lib/agents";
-import { loadSite, publishedPage, storefrontHalted } from "@/lib/storefront";
+import { loadSite, pageFor, storefrontHalted } from "@/lib/storefront";
 
 type Props = { params: Promise<{ site: string }> };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const data = await loadSite((await params).site);
   if (!data) return {};
-  const seo = (await publishedPage(data.site.id, "home"))?.seo;
+  const seo = (await pageFor(data, "home"))?.seo;
   return {
     title: seo?.title || data.site.name,
     description:
@@ -53,13 +53,13 @@ export default async function StorePage({ params }: Props) {
    * A published home design wins (D51); without one this is the fixed
    * storefront it has always been (`docs/BUILDER.md` §14 fallback).
    */
-  const home = await publishedPage(site.id, "home");
+  const home = await pageFor(data, "home");
   if (home) return <StorefrontBuilderPage data={data} tree={home.tree} />;
 
   const topCategories = bundle.categories.filter((c) => !c.parentSlug);
 
   return (
-    <ThemeRoot themeId={themeId} theme={data.theme}>
+    <ThemeRoot themeId={themeId} theme={data.theme} preview={data.preview}>
       <SiteHeader
         siteName={site.name}
         homeHref={`${baseUrl}/`}

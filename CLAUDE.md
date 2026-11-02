@@ -589,7 +589,14 @@ redesign a draft the merchant watches; publish, discard, restore and deletes sta
 by `defineAction` and a pinned test. **One writer at a time**: a brand-agent turn holds a lease on
 the design and every other writer gets `409 AGENT_EDITING` until it is stopped or expires. Rich text
 is a Markdown subset parsed to a tree and rendered through React — never `dangerouslySetInnerHTML`.
-The editor, live preview and brand agent are M2–M3 and **not built yet**.
+**The editor and live preview are built as of 2026-11-01 (M2)** — `/dashboard/websites/{slug}/design`.
+The preview is the real storefront renderer showing the draft, on its **own origin**
+(`preview.{ROOT_DOMAIN}/t/{token}/{slug}`, `lib/builder/preview-url.ts`; a `/preview/t/…` path only
+where subdomains do not load) so dashboard cookies never reach it. The token rides in the path, not
+a cookie — an iframe cookie is third-party on many setups — and is validated in `loadSite`; storefront
+APIs under it are refused in `proxy.ts`, and preview views are not logged as traffic. **Adding
+`preview.markii.shop` to the Vercel project is a manual step** — without it the production preview
+does not load. The brand agent is M3 and **not built yet**.
 
 **Stripe Tax on Markii's own subscription is built as of 2026-09-13** (G3). `automatic_tax` on every
 platform-account subscription create, change and preview — **no `Stripe-Account` header**, the

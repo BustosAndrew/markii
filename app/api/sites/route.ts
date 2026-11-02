@@ -6,7 +6,7 @@ import { assertGrowthAllowed } from "@/lib/billing/standing-guard";
 import { db, sites } from "@/lib/db";
 import { serializeSite, serializeSites } from "@/lib/queries";
 import { ownSitesForStaff } from "@/lib/tenancy";
-import { assertNoRedirectedSiteFields, siteCreateSchema } from "@/lib/validation";
+import { assertNoRedirectedSiteFields, isReservedSiteSlug, siteCreateSchema } from "@/lib/validation";
 
 export const GET = orgHandler(async (req, { session, orgId }) => {
   const sp = new URL(req.url).searchParams;
@@ -59,6 +59,8 @@ export const POST = orgHandler(
     /** A new storefront is growth on an unpaid plan — the day-7 rung of dunning (D10). */
     await assertGrowthAllowed(orgId, "creating a storefront");
     const slug = input.slug ?? slugify(input.name);
+    // A name like "Preview" slugifies onto a reserved Markii host.
+    if (isReservedSiteSlug(slug)) throw conflict(`site slug "${slug}" is reserved; choose another`);
     // Site slugs are globally unique (they are subdomains), so this check stays
     // deliberately unscoped — another org holding the slug is still a conflict.
     const [existing] = await db

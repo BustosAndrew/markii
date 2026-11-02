@@ -2972,7 +2972,7 @@ memberships* above.)
 
 ---
 
-## 19. Site builder & content — partial ✅ LIVE (M1 foundation, 2026-10-31) · editor, preview, brand agent 🟡 — Phase D, D51
+## 19. Site builder & content — partial ✅ LIVE (M1 foundation 2026-10-31 · M2 editor + live preview 2026-11-01) · brand agent 🟡 — Phase D, D51
 
 Architecture in **`docs/BUILDER.md`**. Pages are versioned JSON node trees, never HTML strings.
 **Reads are REST; every write is a registry action** (`POST /api/actions/builder.*`), so the
@@ -2992,6 +2992,7 @@ its tokens — and writes a version snapshot.
 | `GET` | `/api/builder/sites/:idOrSlug/revision` | `{ started, revision, publishedRevision, agentLock }` — one indexed read; poll it to reload the preview |
 | `GET` | `/api/builder/sites/:idOrSlug/checks` | Pre-publish checks on the draft: `{ results[], blocking }` |
 | `GET` | `/api/builder/sites/:idOrSlug/versions` | Published versions, newest first |
+| `POST` | `/api/builder/sites/:idOrSlug/preview-session` | `201 { url, expiresAt }` — a two-hour live-preview URL for the editor's iframe (M2). A route, not an action: the result is a credential and must stay out of the audit log, as API tokens do |
 
 All `cms.read`. Writes are `cms.write`:
 
@@ -3019,11 +3020,13 @@ through `POST /api/actions/:id/undo` except publish, discard and restore.
 - `400 VALIDATION_ERROR` — an edit the registry refuses (nesting, schema, limits: 500 blocks, depth
   12); `404` — a stale node id.
 
+**Live preview (M2).** The URL is the real storefront renderer showing the **draft**: `https://preview.{ROOT_DOMAIN}/t/{token}/{slug}/…` — its own origin, so dashboard cookies never reach it — or `{app}/preview/t/{token}/{slug}/…` where storefront subdomains do not load (`localhost`, `*.vercel.app`), a path form refused when they do. The token is in the path, not a cookie, so links stay inside the preview without third-party cookies. Every storefront API under it answers `403` (no cart, checkout or sign-in against a draft); responses are `no-referrer`, `noindex`, `no-store`; nothing is logged as traffic; an expired, foreign or unknown token is `404`. The page carries a preview-only bridge that `postMessage`s the clicked node id (`markii:select`) and the path (`markii:location`) to the dashboard origin, and outlines the node named in a `markii:highlight` message. Slugs `preview`, `app` and `www` are reserved for sites.
+
 **Storefront.** `/` renders the published home design when there is one; `/pages/{handle}` serves
 published pages; the published theme tokens reach every storefront page through `ThemeRoot`.
 Published HTML carries no editor attributes and no builder JavaScript; FAQ blocks publish
-`FAQPage` JSON-LD. **Not built yet:** the editor screen and live preview (M2), the brand agent
-(M3), templates/bindings/global regions (M4), generators from the tree (M5), custom code (M6).
+`FAQPage` JSON-LD. **The editor is `/dashboard/websites/{slug}/design`** (M2). **Not built yet:** the
+brand agent (M3), templates/bindings/global regions (M4), generators from the tree (M5), custom code (M6).
 
 ---
 

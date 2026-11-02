@@ -24,7 +24,7 @@ export default async function CartPage({ params }: Props) {
   const topCategories = bundle.categories.filter((c) => !c.parentSlug);
 
   return (
-    <ThemeRoot themeId={themeId} theme={data.theme}>
+    <ThemeRoot themeId={themeId} theme={data.theme} preview={data.preview}>
       <SiteHeader
         siteName={site.name}
         homeHref={`${baseUrl}/`}

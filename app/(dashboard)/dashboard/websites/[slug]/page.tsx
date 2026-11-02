@@ -68,6 +68,7 @@ export default async function WebsiteDetailPage({
                 View live
               </ButtonLink>
             ) : null}
+            <ButtonLink href={`/dashboard/websites/${site.slug}/design`}>Edit design</ButtonLink>
           </>
         }
       />

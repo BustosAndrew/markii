@@ -1,4 +1,5 @@
 import { agentTraffic, db } from "@/lib/db";
+import { requestPreview } from "./builder/preview";
 
 const AGENT_PATTERNS: [RegExp, string][] = [
   [/claude|anthropic/i, "Claude"],
@@ -23,6 +24,8 @@ export async function logTraffic(opts: {
   userAgent: string | null | undefined;
   productId?: number | null;
 }): Promise<void> {
+  // The builder's preview is the merchant looking at their own draft, not traffic (D51).
+  if (await requestPreview()) return;
   try {
     await db.insert(agentTraffic).values({
       siteId: opts.siteId,

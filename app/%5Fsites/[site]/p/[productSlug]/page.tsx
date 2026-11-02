@@ -80,7 +80,7 @@ export default async function ProductPage({ params }: Props) {
   const locked = gate !== null && !gate.unlocked;
 
   return (
-    <ThemeRoot themeId={themeId} theme={data.theme}>
+    <ThemeRoot themeId={themeId} theme={data.theme} preview={data.preview}>
       <script
         id="product-jsonld"
         type="application/ld+json"

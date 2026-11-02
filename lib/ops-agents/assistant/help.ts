@@ -211,6 +211,21 @@ The readiness score on the Health page checks your store and catalog against fix
       links: [{ label: "Health", href: "/dashboard/health" }],
     },
     {
+      id: "site_design",
+      title: "Designing your storefront",
+      summary: "The design editor, live preview, publishing and version history.",
+      body: `Each store has a design editor: Websites → choose a store → Edit design. On the left are the page's layers, the blocks you can add, your pages and the theme; in the middle is a live preview of your actual storefront; on the right you edit whatever you select. Click anything in the preview to select it.
+
+- Pages are built from blocks — sections, headings, text, images, buttons, FAQs, testimonials, video, and product grids that always show your current prices and stock. Ready-made sections (a hero, image with text, an FAQ) add several at once.
+- The theme panel sets the base theme, colours, fonts, corner radius and content width. It warns when text would be hard to read against its background.
+- Everything you change is a draft. Shoppers see nothing until you press Publish, which publishes every page and the theme together. Problems that would break the page — an image with no picture chosen, a product that no longer exists — stop publishing until fixed; accessibility issues such as missing alt text are shown as warnings.
+- Every change can be undone. History lists each published version, and any of them can be copied back into your draft.
+- New pages live at /pages/your-page once published. Until a store's home page is first published from the editor, it keeps its original layout.
+
+Editing a design needs the owner, administrator or developer role; other roles can view it.`,
+      links: [{ label: "Websites", href: "/dashboard/websites" }],
+    },
+    {
       id: "merchant_agents",
       title: "Markii's agents, MCP and the API",
       summary: "Which agent does what, the beta allowance, and connecting your own AI tools.",

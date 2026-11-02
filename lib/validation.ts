@@ -65,11 +65,24 @@ const slugSchema = z
 
 // ---------- sites ----------
 
+/**
+ * Subdomains a storefront may not take: each is already a Markii host —
+ * `preview` serves the builder's live preview (D51), `app` and `www` are
+ * platform hosts in `proxy.ts`. A store holding one would never be reached.
+ */
+export const RESERVED_SITE_SLUGS = ["preview", "app", "www"] as const;
+
+export function isReservedSiteSlug(slug: string): boolean {
+  return (RESERVED_SITE_SLUGS as readonly string[]).includes(slug);
+}
+
+const siteSlugSchema = slugSchema.refine((s) => !isReservedSiteSlug(s), "That address is reserved by Markii.");
+
 export const themeIdSchema = z.enum(["studio", "atlas", "noir", "bloom"]);
 
 export const siteCreateSchema = z.object({
   name: z.string().min(1).max(200),
-  slug: slugSchema.optional(),
+  slug: siteSlugSchema.optional(),
   /**
    * **`customDomain` is deliberately absent**, for the same reason as
    * `walletAddress` below: writing it here set the storefront routing table with

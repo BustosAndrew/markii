@@ -334,6 +334,11 @@ from reading products directly to reading the published tree plus catalog data.
 publish, version snapshots, restore, pre-publish checks) — is built: `lib/builder/`,
 `lib/actions/definitions/builder.ts`, `docs/API.md` §19. Next are the editor and live preview (M2),
 then the brand agent (M3). Cache invalidation is moot for now: `loadSite` reads per request.
+**M2 is built (2026-11-01)** — step 5 and part of 6: the editor shell (layers, block library,
+inspector generated from `editorPanel`, pages, theme, undo/redo over registry undo, publish with
+checks, history) and a live preview that is the storefront renderer itself on its own origin. The
+canvas is the real page in an iframe rather than an in-editor re-render, so preview and storefront
+cannot diverge. Drag-and-drop lives in the layer tree, with Alt+arrow keyboard equivalents.
 
 0. **Action registry + `defineAction` primitive** — built back in **Phase C** (`docs/BACKEND.md` §1),
    so it already exists and commerce mutations already use it

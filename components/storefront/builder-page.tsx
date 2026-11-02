@@ -14,16 +14,15 @@ import type { SiteData } from "@/lib/storefront";
 export function StorefrontBuilderPage({
   data,
   tree,
-  preview = false,
 }: {
   data: SiteData;
   tree: PageNode;
-  preview?: boolean;
 }) {
+  const preview = data.preview;
   const { site, bundle, colls, baseUrl, cats, prods } = data;
   const topCategories = bundle.categories.filter((c) => !c.parentSlug);
   return (
-    <ThemeRoot themeId={site.themeId} theme={data.theme}>
+    <ThemeRoot themeId={site.themeId} theme={data.theme} preview={preview}>
       <SiteHeader
         siteName={site.name}
         homeHref={`${baseUrl}/`}

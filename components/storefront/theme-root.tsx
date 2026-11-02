@@ -5,6 +5,7 @@ import {
   type ThemeId,
   type ThemeTokens,
 } from "@/lib/storefront/themes";
+import { PreviewBridge } from "./preview-bridge";
 
 function themeStyle(t: ThemeTokens): CSSProperties {
   return {
@@ -33,6 +34,7 @@ function themeStyle(t: ThemeTokens): CSSProperties {
 export function ThemeRoot({
   themeId,
   theme: resolved,
+  preview = false,
   children,
 }: {
   themeId?: string | null;
@@ -41,6 +43,8 @@ export function ThemeRoot({
    * (`loadSite` → `data.theme`, D51). Wins over `themeId` when given.
    */
   theme?: ThemeTokens;
+  /** The builder's live preview (D51): adds the preview bridge. Never true for a shopper. */
+  preview?: boolean;
   children: ReactNode;
 }) {
   const theme = resolved ?? getTheme(themeId);
@@ -57,6 +61,7 @@ export function ThemeRoot({
       >
         {children}
       </div>
+      {preview ? <PreviewBridge /> : null}
     </>
   );
 }

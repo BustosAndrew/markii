@@ -13,6 +13,7 @@ import {
   type Product,
   type Site,
 } from "@/lib/db";
+import { previewBaseFor, requestPreviewState } from "@/lib/builder/preview";
 import { resolveTheme } from "@/lib/builder/tokens";
 import type { PageNode, PageSeo } from "@/lib/builder/types";
 import { publishedCollectionsFor } from "@/lib/storefront/collections";
@@ -34,6 +35,13 @@ export type SiteData = {
    * reaches the whole storefront, not only builder pages.
    */
   theme: ThemeTokens;
+  /**
+   * True when this request is the builder's live preview of this site (D51):
+   * pages render the **draft**, `theme` is the draft theme, and `baseUrl` keeps
+   * every link inside the preview. Never true for a shopper — it needs a
+   * preview token minted for this site and still unexpired.
+   */
+  preview: boolean;
   /**
    * The owning organization's standing with Markii, derived on this request.
    *
@@ -62,6 +70,8 @@ export type SiteData = {
  * forget the other.
  */
 export function storefrontHalted(data: SiteData): boolean {
+  // The merchant previewing their own draft sees it whatever the store's state.
+  if (data.preview) return false;
   return data.site.status === "paused" || data.billingHold;
 }
 
@@ -95,18 +105,34 @@ export async function loadSite(siteSlug: string): Promise<SiteData | null> {
   const prods = await db.select().from(products).where(eq(products.siteId, site.id));
   const colls = await publishedCollectionsFor(site.id);
   const [design] = await db
-    .select({ publishedTokens: siteDesigns.publishedTokens })
+    .select({
+      publishedTokens: siteDesigns.publishedTokens,
+      draftThemeId: siteDesigns.draftThemeId,
+      draftTokens: siteDesigns.draftTokens,
+    })
     .from(siteDesigns)
     .where(eq(siteDesigns.siteId, site.id))
     .limit(1);
+  /**
+   * A preview that was asked for but does not hold — expired, revoked, or a
+   * token for another site — is a 404, not a quiet fall-back to the live store:
+   * the editor must learn its session ended rather than show the wrong thing.
+   */
+  const previewState = await requestPreviewState();
+  const preview = previewState.requested ? previewState.valid : null;
+  if (previewState.requested && preview?.siteId !== site.id) return null;
+  const inPreview = preview !== null;
   return {
     site,
     cats,
     prods,
     colls,
     bundle: bundleFromDb(site, cats, prods, colls),
-    baseUrl: storefrontUrl(site),
-    theme: resolveTheme(site.themeId, design?.publishedTokens),
+    baseUrl: inPreview ? previewBaseFor(site.slug, preview.token) : storefrontUrl(site),
+    theme: inPreview && design
+      ? resolveTheme(design.draftThemeId, design.draftTokens)
+      : resolveTheme(site.themeId, design?.publishedTokens),
+    preview: inPreview,
     standing,
     /** A lapsed trial, the last rung of dunning (D10), or a platform suspension (G12) — Markii's hold, not the merchant's. */
     billingHold: storefrontHeld(standing),
@@ -134,4 +160,27 @@ export async function publishedPage(siteId: number, handle: string): Promise<Pub
     .limit(1);
   if (!doc?.tree || !doc.handle) return null;
   return { id: doc.id, handle: doc.handle, title: doc.title ?? doc.handle, seo: doc.seo ?? {}, tree: doc.tree };
+}
+
+/**
+ * The page a request should render: the **draft** in the builder's preview,
+ * the published page everywhere else. Pages call this rather than
+ * `publishedPage` so preview and storefront cannot drift apart.
+ */
+export async function pageFor(data: SiteData, handle: string): Promise<PublishedPage | null> {
+  if (!data.preview) return publishedPage(data.site.id, handle);
+  const [doc] = await db
+    .select({
+      id: siteDocuments.id,
+      handle: siteDocuments.handle,
+      title: siteDocuments.title,
+      seo: siteDocuments.seo,
+      tree: siteDocuments.draftTree,
+      deleted: siteDocuments.draftDeleted,
+    })
+    .from(siteDocuments)
+    .where(and(eq(siteDocuments.siteId, data.site.id), eq(siteDocuments.kind, "page"), eq(siteDocuments.handle, handle)))
+    .limit(1);
+  if (!doc || doc.deleted) return null;
+  return { id: doc.id, handle: doc.handle, title: doc.title, seo: doc.seo ?? {}, tree: doc.tree };
 }
