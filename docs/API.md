@@ -36,7 +36,7 @@ carry an explicit status — **never call a `PLANNED` endpoint and never fake it
 | 16 | Accounts, organizations, staff | partial — `/api/auth/*`, `/api/me`, `/api/org`, `/api/org/staff*`, `/api/org/tokens*`, `/api/org/switch`, **org scoping of §1–8**, and **MFA** (`/api/auth/mfa*`, enrol · challenge · recover, D40) are ✅ LIVE; the **audit log** (`/api/org/audit`, 2026-09-06) and **sessions** (`/api/org/sessions*`, 2026-09-07) are ✅ LIVE. **§16 is complete** — every `*_API_LIVE` constant in `lib/api/org.ts` is now `true`. (Tokens and org switching were listed as planned until 2026-08-03, and **MFA until 2026-08-18** — all three were already routed.) Frontend: `/dashboard/settings/account`, `/dashboard/settings/team`, `/dashboard/settings/audit`, the sidebar org switcher, `/mfa/*` | **A** |
 | 17 | Billing, plans, metering, threshold fees | ✅ **LIVE, and merchants are charged** (corrected 2026-08-18 — this row claimed "nothing is charged" long after it did). Usage ledger, threshold fee engine, meter, plan catalog, entitlements, period-close assessments, the **Stripe webhook** (verified + idempotent, platform **and** Connect handlers), subscriptions, plan changes with a Stripe-computed proration preview, cancellation at period end, payment methods, invoice history, and **threshold-fee invoicing onto the same invoice**. Scheduled monthly (§25). Add-on *purchase* alone refuses `409` — Agent Ops and Chargeback Assist are Phase F and do not exist | B |
 | 18 | Commerce core (variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping, **memberships**) | partial — §18.1–18.6 ✅ LIVE, including the §18.4 card rail (Stripe Connect direct charges) and **§18.6 Stripe Tax** (2026-08-17); §18.5 gift cards are ⛔ **deferred** (D33). §18.7 order operations (incl. **processor-executed card refunds**), §18.8 digital delivery, and §18.9 membership gating + shopper login ✅ LIVE — **including recurring/auto-renewing membership billing** (Stripe Subscriptions on the merchant's own Connect account; this row claimed otherwise until 2026-08-18). `STRIPE_CONNECT_WEBHOOK_SECRET` is **set and verified in production** (2026-09-07) — this row called it outstanding for weeks after it was configured. `pnpm stripe:webhooks` confirms the Connect endpoint subscribes to all nine required events including `invoice.created`. Genuine Stripe-generated Connect delivery was proven 2026-09-08 through the CLI (`stripe trigger … --stripe-account`), which this row called unproven for five days after | C |
-| 19 | Site builder & content | partial ✅ (M1 foundation) · editor/preview/brand agent 🟡 | D |
+| 19 | Site builder & content | partial ✅ (M1 foundation · M2 editor + preview · M3 brand agent) · M4–M7 🟡 | D |
 | 20 | Disputes & chargebacks | 🟡 PLANNED | F |
 | 21 | Agent Ops add-on | ⤴ **Superseded by §27** (D47, 2026-10-15) — built as free beta merchant agents rather than a last-phase paid add-on; the add-on billing and the settings/audit endpoints remain unbuilt | F |
 | 22 | **Action registry & MCP** — agent-native architecture | ✅ LIVE (registry, invoke, dry-run, audit, **undo** — 2026-08-18, and the **MCP server** — 2026-09-07: tools, prompts **and resources**). `undoable` is now derived from an `inverse()` and refused if declared without one, which corrected four actions that claimed it falsely | **Registry: C · MCP: D** |
@@ -2972,7 +2972,7 @@ memberships* above.)
 
 ---
 
-## 19. Site builder & content — partial ✅ LIVE (M1 foundation 2026-10-31 · M2 editor + live preview 2026-11-01) · brand agent 🟡 — Phase D, D51
+## 19. Site builder & content — partial ✅ LIVE (M1 foundation 2026-10-31 · M2 editor + live preview 2026-11-01 · M3 brand agent 2026-11-02) — Phase D, D51
 
 Architecture in **`docs/BUILDER.md`**. Pages are versioned JSON node trees, never HTML strings.
 **Reads are REST; every write is a registry action** (`POST /api/actions/builder.*`), so the
@@ -3007,6 +3007,7 @@ All `cms.read`. Writes are `cms.write`:
 | `builder.deletePage` · `restorePage` | medium | — | Soft delete in the draft; a deleted page keeps serving until publish |
 | `builder.publish` | **high** | — | Atomic publish; tokens and agents get `HUMAN_APPROVAL_REQUIRED` |
 | `builder.discardDraft` · `restoreVersion` | medium | — | Draft back to live / a version copied into the draft. Not undoable |
+| `builder.stopAgent` | low | — | Stop the brand agent: frees its edit lease so the editor is writable at once. `{ stopped, sessionId }`; `stopped: false` when no agent was editing. The one write that gets through the lease. Not undoable |
 
 Every draft write answers with the new `revision` (null when nothing changed). All are undoable
 through `POST /api/actions/:id/undo` except publish, discard and restore.
@@ -3025,8 +3026,8 @@ through `POST /api/actions/:id/undo` except publish, discard and restore.
 **Storefront.** `/` renders the published home design when there is one; `/pages/{handle}` serves
 published pages; the published theme tokens reach every storefront page through `ThemeRoot`.
 Published HTML carries no editor attributes and no builder JavaScript; FAQ blocks publish
-`FAQPage` JSON-LD. **The editor is `/dashboard/websites/{slug}/design`** (M2). **Not built yet:** the
-brand agent (M3), templates/bindings/global regions (M4), generators from the tree (M5), custom code (M6).
+`FAQPage` JSON-LD. **The editor is `/dashboard/websites/{slug}/design`** (M2), and the **brand agent** is
+its Agent tab (M3, §27). **Not built yet:** templates/bindings/global regions (M4), generators from the tree (M5), custom code (M6).
 
 ---
 
@@ -3880,7 +3881,7 @@ service; `lib/api/server.ts` has the in-process wrappers.
 
 ---
 
-## 27. Merchant agents — Catalog agent ✅ LIVE (beta, 2026-10-15, D47) · assistant ✅ LIVE (beta, 2026-10-17, D48)
+## 27. Merchant agents — Catalog agent ✅ LIVE (beta, 2026-10-15, D47) · assistant ✅ LIVE (beta, 2026-10-17, D48) · brand agent ✅ LIVE (beta, 2026-11-02, D51)
 
 > **Frontend:** `lib/api/agents.ts` (`AGENTS_API_LIVE = true`) covers everything except the stream;
 > the chat itself is `useChat` against `agentChatEndpoint(agent)` — see `docs/FRONTEND.md`.
@@ -4007,6 +4008,56 @@ approved**: the dry run advances a Postgres sequence its rollback does not retur
 second dry run records a different `entityId` and `sameDiff` refuses it as `stale` every time.
 That applies to *any* agent given a create action. Proposals need a way to express "a new row"
 before one can be allowlisted.
+
+### The brand agent — D51 (M3, 2026-11-02)
+
+`brand` — redesigns one storefront with the merchant, **in the site editor's Agent tab**, beside the
+live preview (`/dashboard/websites/{slug}/design`). Directory entry `surface: "editor"` (the others are
+`"drawer"`), so the Agents menu navigates to `href` instead of opening a drawer.
+
+**It edits the draft for real** (owner, 2026-10-31) — no proposal cards. Its write tools are generated
+from the registry like propose tools but execute (`lib/ops-agents/draft-tools.ts`), and only for
+actions flagged `agentExecution: "draft"` (`lib/ops-agents/brand/allowlist.ts`, pinned by a unit test
+to exactly that set). Nothing a shopper sees: `builder.publish`, `discardDraft`, `restoreVersion`,
+`deletePage` are absent, and `invokeAction` refuses them from an agent anyway. Tool names are the
+MCP names (`builder_setProps`). **`siteId` is removed from every tool's schema and supplied from the
+turn**, so a turn about one store cannot edit another. Results are `{ status: "applied",
+invocationId, result, changes }`, or `refused` / `stopped` / `limit_reached` (60 edits per turn).
+
+**Request body adds `context`** — `{ siteId, pageId?, selectedNodeId?, breakpoint?, path? }`, where
+the merchant is in the editor. `siteId` is **required** for `brand` (`400` without); a site outside the
+caller's reach is `404`. A session is bound to its site (`agent_sessions.site_id`); continuing it on
+another is `409`. `GET /api/agents/sessions?agent=brand&siteId=` lists one site's conversations; both
+session routes now return `siteId`.
+
+**Only for roles with `cms.write`** — `403 FORBIDDEN` otherwise, checked before the turn takes the
+lease (a viewer's turn would otherwise lock the editor to make edits that are all refused).
+
+**One writer at a time.** The turn takes the site's edit lease before the model runs (`409
+AGENT_EDITING`, `details.reason: "turn_in_progress"` for the same conversation still running,
+`"agent_holds_lease"` for another), renews it every 15s (60s lease), and hands it back when the
+stream ends. While it holds it every other writer gets `409 AGENT_EDITING`. **Stop is
+`builder.stopAgent`** (`{ siteId }` → `{ stopped, sessionId }`, `cms.write`, low, not undoable) —
+call it *as well as* aborting the stream, since an aborted fetch may never reach the server. It frees
+the lease; the turn notices on its next renewal and aborts, and any tool call in between is refused
+(`stopped`). Expiry covers a crashed function.
+
+**The agent sees every edit made by hand** — rebuilt from the database at the start of every turn
+and placed in its instructions, never carried in the transcript (`lib/ops-agents/brand/context.ts`):
+the draft as it is now (theme, tokens, contrast warnings, pages, the open page's tree with node ids
+and the selected block marked); every `builder.*` change by anyone but an agent since its previous
+turn began, attributed ("the merchant", another staff member by name, an API token / MCP client,
+undos marked); and, if that turn was stopped, when and which of its edits landed first. The window
+starts at the `sentAt` the server stamps on each user message's `metadata` — no migration, and
+nobody else can write while a turn holds the lease, so everything after it is news.
+
+**Audit.** An agent's `action_invocations` row has `actor_type: "agent"` and `actor_id` = the person
+it acted for (all agents, as of this change — they had been `agent:{kind}`, which the audit view
+could not name). Undo is the ordinary `POST /api/actions/:id/undo`; the editor puts the agent's edits
+on its own undo stack.
+
+**Limits:** 30 steps and 8,000 output tokens per step (the others: 12 / 2,000); same allowance and
+turn rate limit. Model `BRAND_AGENT_MODEL`, default `anthropic/claude-sonnet-5.5`.
 
 ---
 

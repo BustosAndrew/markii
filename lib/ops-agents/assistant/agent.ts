@@ -35,6 +35,12 @@ const SPECIALISTS = [
     where: "the Catalog page (/dashboard/catalog)",
     when: "reviewing products and proposing edits — descriptions, prices, variants, collections, stock",
   },
+  {
+    id: "brand",
+    name: "Brand agent",
+    where: "the Agent tab of a store's design editor (Websites → choose a store → Edit design)",
+    when: "redesigning a storefront — layout, sections, copy, colours, fonts — in the draft, beside a live preview",
+  },
 ] as const;
 
 export function assistantInstructions(context: {

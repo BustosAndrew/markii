@@ -22,6 +22,12 @@ export const AGENT_MODELS = {
    * cheaper model is a configuration change away.
    */
   assistant: process.env.ASSISTANT_AGENT_MODEL?.trim() || "anthropic/claude-sonnet-5.5",
+  /**
+   * The brand agent (D51) writes page trees and copy a merchant reads on their
+   * own storefront, so quality shows; Sonnet is still the default because a
+   * redesign is many tool calls against the same per-org allowance.
+   */
+  brand: process.env.BRAND_AGENT_MODEL?.trim() || "anthropic/claude-sonnet-5.5",
 } as const;
 
 /**
@@ -66,6 +72,19 @@ export const AGENT_MAX_STEPS = 12;
 
 /** Output tokens per step. A proposal is a tool call, not an essay. */
 export const AGENT_MAX_OUTPUT_TOKENS = 2_000;
+
+/**
+ * The brand agent's per-turn limits, larger than the others' because a
+ * redesign *is* the work: a hero, three sections and a palette is a dozen
+ * edits, and one `builder.insertNodes` carrying a section's subtree is a few
+ * thousand tokens of tool input. Still bounded — a turn that wants more stops
+ * and asks (`AGENT_MAX_DRAFT_WRITES_PER_TURN`).
+ */
+export const BRAND_MAX_STEPS = 30;
+export const BRAND_MAX_OUTPUT_TOKENS = 8_000;
+
+/** Draft edits one brand-agent turn may apply before it must stop and report. */
+export const AGENT_MAX_DRAFT_WRITES_PER_TURN = 60;
 
 /**
  * Proposals one turn may create. `docs/AGENT-OPS.md` §3 caps bulk work per

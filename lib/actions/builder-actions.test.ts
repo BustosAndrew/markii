@@ -19,7 +19,7 @@ import type { SiteDesign } from "../db";
 
 afterEach(() => setAuthorizationResolver(async () => false));
 
-const agent: Actor = { type: "agent", id: "agent:brand", orgId: "org_1", onBehalfOfUserId: "usr_1", sessionId: "as_aaaaaaaaaaaaaaaaaaaa" };
+const agent: Actor = { type: "agent", id: "usr_1", orgId: "org_1", onBehalfOfUserId: "usr_1", sessionId: "as_aaaaaaaaaaaaaaaaaaaa" };
 const user: Actor = { type: "user", id: "usr_1", orgId: "org_1" };
 
 describe("which builder actions an agent may run itself (D51)", () => {
@@ -45,7 +45,7 @@ describe("which builder actions an agent may run itself (D51)", () => {
   });
 
   it("never includes anything that changes what shoppers see, or is irreversible", () => {
-    for (const id of ["builder.publish", "builder.discardDraft", "builder.restoreVersion", "builder.deletePage", "builder.restorePage", "builder.startDesign"]) {
+    for (const id of ["builder.publish", "builder.discardDraft", "builder.restoreVersion", "builder.deletePage", "builder.restorePage", "builder.startDesign", "builder.stopAgent"]) {
       expect(getAction(id)?.agentExecution, id).toBeUndefined();
     }
     expect(getAction("builder.publish")?.riskTier).toBe("high");

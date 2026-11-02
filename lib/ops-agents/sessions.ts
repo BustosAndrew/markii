@@ -20,6 +20,8 @@ export async function createSession(input: {
   orgId: string;
   userId: string;
   agent: AgentKind;
+  /** The storefront a brand-agent conversation is bound to; null for the org-wide agents. */
+  siteId?: number | null;
   title: string | null;
 }): Promise<AgentSession> {
   const [row] = await db
@@ -56,12 +58,13 @@ export async function ownedSession(
  */
 export async function listSessions(
   owner: { orgId: string; userId: string },
-  opts: { agent?: AgentKind; limit?: number } = {},
+  opts: { agent?: AgentKind; siteId?: number; limit?: number } = {},
 ) {
   return db
     .select({
       id: agentSessions.id,
       agent: agentSessions.agent,
+      siteId: agentSessions.siteId,
       title: agentSessions.title,
       createdAt: agentSessions.createdAt,
       updatedAt: agentSessions.updatedAt,
@@ -72,6 +75,8 @@ export async function listSessions(
         eq(agentSessions.orgId, owner.orgId),
         eq(agentSessions.userId, owner.userId),
         opts.agent ? eq(agentSessions.agent, opts.agent) : undefined,
+        // The editor lists one site's design conversations, never another site's.
+        opts.siteId != null ? eq(agentSessions.siteId, opts.siteId) : undefined,
       ),
     )
     .orderBy(desc(agentSessions.updatedAt))

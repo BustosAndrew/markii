@@ -5,7 +5,8 @@ import type { DiffEntry } from "./actions";
 const AGENTS_SECTION = "API §27";
 
 /**
- * Merchant agents (§27, D47) — the Catalog agent and the assistant, in beta.
+ * Merchant agents (§27, D47) — the Catalog agent, the assistant and the brand
+ * agent (D51), in beta.
  *
  * **The chat itself is not a function here.** `POST /api/agents/:agent/chat`
  * streams an AI SDK UI message stream, which is `useChat`'s job — see
@@ -25,7 +26,20 @@ const AGENTS_API_LIVE = true;
  * reads the setup checklist, points to pages and agents. It **proposes
  * nothing**, so its transcripts never carry proposal cards.
  */
-export type AgentKind = "catalog" | "assistant";
+export type AgentKind = "catalog" | "assistant" | "brand";
+
+/**
+ * Where the merchant is in the site editor, sent as `context` with every
+ * brand-agent message (D51). `siteId` is required for the brand agent; the
+ * rest tells it what "this" means and is re-checked against the site.
+ */
+export type AgentEditorContext = {
+  siteId: number;
+  pageId?: number;
+  selectedNodeId?: string | null;
+  breakpoint?: "base" | "sm" | "md" | "lg";
+  path?: string;
+};
 
 export type AgentAllowance = {
   usedTokens: number;
@@ -42,7 +56,18 @@ export type AgentDirectory = {
    * `href` is the page the agent lives on (`/dashboard/catalog`); `null` means
    * every dashboard page — the assistant.
    */
-  agents: { id: AgentKind; name: string; description: string; beta: true; href: string | null }[];
+  agents: {
+    id: AgentKind;
+    name: string;
+    description: string;
+    beta: true;
+    href: string | null;
+    /**
+     * `"editor"` — the brand agent — lives inside the site editor, not the
+     * dashboard drawer: picking it from the Agents menu should go to `href`.
+     */
+    surface: "drawer" | "editor";
+  }[];
   /** Markii's deployment can call a model. False → show *configuration required*, not an error. */
   configured: boolean;
   /** This org's month. A separate fact from `configured`; never merge them into one "available". */
@@ -90,6 +115,8 @@ export type AgentProposal = {
 export type AgentSessionSummary = {
   id: string;
   agent: AgentKind;
+  /** The storefront a brand-agent conversation is about; null for the others. */
+  siteId: number | null;
   title: string | null;
   createdAt: string;
   updatedAt: string;
@@ -125,7 +152,7 @@ export function getAgentDirectory(init?: RequestInit) {
  * continues with the agent that started it, so an unfiltered list in the
  * Catalog panel would offer assistant conversations that answer `409`.
  */
-export function listAgentSessions(query?: { agent?: AgentKind }, init?: RequestInit) {
+export function listAgentSessions(query?: { agent?: AgentKind; siteId?: number }, init?: RequestInit) {
   return callWhenLive(AGENTS_API_LIVE, AGENTS_SECTION, () =>
     apiGet<{ items: AgentSessionSummary[] }>("/api/agents/sessions", query, init),
   );

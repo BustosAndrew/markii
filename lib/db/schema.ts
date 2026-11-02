@@ -2777,7 +2777,7 @@ export const stripeWebhookEvents = pgTable(
  * The column is plain `text` with no check constraint, so adding a kind needs
  * no migration — the enum is enforced here and at the route.
  */
-export const AGENT_KINDS = ["catalog", "assistant"] as const;
+export const AGENT_KINDS = ["catalog", "assistant", "brand"] as const;
 export type AgentKind = (typeof AGENT_KINDS)[number];
 
 /**

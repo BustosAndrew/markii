@@ -6,6 +6,7 @@ import { PRESETS, blankPageTree, defaultHomeTree } from "../../builder/presets";
 import {
   bumpRevision,
   catalogFacts,
+  leaseActive,
   loadPage,
   lockDesign,
   ownedSite,
@@ -800,5 +801,45 @@ export const restoreVersion = defineAction({
       .where(eq(siteDesigns.siteId, input.siteId));
     ctx.recordDiff({ entity: "siteDesign", entityId: String(input.siteId), path: "draft", before: null, after: { restoredVersion: input.version } });
     return { version: input.version, revision: await bumpRevision(ctx, input.siteId) };
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Stopping the brand agent
+// ---------------------------------------------------------------------------
+
+/**
+ * Take the pen back from the brand agent (owner, 2026-10-31: the merchant
+ * cannot edit while a turn runs and must stop it to make their own changes).
+ *
+ * **An action, not a bare route**, because it is a mutation a person makes and
+ * the audit row is load-bearing: the agent's next turn reads it to learn that
+ * it was interrupted and which of its changes landed before it was. Aborting
+ * the chat stream alone would not do — an aborted fetch is not guaranteed to
+ * reach the server, and the turn could keep writing.
+ *
+ * It does **not** go through `lockDesign`: that refuses every non-agent writer
+ * while the lease stands, and this is the one write that must get through it.
+ * Not undoable — handing the pen back to a turn that has already ended is not
+ * a state that exists. An agent cannot run it (no `agentExecution`).
+ */
+export const stopAgent = defineAction({
+  id: "builder.stopAgent",
+  description:
+    "Stop the brand agent editing this site's design. Its edits so far stay in the draft; any " +
+    "further edit from that turn is refused. Answers stopped: false when no agent was editing.",
+  input: z.object({ siteId }).strict(),
+  permission: "cms.write",
+  riskTier: "low",
+  async run(input, ctx) {
+    await ownedSite(ctx.db, ctx.actor.orgId!, input.siteId);
+    const [design] = await ctx.db.select().from(siteDesigns).where(eq(siteDesigns.siteId, input.siteId)).for("update").limit(1);
+    if (!design || !leaseActive(design)) return { stopped: false as const, sessionId: null };
+    await ctx.db
+      .update(siteDesigns)
+      .set({ agentLockSessionId: null, agentLockExpiresAt: null, updatedAt: new Date() })
+      .where(eq(siteDesigns.siteId, input.siteId));
+    ctx.recordDiff({ entity: "siteDesign", entityId: String(input.siteId), path: "agentLockSessionId", before: design.agentLockSessionId, after: null });
+    return { stopped: true as const, sessionId: design.agentLockSessionId };
   },
 });

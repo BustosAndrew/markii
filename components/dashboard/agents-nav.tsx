@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { ChevronDown, Sparkles } from "lucide-react";
-import { getAgentDirectory, type AgentDirectory, type AgentKind } from "@/lib/api/agents";
+import { useRouter } from "next/navigation";
+import { getAgentDirectory, type AgentDirectory } from "@/lib/api/agents";
 import { useOpenAgent } from "@/components/dashboard/agent-panel";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -14,6 +15,7 @@ const FALLBACK_AGENTS: AgentDirectory["agents"] = [
     description: "Answers questions, checks setup, and points you to the right page.",
     beta: true,
     href: null,
+    surface: "drawer",
   },
   {
     id: "catalog",
@@ -21,11 +23,21 @@ const FALLBACK_AGENTS: AgentDirectory["agents"] = [
     description: "Proposes catalog edits. Nothing is applied until you approve it.",
     beta: true,
     href: "/dashboard/catalog",
+    surface: "drawer",
+  },
+  {
+    id: "brand",
+    name: "Brand agent",
+    description: "Redesigns your storefront beside a live preview. Edits your draft; you publish.",
+    beta: true,
+    href: "/dashboard/websites",
+    surface: "editor",
   },
 ];
 
 export function AgentsNavMenu() {
   const agents = useOpenAgent();
+  const router = useRouter();
   const menuId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -75,9 +87,14 @@ export function AgentsNavMenu() {
 
   const items = directory?.agents ?? FALLBACK_AGENTS;
 
-  function pick(id: AgentKind) {
+  function pick(item: AgentDirectory["agents"][number]) {
     close();
-    agents?.openAgent(id);
+    // The brand agent works inside one site's editor; the menu takes the merchant to choose a site.
+    if (item.surface === "editor" && item.href) {
+      router.push(item.href);
+      return;
+    }
+    agents?.openAgent(item.id);
   }
 
   return (
@@ -117,7 +134,7 @@ export function AgentsNavMenu() {
               key={item.id}
               type="button"
               role="menuitem"
-              onClick={() => pick(item.id)}
+              onClick={() => pick(item)}
               className="flex w-full cursor-pointer flex-col items-start gap-1 rounded-[var(--radius-control)] px-3 py-2.5 text-left transition-colors hover:bg-hover-soft"
             >
               <span className="flex flex-wrap items-center gap-2">

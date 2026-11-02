@@ -18,6 +18,13 @@ storefront changes, and routine analysis. Sold as a paid add-on.
 > - ❌ Not built: risk-tier settings (every proposal needs approval — there is no auto-allow),
 >   `/api/agent/audit` (the org audit log already shows every executed change), the paid add-on and
 >   its metering, CMS editing, and the other agents.
+> - ✅ **The brand agent (D51, 2026-11-02)** — and with it the first agent that **executes**. The
+>   owner chose direct edits over a card per change, so the line moved from "agents never write" to
+>   "agents never change what shoppers see": it runs only `agentExecution: "draft"` actions (unpublished
+>   builder edits, all low and undoable), publishing stays human, and a turn holds an edit lease that
+>   locks every other writer out until it ends or the merchant presses Stop. Store content stays data:
+>   its instructions carry rule 7 of the catalog agent's list, and its tools are bound to one site.
+>   This is the table below's "Low risk — unpublished page edits — auto-allowed", built.
 > - **Routes are `/api/agents/*`, not the `/api/agent/*` drafted in §4**, because there is a family
 >   of agents; the proposal shape is §4's `AgentProposal` with `actionId`/`input` added and
 >   `undoToken` replaced by the invocation id.

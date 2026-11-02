@@ -25,6 +25,7 @@ import {
   setNodeProps,
   setNodeStyles,
   startDesign,
+  stopBrandAgent,
   updateDesignPage,
   type AgentLock,
   type BlockDescription,
@@ -40,6 +41,7 @@ import { publicErrorMessage } from "@/lib/api/public-copy";
 import { ApiClientError } from "@/lib/api/types";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { ErrorState } from "@/components/ui/error-state";
+import { BrandChat } from "./brand-chat";
 import { HistoryDialog, PublishDialog } from "./dialogs";
 import { Inspector, type PickerData } from "./inspector";
 import { LayerTree } from "./layer-tree";
@@ -60,14 +62,18 @@ import { find, insertionPoint } from "./tree";
  * **While the brand agent works, this is read-only** (owner, 2026-10-31): the
  * server refuses every other writer with `AGENT_EDITING`, and the editor says
  * so up front rather than letting the merchant type into a field that will be
- * refused.
+ * refused. Stop — in the chat or the banner — hands the pen back.
+ *
+ * The brand agent's chat is the Agent tab (M3). Its edits land on this
+ * editor's undo stack like the merchant's own, so "undo what the agent just
+ * did" is the same button.
  */
 
 const POLL_MS = 2_000;
 /** Re-mint the preview well before its two hours run out. */
 const PREVIEW_REFRESH_MS = 90 * 60 * 1000;
 
-type Tab = "layers" | "add" | "pages" | "theme";
+type Tab = "agent" | "layers" | "add" | "pages" | "theme";
 type Viewport = "desktop" | "tablet" | "phone";
 const VIEWPORT_WIDTH: Record<Viewport, string> = { desktop: "100%", tablet: "768px", phone: "390px" };
 
@@ -87,7 +93,7 @@ export function DesignEditor({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [breakpoint, setBreakpoint] = useState<Breakpoint>("base");
   const [viewport, setViewport] = useState<Viewport>("desktop");
-  const [tab, setTab] = useState<Tab>("layers");
+  const [tab, setTab] = useState<Tab>("agent");
   const [preview, setPreview] = useState<{ url: string; origin: string; basePath: string } | null>(null);
   const [frameSrc, setFrameSrc] = useState<string | null>(null);
   const [lock, setLock] = useState<AgentLock>({ active: false, sessionId: null, expiresAt: null });
@@ -98,6 +104,9 @@ export function DesignEditor({
   const [redoStack, setRedoStack] = useState<Step[]>([]);
   const [dialog, setDialog] = useState<"publish" | "history" | null>(null);
   const [pickers, setPickers] = useState<PickerData>({ products: [], categories: [], collections: [] });
+  /** This tab's chat is mid-turn. The lease says the same a poll later; this closes that gap. */
+  const [agentBusy, setAgentBusy] = useState(false);
+  const [stopSignal, setStopSignal] = useState(0);
 
   const frameRef = useRef<HTMLIFrameElement>(null);
   const revisionRef = useRef<number>(-1);
@@ -105,7 +114,7 @@ export function DesignEditor({
   const nonceRef = useRef(0);
 
   const blocks = useMemo(() => new Map<string, BlockDescription>((registry?.blocks ?? []).map((b) => [b.type, b])), [registry]);
-  const readOnly = !canEdit || lock.active;
+  const readOnly = !canEdit || lock.active || agentBusy;
   const started = design?.started === true ? design : null;
 
   // ---------- loading ----------
@@ -223,7 +232,8 @@ export function DesignEditor({
       const d = e.data as { type?: string; nodeId?: string; path?: string };
       if (d?.type === "markii:select" && typeof d.nodeId === "string") {
         setSelectedId(d.nodeId);
-        setTab("layers");
+        // Selecting in the preview while chatting tells the agent what "this" is; stay on the chat.
+        setTab((t) => (t === "agent" ? t : "layers"));
       }
       if (d?.type === "markii:location" && typeof d.path === "string" && d.path.startsWith(preview.basePath)) {
         pathRef.current = d.path.slice(preview.basePath.length).replace(/[?&]__r=\d+/, "").replace(/\?$/, "") || "/";
@@ -307,6 +317,61 @@ export function DesignEditor({
       setBusy(false);
     }
   }, [redoStack, refresh, reloadFrame]);
+
+  // ---------- the brand agent ----------
+
+  const selectedRef = useRef(selectedId);
+  const pageRef = useRef(pageId);
+  const breakpointRef = useRef(breakpoint);
+  useEffect(() => {
+    selectedRef.current = selectedId;
+    pageRef.current = pageId;
+    breakpointRef.current = breakpoint;
+  });
+  /** Read when a message is sent, so it says where the merchant is at that moment. */
+  const agentContext = useCallback(
+    () => ({
+      siteId: site.id,
+      ...(pageRef.current ? { pageId: pageRef.current } : {}),
+      selectedNodeId: selectedRef.current,
+      breakpoint: breakpointRef.current,
+      path: pathRef.current,
+    }),
+    [site.id],
+  );
+
+  const onAgentTool = useCallback(
+    (toolName: string, output: unknown) => {
+      if (!toolName.startsWith("builder_")) return;
+      const o = output as { status?: string; invocationId?: string; changes?: unknown[] } | null;
+      if (o?.status !== "applied" || !o.invocationId) return;
+      // An edit that changed nothing has nothing to undo; stacking it would make Undo answer 409.
+      if (!o.changes?.length) return;
+      // The agent's edit is undoable from here like any other, once it hands the pen back.
+      setUndoStack((st) => [...st.slice(-49), { actionId: toolName.replace("_", "."), invocationId: o.invocationId! }]);
+      setRedoStack([]);
+      void refresh().then(() => reloadFrame(), () => {});
+    },
+    [refresh, reloadFrame],
+  );
+
+  const stopAgent = useCallback(async () => {
+    try {
+      await stopBrandAgent(site.id);
+      setLock({ active: false, sessionId: null, expiresAt: null });
+    } catch (e) {
+      setError(publicErrorMessage(e, "The agent could not be stopped. Try again."));
+    }
+  }, [site.id]);
+
+  const onAgentBusy = useCallback(
+    (b: boolean) => {
+      setAgentBusy(b);
+      // The turn just ended: pick up its last edits and the released lease without waiting for a poll.
+      if (!b) void refresh().then(() => reloadFrame(), () => {});
+    },
+    [refresh, reloadFrame],
+  );
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -399,9 +464,21 @@ export function DesignEditor({
         </Button>
       </div>
 
-      {lock.active ? (
-        <div className="border-b border-warning-border bg-warning-bg px-3 py-2 text-sm text-warning-text" role="status">
-          The brand agent is editing this design — the preview updates as it works. Stop the agent to make your own changes.
+      {lock.active || agentBusy ? (
+        <div className="flex items-center justify-between gap-3 border-b border-warning-border bg-warning-bg px-3 py-2 text-sm text-warning-text" role="status">
+          <span>The brand agent is editing this design — the preview updates as it works. Stop it to make your own changes.</span>
+          {canEdit ? (
+            <Button
+              variant="secondary"
+              className="shrink-0 px-2.5 py-1 text-xs"
+              onClick={() => {
+                setStopSignal((n) => n + 1);
+                void stopAgent();
+              }}
+            >
+              Stop agent
+            </Button>
+          ) : null}
         </div>
       ) : null}
       {!canEdit ? (
@@ -418,11 +495,13 @@ export function DesignEditor({
         </div>
       ) : null}
 
-      <div className="grid min-h-0 flex-1 grid-cols-[280px_minmax(0,1fr)_320px]">
+      <div
+        className={`grid min-h-0 flex-1 ${tab === "agent" ? "grid-cols-[360px_minmax(0,1fr)_300px]" : "grid-cols-[280px_minmax(0,1fr)_320px]"}`}
+      >
         {/* Left */}
         <aside className="flex min-h-0 flex-col border-r border-border" aria-label="Editor tools">
           <div className="flex border-b border-border" role="tablist">
-            {(["layers", "add", "pages", "theme"] as const).map((t) => (
+            {(["agent", "layers", "add", "pages", "theme"] as const).map((t) => (
               <button
                 key={t}
                 type="button"
@@ -436,6 +515,18 @@ export function DesignEditor({
             ))}
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto" role="tabpanel">
+            {/* Kept mounted so a reply keeps streaming while the merchant looks at another tab. */}
+            <div hidden={tab !== "agent"}>
+              <BrandChat
+                siteId={sid}
+                canEdit={canEdit}
+                context={agentContext}
+                onToolResult={onAgentTool}
+                onStop={stopAgent}
+                onBusyChange={onAgentBusy}
+                stopSignal={stopSignal}
+              />
+            </div>
             {tab === "layers" && tree ? (
               <LayerTree
                 root={tree}

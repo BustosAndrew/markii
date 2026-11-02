@@ -221,6 +221,7 @@ The readiness score on the Health page checks your store and catalog against fix
 - Everything you change is a draft. Shoppers see nothing until you press Publish, which publishes every page and the theme together. Problems that would break the page — an image with no picture chosen, a product that no longer exists — stop publishing until fixed; accessibility issues such as missing alt text are shown as warnings.
 - Every change can be undone. History lists each published version, and any of them can be copied back into your draft.
 - New pages live at /pages/your-page once published. Until a store's home page is first published from the editor, it keeps its original layout.
+- The editor's Agent tab is the brand agent: describe the look or change you want and it edits your draft while you watch the preview. While it works you can't edit — press Stop to take over. It sees any changes you make between messages, its edits can be undone like yours, and it cannot publish.
 
 Editing a design needs the owner, administrator or developer role; other roles can view it.`,
       links: [{ label: "Websites", href: "/dashboard/websites" }],
@@ -233,12 +234,14 @@ Editing a design needs the owner, administrator or developer role; other roles c
 
 - The assistant (this chat) answers questions, checks your setup, and points you to the right page or agent. It changes nothing.
 - The Catalog agent, opened from the Catalog page, reviews products and proposes edits. Nothing changes until you approve each proposal, every approved change is in the audit log, and it can be undone.
+- The brand agent, in each store's design editor (Websites → choose a store → Edit design → Agent), redesigns your storefront with you. It edits your unpublished draft directly while you watch the preview; shoppers see nothing until you publish, which only a person can do. Press Stop at any time to take over.
 
-Agents only ever propose. You approve, and you can do only what your role allows.
+Agents never change what shoppers see on their own: the Catalog agent proposes and you approve, and the brand agent works only on your draft. Every change is in the audit log, can be undone, and is limited to what your role allows.
 
 To drive your store from your own AI tools — Claude Code, Cursor — connect over MCP with an API token from team settings. Tokens are scoped, revocable, and go through the same permissions and audit log as the dashboard.`,
       links: [
         { label: "Catalog", href: "/dashboard/catalog" },
+        { label: "Websites", href: "/dashboard/websites" },
         { label: "Team and API tokens", href: "/dashboard/settings/team" },
       ],
     },

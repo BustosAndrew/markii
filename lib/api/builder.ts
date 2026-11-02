@@ -184,6 +184,15 @@ export const restoreDesignPage = (siteId: number, pageId: number) => invokeActio
 export const publishDesign = (siteId: number, note?: string) =>
   invokeAction<{ version: number; pages: number; removedPages: number; warnings: CheckResult[] }>("builder.publish", { siteId, note });
 
+/**
+ * Take the pen back from the brand agent (D51): frees its edit lease, so its
+ * further edits are refused and the editor is writable at once. Call it on
+ * Stop **as well as** aborting the chat stream — an aborted fetch may never
+ * reach the server. `stopped: false` when no agent was editing.
+ */
+export const stopBrandAgent = (siteId: number) =>
+  invokeAction<{ stopped: boolean; sessionId: string | null }>("builder.stopAgent", { siteId });
+
 /** Irreversible — confirm first. */
 export const discardDesignDraft = (siteId: number) => invokeAction<Revisioned>("builder.discardDraft", { siteId });
 

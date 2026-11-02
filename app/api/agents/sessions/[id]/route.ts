@@ -18,6 +18,7 @@ export const GET = orgHandler(async (_req, { params, orgId, session }) => {
   return NextResponse.json({
     id: row.id,
     agent: row.agent,
+    siteId: row.siteId,
     title: row.title,
     messages: row.messages,
     proposals: proposals.map((p) => serializeProposal(p)),

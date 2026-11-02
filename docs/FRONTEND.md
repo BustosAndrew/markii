@@ -81,7 +81,8 @@ API-independent work so you don't outrun the backend") no longer applies to A, B
 | **Catalog agent** | §27 | ✅ **LIVE, screen built** (beta) | Opened from **Agents** in the dashboard header (`AgentsNavMenu`). Propose-only; the merchant approves. MCP (§22) is a different surface — do not confuse them |
 | **Assistant** | §27 | ✅ **LIVE, screen built** (beta, 2026-10-17) | Opened from **Agents** in the dashboard header. Read-only — answers questions, checks setup, routes to pages/agents. Reuses `AgentPanel` with `agent="assistant"` |
 | **Setup checklist** | §28 | ✅ **LIVE, screen built** (2026-10-17) | Overview card via `getSetupStatus()`. `firstRun` leads the page; `next` is the headline. No local ticks — refetch by revisiting |
-| Site builder | §19 | ✅ Foundation LIVE, **no screens** (D51) | Typed client `lib/api/builder.ts`. Editor, live preview, and brand agent are M2–M3 — do not start them |
+| Site builder | §19 | ✅ **LIVE, screens built** (D51 M1–M3) | `/dashboard/websites/[slug]/design` — editor, live preview, and the brand agent in its Agent tab. M4–M7 (templates, regions, custom code) are not started |
+| **Brand agent** | §27 | ✅ **LIVE, screen built** (beta, 2026-11-02) | Lives in the site editor, not a drawer: directory `surface: "editor"`, and the Agents menu navigates to `href`. Edits the draft directly; Stop is `stopBrandAgent` |
 | Channels, Test Lab | §10 · §12 · §20 | ⛔ Deferred | Out of launch scope — do not start |
 | Platform admin | §26 | ✅ LIVE, screens built | `/admin` when `me.operator`. Suspend/reinstate and **Reset MFA** (`resetPlatformMfa`). Never on merchant nav for anyone else |
 
@@ -493,6 +494,25 @@ makes an audit trail untrustworthy.
 The audit list carries both directions now — `undoneBy` on the original row, `undoOf` on the undo —
 so a history screen can strike through a reversed change and label its reversal without a second
 query. Both are `string | null` on `ActionInvocation`.
+
+### 🟢 New 2026-11-02 — the brand agent is built (D51 M3) — review it
+
+`components/builder/brand-chat.tsx` (the editor's **Agent** tab, now the default) over the shared
+`AgentChat`. What changed on shared surfaces, and what not to break:
+
+- **`AgentKind` gains `"brand"`**; directory rows gain **`surface: "drawer" | "editor"`** — route
+  `"editor"` agents to `href` rather than opening `AgentPanel`. Sessions carry **`siteId`**, and
+  `listAgentSessions({ agent: "brand", siteId })` lists one site's conversations.
+- **`AgentChat` gained optional props** the drawer does not use: `context` (a getter, read at send
+  time — the brand agent **requires** `context.siteId`), `onToolResult`, `onStop`, `onBusyChange`,
+  `stopSignal`. Draft tools (`builder_*`) render as "… in your draft" lines — they already happened.
+- **Stop must call `stopBrandAgent(siteId)` as well as aborting the stream.** The editor's banner has
+  its own **Stop agent** button that does both. While a turn runs the editor is read-only
+  (`agentBusy` locally, `agentLock.active` from the poll).
+- **The agent's edits go on the editor's undo stack** (`invocationId` from each tool result), so Undo
+  reverses them like the merchant's own. Edits with no `changes` are skipped — their undo is a `409`.
+- **Double submit is guarded** in `AgentChat` (a ref, since `busy` lags a tick), and replies now carry
+  real ids; `asUiMessages` repairs the empty ids older transcripts were saved with.
 
 ### 🟢 New 2026-11-01 — the design editor and live preview are built (D51 M2) — review them
 

@@ -596,7 +596,21 @@ where subdomains do not load) so dashboard cookies never reach it. The token rid
 a cookie — an iframe cookie is third-party on many setups — and is validated in `loadSite`; storefront
 APIs under it are refused in `proxy.ts`, and preview views are not logged as traffic. **Adding
 `preview.markii.shop` to the Vercel project is a manual step** — without it the production preview
-does not load. The brand agent is M3 and **not built yet**.
+does not load.
+
+**The brand agent is built as of 2026-11-02 (M3)** — the editor's Agent tab, `docs/API.md` §27,
+`lib/ops-agents/brand/`. It **edits the draft for real** through tools generated from the
+`agentExecution: "draft"` actions (`lib/ops-agents/draft-tools.ts`), with `siteId` stripped from
+each schema and bound from the turn. A turn takes the edit lease (`lib/builder/lease.ts`) before the
+model runs, renews it every 15s, and hands it back when the stream ends; **Stop is
+`builder.stopAgent`**, a registry action, because an aborted fetch may never reach the server and
+the audit row is how the next turn learns it was interrupted. **What makes it see the merchant's
+own edits** is `lib/ops-agents/brand/context.ts`: the current draft and every `builder.*` change by
+anyone but an agent since its last turn began, read from the database each turn and put in the
+instructions — never carried in the transcript. The window starts at the `sentAt` the server stamps
+on each user message. **Agent actor ids are now the person's user id** (they were `agent:{kind}`,
+which the audit log could not name), and assistant replies now get real ids — every stored reply had
+been saved with id `""`, so resumed transcripts rendered with duplicate React keys.
 
 **Stripe Tax on Markii's own subscription is built as of 2026-09-13** (G3). `automatic_tax` on every
 platform-account subscription create, change and preview — **no `Stripe-Account` header**, the

@@ -16,6 +16,10 @@ import type { LanguageModel } from "ai";
  * `{"toolCalls":[{"toolName":"…","input":{…}}],"text":"…"}` — makes the first
  * step call those tools; once their results are in, the second step says
  * `text`. Anything else gets a plain reply. The tools themselves are real.
+ *
+ * `{{instructions}}` in `text` is replaced with the turn's system prompt, so a
+ * test can assert what the agent was *told* — the brand agent's live context
+ * (D51) is the whole feature, and it never otherwise leaves the server.
  */
 
 /**
@@ -74,7 +78,12 @@ export async function mockModel(): Promise<LanguageModel> {
       }
 
       const calls = !afterTools ? (script.toolCalls ?? []) : [];
-      const text = afterTools || calls.length === 0 ? (script.text ?? "Mock reply.") : null;
+      const system = (prompt as { role: string; content: unknown }[])
+        .filter((m) => m.role === "system" && typeof m.content === "string")
+        .map((m) => m.content as string)
+        .join("\n");
+      const text =
+        afterTools || calls.length === 0 ? (script.text ?? "Mock reply.").replace("{{instructions}}", system) : null;
 
       const chunks = [
         ...calls.map((c, i) => ({

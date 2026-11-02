@@ -9,10 +9,11 @@ import {
   type UIMessage,
 } from "ai";
 import Link from "next/link";
-import { useId, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   agentChatEndpoint,
   getAgentSession,
+  type AgentEditorContext,
   type AgentKind,
   type AgentProposal,
 } from "@/lib/api/agents";
@@ -24,15 +25,18 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/field";
 
 function asUiMessages(raw: unknown[]): UIMessage[] {
-  return raw.filter((row): row is UIMessage => {
-    if (!row || typeof row !== "object") return false;
-    const message = row as { id?: unknown; role?: unknown; parts?: unknown };
-    return (
-      typeof message.id === "string" &&
-      (message.role === "user" || message.role === "assistant" || message.role === "system") &&
-      Array.isArray(message.parts)
-    );
-  });
+  return raw
+    .filter((row): row is UIMessage => {
+      if (!row || typeof row !== "object") return false;
+      const message = row as { id?: unknown; role?: unknown; parts?: unknown };
+      return (
+        typeof message.id === "string" &&
+        (message.role === "user" || message.role === "assistant" || message.role === "system") &&
+        Array.isArray(message.parts)
+      );
+    })
+    // Transcripts saved before the server assigned reply ids hold "" for every reply.
+    .map((message, index) => (message.id ? message : { ...message, id: `stored-${index}` }));
 }
 
 function textOf(message: UIMessage): string {
@@ -69,7 +73,49 @@ const READ_TOOL_LABEL: Record<string, string> = {
   read_help: "Looked up a help topic",
   get_plans: "Checked plans and prices",
   list_stores: "Listed your stores",
+  get_design: "Read the design",
+  get_page: "Read the page",
+  list_blocks: "Checked the block library",
+  design_checks: "Ran the publish checks",
+  search_products: "Looked up products",
+  get_product: "Read a product",
+  list_categories: "Read your categories",
+  list_collections: "Read your collections",
 };
+
+/**
+ * The brand agent's edits (D51) — tools named after the draft actions they
+ * run (`builder_setProps`). Unlike a proposal these have **already happened**
+ * in the draft, so the line says so; the preview beside the chat shows it.
+ */
+const DRAFT_TOOL_LABEL: Record<string, string> = {
+  builder_addBlock: "Added a block",
+  builder_insertNodes: "Added blocks",
+  builder_insertPreset: "Added a section",
+  builder_removeNodes: "Removed blocks",
+  builder_moveNode: "Moved a block",
+  builder_duplicateNode: "Duplicated a block",
+  builder_setProps: "Edited a block",
+  builder_setStyles: "Restyled a block",
+  builder_setTheme: "Changed the theme",
+  builder_setThemeTokens: "Changed colours and fonts",
+  builder_createPage: "Created a page",
+  builder_updatePage: "Updated a page",
+};
+
+function draftToolNote(output: unknown): { applied: boolean; note: string | null } {
+  if (!output || typeof output !== "object") return { applied: false, note: null };
+  const row = output as { status?: unknown; message?: unknown };
+  if (row.status === "applied") return { applied: true, note: null };
+  if (row.status === "stopped") return { applied: false, note: "Stopped — no further edits from this reply." };
+  if (row.status === "limit_reached") {
+    return { applied: false, note: "The agent reached its limit of edits for one message. Ask it to continue." };
+  }
+  return {
+    applied: false,
+    note: typeof row.message === "string" ? `An edit was refused: ${row.message}` : "An edit was refused.",
+  };
+}
 
 function linkedChatText(text: string): ReactNode {
   const token =
@@ -117,6 +163,7 @@ async function readChatError(res: Response): Promise<ApiClientError> {
 }
 
 function agentNoun(agent: AgentKind): string {
+  if (agent === "brand") return "the brand agent";
   return agent === "catalog" ? "the Catalog agent" : "the assistant";
 }
 
@@ -150,6 +197,8 @@ type ChatSlot = {
   sessionId: string | null;
   onSessionId: (id: string) => void;
   onFinished: () => void;
+  /** Read at send time, so the message carries where the merchant is *now*. */
+  context: { current: (() => AgentEditorContext | undefined) | undefined };
 };
 
 function agentChatTransport(agent: AgentKind, slot: ChatSlot) {
@@ -161,6 +210,7 @@ function agentChatTransport(agent: AgentKind, slot: ChatSlot) {
       return {
         body: {
           ...(slot.sessionId ? { sessionId: slot.sessionId } : {}),
+          ...(slot.context.current ? { context: slot.context.current() } : {}),
           message: {
             id: last?.id ?? crypto.randomUUID(),
             role: "user" as const,
@@ -191,16 +241,20 @@ const EMPTY_COPY: Record<AgentKind, string> = {
     "Ask about products, collections, or stock. The agent proposes edits; nothing changes until you approve a card.",
   assistant:
     "Ask how Markii works, what to set up next, or where to go. The assistant can check your store and point you to a page — it cannot change anything.",
+  brand:
+    "Describe the look you want, or ask for a change to the selected block. The agent edits your draft while you watch the preview; nothing goes live until you publish. You can't edit while it works — press Stop to take over.",
 };
 
 const PLACEHOLDER: Record<AgentKind, string> = {
   catalog: "Ask about your catalog…",
   assistant: "Ask about setup, billing, or how Markii works…",
+  brand: "Ask for a redesign, new section, or copy change…",
 };
 
 const MESSAGE_LABEL: Record<AgentKind, string> = {
   catalog: "Message the Catalog agent",
   assistant: "Message the assistant",
+  brand: "Message the brand agent",
 };
 
 export function AgentChat({
@@ -212,6 +266,11 @@ export function AgentChat({
   disabledReason,
   onSessionId,
   onFinished,
+  context,
+  onToolResult,
+  onStop,
+  onBusyChange,
+  stopSignal = 0,
 }: {
   agent: AgentKind;
   sessionId: string | null;
@@ -221,12 +280,30 @@ export function AgentChat({
   disabledReason?: string;
   onSessionId: (id: string) => void;
   onFinished: () => void;
+  /** Editor context sent with each message — the brand agent requires it. */
+  context?: () => AgentEditorContext | undefined;
+  /** Called once per tool result as it streams in — the editor refreshes its preview on draft edits. */
+  onToolResult?: (toolName: string, output: unknown) => void;
+  /**
+   * Called when the merchant presses Stop, alongside aborting the stream. The
+   * brand agent needs the server told (`builder.stopAgent`): an aborted fetch
+   * is not guaranteed to reach it, and the turn would keep the editor locked.
+   */
+  onStop?: () => void | Promise<void>;
+  onBusyChange?: (busy: boolean) => void;
+  /** Incremented by a host to abort the stream from outside — the editor's own Stop button. */
+  stopSignal?: number;
 }) {
   const fieldId = useId();
+  const contextRef = useRef(context);
+  useEffect(() => {
+    contextRef.current = context;
+  });
   const [slot] = useState<ChatSlot>(() => ({
     sessionId,
     onSessionId,
     onFinished,
+    context: contextRef,
   }));
 
   const [proposals, setProposals] = useState<AgentProposal[]>(initialProposals);
@@ -253,13 +330,56 @@ export function AgentChat({
   const busy = status === "submitted" || status === "streaming";
   const proposalById = new Map(proposals.map((row) => [row.id, row]));
 
+  const busyRef = useRef(onBusyChange);
+  const toolResultRef = useRef(onToolResult);
+  useEffect(() => {
+    busyRef.current = onBusyChange;
+    toolResultRef.current = onToolResult;
+  });
+  useEffect(() => {
+    busyRef.current?.(busy);
+  }, [busy]);
+  useEffect(() => {
+    if (stopSignal > 0) void stop();
+  }, [stopSignal, stop]);
+
+  /** Tool results already reported — the transcript re-renders on every streamed token. */
+  const reported = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    const seen = (reported.current ??= new Set(
+      // A resumed transcript's results happened in an earlier visit; only new ones are news.
+      asUiMessages(initialMessages).flatMap((m) =>
+        m.parts.filter(isToolUIPart).map((p) => p.toolCallId),
+      ),
+    ));
+    for (const message of messages) {
+      if (message.role !== "assistant") continue;
+      for (const part of message.parts) {
+        if (!isToolUIPart(part) || part.state !== "output-available" || seen.has(part.toolCallId)) continue;
+        seen.add(part.toolCallId);
+        toolResultRef.current?.(getToolName(part), part.output);
+      }
+    }
+  }, [messages, initialMessages]);
+
+  /**
+   * Set synchronously, because `busy` is not: two submits in one tick (a
+   * double Enter) both saw it false and sent the message twice — for the brand
+   * agent, two whole turns of edits.
+   */
+  const sending = useRef(false);
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
     const text = draft.trim();
-    if (!text || busy || !canSend) return;
+    if (!text || busy || !canSend || sending.current) return;
+    sending.current = true;
     setDraft("");
     clearError();
-    await sendMessage({ text });
+    try {
+      await sendMessage({ text });
+    } finally {
+      sending.current = false;
+    }
   }
 
   return (
@@ -358,6 +478,34 @@ export function AgentChat({
                   );
                 }
 
+                const draftLabel = DRAFT_TOOL_LABEL[name];
+                if (draftLabel) {
+                  if (part.state === "input-streaming" || part.state === "input-available") {
+                    return (
+                      <p key={`${message.id}-${name}-${index}`} className="text-xs leading-5 text-muted">
+                        Editing the draft…
+                      </p>
+                    );
+                  }
+                  if (part.state === "output-error") {
+                    return (
+                      <p key={`${message.id}-${name}-${index}`} className="text-xs leading-5 text-error-text">
+                        {part.errorText}
+                      </p>
+                    );
+                  }
+                  if (part.state !== "output-available") return null;
+                  const { applied, note } = draftToolNote(part.output);
+                  return (
+                    <p
+                      key={`${message.id}-${name}-${index}`}
+                      className={applied ? "text-xs leading-5 text-foreground" : "text-xs leading-5 text-muted"}
+                    >
+                      {applied ? `${draftLabel} in your draft` : note}
+                    </p>
+                  );
+                }
+
                 const readLabel = READ_TOOL_LABEL[name];
                 if (!readLabel) return null;
                 if (part.state === "input-streaming" || part.state === "input-available") {
@@ -413,7 +561,10 @@ export function AgentChat({
         />
         <div className="mt-2 flex items-center justify-end gap-2">
           {busy ? (
-            <Button type="button" variant="ghost" className="px-3 py-1.5 text-sm" onClick={() => void stop()}>
+            <Button type="button" variant="ghost" className="px-3 py-1.5 text-sm" onClick={() => {
+              void stop();
+              void onStop?.();
+            }}>
               Stop
             </Button>
           ) : null}

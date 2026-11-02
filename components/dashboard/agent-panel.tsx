@@ -56,6 +56,11 @@ const COPY: Record<
     description: "Proposes catalog edits. Nothing is applied until you approve it.",
     loadError: "Could not load the Catalog agent.",
   },
+  brand: {
+    title: "Brand agent",
+    description: "Redesigns your storefront in the site editor. It edits your draft; nothing goes live until you publish.",
+    loadError: "Could not load the brand agent.",
+  },
   assistant: {
     title: "Assistant",
     description: "Answers questions, checks setup, and points you to the right page. It cannot change your store.",

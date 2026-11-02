@@ -339,6 +339,10 @@ inspector generated from `editorPanel`, pages, theme, undo/redo over registry un
 checks, history) and a live preview that is the storefront renderer itself on its own origin. The
 canvas is the real page in an iframe rather than an in-editor re-render, so preview and storefront
 cannot diverge. Drag-and-drop lives in the layer tree, with Alt+arrow keyboard equivalents.
+**M3 is built (2026-11-02)** — the brand agent, docked in the editor (`docs/API.md` §27). It edits the
+draft directly through the `agentExecution: "draft"` actions, holds the edit lease while it works,
+and is told at the start of every turn what the draft looks like now and what the merchant changed
+since it last spoke.
 
 0. **Action registry + `defineAction` primitive** — built back in **Phase C** (`docs/BACKEND.md` §1),
    so it already exists and commerce mutations already use it
