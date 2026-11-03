@@ -74,7 +74,7 @@ const READ_TOOL_LABEL: Record<string, string> = {
   get_plans: "Checked plans and prices",
   list_stores: "Listed your stores",
   get_design: "Read the design",
-  get_page: "Read the page",
+  get_page: "Read the layout",
   list_blocks: "Checked the block library",
   design_checks: "Ran the publish checks",
   search_products: "Looked up products",
@@ -101,6 +101,10 @@ const DRAFT_TOOL_LABEL: Record<string, string> = {
   builder_setThemeTokens: "Changed colours and fonts",
   builder_createPage: "Created a page",
   builder_updatePage: "Updated a page",
+  builder_customizeTemplate: "Started customising a template",
+  builder_customizeRegion: "Started customising a shared region",
+  builder_setBinding: "Connected a block to store data",
+  builder_setVisibility: "Set when a block shows",
 };
 
 function draftToolNote(output: unknown): { applied: boolean; note: string | null } {

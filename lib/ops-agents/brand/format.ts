@@ -1,4 +1,5 @@
 import type { DiffEntry } from "../../db";
+import { describeCondition } from "../../builder/bindings";
 import type { PageNode } from "../../builder/types";
 
 /**
@@ -42,6 +43,8 @@ export function outlineTree(root: PageNode, opts: { selectedId?: string | null; 
     if (props && Object.keys(props).length) parts.push(JSON.stringify(clipValue(props)));
     if (node.styles && Object.keys(node.styles).length) parts.push(`styles=${JSON.stringify(node.styles)}`);
     if (node.intent) parts.push(`intent=${JSON.stringify(node.intent)}`);
+    if (node.bindings && Object.keys(node.bindings).length) parts.push(`bind=${JSON.stringify(node.bindings)}`);
+    if (node.visibleWhen) parts.push(`showIf=${JSON.stringify(describeCondition(node.visibleWhen))}`);
     if (opts.selectedId && node.id === opts.selectedId) parts.push("← SELECTED");
     const line = parts.join(" ");
     if (used + line.length > max) {

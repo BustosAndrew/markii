@@ -1,7 +1,8 @@
+import type { describeBindings, ValueType } from "@/lib/builder/bindings";
 import type { FieldSpec } from "@/lib/builder/blocks";
 import type { CheckResult } from "@/lib/builder/checks";
 import type { DesignTokens } from "@/lib/builder/tokens";
-import type { Breakpoint, PageNode, PageSeo, StyleProps } from "@/lib/builder/types";
+import type { Breakpoint, Condition, PageNode, PageSeo, RegionHandle, StyleProps, TemplateHandle } from "@/lib/builder/types";
 import { invokeAction } from "./actions";
 import { apiGet, apiPost } from "./client";
 import { callWhenLive } from "./planned";
@@ -24,7 +25,7 @@ import { callWhenLive } from "./planned";
 export const BUILDER_API_LIVE = true;
 const SECTION = "API §19";
 
-export type { PageNode, PageSeo, Breakpoint, StyleProps, DesignTokens, CheckResult, FieldSpec };
+export type { PageNode, PageSeo, Breakpoint, StyleProps, DesignTokens, CheckResult, FieldSpec, Condition, TemplateHandle, RegionHandle };
 export type ThemeId = "studio" | "atlas" | "noir" | "bloom";
 
 export type AgentLock = { active: boolean; sessionId: string | null; expiresAt: string | null };
@@ -39,6 +40,23 @@ export type DesignPage = {
   /** `/` for home, `/pages/{handle}` otherwise. */
   path: string;
   updatedAt: string;
+};
+
+/**
+ * A product/collection template or a global region (M4). `id` is null until
+ * customised — the storefront uses its built-in layout meanwhile — and is a
+ * `pageId` like any page's once it exists: every tree edit takes it.
+ */
+export type SharedDocument<H extends string = string> = {
+  handle: H;
+  title: string;
+  id: number | null;
+  customized: boolean;
+  /** Reset in the draft: the built-in layout returns at the next publish. */
+  deleted: boolean;
+  published: boolean;
+  /** Where to point the preview to see it; null when the store has nothing to show it with. */
+  previewPath: string | null;
 };
 
 export type DesignSummary =
@@ -57,6 +75,8 @@ export type DesignSummary =
       publishedAt: string | null;
       agentLock: AgentLock;
       pages: DesignPage[];
+      templates: SharedDocument<TemplateHandle>[];
+      regions: SharedDocument<RegionHandle>[];
     };
 
 export type PageDocument = {
@@ -74,7 +94,7 @@ export type PageDocument = {
 export type BlockDescription = {
   type: string;
   label: string;
-  category: "layout" | "content" | "commerce" | "media";
+  category: "layout" | "content" | "commerce" | "media" | "navigation";
   description: string;
   usageHints: string[];
   children: "none" | "any" | string[];
@@ -84,6 +104,10 @@ export type BlockDescription = {
   /** Generate the inspector from this — one field per entry. */
   editorPanel: FieldSpec[];
   semantics: { element: string; landmark?: string };
+  /** M4: props that may be bound to data, and the value types each takes. Match against `BlockRegistry.data.bindings[].type`. */
+  bindable: Record<string, ValueType[]>;
+  /** M4: the block only works where this data exists — `product` means the product template. */
+  requiresScope: "product" | "collection" | "item" | null;
   /** JSON Schema for the block's props. */
   props: Record<string, unknown>;
 };
@@ -92,6 +116,8 @@ export type BlockRegistry = {
   blocks: BlockDescription[];
   presets: { id: string; label: string; description: string }[];
   tokens: { fonts: string[]; radius: string[]; maxWidth: string[] };
+  /** M4: the binding paths, visibility conditions and repeater sources. */
+  data: ReturnType<typeof describeBindings>;
 };
 
 export type DesignRevision = { started: boolean; revision: number; publishedRevision: number; agentLock: AgentLock };
@@ -176,6 +202,25 @@ export const updateDesignPage = (input: { siteId: number; pageId: number; title?
 export const deleteDesignPage = (siteId: number, pageId: number) => invokeAction<Revisioned>("builder.deletePage", { siteId, pageId });
 
 export const restoreDesignPage = (siteId: number, pageId: number) => invokeAction<Revisioned>("builder.restorePage", { siteId, pageId });
+
+/**
+ * Start a template or region from the current layout (M4). Idempotent:
+ * `created: false` with the existing `pageId` when it already exists. Reset
+ * one with `deleteDesignPage` — it falls back to the built-in layout on publish.
+ */
+export const customizeTemplate = (siteId: number, template: TemplateHandle) =>
+  invokeAction<{ pageId: number; created: boolean } & Revisioned>("builder.customizeTemplate", { siteId, template });
+
+export const customizeRegion = (siteId: number, region: RegionHandle) =>
+  invokeAction<{ pageId: number; created: boolean } & Revisioned>("builder.customizeRegion", { siteId, region });
+
+/** Bind props to data paths (`null` unbinds). A path must be one of `BlockRegistry.data.bindings`. */
+export const setNodeBindings = (input: { siteId: number; pageId: number; nodeId: string; bindings: Record<string, string | null> }) =>
+  invokeAction<{ changed: string[] } & Revisioned>("builder.setBinding", input);
+
+/** Show a block only when `when` holds; `null` shows it always. */
+export const setNodeVisibility = (input: { siteId: number; pageId: number; nodeId: string; when: Condition | null }) =>
+  invokeAction<Revisioned>("builder.setVisibility", input);
 
 /**
  * Publish the whole draft. A blocked publish is `409 CONFLICT` with

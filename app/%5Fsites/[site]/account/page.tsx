@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { and, desc, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
-import { SiteHeader } from "@/components/storefront/site-header";
+import { StoreFooter, StoreTop } from "@/components/storefront/store-chrome";
 import { ThemeRoot } from "@/components/storefront/theme-root";
 import { currentCustomer } from "@/lib/auth/shopper";
 import { membershipStatus } from "@/lib/commerce/memberships";
@@ -42,7 +42,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
   const { error, notice } = await searchParams;
   const data = await loadSite(siteSlug);
   if (!data) notFound();
-  const { site, bundle, baseUrl } = data;
+  const { site, baseUrl } = data;
   if (storefrontHalted(data)) notFound();
 
   const customer = await currentCustomer(site.id);
@@ -71,17 +71,10 @@ export default async function AccountPage({ params, searchParams }: Props) {
     : [];
 
   const now = new Date();
-  const topCategories = bundle.categories.filter((c) => !c.parentSlug);
 
   return (
     <ThemeRoot themeId={site.themeId ?? "studio"} theme={data.theme} preview={data.preview}>
-      <SiteHeader
-        siteName={site.name}
-        homeHref={`${baseUrl}/`}
-        cartHref={`${baseUrl}/cart`}
-        accountHref={`${baseUrl}/account`}
-        nav={topCategories.map((c) => ({ name: c.name, href: `${baseUrl}/c/${c.slug}` }))}
-      />
+      <StoreTop data={data} minimal />
       <main className="sf-main">
         <h1 className="sf-title">Your account</h1>
 
@@ -187,6 +180,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
           </>
         )}
       </main>
+      <StoreFooter data={data} />
     </ThemeRoot>
   );
 }

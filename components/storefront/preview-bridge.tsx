@@ -9,8 +9,9 @@ import { dashboardOrigin } from "@/lib/builder/preview";
  *
  * It does four things, all through `postMessage` to the dashboard's origin
  * and nowhere else: report the path the merchant navigated to, report which
- * block they clicked, outline the block the editor selected, and keep the
- * scroll position across the reloads that follow every edit.
+ * block they clicked — and which document it belongs to, since a page shows
+ * its header and footer too (M4) — outline the block the editor selected, and
+ * keep the scroll position across the reloads that follow every edit.
  *
  * The script is a fixed string. The one value interpolated is the dashboard
  * origin, JSON-encoded, and the messages it accepts are checked against it.
@@ -25,7 +26,8 @@ post({type:"markii:location",path:location.pathname+location.search});
 document.addEventListener("click",function(e){
 var t=e.target;var el=t&&t.closest?t.closest("[data-mk-node]"):null;
 if(!el)return;
-post({type:"markii:select",nodeId:el.getAttribute("data-mk-node")});
+var doc=el.closest("[data-mk-doc]");
+post({type:"markii:select",nodeId:el.getAttribute("data-mk-node"),docId:doc?doc.getAttribute("data-mk-doc"):null});
 if(e.altKey||e.metaKey){e.preventDefault()}
 },true);
 var sel=null;

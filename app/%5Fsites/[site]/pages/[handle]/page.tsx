@@ -42,5 +42,5 @@ export default async function BuilderPageRoute({ params }: Props) {
     userAgent: (await headers()).get("user-agent"),
   });
 
-  return <StorefrontBuilderPage data={data} tree={page.tree} />;
+  return <StorefrontBuilderPage data={data} tree={page.tree} documentId={page.id} />;
 }

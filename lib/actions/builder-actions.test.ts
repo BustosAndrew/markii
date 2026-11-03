@@ -31,15 +31,20 @@ describe("which builder actions an agent may run itself (D51)", () => {
     expect(executable).toEqual([
       "builder.addBlock",
       "builder.createPage",
+      // M4: a template or region is a draft document like a page; reset stays human (deletePage).
+      "builder.customizeRegion",
+      "builder.customizeTemplate",
       "builder.duplicateNode",
       "builder.insertNodes",
       "builder.insertPreset",
       "builder.moveNode",
       "builder.removeNodes",
+      "builder.setBinding",
       "builder.setProps",
       "builder.setStyles",
       "builder.setTheme",
       "builder.setThemeTokens",
+      "builder.setVisibility",
       "builder.updatePage",
     ]);
   });

@@ -2,7 +2,8 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { ApiError, conflict, notFound } from "../../api";
 import { blockingErrors, checkPage, checkTheme, type CheckResult } from "../../builder/checks";
-import { PRESETS, blankPageTree, defaultHomeTree } from "../../builder/presets";
+import { conditionSchema } from "../../builder/bindings";
+import { DEFAULT_REGION_TREES, DEFAULT_TEMPLATE_TREES, PRESETS, blankPageTree, defaultHomeTree } from "../../builder/presets";
 import {
   bumpRevision,
   catalogFacts,
@@ -20,13 +21,26 @@ import {
   moveNode,
   nodeInputSchema,
   removeNodes,
+  setBindings,
   setIntent,
   setProps,
   setStyles,
+  setVisibility as setNodeVisibility,
   type Removed,
 } from "../../builder/tree";
 import { styleSchema } from "../../builder/styles";
-import { BREAKPOINTS, HOME_HANDLE, type PageNode, type PageSeo } from "../../builder/types";
+import {
+  BREAKPOINTS,
+  HOME_HANDLE,
+  REGION_HANDLES,
+  SHARED_DOCUMENT_TITLES,
+  TEMPLATE_HANDLES,
+  type Condition,
+  type PageNode,
+  type PageSeo,
+  type RegionHandle,
+  type TemplateHandle,
+} from "../../builder/types";
 import { siteDesignVersions, siteDesigns, siteDocuments, sites } from "../../db";
 import { defineAction } from "../registry";
 import type { ActionContext } from "../types";
@@ -389,6 +403,90 @@ export const setProps_ = defineAction({
   },
 });
 
+// ---------------------------------------------------------------------------
+// Data bindings and visibility (M4) — the brand agent may run these too
+// ---------------------------------------------------------------------------
+
+export const setBinding = defineAction({
+  id: "builder.setBinding",
+  description:
+    "Fill a block's props from live data instead of fixed text: bindings maps a prop to a path " +
+    "(null unbinds). Paths: product.title/description/price/stockStatus/sku/category/image/url/slug " +
+    "in the product template; item.* (the same fields) inside a repeater; collection.title/" +
+    "description/image/url in the collection template; store.name/url/copyright anywhere. Only " +
+    "props the block lists as bindable, with a path of the type they take. The prop's own value " +
+    "stays as the placeholder shown where the data is absent.",
+  input: z
+    .object({
+      siteId,
+      pageId,
+      nodeId,
+      bindings: z
+        .record(z.string().max(40), z.string().max(80).nullable())
+        .refine((b) => Object.keys(b).length >= 1 && Object.keys(b).length <= 10, "Between 1 and 10 bindings."),
+    })
+    .strict(),
+  permission: "cms.write",
+  riskTier: "low",
+  agentExecution: "draft",
+  undoable: true,
+  inverse: (r) => {
+    const input = r.input as { siteId: number; pageId: number; nodeId: string };
+    const prefix = `nodes.${input.nodeId}.bindings.`;
+    const bindings: Record<string, string | null> = {};
+    for (const d of r.diff) if (d.path.startsWith(prefix)) bindings[d.path.slice(prefix.length)] = (d.before as string | null) ?? null;
+    if (Object.keys(bindings).length === 0) return null;
+    return { actionId: "builder.setBinding", input: { siteId: input.siteId, pageId: input.pageId, nodeId: input.nodeId, bindings } };
+  },
+  async run(input, ctx) {
+    const { out, revision } = await editPage(
+      ctx,
+      input.siteId,
+      input.pageId,
+      (tree) => setBindings(tree, input.nodeId, input.bindings),
+      (o) => o.changes.length > 0,
+    );
+    for (const c of out.changes) {
+      ctx.recordDiff({ ...pageEntity(input.pageId), path: `nodes.${input.nodeId}.bindings.${c.key}`, before: c.before, after: c.after });
+    }
+    return { nodeId: input.nodeId, changed: out.changes.map((c) => c.key), revision };
+  },
+});
+
+export const setVisibility = defineAction({
+  id: "builder.setVisibility",
+  description:
+    "Show a block only when a condition holds, e.g. { path: \"product.stock\", op: \"gt\", value: 0 } " +
+    "or { path: \"collection.description\", op: \"exists\" }; null shows it always. Ops: exists, " +
+    "missing, eq, neq, gt, gte, lt, lte (the last four on numbers). Paths: product.stock/inStock/" +
+    "priceMinor/description/image/sku/relatedCount, item.* inside a repeater, collection.productCount/" +
+    "description/image, store.hasCollections/productCount.",
+  input: z.object({ siteId, pageId, nodeId, when: conditionSchema.nullable() }).strict(),
+  permission: "cms.write",
+  riskTier: "low",
+  agentExecution: "draft",
+  undoable: true,
+  inverse: (r) => {
+    const input = r.input as { siteId: number; pageId: number; nodeId: string };
+    const d = r.diff.find((x) => x.path === `nodes.${input.nodeId}.visibleWhen`);
+    if (!d) return null;
+    return { actionId: "builder.setVisibility", input: { siteId: input.siteId, pageId: input.pageId, nodeId: input.nodeId, when: d.before ?? null } };
+  },
+  async run(input, ctx) {
+    const { out, revision } = await editPage(
+      ctx,
+      input.siteId,
+      input.pageId,
+      (tree) => setNodeVisibility(tree, input.nodeId, input.when as Condition | null),
+      (o) => o.changed,
+    );
+    if (revision !== null) {
+      ctx.recordDiff({ ...pageEntity(input.pageId), path: `nodes.${input.nodeId}.visibleWhen`, before: out.before, after: input.when });
+    }
+    return { nodeId: input.nodeId, revision };
+  },
+});
+
 const stylePatchSchema = z
   .object(
     Object.fromEntries(Object.entries(styleSchema.shape).map(([k, v]) => [k, (v as z.ZodOptional<z.ZodType>).unwrap().nullable().optional()])),
@@ -578,6 +676,7 @@ export const updatePage = defineAction({
   async run(input, ctx) {
     await lockDesign(ctx, input.siteId);
     const doc = await loadPage(ctx.db, input.siteId, input.pageId);
+    if (input.handle !== undefined && doc.kind !== "page") throw conflict("A template's or region's handle is fixed.");
     if (input.handle !== undefined && doc.handle === HOME_HANDLE) throw conflict("The home page's address cannot change.");
 
     const next: { title?: string; handle?: string; seo?: PageSeo } = {};
@@ -602,10 +701,86 @@ export const updatePage = defineAction({
   },
 });
 
+// ---------------------------------------------------------------------------
+// Templates and global regions (M4)
+// ---------------------------------------------------------------------------
+
+/**
+ * Start a template or region from its default tree — or bring one back that
+ * was reset in this draft. Idempotent: an existing one is returned unchanged,
+ * and its undo does nothing.
+ */
+async function customizeShared(ctx: ActionContext, site: number, kind: "template" | "region", handle: TemplateHandle | RegionHandle) {
+  await lockDesign(ctx, site);
+  const [existing] = await ctx.db
+    .select({ id: siteDocuments.id, draftDeleted: siteDocuments.draftDeleted })
+    .from(siteDocuments)
+    .where(and(eq(siteDocuments.siteId, site), eq(siteDocuments.kind, kind), eq(siteDocuments.handle, handle)))
+    .limit(1);
+  if (existing && !existing.draftDeleted) return { pageId: existing.id, created: false, revision: null };
+
+  const tree = kind === "template" ? DEFAULT_TEMPLATE_TREES[handle as TemplateHandle]() : DEFAULT_REGION_TREES[handle as RegionHandle]();
+  let id: number;
+  if (existing) {
+    await ctx.db.update(siteDocuments).set({ draftDeleted: false, draftTree: tree, updatedAt: new Date() }).where(eq(siteDocuments.id, existing.id));
+    id = existing.id;
+  } else {
+    const [row] = await ctx.db
+      .insert(siteDocuments)
+      .values({ siteId: site, kind, handle, title: SHARED_DOCUMENT_TITLES[handle], draftTree: tree })
+      .returning({ id: siteDocuments.id });
+    id = row.id;
+  }
+  ctx.recordDiff({ ...pageEntity(id), path: kind, before: null, after: { handle } });
+  return { pageId: id, created: true, revision: await bumpRevision(ctx, site) };
+}
+
+/** Undoing a customise resets it again; undoing one that changed nothing does nothing. */
+const uncustomize = (r: { input: unknown; result: unknown }) => {
+  const input = r.input as { siteId: number };
+  const result = r.result as { pageId: number; created: boolean };
+  if (!result?.created) return null;
+  return { actionId: "builder.deletePage", input: { siteId: input.siteId, pageId: result.pageId }, conflictCheck: "none" as const };
+};
+
+export const customizeTemplate = defineAction({
+  id: "builder.customizeTemplate",
+  description:
+    "Start designing the layout every product page (template \"product\") or every collection page " +
+    "(template \"collection\") uses. It starts as the store's current layout, built from blocks bound " +
+    "to each product's or collection's own data, and is edited like any page (its pageId). Shoppers " +
+    "see it only once published. Already customised: returns the existing one.",
+  input: z.object({ siteId, template: z.enum(TEMPLATE_HANDLES) }).strict(),
+  permission: "cms.write",
+  riskTier: "low",
+  agentExecution: "draft",
+  undoable: true,
+  inverse: uncustomize,
+  run: (input, ctx) => customizeShared(ctx, input.siteId, "template", input.template),
+});
+
+export const customizeRegion = defineAction({
+  id: "builder.customizeRegion",
+  description:
+    "Start designing a part shown on every page: the header, the footer, or an announcement bar " +
+    "above the header. The header starts as the current one (store name, category menu, search, " +
+    "account and cart); the footer and announcement bar are new. Edited like any page (its pageId); " +
+    "shoppers see it only once published. Already customised: returns the existing one.",
+  input: z.object({ siteId, region: z.enum(REGION_HANDLES) }).strict(),
+  permission: "cms.write",
+  riskTier: "low",
+  agentExecution: "draft",
+  undoable: true,
+  inverse: uncustomize,
+  run: (input, ctx) => customizeShared(ctx, input.siteId, "region", input.region),
+});
+
 /** Human-only: deleting is a medium-risk change the brand agent may suggest but not make. */
 export const deletePage = defineAction({
   id: "builder.deletePage",
-  description: "Delete a page from the draft. It keeps serving until the next publish. The home page cannot be deleted.",
+  description:
+    "Delete a page from the draft, or reset a template or region back to the store's built-in " +
+    "layout. It keeps serving until the next publish. The home page cannot be deleted.",
   input: z.object({ siteId, pageId }).strict(),
   permission: "cms.write",
   riskTier: "medium",
@@ -654,7 +829,7 @@ export async function draftChecks(ctx: Pick<ActionContext, "db">, site: number, 
   const docs = await ctx.db.select().from(siteDocuments).where(eq(siteDocuments.siteId, site));
   const facts = await catalogFacts(ctx.db, site);
   const results: CheckResult[] = [];
-  for (const doc of docs.filter((d) => !d.draftDeleted)) results.push(...checkPage(doc.draftTree, facts, doc.handle));
+  for (const doc of docs.filter((d) => !d.draftDeleted)) results.push(...checkPage(doc.draftTree, facts, doc.handle, doc.kind));
   results.push(...checkTheme(resolveTheme(design.draftThemeId, design.draftTokens)));
   return { docs, results };
 }

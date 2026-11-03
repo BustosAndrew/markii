@@ -226,4 +226,60 @@ describe("brand agent", () => {
     expect(published).toHaveLength(0);
     expect(await leaseReleased()).toBe(true);
   });
+
+  /**
+   * M4: templates, bindings and visibility are draft edits the agent makes itself, with the same audit.
+   * Last in the file: the stop tests above plant a lease by hand, with no turn behind it, so edits
+   * from another conversation in between would count as the stopped turn's.
+   */
+  it("customises the product template, binds and hides blocks there, and sees the result next turn", async () => {
+    const started = await turn(
+      mock({ toolCalls: [{ toolName: "builder_customizeTemplate", input: { template: "product" } }], text: "Started your product template." }),
+    );
+    expect(started.status, started.text.slice(0, 300)).toBe(200);
+    expect(started.text).toContain('"status":"applied"');
+    expect(await leaseReleased()).toBe(true);
+    const session = started.headers.get("x-agent-session-id")!;
+
+    const [tpl] = await sql`select id, draft_tree from site_documents where site_id = ${siteId} and kind = 'template' and handle = 'product'`;
+    expect(tpl, "the agent's customise did not create the template").toBeTruthy();
+    const all = (n: any): any[] => [n, ...(n.children ?? []).flatMap(all)];
+    const buy = all(tpl.draft_tree).find((n) => n.type === "productBuy");
+    const sku = all(tpl.draft_tree).find((n) => n.type === "text" && n.bindings?.markdown === "product.stockStatus");
+
+    const edited = await turn(
+      mock({
+        toolCalls: [
+          { toolName: "builder_setBinding", input: { pageId: tpl.id, nodeId: sku.id, bindings: { markdown: "product.sku" } } },
+          { toolName: "builder_setVisibility", input: { pageId: tpl.id, nodeId: buy.id, when: { path: "product.inStock", op: "eq", value: true } } },
+        ],
+        text: "Done.",
+      }),
+      { session, context: { pageId: tpl.id } },
+    );
+    expect(edited.status, edited.text.slice(0, 300)).toBe(200);
+    expect(edited.text.match(/"status":"applied"/g)?.length).toBe(2);
+    expect(await leaseReleased()).toBe(true);
+
+    const audit = await sql`select action_id, actor_type, actor_id from action_invocations
+                            where org_id = ${orgId} and action_id in ('builder.customizeTemplate', 'builder.setBinding', 'builder.setVisibility')
+                            order by occurred_at`;
+    // The two edits of the second turn run as one step, so either may land first.
+    expect(audit.map((r: any) => [r.action_id, r.actor_type, r.actor_id]).sort()).toEqual([
+      ["builder.customizeTemplate", "agent", userId],
+      ["builder.setBinding", "agent", userId],
+      ["builder.setVisibility", "agent", userId],
+    ]);
+
+    const told = streamedText((await turn(mock({ text: "{{instructions}}" }), { session, context: { pageId: tpl.id } })).text);
+    expect(told).toContain(`Template #${tpl.id} tree (draft)`);
+    expect(told).toContain(`#${tpl.id} Product page (product) — not yet published`);
+    expect(told).toContain('bind={"markdown":"product.sku"}');
+    expect(told).toContain('showIf="product.inStock = true"');
+    expect(told).toContain("Header (header) — not customised");
+    expect(await leaseReleased()).toBe(true);
+
+    // Shoppers still see the fixed product page: the agent cannot publish.
+    expect((await shopper.getRaw(`/_sites/${slug}/p/test-product-one`)).text).not.toContain('class="mk-page"');
+  });
 });

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
-import { SiteHeader } from "@/components/storefront/site-header";
+import { StoreFooter, StoreTop } from "@/components/storefront/store-chrome";
 import { ThemeRoot } from "@/components/storefront/theme-root";
 import { logTraffic } from "@/lib/agents";
 import { loadSite, storefrontHalted } from "@/lib/storefront";
@@ -30,7 +30,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function CollectionsPage({ params }: Props) {
   const data = await loadSite((await params).site);
   if (!data || storefrontHalted(data)) notFound();
-  const { site, bundle, colls, baseUrl } = data;
+  const { site, colls, baseUrl } = data;
 
   await logTraffic({
     siteId: site.id,
@@ -38,20 +38,11 @@ export default async function CollectionsPage({ params }: Props) {
     userAgent: (await headers()).get("user-agent"),
   });
 
-  const topCategories = bundle.categories.filter((c) => !c.parentSlug);
   const themeId = site.themeId ?? "studio";
 
   return (
     <ThemeRoot themeId={themeId} theme={data.theme} preview={data.preview}>
-      <SiteHeader
-        siteName={site.name}
-        homeHref={`${baseUrl}/`}
-        cartHref={`${baseUrl}/cart`}
-        accountHref={`${baseUrl}/account`}
-        searchAction={`${baseUrl}/search`}
-        collectionsHref={colls.length > 0 ? `${baseUrl}/collections` : undefined}
-        nav={topCategories.map((c) => ({ name: c.name, href: `${baseUrl}/c/${c.slug}` }))}
-      />
+      <StoreTop data={data} />
       <main className="sf-main">
         <p className="sf-crumb">
           <a href={`${baseUrl}/`}>{site.name}</a> / Collections
@@ -73,6 +64,7 @@ export default async function CollectionsPage({ params }: Props) {
           </ul>
         ) : null}
       </main>
+      <StoreFooter data={data} />
     </ThemeRoot>
   );
 }

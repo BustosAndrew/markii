@@ -1,4 +1,5 @@
 import { and, eq } from "drizzle-orm";
+import { cache } from "react";
 import { accountStanding, storefrontHeld, type AccountStanding } from "@/lib/billing/standing";
 import {
   categories,
@@ -15,7 +16,7 @@ import {
 } from "@/lib/db";
 import { previewBaseFor, requestPreviewState } from "@/lib/builder/preview";
 import { resolveTheme } from "@/lib/builder/tokens";
-import type { PageNode, PageSeo } from "@/lib/builder/types";
+import { REGION_HANDLES, type DocumentKind, type PageNode, type PageSeo, type RegionHandle } from "@/lib/builder/types";
 import { publishedCollectionsFor } from "@/lib/storefront/collections";
 import type { ThemeTokens } from "@/lib/storefront/themes";
 import { bundleFromDb, type Bundle } from "@/lib/generators";
@@ -142,11 +143,11 @@ export async function loadSite(siteSlug: string): Promise<SiteData | null> {
 export type PublishedPage = { id: number; handle: string; title: string; seo: PageSeo; tree: PageNode };
 
 /**
- * A page as **published** — the storefront never reads a draft (D51). Null
- * when the site has no published page by that handle, which for the home page
- * means "render the fixed storefront" (`docs/BUILDER.md` §14).
+ * A document as **published** — the storefront never reads a draft (D51). Null
+ * when the site has none by that handle, which means "render the fixed
+ * layout" for the home page, a template, or a region (`docs/BUILDER.md` §14).
  */
-export async function publishedPage(siteId: number, handle: string): Promise<PublishedPage | null> {
+export async function publishedDocument(siteId: number, kind: DocumentKind, handle: string): Promise<PublishedPage | null> {
   const [doc] = await db
     .select({
       id: siteDocuments.id,
@@ -156,19 +157,23 @@ export async function publishedPage(siteId: number, handle: string): Promise<Pub
       tree: siteDocuments.publishedTree,
     })
     .from(siteDocuments)
-    .where(and(eq(siteDocuments.siteId, siteId), eq(siteDocuments.kind, "page"), eq(siteDocuments.publishedHandle, handle)))
+    .where(and(eq(siteDocuments.siteId, siteId), eq(siteDocuments.kind, kind), eq(siteDocuments.publishedHandle, handle)))
     .limit(1);
   if (!doc?.tree || !doc.handle) return null;
   return { id: doc.id, handle: doc.handle, title: doc.title ?? doc.handle, seo: doc.seo ?? {}, tree: doc.tree };
 }
 
+export function publishedPage(siteId: number, handle: string): Promise<PublishedPage | null> {
+  return publishedDocument(siteId, "page", handle);
+}
+
 /**
- * The page a request should render: the **draft** in the builder's preview,
- * the published page everywhere else. Pages call this rather than
- * `publishedPage` so preview and storefront cannot drift apart.
+ * The document a request should render: the **draft** in the builder's
+ * preview, the published one everywhere else. Pages call this rather than
+ * `publishedDocument` so preview and storefront cannot drift apart.
  */
-export async function pageFor(data: SiteData, handle: string): Promise<PublishedPage | null> {
-  if (!data.preview) return publishedPage(data.site.id, handle);
+export async function documentFor(data: SiteData, kind: DocumentKind, handle: string): Promise<PublishedPage | null> {
+  if (!data.preview) return publishedDocument(data.site.id, kind, handle);
   const [doc] = await db
     .select({
       id: siteDocuments.id,
@@ -179,8 +184,46 @@ export async function pageFor(data: SiteData, handle: string): Promise<Published
       deleted: siteDocuments.draftDeleted,
     })
     .from(siteDocuments)
-    .where(and(eq(siteDocuments.siteId, data.site.id), eq(siteDocuments.kind, "page"), eq(siteDocuments.handle, handle)))
+    .where(and(eq(siteDocuments.siteId, data.site.id), eq(siteDocuments.kind, kind), eq(siteDocuments.handle, handle)))
     .limit(1);
   if (!doc || doc.deleted) return null;
   return { id: doc.id, handle: doc.handle, title: doc.title, seo: doc.seo ?? {}, tree: doc.tree };
+}
+
+export function pageFor(data: SiteData, handle: string): Promise<PublishedPage | null> {
+  return documentFor(data, "page", handle);
+}
+
+export type Regions = Partial<Record<RegionHandle, PublishedPage>>;
+
+/**
+ * Every global region the request should render, in one query, once per
+ * request however many components ask — the announcement bar, header and
+ * footer each render from it.
+ */
+const loadRegions = cache(async (siteId: number, preview: boolean): Promise<Regions> => {
+  const rows = await db
+    .select({
+      id: siteDocuments.id,
+      handle: siteDocuments.handle,
+      title: siteDocuments.title,
+      deleted: siteDocuments.draftDeleted,
+      draftTree: siteDocuments.draftTree,
+      publishedHandle: siteDocuments.publishedHandle,
+      publishedTree: siteDocuments.publishedTree,
+    })
+    .from(siteDocuments)
+    .where(and(eq(siteDocuments.siteId, siteId), eq(siteDocuments.kind, "region")));
+  const out: Regions = {};
+  for (const r of rows) {
+    const handle = preview ? r.handle : r.publishedHandle;
+    const tree = preview ? (r.deleted ? null : r.draftTree) : r.publishedTree;
+    if (!handle || !tree || !(REGION_HANDLES as readonly string[]).includes(handle)) continue;
+    out[handle as RegionHandle] = { id: r.id, handle, title: r.title, seo: {}, tree };
+  }
+  return out;
+});
+
+export function regionsFor(data: SiteData): Promise<Regions> {
+  return loadRegions(data.site.id, data.preview);
 }

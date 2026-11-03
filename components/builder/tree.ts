@@ -1,4 +1,6 @@
 import type { BlockDescription, PageNode } from "@/lib/api/builder";
+import { scopesFor } from "@/lib/builder/bindings";
+import type { DocumentKind } from "@/lib/builder/types";
 
 /**
  * Read-only tree helpers for the editor. **Pure and client-safe** — the
@@ -25,6 +27,30 @@ export function find(root: PageNode, id: string | null): Found | null {
 
 export function contains(ancestor: PageNode, id: string): boolean {
   return (ancestor.children ?? []).some((c) => c.id === id || contains(c, id));
+}
+
+/** Whether a node sits somewhere inside a repeater — where `item.*` bindings exist (M4). */
+export function insideRepeater(root: PageNode, id: string): boolean {
+  const visit = (node: PageNode, inRepeater: boolean): boolean | null => {
+    if (node.id === id) return inRepeater;
+    for (const c of node.children ?? []) {
+      const hit = visit(c, inRepeater || node.type === "repeater");
+      if (hit !== null) return hit;
+    }
+    return null;
+  };
+  return visit(root, false) ?? false;
+}
+
+/**
+ * The data scopes a selected node can bind to: what its document renders with
+ * (the server's own `scopesFor` — the module is pure), plus `item` inside a
+ * repeater.
+ */
+export function nodeScopes(doc: { kind: DocumentKind; handle: string } | null, root: PageNode | null, nodeId: string | null): string[] {
+  const scopes = [...scopesFor(doc?.kind ?? "page", doc?.handle ?? "")];
+  if (root && nodeId && insideRepeater(root, nodeId)) scopes.push("item");
+  return scopes;
 }
 
 /** Whether a block of `childType` may sit directly inside a block of `parentType` — mirrors the registry. */

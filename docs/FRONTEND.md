@@ -81,7 +81,7 @@ API-independent work so you don't outrun the backend") no longer applies to A, B
 | **Catalog agent** | §27 | ✅ **LIVE, screen built** (beta) | Opened from **Agents** in the dashboard header (`AgentsNavMenu`). Propose-only; the merchant approves. MCP (§22) is a different surface — do not confuse them |
 | **Assistant** | §27 | ✅ **LIVE, screen built** (beta, 2026-10-17) | Opened from **Agents** in the dashboard header. Read-only — answers questions, checks setup, routes to pages/agents. Reuses `AgentPanel` with `agent="assistant"` |
 | **Setup checklist** | §28 | ✅ **LIVE, screen built** (2026-10-17) | Overview card via `getSetupStatus()`. `firstRun` leads the page; `next` is the headline. No local ticks — refetch by revisiting |
-| Site builder | §19 | ✅ **LIVE, screens built** (D51 M1–M3) | `/dashboard/websites/[slug]/design` — editor, live preview, and the brand agent in its Agent tab. M4–M7 (templates, regions, custom code) are not started |
+| Site builder | §19 | ✅ **LIVE, screens built** (D51 M1–M4) | `/dashboard/websites/[slug]/design` — editor, live preview, the brand agent in its Agent tab, and (M4) templates, regions and data bindings in the Pages tab and inspector. M5–M7 (generators, custom code, editor polish) are not started |
 | **Brand agent** | §27 | ✅ **LIVE, screen built** (beta, 2026-11-02) | Lives in the site editor, not a drawer: directory `surface: "editor"`, and the Agents menu navigates to `href`. Edits the draft directly; Stop is `stopBrandAgent` |
 | Channels, Test Lab | §10 · §12 · §20 | ⛔ Deferred | Out of launch scope — do not start |
 | Platform admin | §26 | ✅ LIVE, screens built | `/admin` when `me.operator`. Suspend/reinstate and **Reset MFA** (`resetPlatformMfa`). Never on merchant nav for anyone else |
@@ -494,6 +494,30 @@ makes an audit trail untrustworthy.
 The audit list carries both directions now — `undoneBy` on the original row, `undoOf` on the undo —
 so a history screen can strike through a reversed change and label its reversal without a second
 query. Both are `string | null` on `ActionInvocation`.
+
+### 🟢 New 2026-11-03 — templates, regions and data bindings are built (D51 M4) — review them
+
+Backend and screens both landed (`docs/API.md` §19, "Templates, regions and data binding").
+What changed on shared surfaces:
+
+- **Every storefront page now renders `StoreTop` / `StoreFooter`** (`components/storefront/store-chrome.tsx`)
+  instead of `SiteHeader` directly — they render the merchant's published header, footer and
+  announcement bar, or the fixed header exactly as before. A new storefront page must use them too,
+  or it will show a header the merchant replaced. `minimal` is the cart/account variant.
+- **The block CSS moved into `ThemeRoot`** (`lib/builder/block-css.ts`), once per page, so several
+  builder documents on one page share one cascade. `BuilderPage` emits only its node styles now.
+- **`lib/api/builder.ts`**: `DesignSummary` gains `templates[]` / `regions[]` (`SharedDocument`);
+  `BlockDescription` gains `bindable` and `requiresScope` and the category `navigation`;
+  `BlockRegistry` gains `data` (paths, conditions, repeater sources); `PageNode` carries
+  `bindings` / `visibleWhen`; `CheckResult` may carry `kind`. New writes: `customizeTemplate`,
+  `customizeRegion`, `setNodeBindings`, `setNodeVisibility`. Reset is `deleteDesignPage`.
+- **Editor**: the Pages tab lists templates and regions (Customize / Reset / Restore); the inspector
+  has Data (bind a prop — only paths that fit the prop and the document) and "Show only when".
+  The preview sends `docId` with a click, and the editor opens that document. **The open document
+  lives in a ref written at the moment it changes** (`pageRef`): reads that resolve later — the
+  revision poll, a write's refresh — check it before `setPage`, because a poll started for the home
+  page could land after a template opened and put the home tree under the template's id (found in
+  the browser: a click after Customize selected nothing).
 
 ### 🟢 New 2026-11-02 — the brand agent is built (D51 M3) — review it
 

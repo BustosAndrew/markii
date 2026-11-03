@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { BlockRegistry, DesignPage, DesignTokens, PageSeo, ThemeId } from "@/lib/api/builder";
+import type { BlockRegistry, DesignPage, DesignTokens, PageSeo, SharedDocument, ThemeId } from "@/lib/api/builder";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/field";
 
@@ -17,7 +17,7 @@ export function AddPanel({
   onAddBlock: (type: string) => void;
   onAddPreset: (preset: string) => void;
 }) {
-  const groups = ["layout", "content", "media", "commerce"] as const;
+  const groups = ["layout", "content", "media", "commerce", "navigation"] as const;
   return (
     <div className="space-y-5 p-3">
       <section>
@@ -155,6 +155,90 @@ export function PagesPanel({
           Create page
         </Button>
       </form>
+    </div>
+  );
+}
+
+const SHARED_HELP: Record<string, string> = {
+  product: "Every product page",
+  collection: "Every collection page",
+  announcement: "A line above the header on every page",
+  header: "The top of every page",
+  footer: "The bottom of every page",
+};
+
+/**
+ * Templates and global regions (M4). Not customised, the storefront uses its
+ * built-in layout; customising starts from that layout, so nothing changes
+ * for shoppers until it is edited and published. Reset is the same delete a
+ * page has: the built-in layout returns at the next publish.
+ */
+export function SharedLayoutsPanel({
+  templates,
+  regions,
+  currentId,
+  disabled,
+  onOpen,
+  onCustomize,
+  onReset,
+  onRestore,
+}: {
+  templates: SharedDocument[];
+  regions: SharedDocument[];
+  currentId: number | null;
+  disabled: boolean;
+  onOpen: (doc: SharedDocument & { id: number }) => void;
+  onCustomize: (kind: "template" | "region", handle: string) => void;
+  onReset: (id: number) => void;
+  onRestore: (id: number) => void;
+}) {
+  const row = (kind: "template" | "region", d: SharedDocument) => (
+    <li key={d.handle} className="space-y-1">
+      <div className="flex items-center gap-2">
+        {d.customized && d.id !== null ? (
+          <button
+            type="button"
+            onClick={() => onOpen(d as SharedDocument & { id: number })}
+            className={`min-w-0 flex-1 truncate rounded px-2 py-1.5 text-left text-sm text-foreground ${d.id === currentId ? "bg-brand/10" : "hover:bg-hover"}`}
+          >
+            {d.title}
+            {!d.published ? <span className="ml-1 text-xs text-muted">· not published</span> : null}
+          </button>
+        ) : (
+          <span className={`min-w-0 flex-1 truncate px-2 py-1.5 text-sm ${d.deleted ? "text-muted line-through" : "text-muted"}`}>
+            {d.title} <span className="text-xs">· {d.deleted ? "reset at next publish" : "built-in"}</span>
+          </span>
+        )}
+        {d.customized && d.id !== null ? (
+          <Button variant="ghost" disabled={disabled} onClick={() => onReset(d.id!)} aria-label={`Reset ${d.title} to the built-in layout`}>
+            Reset
+          </Button>
+        ) : d.deleted && d.id !== null ? (
+          <Button variant="ghost" disabled={disabled} onClick={() => onRestore(d.id!)}>
+            Restore
+          </Button>
+        ) : (
+          <Button variant="ghost" disabled={disabled} onClick={() => onCustomize(kind, d.handle)}>
+            Customize
+          </Button>
+        )}
+      </div>
+      <p className="px-2 text-xs text-muted">
+        {SHARED_HELP[d.handle]}
+        {kind === "template" && d.previewPath === null ? " — add a product (or publish a collection) to preview it." : "."}
+      </p>
+    </li>
+  );
+  return (
+    <div className="space-y-4 border-t border-border p-3">
+      <section aria-label="Templates">
+        <h3 className="mb-1 text-sm font-semibold text-foreground">Templates</h3>
+        <ul className="space-y-2">{templates.map((t) => row("template", t))}</ul>
+      </section>
+      <section aria-label="Shared regions">
+        <h3 className="mb-1 text-sm font-semibold text-foreground">On every page</h3>
+        <ul className="space-y-2">{regions.map((r) => row("region", r))}</ul>
+      </section>
     </div>
   );
 }

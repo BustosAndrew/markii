@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
+import { BLOCK_CSS } from "@/lib/builder/block-css";
 import {
   getTheme,
   themeStylesheet,
@@ -54,6 +55,8 @@ export function ThemeRoot({
       <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
       <link rel="stylesheet" href={theme.fontHref} />
       <style dangerouslySetInnerHTML={{ __html: themeStylesheet(theme) }} />
+      {/* Once per page, after the theme and before any builder document's node styles (`lib/builder/block-css.ts`). */}
+      <style dangerouslySetInnerHTML={{ __html: BLOCK_CSS }} />
       <div
         className="sf-shell"
         data-theme={theme.id as ThemeId}

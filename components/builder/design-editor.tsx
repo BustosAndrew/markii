@@ -7,6 +7,8 @@ import {
   addBlock,
   createDesignPage,
   createPreviewSession,
+  customizeRegion,
+  customizeTemplate,
   deleteDesignPage,
   discardDesignDraft,
   duplicateNode,
@@ -22,8 +24,10 @@ import {
   restoreDesignVersion,
   setDesignTheme,
   setDesignTokens,
+  setNodeBindings,
   setNodeProps,
   setNodeStyles,
+  setNodeVisibility,
   startDesign,
   stopBrandAgent,
   updateDesignPage,
@@ -33,6 +37,8 @@ import {
   type Breakpoint,
   type DesignSummary,
   type PageDocument,
+  type RegionHandle,
+  type TemplateHandle,
 } from "@/lib/api/builder";
 import { listCategories } from "@/lib/api/categories";
 import { listCollections } from "@/lib/api/commerce";
@@ -45,8 +51,8 @@ import { BrandChat } from "./brand-chat";
 import { HistoryDialog, PublishDialog } from "./dialogs";
 import { Inspector, type PickerData } from "./inspector";
 import { LayerTree } from "./layer-tree";
-import { AddPanel, PagesPanel, ThemePanel } from "./panels";
-import { find, insertionPoint } from "./tree";
+import { AddPanel, PagesPanel, SharedLayoutsPanel, ThemePanel } from "./panels";
+import { find, insertionPoint, nodeScopes } from "./tree";
 
 /**
  * The site editor (`docs/BUILDER.md` §11, D51 M2): the page's layers and
@@ -110,6 +116,16 @@ export function DesignEditor({
 
   const frameRef = useRef<HTMLIFrameElement>(null);
   const revisionRef = useRef<number>(-1);
+  /**
+   * The open document, written the moment it changes — not after a render.
+   * Reads that resolve later (the revision poll, a write's refresh) check it,
+   * so a request started for the home page cannot land after the merchant
+   * opened a template and put the home tree back under the template's id.
+   */
+  const pageRef = useRef<number | null>(null);
+  // Current values for callbacks that outlive a render: the agent's context getter and the preview's messages.
+  const selectedRef = useRef(selectedId);
+  const breakpointRef = useRef(breakpoint);
   const pathRef = useRef<string>("/");
   const nonceRef = useRef(0);
 
@@ -136,10 +152,33 @@ export function DesignEditor({
     if (!d.started) return;
     revisionRef.current = d.revision;
     setLock(d.agentLock);
-    const id = pageId ?? d.pages.find((p) => p.handle === "home")?.id ?? d.pages[0]?.id ?? null;
-    if (id !== pageId) setPageId(id);
-    if (id !== null) setPage(await getDesignPage(site.id, id));
-  }, [site.id, pageId]);
+    const id = pageRef.current ?? d.pages.find((p) => p.handle === "home")?.id ?? d.pages[0]?.id ?? null;
+    if (pageRef.current === null && id !== null) {
+      pageRef.current = id;
+      setPageId(id);
+    }
+    if (id === null) return;
+    const doc = await getDesignPage(site.id, id);
+    // Another document was opened while this was in flight: its own read wins.
+    if (pageRef.current === id) setPage(doc);
+  }, [site.id]);
+
+  /**
+   * Open one document of the draft — a page, template or region (M4). `path`
+   * moves the preview there; null keeps it where it is (a region shows on
+   * whatever page the merchant is looking at).
+   */
+  const openDocument = useCallback(
+    async (id: number, path: string | null, selectNodeId: string | null = null) => {
+      pageRef.current = id;
+      setPageId(id);
+      setSelectedId(selectNodeId);
+      const doc = await getDesignPage(site.id, id);
+      if (pageRef.current === id) setPage(doc);
+      if (path !== null) reloadFrame(path);
+    },
+    [site.id, reloadFrame],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -158,8 +197,12 @@ export function DesignEditor({
           revisionRef.current = d.revision;
           setLock(d.agentLock);
           const home = d.pages.find((p) => p.handle === "home") ?? d.pages[0];
+          pageRef.current = home?.id ?? null;
           setPageId(home?.id ?? null);
-          if (home) setPage(await getDesignPage(site.id, home.id));
+          if (home) {
+            const doc = await getDesignPage(site.id, home.id);
+            if (pageRef.current === home.id) setPage(doc);
+          }
           const minted = await createPreviewSession(site.id);
           const u = new URL(minted.url);
           if (!cancelled) setPreview({ url: minted.url, origin: u.origin, basePath: u.pathname });
@@ -225,13 +268,23 @@ export function DesignEditor({
 
   // ---------- the preview frame ----------
 
+  // The preview reports clicks with the document they landed in: a header block while the home page is open.
+  const openRef = useRef(openDocument);
+  useEffect(() => {
+    selectedRef.current = selectedId;
+    breakpointRef.current = breakpoint;
+    openRef.current = openDocument;
+  });
+
   useEffect(() => {
     if (!preview) return;
     const onMessage = (e: MessageEvent) => {
       if (e.origin !== preview.origin) return;
-      const d = e.data as { type?: string; nodeId?: string; path?: string };
+      const d = e.data as { type?: string; nodeId?: string; docId?: string; path?: string };
       if (d?.type === "markii:select" && typeof d.nodeId === "string") {
-        setSelectedId(d.nodeId);
+        const docId = d.docId && /^\d+$/.test(d.docId) ? Number(d.docId) : null;
+        if (docId !== null && docId !== pageRef.current) void openRef.current(docId, null, d.nodeId).catch(() => {});
+        else setSelectedId(d.nodeId);
         // Selecting in the preview while chatting tells the agent what "this" is; stay on the chat.
         setTab((t) => (t === "agent" ? t : "layers"));
       }
@@ -320,14 +373,6 @@ export function DesignEditor({
 
   // ---------- the brand agent ----------
 
-  const selectedRef = useRef(selectedId);
-  const pageRef = useRef(pageId);
-  const breakpointRef = useRef(breakpoint);
-  useEffect(() => {
-    selectedRef.current = selectedId;
-    pageRef.current = pageId;
-    breakpointRef.current = breakpoint;
-  });
   /** Read when a message is sent, so it says where the merchant is at that moment. */
   const agentContext = useCallback(
     () => ({
@@ -343,16 +388,30 @@ export function DesignEditor({
   const onAgentTool = useCallback(
     (toolName: string, output: unknown) => {
       if (!toolName.startsWith("builder_")) return;
-      const o = output as { status?: string; invocationId?: string; changes?: unknown[] } | null;
+      const o = output as { status?: string; invocationId?: string; changes?: unknown[]; result?: { pageId?: number; created?: boolean } } | null;
       if (o?.status !== "applied" || !o.invocationId) return;
       // An edit that changed nothing has nothing to undo; stacking it would make Undo answer 409.
       if (!o.changes?.length) return;
       // The agent's edit is undoable from here like any other, once it hands the pen back.
       setUndoStack((st) => [...st.slice(-49), { actionId: toolName.replace("_", "."), invocationId: o.invocationId! }]);
       setRedoStack([]);
+      // The agent started on a template or region: follow it there, so its next edits are the ones on screen.
+      const opened = o.result?.created && o.result.pageId ? o.result.pageId : null;
+      if (opened !== null) {
+        void getDesign(site.id)
+          .then((d) => {
+            if (!d.started) return;
+            setDesign(d);
+            // A template moves the preview to a sample product or collection; a region shows where we are.
+            const template = d.templates.find((x) => x.id === opened);
+            return openDocument(opened, template ? template.previewPath : null);
+          })
+          .catch(() => {});
+        return;
+      }
       void refresh().then(() => reloadFrame(), () => {});
     },
-    [refresh, reloadFrame],
+    [refresh, reloadFrame, openDocument, site.id],
   );
 
   const stopAgent = useCallback(async () => {
@@ -543,32 +602,53 @@ export function DesignEditor({
               <AddPanel registry={registry} disabled={readOnly || busy || !tree} onAddBlock={(t) => void add(t)} onAddPreset={(p) => void add("section", p)} />
             ) : null}
             {tab === "pages" ? (
+              <>
               <PagesPanel
                 pages={started.pages}
                 currentId={pageId}
                 currentSeo={page?.seo ?? {}}
                 disabled={readOnly || busy}
-                onOpen={(id) => {
-                  setPageId(id);
-                  setSelectedId(null);
-                  const p = started.pages.find((x) => x.id === id);
-                  void getDesignPage(sid, id).then(setPage);
-                  reloadFrame(p?.path ?? "/");
-                }}
+                onOpen={(id) => void openDocument(id, started.pages.find((x) => x.id === id)?.path ?? "/")}
                 onCreate={async (handle, title) => {
                   const out = await run(() => createDesignPage(sid, handle, title), "builder.createPage");
                   const newId = (out?.result as { pageId?: number } | undefined)?.pageId;
-                  if (newId) {
-                    setPageId(newId);
-                    setPage(await getDesignPage(sid, newId));
-                    reloadFrame(`/pages/${handle}`);
-                  }
+                  if (newId) await openDocument(newId, `/pages/${handle}`);
                   return Boolean(out);
                 }}
                 onRename={(id, patch) => void run(() => updateDesignPage({ siteId: sid, pageId: id, ...patch }), "builder.updatePage")}
                 onDelete={(id) => void run(() => deleteDesignPage(sid, id), "builder.deletePage")}
                 onRestore={(id) => void run(() => restoreDesignPage(sid, id), "builder.restorePage")}
               />
+              <SharedLayoutsPanel
+                templates={started.templates}
+                regions={started.regions}
+                currentId={pageId}
+                disabled={readOnly || busy}
+                onOpen={(d) => void openDocument(d.id, started.templates.some((t) => t.handle === d.handle) ? d.previewPath : null)}
+                onCustomize={async (kind, handle) => {
+                  const out =
+                    kind === "template"
+                      ? await run(() => customizeTemplate(sid, handle as TemplateHandle), "builder.customizeTemplate")
+                      : await run(() => customizeRegion(sid, handle as RegionHandle), "builder.customizeRegion");
+                  const id = out?.result?.pageId;
+                  if (!id) return;
+                  const preview = kind === "template" ? started.templates.find((t) => t.handle === handle)?.previewPath ?? null : null;
+                  await openDocument(id, preview);
+                }}
+                onReset={async (id) => {
+                  if (!(await run(() => deleteDesignPage(sid, id), "builder.deletePage"))) return;
+                  // The reset document is gone from the draft; go back to the home page.
+                  const home = started.pages.find((p) => p.handle === "home");
+                  if (id === pageId && home) await openDocument(home.id, null);
+                }}
+                onRestore={async (id) => {
+                  if (!(await run(() => restoreDesignPage(sid, id), "builder.restorePage"))) return;
+                  // Back in the draft: open it, as Customize does.
+                  const template = started.templates.find((t) => t.id === id);
+                  await openDocument(id, template ? template.previewPath : null);
+                }}
+              />
+              </>
             ) : null}
             {tab === "theme" ? (
               <ThemePanel
@@ -611,6 +691,14 @@ export function DesignEditor({
             onBreakpoint={setBreakpoint}
             disabled={readOnly || busy}
             data={pickers}
+            paths={registry.data}
+            scopes={nodeScopes(page ? { kind: page.kind, handle: page.handle } : null, tree, selected?.id ?? null)}
+            onBindings={(bindings) =>
+              selected && void run(() => setNodeBindings({ siteId: sid, pageId: pid, nodeId: selected.id, bindings }), "builder.setBinding")
+            }
+            onVisibility={(when) =>
+              selected && void run(() => setNodeVisibility({ siteId: sid, pageId: pid, nodeId: selected.id, when }), "builder.setVisibility")
+            }
             onProps={(props, unset) =>
               selected && void run(() => setNodeProps({ siteId: sid, pageId: pid, nodeId: selected.id, props, unset }), "builder.setProps")
             }

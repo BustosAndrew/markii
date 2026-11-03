@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { orgHandler } from "@/lib/auth/handler";
+import { describeBindings } from "@/lib/builder/bindings";
 import { describeBlocks } from "@/lib/builder/blocks";
 import { PRESETS } from "@/lib/builder/presets";
 import { FONTS, MAX_WIDTH_SCALE, RADIUS_SCALE } from "@/lib/builder/tokens";
@@ -16,6 +17,8 @@ export const GET = orgHandler(
       blocks: describeBlocks(),
       presets: Object.entries(PRESETS).map(([id, p]) => ({ id, label: p.label, description: p.description })),
       tokens: { fonts: Object.keys(FONTS), radius: RADIUS_SCALE, maxWidth: MAX_WIDTH_SCALE },
+      // M4: the binding paths, visibility conditions and repeater sources — the whole whitelist.
+      data: describeBindings(),
     }),
   { permission: "cms.read" },
 );

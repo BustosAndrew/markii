@@ -3,10 +3,12 @@ import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import type { CollectionPage as SchemaCollectionPage, WithContext } from "schema-dts";
 import { ProductCard } from "@/components/storefront/product-card";
-import { SiteHeader } from "@/components/storefront/site-header";
+import { StoreFooter, StoreTop } from "@/components/storefront/store-chrome";
 import { ThemeRoot } from "@/components/storefront/theme-root";
 import { logTraffic } from "@/lib/agents";
-import { loadSite, storefrontHalted } from "@/lib/storefront";
+import { StorefrontBuilderPage } from "@/components/storefront/builder-page";
+import { collectionView } from "@/lib/builder/views";
+import { documentFor, loadSite, storefrontHalted } from "@/lib/storefront";
 import { publishedCollectionByHandle, storefrontMembersOf } from "@/lib/storefront/collections";
 
 type Props = { params: Promise<{ site: string; handle: string }> };
@@ -43,7 +45,7 @@ export default async function CollectionPage({ params }: Props) {
   const { site: siteSlug, handle } = await params;
   const data = await loadSite(siteSlug);
   if (!data || storefrontHalted(data)) notFound();
-  const { site, bundle, colls, baseUrl } = data;
+  const { site, baseUrl } = data;
 
   const collection = await publishedCollectionByHandle(site.id, handle);
   if (!collection) notFound();
@@ -55,7 +57,6 @@ export default async function CollectionPage({ params }: Props) {
   });
 
   const items = await storefrontMembersOf(collection);
-  const topCategories = bundle.categories.filter((c) => !c.parentSlug);
   const themeId = site.themeId ?? "studio";
   const description = strip(collection.description);
 
@@ -77,22 +78,33 @@ export default async function CollectionPage({ params }: Props) {
     },
   };
 
+  const collectionLd = (
+    <script
+      type="application/ld+json"
+      // Trusted: built from the merchant's own catalog by this route.
+      dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+    />
+  );
+
+  /** A published collection template wins (M4); the CollectionPage JSON-LD stays the route's. */
+  const template = await documentFor(data, "template", "collection");
+  if (template) {
+    return (
+      <StorefrontBuilderPage
+        data={data}
+        tree={template.tree}
+        documentId={template.id}
+        before={collectionLd}
+        scope={{ collection: collectionView(collection, { baseUrl, productCount: items.length }) }}
+        extra={{ collectionProducts: items }}
+      />
+    );
+  }
+
   return (
     <ThemeRoot themeId={themeId} theme={data.theme} preview={data.preview}>
-      <script
-        type="application/ld+json"
-        // Trusted: built from the merchant's own catalog by this route.
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
-      />
-      <SiteHeader
-        siteName={site.name}
-        homeHref={`${baseUrl}/`}
-        cartHref={`${baseUrl}/cart`}
-        accountHref={`${baseUrl}/account`}
-        searchAction={`${baseUrl}/search`}
-        collectionsHref={colls.length > 0 ? `${baseUrl}/collections` : undefined}
-        nav={topCategories.map((c) => ({ name: c.name, href: `${baseUrl}/c/${c.slug}` }))}
-      />
+      {collectionLd}
+      <StoreTop data={data} />
       <main className="sf-main">
         <p className="sf-crumb">
           <a href={`${baseUrl}/`}>{site.name}</a> /{" "}
@@ -119,6 +131,7 @@ export default async function CollectionPage({ params }: Props) {
           </ul>
         ) : null}
       </main>
+      <StoreFooter data={data} />
     </ThemeRoot>
   );
 }

@@ -71,7 +71,20 @@ export type PageNode = {
    * from raw structure.
    */
   intent?: string;
+  /**
+   * Props filled from live data at render (`docs/BUILDER.md` §9): prop name →
+   * a path from `./bindings`, such as `{ text: "product.title" }`. The prop's
+   * own value stays as the design-time placeholder and shows wherever the data
+   * is not available.
+   */
+  bindings?: Record<string, string>;
+  /** Render only when this holds — a whitelisted comparison, never an expression to evaluate. */
+  visibleWhen?: Condition;
 };
+
+export const CONDITION_OPS = ["exists", "missing", "eq", "neq", "gt", "gte", "lt", "lte"] as const;
+export type ConditionOp = (typeof CONDITION_OPS)[number];
+export type Condition = { path: string; op: ConditionOp; value?: string | number | boolean };
 
 export const NODE_ID_PATTERN = /^n_[a-z0-9]{10}$/;
 
@@ -86,6 +99,25 @@ export const TREE_LIMITS = {
 
 export const DOCUMENT_KINDS = ["page", "template", "region"] as const;
 export type DocumentKind = (typeof DOCUMENT_KINDS)[number];
+
+/**
+ * Templates (M4): the layout every product or collection page renders with,
+ * once customised. A store with none keeps the fixed layout for that page type.
+ */
+export const TEMPLATE_HANDLES = ["product", "collection"] as const;
+export type TemplateHandle = (typeof TEMPLATE_HANDLES)[number];
+
+/** Global regions (M4): edited once, shown on every storefront page. */
+export const REGION_HANDLES = ["announcement", "header", "footer"] as const;
+export type RegionHandle = (typeof REGION_HANDLES)[number];
+
+export const SHARED_DOCUMENT_TITLES: Record<TemplateHandle | RegionHandle, string> = {
+  product: "Product page",
+  collection: "Collection page",
+  announcement: "Announcement bar",
+  header: "Header",
+  footer: "Footer",
+};
 
 export type PageSeo = {
   title?: string;

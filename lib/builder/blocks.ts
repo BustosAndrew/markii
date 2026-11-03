@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { REPEATER_SOURCES, type DataScope, type ValueType } from "./bindings";
 import { safeHref } from "./markdown";
 import { SPACE_TOKENS, type NodeStyles } from "./types";
 
@@ -32,7 +33,7 @@ export type FieldSpec =
   | { name: string; label: string; kind: "stringList"; maxItems: number; maxLength: number }
   | { name: string; label: string; kind: "items"; maxItems: number; fields: FieldSpec[] };
 
-export type BlockCategory = "layout" | "content" | "commerce" | "media";
+export type BlockCategory = "layout" | "content" | "commerce" | "media" | "navigation";
 
 export type BlockDefinition = {
   type: string;
@@ -53,6 +54,13 @@ export type BlockDefinition = {
   semantics: { element: string; landmark?: string };
   /** Reads the store's catalogue when it renders. */
   requiresData?: "catalog";
+  /**
+   * Props that may be filled from data (`./bindings`), and the value types
+   * each accepts. A prop not listed here cannot be bound.
+   */
+  bindable?: Readonly<Record<string, readonly ValueType[]>>;
+  /** Renders only where this scope exists — a buy block needs a product, so it belongs in the product template. */
+  requiresScope?: Exclude<DataScope, "store">;
 };
 
 // ---------- shared field schemas ----------
@@ -226,6 +234,7 @@ const DEFINITIONS: BlockDefinition[] = [
       { name: "level", label: "Level", kind: "select", options: LEVELS.map((l) => ({ value: l, label: `H${l}` })) },
     ],
     semantics: { element: "h1–h6" },
+    bindable: { text: ["text"] },
   }),
   block({
     type: "text",
@@ -244,6 +253,7 @@ const DEFINITIONS: BlockDefinition[] = [
     insertable: true,
     editorPanel: [{ name: "markdown", label: "Text", kind: "markdown", maxLength: 5000 }],
     semantics: { element: "p / ul / ol" },
+    bindable: { markdown: ["text"] },
   }),
   block({
     type: "image",
@@ -288,6 +298,7 @@ const DEFINITIONS: BlockDefinition[] = [
       },
     ],
     semantics: { element: "figure" },
+    bindable: { src: ["image"], alt: ["text"], caption: ["text"], href: ["link"] },
   }),
   block({
     type: "button",
@@ -323,6 +334,7 @@ const DEFINITIONS: BlockDefinition[] = [
       },
     ],
     semantics: { element: "a" },
+    bindable: { label: ["text"], href: ["link"] },
   }),
   block({
     type: "list",
@@ -462,14 +474,17 @@ const DEFINITIONS: BlockDefinition[] = [
     type: "productGrid",
     label: "Product grid",
     category: "commerce",
-    description: "A grid of the store's products: all of them, one category, or one collection.",
+    description:
+      "A grid of the store's products: all of them, one category, one collection, or — in the " +
+      "collection template — the collection the page is showing (source \"current\").",
     usageHints: [
       "Uses live catalogue data — prices and stock are always current.",
       "Pick a category or collection with category_slug / collection_handle from the store's own lists.",
+      "Use source \"current\" only in the collection template.",
     ],
     schema: z
       .object({
-        source: z.enum(["all", "category", "collection"]).default("all"),
+        source: z.enum(["all", "category", "collection", "current"]).default("all"),
         categorySlug: z.string().max(200).optional(),
         collectionHandle: z.string().max(200).optional(),
         limit: z.number().int().min(1).max(48).default(12),
@@ -496,6 +511,7 @@ const DEFINITIONS: BlockDefinition[] = [
           { value: "all", label: "All products" },
           { value: "category", label: "One category" },
           { value: "collection", label: "One collection" },
+          { value: "current", label: "This collection (collection template)" },
         ],
       },
       { name: "categorySlug", label: "Category", kind: "category" },
@@ -519,6 +535,7 @@ const DEFINITIONS: BlockDefinition[] = [
     editorPanel: [{ name: "productSlug", label: "Product", kind: "product" }],
     semantics: { element: "article" },
     requiresData: "catalog",
+    bindable: { productSlug: ["productSlug"] },
   }),
   block({
     type: "collectionList",
@@ -541,6 +558,237 @@ const DEFINITIONS: BlockDefinition[] = [
     ],
     semantics: { element: "ul" },
     requiresData: "catalog",
+  }),
+
+  // ---------- M4: layout for templates and regions ----------
+
+  block({
+    type: "row",
+    label: "Row",
+    category: "layout",
+    description: "Blocks side by side in one line that wraps on narrow screens — a logo beside a menu, a pair of buttons.",
+    usageHints: ["For a few small blocks. Use columns for page content and a grid for cards."],
+    schema: z
+      .object({
+        justify: z.enum(["start", "center", "end", "between"]).default("between"),
+        wrap: z.boolean().default(true),
+      })
+      .strict(),
+    defaults: { props: { justify: "between", wrap: true }, styles: { base: { gap: "md" } } },
+    children: "any",
+    insertable: true,
+    editorPanel: [
+      {
+        name: "justify",
+        label: "Spread",
+        kind: "select",
+        options: [
+          { value: "start", label: "From the start" },
+          { value: "center", label: "Centred" },
+          { value: "end", label: "To the end" },
+          { value: "between", label: "Spread out" },
+        ],
+      },
+      { name: "wrap", label: "Wrap onto a new line when narrow", kind: "boolean" },
+    ],
+    semantics: { element: "div" },
+  }),
+  block({
+    type: "repeater",
+    label: "Repeater",
+    category: "layout",
+    description:
+      "Repeats the blocks inside it once per product — all of the store's products, the collection " +
+      "the page is showing, or the product's related products. Inside it, bind props to item.* " +
+      "(item.title, item.price, item.image, item.url) to show each product.",
+    usageHints: [
+      "Design one item; it is drawn for every product in the source.",
+      "\"collection.products\" works only in the collection template, \"product.related\" only in the product template.",
+      "A repeater cannot hold another repeater.",
+    ],
+    schema: z
+      .object({
+        source: z.enum(Object.keys(REPEATER_SOURCES) as [string, ...string[]]).default("store.products"),
+        limit: z.number().int().min(1).max(48).default(12),
+        minItemWidth: z.enum(["sm", "md", "lg"]).default("md"),
+        emptyText: z.string().max(200).optional(),
+      })
+      .strict(),
+    defaults: { props: { source: "store.products", limit: 12, minItemWidth: "md" }, styles: { base: { gap: "lg" } } },
+    children: "any",
+    maxChildren: 12,
+    insertable: true,
+    editorPanel: [
+      {
+        name: "source",
+        label: "Repeat for",
+        kind: "select",
+        options: Object.entries(REPEATER_SOURCES).map(([value, s]) => ({ value, label: s.label })),
+      },
+      { name: "limit", label: "At most", kind: "number", min: 1, max: 48 },
+      {
+        name: "minItemWidth",
+        label: "Item width",
+        kind: "select",
+        options: [
+          { value: "sm", label: "Narrow" },
+          { value: "md", label: "Medium" },
+          { value: "lg", label: "Wide" },
+        ],
+      },
+      { name: "emptyText", label: "Shown when there is nothing to repeat", kind: "text", maxLength: 200 },
+    ],
+    semantics: { element: "ul" },
+    requiresData: "catalog",
+  }),
+
+  // ---------- M4: the product template ----------
+
+  block({
+    type: "productBuy",
+    label: "Buy",
+    category: "commerce",
+    description:
+      "The product's purchase controls: option and variant pickers, quantity and Add to cart, the " +
+      "members-only notice for gated products, and the agent checkout instructions when the store " +
+      "takes x402.",
+    usageHints: [
+      "Product template only. Every product template needs exactly one, or shoppers cannot buy.",
+      "Show the price and stock beside it with text blocks bound to product.price and product.stockStatus.",
+    ],
+    schema: z.object({ showAgentCheckout: z.boolean().default(true) }).strict(),
+    defaults: { props: { showAgentCheckout: true } },
+    children: "none",
+    insertable: true,
+    editorPanel: [{ name: "showAgentCheckout", label: "Show agent checkout instructions (x402 stores)", kind: "boolean" }],
+    semantics: { element: "form (island)" },
+    requiresScope: "product",
+  }),
+  block({
+    type: "productGallery",
+    label: "Product images",
+    category: "media",
+    description: "Every image of the product the page is showing, with the product's name as alt text.",
+    usageHints: ["Product template only."],
+    schema: z.object({ layout: z.enum(["stack", "grid"]).default("stack") }).strict(),
+    defaults: { props: { layout: "stack" } },
+    children: "none",
+    insertable: true,
+    editorPanel: [
+      {
+        name: "layout",
+        label: "Layout",
+        kind: "select",
+        options: [
+          { value: "stack", label: "One under another" },
+          { value: "grid", label: "Two across" },
+        ],
+      },
+    ],
+    semantics: { element: "figure" },
+    requiresScope: "product",
+  }),
+
+  // ---------- M4: navigation, for the header and footer ----------
+
+  block({
+    type: "navMenu",
+    label: "Menu",
+    category: "navigation",
+    description:
+      "A menu of links. Add your own links, and optionally every top-level category and a link to " +
+      "the collections index, kept current as the catalogue changes.",
+    usageHints: [
+      "Give each menu a label (\"Main\", \"Footer\") — screen readers announce it.",
+      "Link only to places that exist: /collections, /search, /pages/{handle}, /c/{category}, /p/{product}.",
+    ],
+    schema: z
+      .object({
+        label: z.string().trim().min(1).max(60).default("Main"),
+        items: z
+          .array(z.object({ label: z.string().trim().min(1).max(60), href: link }).strict())
+          .max(20)
+          .default([]),
+        categories: z.boolean().default(false),
+        collections: z.boolean().default(false),
+        direction: z.enum(["row", "column"]).default("row"),
+      })
+      .strict(),
+    defaults: { props: { label: "Main", items: [], categories: false, collections: false, direction: "row" } },
+    children: "none",
+    insertable: true,
+    editorPanel: [
+      { name: "label", label: "Menu name (for screen readers)", kind: "text", maxLength: 60 },
+      {
+        name: "items",
+        label: "Links",
+        kind: "items",
+        maxItems: 20,
+        fields: [
+          { name: "label", label: "Label", kind: "text", maxLength: 60 },
+          { name: "href", label: "Link", kind: "link" },
+        ],
+      },
+      { name: "categories", label: "Add the top-level categories", kind: "boolean" },
+      { name: "collections", label: "Add a Collections link (when the store has any)", kind: "boolean" },
+      {
+        name: "direction",
+        label: "Direction",
+        kind: "select",
+        options: [
+          { value: "row", label: "Across" },
+          { value: "column", label: "Down" },
+        ],
+      },
+    ],
+    semantics: { element: "nav", landmark: "navigation" },
+    requiresData: "catalog",
+  }),
+  block({
+    type: "storeBrand",
+    label: "Store name / logo",
+    category: "navigation",
+    description: "The store's name, its logo, or both, linking to the home page.",
+    usageHints: ["Once, at the start of the header.", "A logo needs alt text, usually the store's name."],
+    schema: z
+      .object({
+        logoSrc: imageUrl.optional(),
+        logoAlt: z.string().max(120).optional(),
+        showName: z.boolean().default(true),
+      })
+      .strict(),
+    defaults: { props: { showName: true } },
+    children: "none",
+    insertable: true,
+    editorPanel: [
+      { name: "logoSrc", label: "Logo", kind: "image" },
+      { name: "logoAlt", label: "Logo alt text", kind: "text", maxLength: 120 },
+      { name: "showName", label: "Show the store's name", kind: "boolean" },
+    ],
+    semantics: { element: "a" },
+  }),
+  block({
+    type: "storeLinks",
+    label: "Search, account and cart",
+    category: "navigation",
+    description: "The search box and the Account and Cart links shoppers expect in a header.",
+    usageHints: ["Keep Cart in the header: it is how shoppers reach checkout."],
+    schema: z
+      .object({
+        search: z.boolean().default(true),
+        account: z.boolean().default(true),
+        cart: z.boolean().default(true),
+      })
+      .strict(),
+    defaults: { props: { search: true, account: true, cart: true } },
+    children: "none",
+    insertable: true,
+    editorPanel: [
+      { name: "search", label: "Search box", kind: "boolean" },
+      { name: "account", label: "Account link", kind: "boolean" },
+      { name: "cart", label: "Cart link", kind: "boolean" },
+    ],
+    semantics: { element: "div (form + links)" },
   }),
 ];
 
@@ -587,6 +835,8 @@ export function describeBlocks() {
     defaults: d.defaults,
     editorPanel: d.editorPanel,
     semantics: d.semantics,
+    bindable: d.bindable ?? {},
+    requiresScope: d.requiresScope ?? null,
     props: z.toJSONSchema(d.schema, { io: "input", unrepresentable: "any" }),
   }));
 }

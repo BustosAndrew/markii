@@ -1,6 +1,7 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BlockDescription, CheckResult, PageNode } from "@/lib/api/builder";
+import { describeBindings } from "@/lib/builder/bindings";
 
 /**
  * The editor's two renders where being wrong costs the merchant (D51, M2):
@@ -38,23 +39,29 @@ const heading: BlockDescription = {
     { name: "level", label: "Level", kind: "select", options: [1, 2, 3].map((l) => ({ value: l, label: `H${l}` })) },
   ],
   semantics: { element: "h1–h6" },
+  bindable: { text: ["text"] },
+  requiresScope: null,
   props: {},
 };
 const node: PageNode = { id: "n_aaaaaaaaaa", type: "heading", props: { text: "Our story", level: 2 } };
 
 const noop = () => {};
-function inspector(disabled: boolean) {
+function inspector(disabled: boolean, opts: { scopes?: string[]; node?: PageNode; onBindings?: (p: Record<string, string | null>) => void } = {}) {
   return render(
     <Inspector
-      node={node}
+      node={opts.node ?? node}
       block={heading}
       breakpoint="base"
       onBreakpoint={noop}
       disabled={disabled}
       data={{ products: [], categories: [], collections: [] }}
+      paths={describeBindings()}
+      scopes={opts.scopes ?? ["store"]}
       onProps={noop}
       onStyles={noop}
       onIntent={noop}
+      onBindings={opts.onBindings ?? noop}
+      onVisibility={noop}
       onDuplicate={noop}
       onRemove={noop}
     />,
@@ -77,6 +84,42 @@ describe("the inspector", () => {
     for (const el of [screen.getByLabelText("Text"), screen.getByLabelText("Level"), screen.getByRole("button", { name: "Delete" })]) {
       expect((el as HTMLInputElement).disabled, el.outerHTML.slice(0, 60)).toBe(true);
     }
+    // M4: the data and visibility controls are writes too.
+    for (const el of screen.getAllByRole("combobox")) expect((el as HTMLSelectElement).disabled, el.id).toBe(true);
+  });
+});
+
+describe("the inspector's data bindings (M4)", () => {
+  const optionsOf = () =>
+    [...(document.getElementById("b-text") as HTMLSelectElement).options].map((o) => o.value).filter(Boolean);
+
+  it("offers product fields only where the document has a product", () => {
+    inspector(false, { scopes: ["store"] });
+    expect(optionsOf()).toContain("store.name");
+    expect(optionsOf().some((p) => p.startsWith("product."))).toBe(false);
+    cleanup();
+    inspector(false, { scopes: ["store", "product"] });
+    expect(optionsOf()).toContain("product.title");
+    // Only text paths for a text prop — never an image or a link.
+    expect(optionsOf()).not.toContain("product.image");
+    expect(optionsOf()).not.toContain("product.url");
+  });
+
+  it("shows a binding the document cannot satisfy rather than hiding it", () => {
+    inspector(false, { scopes: ["store"], node: { ...node, bindings: { text: "product.title" } } });
+    const select = document.getElementById("b-text") as HTMLSelectElement;
+    expect(select.value).toBe("product.title");
+    expect(select.selectedOptions[0].textContent).toMatch(/not available here/);
+  });
+
+  it("binds and unbinds through one action each", () => {
+    const onBindings = vi.fn();
+    inspector(false, { scopes: ["store", "product"], onBindings });
+    const select = document.getElementById("b-text") as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "product.title" } });
+    expect(onBindings).toHaveBeenLastCalledWith({ text: "product.title" });
+    fireEvent.change(select, { target: { value: "" } });
+    expect(onBindings).toHaveBeenLastCalledWith({ text: null });
   });
 });
 

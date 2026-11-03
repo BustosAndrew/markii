@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
-import { SiteHeader } from "@/components/storefront/site-header";
+import { StoreFooter, StoreTop } from "@/components/storefront/store-chrome";
 import { ThemeRoot } from "@/components/storefront/theme-root";
 import { logTraffic } from "@/lib/agents";
 import { formatPrice } from "@/lib/generators";
@@ -45,7 +45,7 @@ export async function generateMetadata({ params, searchParams }: Props): Promise
 export default async function SearchPage({ params, searchParams }: Props) {
   const data = await loadSite((await params).site);
   if (!data || storefrontHalted(data)) notFound();
-  const { site, bundle, colls, baseUrl } = data;
+  const { site, baseUrl } = data;
   const q = normalizeQuery(firstParam((await searchParams).q));
 
   await logTraffic({
@@ -55,24 +55,11 @@ export default async function SearchPage({ params, searchParams }: Props) {
   });
 
   const results = q ? await searchProducts(site.id, q) : [];
-  const topCategories = bundle.categories.filter((c) => !c.parentSlug);
   const themeId = site.themeId ?? "studio";
 
   return (
     <ThemeRoot themeId={themeId} theme={data.theme} preview={data.preview}>
-      <SiteHeader
-        siteName={site.name}
-        homeHref={`${baseUrl}/`}
-        cartHref={`${baseUrl}/cart`}
-        accountHref={`${baseUrl}/account`}
-        searchAction={`${baseUrl}/search`}
-        collectionsHref={colls.length > 0 ? `${baseUrl}/collections` : undefined}
-        searchQuery={q}
-        nav={topCategories.map((c) => ({
-          name: c.name,
-          href: `${baseUrl}/c/${c.slug}`,
-        }))}
-      />
+      <StoreTop data={data} searchQuery={q} />
       <main className="sf-main">
         <p className="sf-crumb">
           <a href={`${baseUrl}/`}>{site.name}</a> / Search
@@ -105,6 +92,7 @@ export default async function SearchPage({ params, searchParams }: Props) {
           </ul>
         ) : null}
       </main>
+      <StoreFooter data={data} />
     </ThemeRoot>
   );
 }

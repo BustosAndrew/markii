@@ -1,11 +1,12 @@
 import "server-only";
 
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull } from "drizzle-orm";
 import { notFound } from "@/lib/api";
-import { db, siteDesignVersions, siteDesigns, siteDocuments, type SiteDesign } from "@/lib/db";
+import { collections, db, products, siteDesignVersions, siteDesigns, siteDocuments, type SiteDesign } from "@/lib/db";
 import { blockingErrors, checkPage, checkTheme, type CheckResult } from "./checks";
 import { catalogFacts, leaseActive } from "./store";
 import { resolveTheme, type DesignTokens } from "./tokens";
+import { REGION_HANDLES, SHARED_DOCUMENT_TITLES, type RegionHandle, type TemplateHandle } from "./types";
 
 /**
  * Reads behind the builder's REST surface (`docs/API.md` §19) and the brand
@@ -47,6 +48,37 @@ export async function designSummary(siteId: number) {
     .orderBy(asc(siteDocuments.id));
 
   const theme = resolveTheme(design.draftThemeId, design.draftTokens as DesignTokens);
+
+  // Where the preview shows a template: the first product or published collection there is.
+  const [[sample], [sampleCollection]] = await Promise.all([
+    db
+      .select({ slug: products.slug })
+      .from(products)
+      .where(and(eq(products.siteId, siteId), eq(products.enabled, true)))
+      .orderBy(asc(products.id))
+      .limit(1),
+    db
+      .select({ handle: collections.handle })
+      .from(collections)
+      .where(and(eq(collections.siteId, siteId), isNotNull(collections.publishedAt)))
+      .orderBy(asc(collections.id))
+      .limit(1),
+  ]);
+  const shared = <H extends TemplateHandle | RegionHandle>(kind: "template" | "region", handle: H, previewPath: string | null) => {
+    const d = docs.find((x) => x.kind === kind && x.handle === handle);
+    return {
+      handle,
+      title: SHARED_DOCUMENT_TITLES[handle],
+      /** Null until customised; the storefront uses the built-in layout meanwhile. */
+      id: d?.id ?? null,
+      customized: Boolean(d && !d.draftDeleted),
+      /** Reset in the draft: the built-in layout returns at the next publish. */
+      deleted: d?.draftDeleted ?? false,
+      published: d?.publishedHandle != null,
+      previewPath,
+    };
+  };
+
   return {
     siteId,
     started: true as const,
@@ -70,6 +102,12 @@ export async function designSummary(siteId: number) {
         path: d.handle === "home" ? "/" : `/pages/${d.handle}`,
         updatedAt: d.updatedAt.toISOString(),
       })),
+    /** M4. `previewPath` is null when the store has no product (or published collection) to show it with. */
+    templates: [
+      shared("template", "product", sample ? `/p/${sample.slug}` : null),
+      shared("template", "collection", sampleCollection ? `/collections/${sampleCollection.handle}` : null),
+    ],
+    regions: REGION_HANDLES.map((h) => shared("region", h, "/")),
   };
 }
 
@@ -102,7 +140,7 @@ export async function designChecks(siteId: number): Promise<{ results: CheckResu
   const docs = await db.select().from(siteDocuments).where(eq(siteDocuments.siteId, siteId));
   const facts = await catalogFacts(db, siteId);
   const results: CheckResult[] = [];
-  for (const doc of docs.filter((d) => !d.draftDeleted)) results.push(...checkPage(doc.draftTree, facts, doc.handle));
+  for (const doc of docs.filter((d) => !d.draftDeleted)) results.push(...checkPage(doc.draftTree, facts, doc.handle, doc.kind));
   results.push(...checkTheme(resolveTheme(design.draftThemeId, design.draftTokens as DesignTokens)));
   return { results, blocking: blockingErrors(results).length };
 }

@@ -612,6 +612,18 @@ on each user message. **Agent actor ids are now the person's user id** (they wer
 which the audit log could not name), and assistant replies now get real ids — every stored reply had
 been saved with id `""`, so resumed transcripts rendered with duplicate React keys.
 
+**Templates, global regions and data binding are built as of 2026-11-03 (M4)** — `docs/API.md` §19.
+A product/collection **template** and the announcement/header/footer **regions** are ordinary
+documents (`kind` template/region; **no migration** — 0046 already allowed both), so every tree edit,
+undo, check and publish works on them; customise starts from the built-in layout and **reset is
+`builder.deletePage`**. Bindings and visibility are a **closed whitelist** (`lib/builder/bindings.ts`),
+never an expression; a path whose data the document lacks blocks publish rather than rendering a
+placeholder to shoppers. **Every storefront page renders `StoreTop`/`StoreFooter`**, never
+`SiteHeader` directly, or it shows a header the merchant replaced. **The product and collection
+routes keep their own JSON-LD** whatever the template holds. **The block CSS is emitted once per page
+by `ThemeRoot`** — a copy per document would let a later document's base rules undo an earlier one's
+node styles. The brand agent can do all of it (four more `agentExecution: "draft"` actions, pinned).
+
 **Stripe Tax on Markii's own subscription is built as of 2026-09-13** (G3). `automatic_tax` on every
 platform-account subscription create, change and preview — **no `Stripe-Account` header**, the
 opposite direction of money from §18.6 — decided from two facts that are reported apart and never

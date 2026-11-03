@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { CartCheckout } from "@/components/storefront/cart-checkout";
-import { SiteHeader } from "@/components/storefront/site-header";
+import { StoreFooter, StoreTop } from "@/components/storefront/store-chrome";
 import { ThemeRoot } from "@/components/storefront/theme-root";
 import { loadSite, storefrontHalted } from "@/lib/storefront";
 
@@ -19,22 +19,12 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function CartPage({ params }: Props) {
   const data = await loadSite((await params).site);
   if (!data || storefrontHalted(data)) notFound();
-  const { site, bundle, baseUrl } = data;
+  const { site, baseUrl } = data;
   const themeId = site.themeId ?? "studio";
-  const topCategories = bundle.categories.filter((c) => !c.parentSlug);
 
   return (
     <ThemeRoot themeId={themeId} theme={data.theme} preview={data.preview}>
-      <SiteHeader
-        siteName={site.name}
-        homeHref={`${baseUrl}/`}
-        cartHref={`${baseUrl}/cart`}
-        accountHref={`${baseUrl}/account`}
-        nav={topCategories.map((c) => ({
-          name: c.name,
-          href: `${baseUrl}/c/${c.slug}`,
-        }))}
-      />
+      <StoreTop data={data} minimal />
       <main className="sf-main">
         <CartCheckout
           homeHref={`${baseUrl}/`}
@@ -45,6 +35,7 @@ export default async function CartPage({ params }: Props) {
           }}
         />
       </main>
+      <StoreFooter data={data} />
     </ThemeRoot>
   );
 }

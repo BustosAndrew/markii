@@ -23,4 +23,9 @@ export const BRAND_DRAFT_ACTIONS = [
   "builder.setThemeTokens",
   "builder.createPage",
   "builder.updatePage",
+  // M4: templates, regions, data bindings and visibility — still draft-only.
+  "builder.customizeTemplate",
+  "builder.customizeRegion",
+  "builder.setBinding",
+  "builder.setVisibility",
 ] as const;

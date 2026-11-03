@@ -3,6 +3,7 @@ import "server-only";
 import { tool } from "ai";
 import { z } from "zod";
 import { ApiError } from "../../api";
+import { describeBindings } from "../../builder/bindings";
 import { describeBlocks } from "../../builder/blocks";
 import { PRESETS } from "../../builder/presets";
 import { designChecks, designSummary, pageDocument } from "../../builder/queries";
@@ -43,9 +44,11 @@ Rules:
 8. If you do not know the brand — audience, tone, colours they love or avoid — ask before a redesign. A small, specific request can go ahead.
 9. Edits listed under "Changed since your last reply" were the merchant's deliberate choices. Build on them; do not undo them unless asked.
 10. If an edit is refused, read the message and correct the input. If it says you were stopped, make no further edits and summarise what you did.
-11. You cannot publish, discard the draft, restore an old version, delete pages or add custom code. Say so, and point to the Publish and History buttons or the Pages tab in the editor.
+11. You cannot publish, discard the draft, restore an old version, delete pages, reset a template or region, or add custom code. Say so, and point to the Publish and History buttons or the Pages tab in the editor.
 12. Money is in integer minor units of the store's currency (${context.currency}); 1999 in USD is $19.99, while JPY has no minor unit.
 13. Be brief. They can see the preview: say what you changed in a sentence or two, not field by field.
+14. Shared layouts: every product page renders with the product template, every collection page with the collection template, and every page shows the header, footer and announcement bar. To change one, call builder_customizeTemplate or builder_customizeRegion first — it returns the pageId — then edit it like any page. Ask before adding a footer or announcement bar the merchant did not mention: once published it appears on every page.
+15. In a template, show each product's or collection's own data with builder_setBinding (product.title, product.price, collection.description…) instead of typing it in; inside a repeater, bind to item.*. Keep the product template's Buy block, or shoppers cannot buy. Hide a block whose data may be missing with builder_setVisibility. list_blocks lists every binding path, condition and repeater source.
 
 ${context.live}`;
 }
@@ -73,23 +76,27 @@ export function brandTools(turn: TurnContext, scope: ReadScope, siteId: number, 
       execute: () => asResult(() => designSummary(siteId)),
     }),
     get_page: tool({
-      description: "One page of the draft in full: title, handle, SEO and the whole node tree as JSON.",
+      description:
+        "One document of the draft in full — a page, or a customised template or region (same ids): " +
+        "kind, title, handle, SEO and the whole node tree as JSON, bindings and conditions included.",
       inputSchema: z.object({ pageId: z.number().int().positive() }),
       execute: ({ pageId }) =>
         asResult(async () => {
           const doc = await pageDocument(siteId, pageId);
-          return { id: doc.id, handle: doc.handle, title: doc.title, seo: doc.seo, deleted: doc.deleted, tree: doc.tree };
+          return { id: doc.id, kind: doc.kind, handle: doc.handle, title: doc.title, seo: doc.seo, deleted: doc.deleted, tree: doc.tree };
         }),
     }),
     list_blocks: tool({
       description:
         "The block types you can place — each with its props as JSON Schema, defaults, what it may " +
-        "contain, and usage hints — plus the section presets builder_insertPreset accepts.",
+        "contain, which props can be bound to data, and usage hints — plus the section presets " +
+        "builder_insertPreset accepts, and every binding path, visibility condition and repeater source.",
       inputSchema: z.object({}),
       execute: async () => ({
         // The editor's field layout is for people; the JSON Schema in `props` is what the model needs.
         blocks: describeBlocks().map((b) => ({ ...b, editorPanel: undefined })),
         presets: Object.entries(PRESETS).map(([id, p]) => ({ id, label: p.label, description: p.description })),
+        data: describeBindings(),
       }),
     }),
     design_checks: tool({

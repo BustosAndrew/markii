@@ -3,7 +3,7 @@ import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { StorefrontBuilderPage } from "@/components/storefront/builder-page";
 import { ProductCard } from "@/components/storefront/product-card";
-import { SiteHeader } from "@/components/storefront/site-header";
+import { StoreFooter, StoreTop } from "@/components/storefront/store-chrome";
 import { StorePaused } from "@/components/storefront/paused";
 import { ThemeRoot } from "@/components/storefront/theme-root";
 import { logTraffic } from "@/lib/agents";
@@ -30,7 +30,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function StorePage({ params }: Props) {
   const data = await loadSite((await params).site);
   if (!data) notFound();
-  const { site, bundle, colls, baseUrl } = data;
+  const { site, bundle, baseUrl } = data;
   const themeId = site.themeId ?? "studio";
 
   /**
@@ -54,24 +54,12 @@ export default async function StorePage({ params }: Props) {
    * storefront it has always been (`docs/BUILDER.md` §14 fallback).
    */
   const home = await pageFor(data, "home");
-  if (home) return <StorefrontBuilderPage data={data} tree={home.tree} />;
+  if (home) return <StorefrontBuilderPage data={data} tree={home.tree} documentId={home.id} />;
 
-  const topCategories = bundle.categories.filter((c) => !c.parentSlug);
 
   return (
     <ThemeRoot themeId={themeId} theme={data.theme} preview={data.preview}>
-      <SiteHeader
-        siteName={site.name}
-        homeHref={`${baseUrl}/`}
-        cartHref={`${baseUrl}/cart`}
-        accountHref={`${baseUrl}/account`}
-        searchAction={`${baseUrl}/search`}
-        collectionsHref={colls.length > 0 ? `${baseUrl}/collections` : undefined}
-        nav={topCategories.map((c) => ({
-          name: c.name,
-          href: `${baseUrl}/c/${c.slug}`,
-        }))}
-      />
+      <StoreTop data={data} />
       <main className="sf-main">
         <header className="sf-hero">
           <h1 className="sf-title">{site.name}</h1>
@@ -99,6 +87,7 @@ export default async function StorePage({ params }: Props) {
           ))}
         </ul>
       </main>
+      <StoreFooter data={data} />
     </ThemeRoot>
   );
 }

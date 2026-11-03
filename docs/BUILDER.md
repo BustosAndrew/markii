@@ -343,6 +343,14 @@ cannot diverge. Drag-and-drop lives in the layer tree, with Alt+arrow keyboard e
 draft directly through the `agentExecution: "draft"` actions, holds the edit lease while it works,
 and is told at the start of every turn what the draft looks like now and what the merchant changed
 since it last spoke.
+**M4 is built (2026-11-03)** — step 9 and the menus of step 12: product and collection templates,
+the announcement bar, header and footer as global regions (§4), data bindings, repeaters and
+conditional visibility (§9). Two decisions §9 left open: conditions are **structured** (`{ path, op,
+value }`) rather than a parsed expression — the same whitelist, with nothing to parse — and
+`customer.loggedIn` is **not** offered, because no storefront render reads the shopper's session
+today and a per-shopper page is a caching decision of its own. Menus are a `navMenu` block in a
+region, not a separate table. The editor previews a template against the store's first product or
+collection and follows links inside the preview to any other.
 
 0. **Action registry + `defineAction` primitive** — built back in **Phase C** (`docs/BACKEND.md` §1),
    so it already exists and commerce mutations already use it

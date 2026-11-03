@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { BlockDescription, Breakpoint, FieldSpec, PageNode, StyleProps } from "@/lib/api/builder";
+import type { BlockDescription, BlockRegistry, Breakpoint, Condition, FieldSpec, PageNode, StyleProps } from "@/lib/api/builder";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/field";
 import { Toggle } from "@/components/ui/toggle";
@@ -236,6 +236,139 @@ function Field({ spec, props, commit, disabled, data }: { spec: FieldSpec; props
   }
 }
 
+type DataList = BlockRegistry["data"];
+
+/**
+ * Bindings (M4): each prop the block lets be bound, with the paths that fit
+ * both its type and the document — a product path is offered only in the
+ * product template, `item.*` only inside a repeater.
+ */
+function DataSection({ node, block, paths, scopes, disabled, onBindings }: { node: PageNode; block: BlockDescription; paths: DataList; scopes: string[]; disabled: boolean; onBindings: (patch: Record<string, string | null>) => void }) {
+  const rows = Object.entries(block.bindable ?? {})
+    .map(([prop, accepts]) => {
+      const current = node.bindings?.[prop] ?? "";
+      const options = paths.bindings.filter((b) => accepts.includes(b.type) && scopes.includes(b.scope));
+      const label = block.editorPanel.find((f) => f.name === prop)?.label ?? prop;
+      return { prop, current, options, label };
+    })
+    .filter((r) => r.options.length > 0 || r.current);
+  if (rows.length === 0) return null;
+  return (
+    <section className="space-y-3" aria-label="Data">
+      <div>
+        <h3 className="text-sm font-semibold text-foreground">Data</h3>
+        <p className="text-xs text-muted">Fill a field from the store instead of fixed text. The text above stays as the placeholder.</p>
+      </div>
+      {rows.map((r) => (
+        <div key={r.prop}>
+          <Label htmlFor={`b-${r.prop}`} className="text-xs">
+            {r.label} comes from
+          </Label>
+          <Select id={`b-${r.prop}`} className="py-1.5 text-xs" value={r.current} disabled={disabled} onChange={(e) => onBindings({ [r.prop]: e.target.value || null })}>
+            <option value="">Fixed text</option>
+            {r.current && !r.options.some((o) => o.path === r.current) ? <option value={r.current}>{r.current} (not available here)</option> : null}
+            {r.options.map((o) => (
+              <option key={o.path} value={o.path}>
+                {o.label} — {o.path}
+              </option>
+            ))}
+          </Select>
+        </div>
+      ))}
+    </section>
+  );
+}
+
+const OPS_BY_TYPE: Record<string, { value: Condition["op"]; label: string }[]> = {
+  number: [
+    { value: "gt", label: "is more than" },
+    { value: "gte", label: "is at least" },
+    { value: "lt", label: "is less than" },
+    { value: "lte", label: "is at most" },
+    { value: "eq", label: "is exactly" },
+    { value: "neq", label: "is not" },
+  ],
+  boolean: [
+    { value: "eq", label: "is" },
+    { value: "neq", label: "is not" },
+  ],
+  text: [
+    { value: "exists", label: "is set" },
+    { value: "missing", label: "is empty" },
+  ],
+};
+
+/** Conditional visibility (M4): one whitelisted comparison, built from selects — never typed as an expression. */
+function VisibilitySection({ node, paths, scopes, disabled, onVisibility }: { node: PageNode; paths: DataList; scopes: string[]; disabled: boolean; onVisibility: (when: Condition | null) => void }) {
+  const current = node.visibleWhen ?? null;
+  const conditions = paths.conditions.filter((c) => scopes.includes(c.scope) || c.path === current?.path);
+  const [path, setPath] = useState(current?.path ?? "");
+  const spec = conditions.find((c) => c.path === path);
+  const ops = spec ? OPS_BY_TYPE[spec.type] : [];
+  const [op, setOp] = useState<Condition["op"] | "">(current?.op ?? "");
+  const [value, setValue] = useState(current?.value === undefined ? "" : String(current.value));
+  const chosenOp = ops.some((o) => o.value === op) ? op : (ops[0]?.value ?? "");
+  const needsValue = chosenOp !== "exists" && chosenOp !== "missing" && chosenOp !== "";
+  const parsed: Condition | null = spec && chosenOp
+    ? needsValue
+      ? spec.type === "number"
+        ? value.trim() !== "" && Number.isFinite(Number(value)) ? { path, op: chosenOp, value: Number(value) } : null
+        : spec.type === "boolean"
+          ? { path, op: chosenOp, value: value !== "false" }
+          : null
+      : { path, op: chosenOp }
+    : null;
+  if (conditions.length === 0) return null;
+  return (
+    <section className="space-y-3" aria-label="Visibility">
+      <div>
+        <h3 className="text-sm font-semibold text-foreground">Show only when</h3>
+        <p className="text-xs text-muted">{current ? "This block is hidden for shoppers unless the condition holds." : "Always shown."}</p>
+      </div>
+      <div className="grid gap-2">
+        <Select aria-label="Condition data" className="py-1.5 text-xs" value={path} disabled={disabled} onChange={(e) => setPath(e.target.value)}>
+          <option value="">Choose…</option>
+          {conditions.map((c) => (
+            <option key={c.path} value={c.path}>
+              {c.path.split(".")[0]} {c.label}
+            </option>
+          ))}
+        </Select>
+        {spec ? (
+          <div className="flex gap-2">
+            <Select aria-label="Comparison" className="py-1.5 text-xs" value={chosenOp} disabled={disabled} onChange={(e) => setOp(e.target.value as Condition["op"])}>
+              {ops.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </Select>
+            {needsValue && spec.type === "number" ? (
+              <Input aria-label="Value" type="number" className="py-1.5 text-xs" value={value} disabled={disabled} onChange={(e) => setValue(e.target.value)} />
+            ) : null}
+            {needsValue && spec.type === "boolean" ? (
+              <Select aria-label="Value" className="py-1.5 text-xs" value={value === "false" ? "false" : "true"} disabled={disabled} onChange={(e) => setValue(e.target.value)}>
+                <option value="true">true</option>
+                <option value="false">false</option>
+              </Select>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+      <div className="flex gap-2">
+        <Button variant="secondary" disabled={disabled || !parsed || JSON.stringify(parsed) === JSON.stringify(current)} onClick={() => parsed && onVisibility(parsed)}>
+          Save condition
+        </Button>
+        {current ? (
+          <Button variant="ghost" disabled={disabled} onClick={() => onVisibility(null)}>
+            Always show
+          </Button>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
 export function Inspector({
   node,
   block,
@@ -243,9 +376,13 @@ export function Inspector({
   onBreakpoint,
   disabled,
   data,
+  paths,
+  scopes,
   onProps,
   onStyles,
   onIntent,
+  onBindings,
+  onVisibility,
   onDuplicate,
   onRemove,
 }: {
@@ -255,9 +392,15 @@ export function Inspector({
   onBreakpoint: (b: Breakpoint) => void;
   disabled: boolean;
   data: PickerData;
+  /** M4: the binding and condition whitelist, from the block registry. */
+  paths: DataList;
+  /** M4: the data scopes this node can read — its document's, plus `item` inside a repeater. */
+  scopes: string[];
   onProps: Commit;
   onStyles: (styles: Record<string, unknown>) => void;
   onIntent: (intent: string | null) => void;
+  onBindings: (patch: Record<string, string | null>) => void;
+  onVisibility: (when: Condition | null) => void;
   onDuplicate: () => void;
   onRemove: () => void;
 }) {
@@ -283,6 +426,12 @@ export function Inspector({
         ) : null}
       </div>
 
+      {block?.requiresScope && !scopes.includes(block.requiresScope) ? (
+        <p className="rounded-[var(--radius-control)] border border-warning-border bg-warning-bg p-2 text-xs text-warning-text" role="note">
+          This block works only in the {block.requiresScope} template. Publishing is blocked while it is here.
+        </p>
+      ) : null}
+
       {block?.editorPanel.length ? (
         <section className="space-y-4" aria-label="Content">
           {block.editorPanel.map((spec) => (
@@ -290,6 +439,16 @@ export function Inspector({
           ))}
         </section>
       ) : null}
+
+      {block ? <DataSection node={node} block={block} paths={paths} scopes={scopes} disabled={disabled} onBindings={onBindings} /> : null}
+      <VisibilitySection
+        key={`${node.id}-${JSON.stringify(node.visibleWhen ?? null)}-${scopes.join(",")}`}
+        node={node}
+        paths={paths}
+        scopes={scopes}
+        disabled={disabled}
+        onVisibility={onVisibility}
+      />
 
       <section className="space-y-3" aria-label="Style">
         <div className="flex items-center justify-between gap-2">

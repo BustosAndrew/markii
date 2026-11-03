@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
-import { SiteHeader } from "@/components/storefront/site-header";
+import { StoreFooter, StoreTop } from "@/components/storefront/store-chrome";
 import { ThemeRoot } from "@/components/storefront/theme-root";
 import { logTraffic } from "@/lib/agents";
 import { formatPrice } from "@/lib/generators";
@@ -24,7 +24,7 @@ export default async function CategoryPage({ params }: Props) {
   const { site: siteSlug, categorySlug } = await params;
   const data = await loadSite(siteSlug);
   if (!data) notFound();
-  const { site, cats, prods, bundle, colls, baseUrl } = data;
+  const { site, cats, prods, baseUrl } = data;
   const category = cats.find((c) => c.slug === categorySlug && c.enabled);
   if (!category || storefrontHalted(data)) notFound();
 
@@ -39,23 +39,11 @@ export default async function CategoryPage({ params }: Props) {
   const items = prods.filter(
     (p) => p.enabled && p.categoryId != null && categoryIds.includes(p.categoryId),
   );
-  const topCategories = bundle.categories.filter((c) => !c.parentSlug);
   const themeId = site.themeId ?? "studio";
 
   return (
     <ThemeRoot themeId={themeId} theme={data.theme} preview={data.preview}>
-      <SiteHeader
-        siteName={site.name}
-        homeHref={`${baseUrl}/`}
-        cartHref={`${baseUrl}/cart`}
-        accountHref={`${baseUrl}/account`}
-        searchAction={`${baseUrl}/search`}
-        collectionsHref={colls.length > 0 ? `${baseUrl}/collections` : undefined}
-        nav={topCategories.map((c) => ({
-          name: c.name,
-          href: `${baseUrl}/c/${c.slug}`,
-        }))}
-      />
+      <StoreTop data={data} />
       <main className="sf-main">
         <p className="sf-crumb">
           <a href={`${baseUrl}/`}>{site.name}</a> / {category.name}
@@ -92,6 +80,7 @@ export default async function CategoryPage({ params }: Props) {
           ))}
         </ul>
       </main>
+      <StoreFooter data={data} />
     </ThemeRoot>
   );
 }

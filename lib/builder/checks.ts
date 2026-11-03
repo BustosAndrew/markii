@@ -1,14 +1,16 @@
+import { REPEATER_SOURCES, scopeOf, scopesFor, type DataScope, type RepeaterSource } from "./bindings";
 import { getBlock } from "./blocks";
 import { contrastWarnings } from "./tokens";
 import type { ThemeTokens } from "@/lib/storefront/themes";
-import type { PageNode } from "./types";
+import type { DocumentKind, PageNode } from "./types";
 
 /**
  * Pre-publish checks (`docs/BUILDER.md` §12): **errors block publishing,
  * warnings inform.** An error is something that would ship broken — an image
- * with no source, a featured product that does not exist. A warning is
- * something a person should look at — a skipped heading level, missing alt
- * text, low contrast — and may have a reason for.
+ * with no source, a featured product that does not exist, a binding to data
+ * the page will never have. A warning is something a person should look at — a
+ * skipped heading level, missing alt text, low contrast — and may have a reason
+ * for.
  *
  * Pure: the caller passes what the catalogue holds, so these run the same in
  * the editor, for the agent, and at publish.
@@ -18,7 +20,10 @@ export type CheckResult = {
   severity: "error" | "warning";
   code: string;
   message: string;
+  /** The document's handle — a page's, or a template's or region's (`product`, `header`). */
   pageHandle?: string;
+  /** Omitted for pages, so results from before M4 read the same. */
+  kind?: Exclude<DocumentKind, "page">;
   nodeId?: string;
 };
 
@@ -30,27 +35,78 @@ export type CatalogFacts = {
 
 const PLACEHOLDER_TYPES = new Set(["heading", "text", "testimonial", "faq", "accordion", "list"]);
 
-function walk(node: PageNode, fn: (n: PageNode, parent: PageNode | null) => void, parent: PageNode | null = null) {
-  fn(node, parent);
-  for (const child of node.children ?? []) walk(child, fn, node);
+const WHERE: Record<Exclude<DataScope, "store">, string> = {
+  product: "the product template",
+  collection: "the collection template",
+  item: "a repeater",
+};
+
+function walk(
+  node: PageNode,
+  fn: (n: PageNode, parent: PageNode | null, inRepeater: boolean) => void,
+  parent: PageNode | null = null,
+  inRepeater = false,
+) {
+  fn(node, parent, inRepeater);
+  for (const child of node.children ?? []) walk(child, fn, node, inRepeater || node.type === "repeater");
 }
 
-export function checkPage(tree: PageNode, catalog: CatalogFacts, pageHandle?: string): CheckResult[] {
+export function checkPage(
+  tree: PageNode,
+  catalog: CatalogFacts,
+  pageHandle?: string,
+  kind: DocumentKind = "page",
+): CheckResult[] {
   const out: CheckResult[] = [];
   const push = (severity: CheckResult["severity"], code: string, message: string, nodeId?: string) =>
-    out.push({ severity, code, message, pageHandle, nodeId });
+    out.push({ severity, code, message, pageHandle, ...(kind !== "page" ? { kind } : {}), nodeId });
+
+  const available = scopesFor(kind, pageHandle ?? "");
+  const has = (scope: DataScope | null, inRepeater: boolean) =>
+    scope !== null && (scope === "item" ? inRepeater : available.has(scope));
+  const isRegion = kind === "region";
 
   const headings: { level: number; nodeId: string }[] = [];
+  let buyBlocks = 0;
 
-  walk(tree, (node) => {
+  walk(tree, (node, _parent, inRepeater) => {
     const p = node.props as Record<string, unknown>;
+    const bound = (prop: string) => Boolean(node.bindings?.[prop]);
+    const def = getBlock(node.type);
+
+    for (const [prop, path] of Object.entries(node.bindings ?? {})) {
+      const scope = scopeOf(path);
+      if (!has(scope, inRepeater)) {
+        push(
+          "error",
+          "UNAVAILABLE_BINDING",
+          `"${prop}" is bound to ${path}, which only exists in ${scope && scope !== "store" ? WHERE[scope] : "another document"}.`,
+          node.id,
+        );
+      }
+    }
+    if (node.visibleWhen) {
+      const scope = scopeOf(node.visibleWhen.path);
+      if (!has(scope, inRepeater)) {
+        push(
+          "error",
+          "UNAVAILABLE_CONDITION",
+          `A block is shown only when ${node.visibleWhen.path} holds, which only exists in ${scope && scope !== "store" ? WHERE[scope] : "another document"}.`,
+          node.id,
+        );
+      }
+    }
+    if (def?.requiresScope && !available.has(def.requiresScope)) {
+      push("error", "BLOCK_NEEDS_TEMPLATE", `A ${def.label.toLowerCase()} block works only in ${WHERE[def.requiresScope]}.`, node.id);
+    }
+
     switch (node.type) {
       case "heading":
         headings.push({ level: Number(p.level ?? 2), nodeId: node.id });
         break;
       case "image":
-        if (!p.src) push("error", "MISSING_IMAGE_SOURCE", "An image block has no image chosen.", node.id);
-        else if (!p.decorative && !String(p.alt ?? "").trim()) {
+        if (!p.src && !bound("src")) push("error", "MISSING_IMAGE_SOURCE", "An image block has no image chosen.", node.id);
+        else if (!p.decorative && !String(p.alt ?? "").trim() && !bound("alt")) {
           push("warning", "MISSING_ALT", "An image has no alt text. Describe it, or mark it decorative.", node.id);
         }
         break;
@@ -58,6 +114,7 @@ export function checkPage(tree: PageNode, catalog: CatalogFacts, pageHandle?: st
         if (!p.url) push("error", "MISSING_VIDEO_URL", "A video block has no YouTube or Vimeo link.", node.id);
         break;
       case "productCard":
+        if (bound("productSlug")) break;
         if (!p.productSlug) push("error", "PRODUCT_NOT_CHOSEN", "A featured-product block has no product chosen.", node.id);
         else if (!catalog.productSlugs.has(String(p.productSlug))) {
           push("error", "UNKNOWN_PRODUCT", `No enabled product "${p.productSlug}" in this store.`, node.id);
@@ -70,8 +127,33 @@ export function checkPage(tree: PageNode, catalog: CatalogFacts, pageHandle?: st
         if (p.source === "collection" && !catalog.collectionHandles.has(String(p.collectionHandle))) {
           push("error", "UNKNOWN_COLLECTION", `No published collection "${p.collectionHandle}" in this store.`, node.id);
         }
+        if (p.source === "current" && !available.has("collection")) {
+          push("error", "UNAVAILABLE_SOURCE", "A product grid showing \"this collection\" works only in the collection template.", node.id);
+        }
+        break;
+      case "repeater": {
+        const scope = REPEATER_SOURCES[p.source as RepeaterSource]?.scope;
+        if (scope && scope !== "store" && !available.has(scope)) {
+          push("error", "UNAVAILABLE_SOURCE", `A repeater over ${String(p.source)} works only in ${WHERE[scope]}.`, node.id);
+        }
+        if ((node.children ?? []).length === 0) push("warning", "EMPTY_REPEATER", "A repeater has nothing inside it to repeat.", node.id);
+        break;
+      }
+      case "productBuy":
+        buyBlocks += 1;
+        break;
+      case "navMenu":
+        if (((p.items as unknown[]) ?? []).length === 0 && !p.categories && !p.collections) {
+          push("warning", "EMPTY_MENU", "A menu has no links.", node.id);
+        }
+        break;
+      case "storeBrand":
+        if (p.logoSrc && !p.showName && !String(p.logoAlt ?? "").trim()) {
+          push("warning", "MISSING_ALT", "The logo has no alt text and the store's name is hidden, so the home link has no name.", node.id);
+        }
         break;
       case "section": {
+        if (isRegion) break;
         const hasHeading = (node.children ?? []).some((c) => c.type === "heading");
         if ((node.children ?? []).length === 0) push("warning", "EMPTY_SECTION", "A section is empty.", node.id);
         else if (!hasHeading && !String(p.label ?? "").trim() && node.intent !== "hero") {
@@ -86,13 +168,24 @@ export function checkPage(tree: PageNode, catalog: CatalogFacts, pageHandle?: st
       }
     }
 
-    if (PLACEHOLDER_TYPES.has(node.type)) {
-      const def = getBlock(node.type);
+    // A bound block's text comes from the catalogue; its placeholder never shows where the data exists.
+    if (PLACEHOLDER_TYPES.has(node.type) && !node.bindings) {
       if (def && JSON.stringify(def.defaults.props) === JSON.stringify(stripDefaults(p, def.defaults.props))) {
         push("warning", "PLACEHOLDER_TEXT", `A ${def.label.toLowerCase()} still has its placeholder text.`, node.id);
       }
     }
   });
+
+  if (kind === "template" && pageHandle === "product") {
+    if (buyBlocks === 0) {
+      push("error", "MISSING_BUY_BLOCK", "The product template has no Buy block, so shoppers could not add products to their cart.");
+    } else if (buyBlocks > 1) {
+      push("warning", "MULTIPLE_BUY_BLOCKS", "The product template has more than one Buy block.");
+    }
+  }
+
+  // A header or footer is not a page: its headings are not the page's outline.
+  if (isRegion) return out;
 
   const h1s = headings.filter((h) => h.level === 1);
   if (h1s.length === 0) push("warning", "NO_H1", "The page has no level-1 heading.");

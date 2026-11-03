@@ -64,7 +64,7 @@ describe("site builder", () => {
     const live = await storefront();
     expect(live.status).toBe(200);
     expect(live.text).toContain("sf-hero");
-    expect(live.text).not.toContain("mk-page");
+    expect(live.text).not.toContain('class="mk-page"');
   });
 
   it("keeps draft edits off the storefront until publish, then shows them", async () => {
@@ -92,7 +92,7 @@ describe("site builder", () => {
     const live = await storefront();
     expect(live.text).toContain("Draft headline");
     expect(live.text).toContain("Browse the range");
-    expect(live.text).toContain("mk-page");
+    expect(live.text).toContain('class="mk-page"');
     // The live page carries no editor attributes.
     expect(live.text).not.toContain("data-mk-node");
     // The seeded product grid renders the store's real products.

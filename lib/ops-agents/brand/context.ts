@@ -105,9 +105,14 @@ export async function liveContext(input: {
   const summary = await designSummary(site.id);
   if (!summary.started) return "The design has not been started yet; the merchant must open the editor first.";
 
+  // Every document the merchant can have open: pages, and (M4) customised templates and regions.
+  const shared = [...summary.templates, ...summary.regions]
+    .filter((d): d is typeof d & { id: number } => d.customized && d.id !== null)
+    .map((d) => ({ id: d.id, title: d.title, path: d.previewPath ?? "(no product or collection to preview it with)", handle: d.handle }));
   const livePages = summary.pages.filter((p) => !p.deleted);
+  const openable = [...livePages, ...shared];
   const open =
-    (editor.pageId ? livePages.find((p) => p.id === editor.pageId) : undefined) ??
+    (editor.pageId ? openable.find((p) => p.id === editor.pageId) : undefined) ??
     livePages.find((p) => p.handle === HOME_HANDLE) ??
     livePages[0];
   const doc = open ? await pageDocument(site.id, open.id) : null;
@@ -132,13 +137,21 @@ export async function liveContext(input: {
   for (const p of summary.pages) {
     out.push(`- #${p.id} ${JSON.stringify(p.title)} ${p.path}${p.deleted ? " (deleted in the draft)" : ""}${p.published ? "" : " (not yet published)"}`);
   }
+  const sharedLine = (d: (typeof summary.templates)[number] | (typeof summary.regions)[number]) =>
+    d.customized
+      ? `- #${d.id} ${d.title} (${d.handle})${d.published ? "" : " — not yet published"}`
+      : `- ${d.title} (${d.handle}) — not customised; shoppers see the built-in layout${d.deleted ? " (reset in this draft)" : ""}`;
+  out.push("Templates — every product or collection page renders with one once it is customised and published:");
+  for (const t of summary.templates) out.push(sharedLine(t));
+  out.push("Regions — shown on every page once customised and published:");
+  for (const r of summary.regions) out.push(sharedLine(r));
 
   out.push("");
   out.push("## Where the merchant is");
   if (editor.pageId && open?.id !== editor.pageId) {
     out.push(`They had page #${editor.pageId} open, which is no longer in the draft; showing #${open?.id ?? "?"} instead.`);
   }
-  out.push(`Open page: ${open ? `#${open.id} ${JSON.stringify(open.title)} (${open.path})` : "none"}`);
+  out.push(`Open in the editor: ${open ? `#${open.id} ${JSON.stringify(open.title)} (${open.path})` : "none"}`);
   if (editor.breakpoint) out.push(`Previewing at: ${editor.breakpoint === "base" ? "desktop" : editor.breakpoint} breakpoint`);
   if (editor.path) out.push(`Preview path: ${editor.path}`);
   if (editor.selectedNodeId) {
@@ -152,7 +165,8 @@ export async function liveContext(input: {
   }
   if (tree) {
     out.push("");
-    out.push(`## Page #${open!.id} tree (draft)`);
+    const kind = doc?.kind === "template" ? "Template" : doc?.kind === "region" ? "Region" : "Page";
+    out.push(`## ${kind} #${open!.id} tree (draft)`);
     out.push(outlineTree(tree, { selectedId: selected?.node.id ?? null }));
   }
 

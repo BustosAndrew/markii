@@ -1,11 +1,13 @@
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
-import { BLOCKS, canContain, getBlock } from "./blocks";
+import { BINDING_PATHS, bindingsSchema, conditionSchema } from "./bindings";
+import { BLOCKS, canContain, getBlock, type BlockDefinition } from "./blocks";
 import { nodeStylesSchema, styleSchema } from "./styles";
 import {
   NODE_ID_PATTERN,
   TREE_LIMITS,
   type Breakpoint,
+  type Condition,
   type NodeStyles,
   type PageNode,
   type StyleProps,
@@ -83,6 +85,41 @@ function issuesOf(e: unknown): string {
 }
 
 /**
+ * A node's bindings, checked against its block: only props the block declares
+ * bindable, and only paths whose value type that prop accepts — an image path
+ * cannot fill a heading. Whether the path's *scope* exists where the document
+ * renders is a publish check (`./checks`), since it depends on the document.
+ */
+function validBindings(node: PageNode, def: BlockDefinition): Record<string, string> | undefined {
+  if (!node.bindings || Object.keys(node.bindings).length === 0) return undefined;
+  const parsed = bindingsSchema.safeParse(node.bindings);
+  if (!parsed.success) throw new TreeError("INVALID", `Invalid bindings on ${node.id}: ${issuesOf(parsed.error)}`, { nodeId: node.id });
+  for (const [prop, path] of Object.entries(parsed.data)) {
+    const accepts = def.bindable?.[prop];
+    if (!accepts) {
+      const can = Object.keys(def.bindable ?? {});
+      throw new TreeError(
+        "INVALID",
+        `A ${node.type} block cannot bind "${prop}"${can.length ? ` — bindable: ${can.join(", ")}` : " — it has no bindable props"}.`,
+        { nodeId: node.id },
+      );
+    }
+    const type = BINDING_PATHS[path].type;
+    if (!accepts.includes(type)) {
+      throw new TreeError("INVALID", `"${path}" is ${type}; ${node.type}.${prop} takes ${accepts.join(" or ")}.`, { nodeId: node.id });
+    }
+  }
+  return parsed.data;
+}
+
+function validCondition(node: PageNode): Condition | undefined {
+  if (!node.visibleWhen) return undefined;
+  const parsed = conditionSchema.safeParse(node.visibleWhen);
+  if (!parsed.success) throw new TreeError("INVALID", `Invalid visibility condition on ${node.id}: ${issuesOf(parsed.error)}`, { nodeId: node.id });
+  return parsed.data as Condition;
+}
+
+/**
  * The whole tree is valid: one root, known types, legal nesting, each node's
  * props and styles passing its block's schema, unique well-formed ids, and
  * within the size limits. Returns the tree with every block's defaults applied.
@@ -92,7 +129,7 @@ export function validateTree(root: PageNode): PageNode {
   const seen = new Set<string>();
   let total = 0;
 
-  const check = (node: PageNode, parentType: string | null, depth: number): PageNode => {
+  const check = (node: PageNode, parentType: string | null, depth: number, inRepeater = false): PageNode => {
     total += 1;
     if (total > TREE_LIMITS.maxNodes) {
       throw new TreeError("LIMIT", `A page may hold at most ${TREE_LIMITS.maxNodes} blocks.`);
@@ -113,6 +150,9 @@ export function validateTree(root: PageNode): PageNode {
         nodeId: node.id,
         parentType,
       });
+    }
+    if (inRepeater && node.type === "repeater") {
+      throw new TreeError("INVALID", "A repeater cannot hold another repeater.", { nodeId: node.id });
     }
 
     let props: Record<string, unknown>;
@@ -146,10 +186,17 @@ export function validateTree(root: PageNode): PageNode {
       throw new TreeError("LIMIT", `A ${node.type} block holds at most ${def.maxChildren} children.`, { nodeId: node.id });
     }
 
+    const bindings = validBindings(node, def);
+    const visibleWhen = validCondition(node);
+
     const out: PageNode = { id: node.id, type: node.type, props };
     if (styles) out.styles = styles;
     if (node.intent) out.intent = node.intent;
-    if (def.children !== "none") out.children = children.map((c) => check(c, node.type, depth + 1));
+    if (bindings) out.bindings = bindings;
+    if (visibleWhen) out.visibleWhen = visibleWhen;
+    if (def.children !== "none") {
+      out.children = children.map((c) => check(c, node.type, depth + 1, inRepeater || node.type === "repeater"));
+    }
     return out;
   };
 
@@ -170,6 +217,8 @@ export type NodeInput = {
   props?: Record<string, unknown>;
   styles?: NodeStyles;
   intent?: string;
+  bindings?: Record<string, string>;
+  visibleWhen?: Condition;
   children?: NodeInput[];
 };
 
@@ -187,11 +236,14 @@ function nodeInputAtDepth(depth: number): z.ZodType<NodeInput> {
     props: z.record(z.string(), z.unknown()).optional(),
     styles: nodeStylesSchema.optional(),
     intent: z.string().max(TREE_LIMITS.maxIntentLength).optional(),
+    // Checked against the block in validateTree; here only the shape, so undo can put back what was removed.
+    bindings: z.record(z.string().max(40), z.string().max(80)).optional(),
+    visibleWhen: conditionSchema.optional(),
   };
-  if (depth === 0) return z.object(fields).strict();
+  if (depth === 0) return z.object(fields).strict() as unknown as z.ZodType<NodeInput>;
   return z
     .object({ ...fields, children: z.array(nodeInputAtDepth(depth - 1)).max(TREE_LIMITS.maxNodes).optional() })
-    .strict();
+    .strict() as unknown as z.ZodType<NodeInput>;
 }
 
 export const nodeInputSchema: z.ZodType<NodeInput> = nodeInputAtDepth(TREE_LIMITS.maxDepth);
@@ -219,6 +271,8 @@ export function buildNode(input: NodeInput, taken: Set<string>, id: IdGenerator 
   const styles = input.styles ?? (input.id === undefined ? def.defaults.styles : undefined);
   if (styles && Object.keys(styles).length) node.styles = clone(styles);
   if (input.intent) node.intent = input.intent;
+  if (input.bindings && Object.keys(input.bindings).length) node.bindings = { ...input.bindings };
+  if (input.visibleWhen) node.visibleWhen = { ...input.visibleWhen };
 
   if (def.children !== "none") {
     const kids = input.children ?? defaultChildren(input.type);
@@ -338,6 +392,8 @@ export function duplicateNode(
     props: clone(n.props),
     styles: n.styles ? clone(n.styles) : undefined,
     intent: n.intent,
+    bindings: n.bindings ? { ...n.bindings } : undefined,
+    visibleWhen: n.visibleWhen ? { ...n.visibleWhen } : undefined,
     children: n.children?.map(strip),
   });
   const { root: next, inserted } = insertNodes(
@@ -407,6 +463,43 @@ export function setStyles(
   if (Object.keys(styles).length) hit.node.styles = styles;
   else delete hit.node.styles;
   return { root: validateTree(next), changes };
+}
+
+/** Bind props to data paths, or unbind (`null`). Validated against the block in `validateTree`. */
+export function setBindings(
+  root: PageNode,
+  nodeId: string,
+  patch: Record<string, string | null>,
+): { root: PageNode; changes: FieldChange[] } {
+  const next = clone(root);
+  const hit = mustLocate(next, nodeId);
+  const current: Record<string, string> = { ...(hit.node.bindings ?? {}) };
+  const changes: FieldChange[] = [];
+  for (const [prop, path] of Object.entries(patch)) {
+    const before = current[prop] ?? null;
+    if (path === null) delete current[prop];
+    else current[prop] = path;
+    const after = current[prop] ?? null;
+    if (before !== after) changes.push({ key: prop, before, after });
+  }
+  if (Object.keys(current).length) hit.node.bindings = current;
+  else delete hit.node.bindings;
+  return { root: validateTree(next), changes };
+}
+
+/** Show a node only when a condition holds, or always (`null`). */
+export function setVisibility(
+  root: PageNode,
+  nodeId: string,
+  when: Condition | null,
+): { root: PageNode; before: Condition | null; changed: boolean } {
+  const next = clone(root);
+  const hit = mustLocate(next, nodeId);
+  if (!hit.parent) throw new TreeError("INVALID", "The page root is always shown.");
+  const before = hit.node.visibleWhen ?? null;
+  if (when) hit.node.visibleWhen = when;
+  else delete hit.node.visibleWhen;
+  return { root: validateTree(next), before, changed: !same(before, when) };
 }
 
 export function setIntent(root: PageNode, nodeId: string, intent: string | null): { root: PageNode; before: string | null } {

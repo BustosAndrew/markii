@@ -222,6 +222,7 @@ The readiness score on the Health page checks your store and catalog against fix
 - Every change can be undone. History lists each published version, and any of them can be copied back into your draft.
 - New pages live at /pages/your-page once published. Until a store's home page is first published from the editor, it keeps its original layout.
 - The editor's Agent tab is the brand agent: describe the look or change you want and it edits your draft while you watch the preview. While it works you can't edit — press Stop to take over. It sees any changes you make between messages, its edits can be undone like yours, and it cannot publish.
+- The Pages tab also lists templates and the parts on every page. Customize the product page or collection page template to change how every product or collection looks; customize the header, footer or an announcement bar to change them on every page at once. Blocks in a template can show each product's own name, price, images and description (the Data section of a selected block), and any block can be set to show only when, say, a product is in stock. Reset puts the built-in layout back at the next publish.
 
 Editing a design needs the owner, administrator or developer role; other roles can view it.`,
       links: [{ label: "Websites", href: "/dashboard/websites" }],
