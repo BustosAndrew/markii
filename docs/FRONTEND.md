@@ -525,8 +525,10 @@ What changed on shared surfaces:
 `AgentChat`. What changed on shared surfaces, and what not to break:
 
 - **`AgentKind` gains `"brand"`**; directory rows gain **`surface: "drawer" | "editor"`** — route
-  `"editor"` agents to `href` rather than opening `AgentPanel`. Sessions carry **`siteId`**, and
+  `"editor"` agents to `href` rather than opening `AgentPanel`. The Agents menu appends
+  `?open=design` so `/dashboard/websites` cards open the editor. Sessions carry **`siteId`**, and
   `listAgentSessions({ agent: "brand", siteId })` lists one site's conversations.
+  `AskAgentButton` for `brand` is a link to that list, not a drawer.
 - **`AgentChat` gained optional props** the drawer does not use: `context` (a getter, read at send
   time — the brand agent **requires** `context.siteId`), `onToolResult`, `onStop`, `onBusyChange`,
   `stopSignal`. Draft tools (`builder_*`) render as "… in your draft" lines — they already happened.

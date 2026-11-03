@@ -91,7 +91,10 @@ export function AgentsNavMenu() {
     close();
     // The brand agent works inside one site's editor; the menu takes the merchant to choose a site.
     if (item.surface === "editor" && item.href) {
-      router.push(item.href);
+      const dest = item.href.includes("?")
+        ? `${item.href}&open=design`
+        : `${item.href}?open=design`;
+      router.push(dest);
       return;
     }
     agents?.openAgent(item.id);

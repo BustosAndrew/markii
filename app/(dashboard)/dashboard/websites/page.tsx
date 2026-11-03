@@ -20,6 +20,7 @@ export default async function WebsitesPage({
   const status = firstParam(sp.status) as SiteStatus | undefined;
   const page = parsePage(sp.page);
   const limit = parseLimit(sp.limit);
+  const openDesign = firstParam(sp.open) === "design";
 
   const { data, error } = await loadOrError(() =>
     listSites(
@@ -39,7 +40,11 @@ export default async function WebsitesPage({
     <div>
       <PageHeader
         title="Websites"
-        description="Agent storefronts across your Markii account."
+        description={
+          openDesign
+            ? "Choose a storefront to open the brand agent beside its live preview."
+            : "Agent storefronts across your Markii account."
+        }
         actions={
           data && data.items.length === 0 ? undefined : (
             <ButtonLink href="/dashboard/websites/new">New website</ButtonLink>
@@ -68,8 +73,16 @@ export default async function WebsitesPage({
 
       {!error && data && data.items.length === 0 ? (
         <EmptyState
-          title="No websites yet"
-          description="Create a site to import a catalog and deploy for agents."
+          title={
+            openDesign
+              ? "Create a website to use the brand agent"
+              : "No websites yet"
+          }
+          description={
+            openDesign
+              ? "The brand agent chats in the design editor, beside a live preview of your store — not in a side panel like Catalog or Assistant."
+              : "Create a site to import a catalog and deploy for agents."
+          }
           action={
             <ButtonLink href="/dashboard/websites/new">Create website</ButtonLink>
           }
@@ -80,7 +93,15 @@ export default async function WebsitesPage({
         <>
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {data.items.map((site) => (
-              <SiteCard key={site.id} site={site} />
+              <SiteCard
+                key={site.id}
+                site={site}
+                href={
+                  openDesign
+                    ? `/dashboard/websites/${site.slug}/design`
+                    : undefined
+                }
+              />
             ))}
             <ButtonLink
               href="/dashboard/websites/new"
