@@ -18,6 +18,24 @@ export function getSite(idOrSlug: string, init?: RequestInit) {
 }
 
 /**
+ * A storefront's address as a merchant reads it — `demo.markii.shop`, or
+ * their verified custom domain. Pass `site.storefrontUrl`, never a hostname
+ * built from the slug: the server's URL is the one shoppers and agents are
+ * sent to (a verified domain wins, a pending one never does), and a literal
+ * root domain here once showed every store at an address it did not have.
+ */
+export function storefrontAddress(storefrontUrl: string): string {
+  return storefrontUrl.replace(/^https?:\/\//, "").replace(/\/$/, "");
+}
+
+/**
+ * Stands in for the slug in an address built before the site exists (the
+ * new-website wizard). Here, not in the wizard: a constant exported from a
+ * `"use client"` module reaches a server component as a reference, not a string.
+ */
+export const SLUG_MARK = "__slug__";
+
+/**
  * What these routes will actually write.
  *
  * `customDomain` and `walletAddress` are **refused by name**, not ignored: both

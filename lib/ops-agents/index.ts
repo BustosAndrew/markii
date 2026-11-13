@@ -95,7 +95,8 @@ export const AGENT_DIRECTORY: Record<
       "Redesigns your storefront with you — layout, copy, colours, fonts — in the site editor, beside " +
       "a live preview. It edits your draft; nothing goes live until you publish.",
     beta: true,
-    href: "/dashboard/websites",
+    // The Websites list in its "open the design editor" mode — every consumer of the directory gets it.
+    href: "/dashboard/websites?open=design",
     surface: "editor",
   },
 };

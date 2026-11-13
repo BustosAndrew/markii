@@ -30,7 +30,7 @@ const FALLBACK_AGENTS: AgentDirectory["agents"] = [
     name: "Brand agent",
     description: "Redesigns your storefront beside a live preview. Edits your draft; you publish.",
     beta: true,
-    href: "/dashboard/websites",
+    href: "/dashboard/websites?open=design",
     surface: "editor",
   },
 ];
@@ -91,10 +91,7 @@ export function AgentsNavMenu() {
     close();
     // The brand agent works inside one site's editor; the menu takes the merchant to choose a site.
     if (item.surface === "editor" && item.href) {
-      const dest = item.href.includes("?")
-        ? `${item.href}&open=design`
-        : `${item.href}?open=design`;
-      router.push(dest);
+      router.push(item.href);
       return;
     }
     agents?.openAgent(item.id);

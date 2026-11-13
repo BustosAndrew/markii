@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getSite, getSiteDomain, getSiteSummary } from "@/lib/api/server";
 import { loadOrError } from "@/lib/api/load";
+import { storefrontAddress } from "@/lib/api/sites";
 import { Badge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
 import { Sparkline } from "@/components/ui/charts";
@@ -44,7 +45,7 @@ export default async function WebsiteDetailPage({
     <div className="space-y-8">
       <PageHeader
         title={site.name}
-        description={site.storefrontUrl || `${site.slug}.markii.app`}
+        description={storefrontAddress(site.storefrontUrl)}
         actions={
           <>
             <Badge

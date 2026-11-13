@@ -242,7 +242,7 @@ Agents never change what shoppers see on their own: the Catalog agent proposes a
 To drive your store from your own AI tools — Claude Code, Cursor — connect over MCP with an API token from team settings. Tokens are scoped, revocable, and go through the same permissions and audit log as the dashboard.`,
       links: [
         { label: "Catalog", href: "/dashboard/catalog" },
-        { label: "Websites", href: "/dashboard/websites" },
+        { label: "Brand agent — choose a store", href: "/dashboard/websites?open=design" },
         { label: "Team and API tokens", href: "/dashboard/settings/team" },
       ],
     },

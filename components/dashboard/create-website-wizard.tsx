@@ -12,7 +12,7 @@ import {
 import { createCategory } from "@/lib/api/categories";
 import { connectDomain } from "@/lib/api/domains";
 import { createProduct } from "@/lib/api/products";
-import { createSite, deploySite } from "@/lib/api/sites";
+import { SLUG_MARK, createSite, deploySite } from "@/lib/api/sites";
 import {
   ApiClientError,
   THEME_IDS,
@@ -62,9 +62,12 @@ type Step = 1 | 2 | 3 | 4;
 export function CreateWebsiteWizard({
   sites,
   orgCurrency,
+  addressTemplate,
 }: {
   sites: Site[];
   orgCurrency: string;
+  /** The new store's address with `SLUG_MARK` for its slug, from the server's own rule. */
+  addressTemplate: string;
 }) {
   const router = useRouter();
   const [step, setStep] = useState<Step>(1);
@@ -652,7 +655,7 @@ export function CreateWebsiteWizard({
               placeholder="demo-store"
             />
             <p className="mt-1.5 text-xs text-muted">
-              Subdomain: {(draft.site.slug || "your-site")}.markii.app
+              Address: {addressTemplate.replace(SLUG_MARK, draft.site.slug || "your-site")}
             </p>
           </div>
           <fieldset>

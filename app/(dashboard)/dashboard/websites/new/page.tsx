@@ -1,6 +1,8 @@
 import { getMe, listSites } from "@/lib/api/server";
 import { loadOrError } from "@/lib/api/load";
 import { CreateWebsiteWizard } from "@/components/dashboard/create-website-wizard";
+import { tenantBaseUrl } from "@/lib/api";
+import { SLUG_MARK, storefrontAddress } from "@/lib/api/sites";
 
 export default async function NewWebsitePage() {
   const [sitesResult, meResult] = await Promise.all([
@@ -20,6 +22,9 @@ export default async function NewWebsitePage() {
     <CreateWebsiteWizard
       sites={sitesResult.data?.items ?? []}
       orgCurrency={usable ? orgCurrency : "USD"}
+      // The server's own rule for where a new store will live — a subdomain of ROOT_DOMAIN,
+      // or the /_sites path where subdomains do not serve (localhost, *.vercel.app).
+      addressTemplate={storefrontAddress(tenantBaseUrl(SLUG_MARK))}
     />
   );
 }

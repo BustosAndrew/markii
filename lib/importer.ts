@@ -435,7 +435,7 @@ export async function assertPublicUrl(raw: string): Promise<URL> {
 
 // ---------- fetching ----------
 
-const FETCH_HEADERS = { "user-agent": "Markii-Importer/1.0 (+https://markii.app)" };
+const FETCH_HEADERS = { "user-agent": "Markii-Importer/1.0 (+https://markii.shop)" };
 const MAX_REDIRECTS = 3;
 
 /**

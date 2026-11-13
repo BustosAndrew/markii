@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { StatusDot } from "@/components/ui/status-dot";
+import { storefrontAddress } from "@/lib/api/sites";
 import type { Site } from "@/lib/api/types";
 
 const statusTone = {
@@ -37,7 +38,7 @@ export function SiteCard({
               {site.name}
             </h2>
             <p className="mt-1 truncate font-mono text-xs text-muted">
-              {site.slug}.markii.app
+              {storefrontAddress(site.storefrontUrl)}
             </p>
           </div>
           <Badge variant={statusBadge[site.status]}>{site.status}</Badge>
