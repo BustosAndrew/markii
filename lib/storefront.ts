@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq, isNotNull } from "drizzle-orm";
 import { cache } from "react";
 import { accountStanding, storefrontHeld, type AccountStanding } from "@/lib/billing/standing";
 import {
@@ -165,6 +165,36 @@ export async function publishedDocument(siteId: number, kind: DocumentKind, hand
 
 export function publishedPage(siteId: number, handle: string): Promise<PublishedPage | null> {
   return publishedDocument(siteId, "page", handle);
+}
+
+/**
+ * Every published page, home first — what the sitemap, `llms.txt` and
+ * `llms-full.txt` list (M5). Published only: those documents describe what
+ * shoppers can reach, and the draft is not that.
+ */
+export async function publishedPages(siteId: number): Promise<(PublishedPage & { path: string })[]> {
+  const rows = await db
+    .select({
+      id: siteDocuments.id,
+      handle: siteDocuments.publishedHandle,
+      title: siteDocuments.publishedTitle,
+      seo: siteDocuments.publishedSeo,
+      tree: siteDocuments.publishedTree,
+    })
+    .from(siteDocuments)
+    .where(and(eq(siteDocuments.siteId, siteId), eq(siteDocuments.kind, "page"), isNotNull(siteDocuments.publishedTree)))
+    .orderBy(asc(siteDocuments.id));
+  return rows
+    .filter((r): r is typeof r & { handle: string; tree: PageNode } => Boolean(r.handle && r.tree))
+    .map((r) => ({
+      id: r.id,
+      handle: r.handle,
+      title: r.title ?? r.handle,
+      seo: r.seo ?? {},
+      tree: r.tree,
+      path: r.handle === "home" ? "/" : `/pages/${r.handle}`,
+    }))
+    .sort((a, b) => (a.handle === "home" ? -1 : b.handle === "home" ? 1 : 0));
 }
 
 /**

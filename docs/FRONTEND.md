@@ -495,6 +495,17 @@ The audit list carries both directions now — `undoneBy` on the original row, `
 so a history screen can strike through a reversed change and label its reversal without a second
 query. Both are `string | null` on `ActionInvocation`.
 
+### 🟢 New 2026-11-12 — page SEO and agent documents (D51 M5)
+
+- **`PageSeo` gains `ogImage`** (https). **`builder.updatePage` replaces `seo` whole**, so a form must
+  send every field every time — the Pages tab's SEO form now owns title, description, share image
+  and noindex together (it used to send only title and description, which would have dropped the
+  other two on every save).
+- **`noindex` now also hides the page from agents** — the sitemap, `llms.txt` and `llms-full.txt` —
+  so the toggle reads "Hide from search engines and AI agents". The SEO description is also how
+  `llms.txt` describes the page.
+- No new client calls: the agent documents are storefront routes, not dashboard API.
+
 ### 🟢 New 2026-11-03 — templates, regions and data bindings are built (D51 M4) — review them
 
 Backend and screens both landed (`docs/API.md` §19, "Templates, regions and data binding").

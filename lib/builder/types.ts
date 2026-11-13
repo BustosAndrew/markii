@@ -123,6 +123,8 @@ export type PageSeo = {
   title?: string;
   description?: string;
   noindex?: boolean;
+  /** The image a link preview shows (Open Graph, M5). https only. */
+  ogImage?: string;
 };
 
 /** The home page always exists and keeps this handle. */

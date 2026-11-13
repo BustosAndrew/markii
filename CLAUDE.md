@@ -624,6 +624,14 @@ routes keep their own JSON-LD** whatever the template holds. **The block CSS is 
 by `ThemeRoot`** — a copy per document would let a later document's base rules undo an earlier one's
 node styles. The brand agent can do all of it (four more `agentExecution: "draft"` actions, pinned).
 
+**The agent documents read the published design as of 2026-11-12 (M5)** — `docs/API.md` §19. The
+sitemap, `llms.txt` and the new **`llms-full.txt`** (every published page's text as Markdown,
+`lib/builder/to-markdown.ts`) all read **one list in `lib/storefront-docs.ts`**: published pages,
+**never a `noindex` one** — hiding a page from search hides it from agents. Builder pages carry
+`WebPage`, `FAQPage` and an `ItemList` per visible product listing; the home page carries `WebSite`
+with a `SearchAction`. **`builder.updatePage` replaces `seo` whole**, so a form that sends one field
+wipes the others — the editor's SEO form sends all four.
+
 **Stripe Tax on Markii's own subscription is built as of 2026-09-13** (G3). `automatic_tax` on every
 platform-account subscription create, change and preview — **no `Stripe-Account` header**, the
 opposite direction of money from §18.6 — decided from two facts that are reported apart and never

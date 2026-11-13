@@ -123,7 +123,15 @@ export type AgentDiscoveryOpts = {
   /** Which purchase rails this store actually offers. */
   rails?: { x402?: boolean; stripe?: boolean };
   purchasesEnabled?: boolean;
+  /**
+   * The store's own published pages, home excluded (M5) — about, shipping,
+   * returns. Listed in `llms.txt`, and their full text is `llms-full.txt`.
+   * Pages marked noindex are left out by the caller.
+   */
+  pages?: DiscoveryPage[];
 };
+
+export type DiscoveryPage = { title: string; path: string; description?: string };
 
 function discoveryBlurb(opts: AgentDiscoveryOpts): string {
   const rails: string[] = [];
@@ -154,7 +162,17 @@ export function generateLlmsTxt(
   if (opts.purchasesEnabled !== false && opts.rails?.x402) {
     lines.push(`- Checkout API: POST ${baseUrl}/api/checkout`);
   }
+  if (opts.pages?.length) {
+    lines.push(`- Full text of the store's pages: ${baseUrl}/llms-full.txt`);
+  }
   lines.push("");
+  if (opts.pages?.length) {
+    lines.push("## Pages", "");
+    for (const p of opts.pages) {
+      lines.push(`- [${p.title}](${baseUrl}${p.path})${p.description ? `: ${strip(p.description)}` : ""}`);
+    }
+    lines.push("");
+  }
   if (categories.length) {
     lines.push("## Categories", "");
     for (const c of categories) {
@@ -221,7 +239,11 @@ This store is machine-readable. ${discoveryBlurb(opts)}
 
 - \`GET ${baseUrl}/llms.txt\` — catalog summary
 - \`GET ${baseUrl}/sitemap.xml\` — all URLs
-- Every product page (\`${baseUrl}/p/{slug}\`) embeds Schema.org Product JSON-LD.
+- Every product page (\`${baseUrl}/p/{slug}\`) embeds Schema.org Product JSON-LD.${
+    opts.pages?.length
+      ? `\n- \`GET ${baseUrl}/llms-full.txt\` — the store's own pages (${opts.pages.map((p) => p.title).join(", ")}) as Markdown: policies, shipping, about. Read it before answering a question about them.`
+      : ""
+  }
 
 ## Search
 
@@ -304,9 +326,52 @@ export function sitemapTree(bundle: Bundle): { pages: SitemapNode[] } {
   };
 }
 
-export function generateSitemapXml(bundle: Bundle, baseUrl: string): string {
+/**
+ * The store's own document for `llms-full.txt` (M5, the llms.txt convention's
+ * full-text companion): every published page's Markdown under its title and
+ * address. Rendered by the caller (`lib/builder/to-markdown.ts`).
+ */
+export function generateLlmsFullTxt(
+  bundle: Bundle,
+  baseUrl: string,
+  pages: (DiscoveryPage & { markdown: string })[],
+): string {
+  const out = [
+    `# ${bundle.site.name} — pages`,
+    "",
+    `The full text of ${bundle.site.name}'s own pages, as published. Products are listed in ${baseUrl}/llms.txt and searchable at ${baseUrl}/api/search?q={query}.`,
+  ];
+  for (const p of pages) {
+    out.push("", `## ${p.title}`, "", `URL: ${baseUrl}${p.path}`);
+    if (p.description) out.push(`Summary: ${strip(p.description)}`);
+    if (p.markdown.trim()) out.push("", p.markdown.trim());
+  }
+  return out.join("\n") + "\n";
+}
+
+/**
+ * The home page's `WebSite` JSON-LD with a `SearchAction` — how a crawler or
+ * agent learns the store has search and what its URL template is (M5).
+ */
+export function websiteJsonLd(siteName: string, baseUrl: string) {
+  return {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    name: siteName,
+    url: `${baseUrl}/`,
+    potentialAction: {
+      "@type": "SearchAction",
+      target: `${baseUrl}/search?q={search_term_string}`,
+      "query-input": "required name=search_term_string",
+    },
+  };
+}
+
+export function generateSitemapXml(bundle: Bundle, baseUrl: string, pagePaths: string[] = []): string {
   const urls = [
     `${baseUrl}/`,
+    // Published builder pages (M5); the home page is the line above.
+    ...pagePaths.filter((p) => p !== "/").map((p) => `${baseUrl}${p}`),
     ...bundle.categories.map((c) => `${baseUrl}/c/${c.slug}`),
     ...(bundle.collections ?? []).map((c) => `${baseUrl}/collections/${c.handle}`),
     ...bundle.products.map((p) => `${baseUrl}/p/${p.slug}`),

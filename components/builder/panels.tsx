@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { BlockRegistry, DesignPage, DesignTokens, PageSeo, SharedDocument, ThemeId } from "@/lib/api/builder";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/field";
+import { Toggle } from "@/components/ui/toggle";
 
 /** The block library and presets (`docs/BUILDER.md` §11). Inserts go into or after the selection. */
 export function AddPanel({
@@ -83,7 +84,7 @@ export function PagesPanel({
   disabled: boolean;
   onOpen: (id: number) => void;
   onCreate: (handle: string, title: string) => Promise<boolean>;
-  onRename: (id: number, patch: { title?: string; seo?: { title?: string; description?: string } }) => void;
+  onRename: (id: number, patch: { title?: string; seo?: PageSeo }) => void;
   onDelete: (id: number) => void;
   onRestore: (id: number) => void;
 }) {
@@ -244,22 +245,50 @@ export function SharedLayoutsPanel({
 }
 
 /** SEO fields save on blur. Their current values come from the page document, loaded by the editor. */
-function SeoFields({ seo: initial, disabled, onSave }: { seo: PageSeo; disabled: boolean; onSave: (seo: { title?: string; description?: string }) => void }) {
-  const [seo, setSeo] = useState<{ title?: string; description?: string }>({ title: initial.title, description: initial.description });
-  const save = () => {
-    const next = Object.fromEntries(Object.entries(seo).filter(([, v]) => v && v.trim())) as { title?: string; description?: string };
-    if (JSON.stringify(next) !== JSON.stringify({ ...(initial.title ? { title: initial.title } : {}), ...(initial.description ? { description: initial.description } : {}) })) onSave(next);
+/**
+ * The page's SEO, saved as one object on blur or toggle — `builder.updatePage`
+ * replaces `seo` whole, so every field is sent every time, or saving the title
+ * would drop the share image and the noindex switch.
+ */
+function SeoFields({ seo: initial, disabled, onSave }: { seo: PageSeo; disabled: boolean; onSave: (seo: PageSeo) => void }) {
+  const [seo, setSeo] = useState<PageSeo>(initial);
+  const clean = (s: PageSeo): PageSeo => {
+    const out: PageSeo = {};
+    if (s.title?.trim()) out.title = s.title.trim();
+    if (s.description?.trim()) out.description = s.description.trim();
+    if (s.ogImage?.trim()) out.ogImage = s.ogImage.trim();
+    if (s.noindex) out.noindex = true;
+    return out;
+  };
+  const save = (next: PageSeo = seo) => {
+    if (JSON.stringify(clean(next)) !== JSON.stringify(clean(initial))) onSave(clean(next));
   };
   return (
     <div className="space-y-3">
       <div>
         <Label htmlFor="seo-title">Search title</Label>
-        <Input id="seo-title" maxLength={120} disabled={disabled} value={seo.title ?? ""} placeholder="Defaults to the page title" onChange={(e) => setSeo({ ...seo, title: e.target.value })} onBlur={save} />
+        <Input id="seo-title" maxLength={120} disabled={disabled} value={seo.title ?? ""} placeholder="Defaults to the page title" onChange={(e) => setSeo({ ...seo, title: e.target.value })} onBlur={() => save()} />
       </div>
       <div>
         <Label htmlFor="seo-desc">Search description</Label>
-        <Input id="seo-desc" maxLength={320} disabled={disabled} value={seo.description ?? ""} onChange={(e) => setSeo({ ...seo, description: e.target.value })} onBlur={save} />
+        <Input id="seo-desc" maxLength={320} disabled={disabled} value={seo.description ?? ""} onChange={(e) => setSeo({ ...seo, description: e.target.value })} onBlur={() => save()} />
+        <p className="mt-1 text-xs text-muted">Also how llms.txt describes this page to AI agents.</p>
       </div>
+      <div>
+        <Label htmlFor="seo-image">Share image</Label>
+        <Input id="seo-image" maxLength={2000} disabled={disabled} value={seo.ogImage ?? ""} placeholder="https://…" onChange={(e) => setSeo({ ...seo, ogImage: e.target.value })} onBlur={() => save()} />
+        <p className="mt-1 text-xs text-muted">Shown when a link to this page is shared.</p>
+      </div>
+      <Toggle
+        checked={Boolean(seo.noindex)}
+        disabled={disabled}
+        label="Hide from search engines and AI agents"
+        onChange={(v) => {
+          const next = { ...seo, noindex: v };
+          setSeo(next);
+          save(next);
+        }}
+      />
     </div>
   );
 }

@@ -12,7 +12,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ site: st
     path: "/llms.txt",
     userAgent: req.headers.get("user-agent"),
   });
-  const body = renderLlmsTxt(data);
+  const body = await renderLlmsTxt(data);
   return new Response(body, {
     headers: {
       "content-type": "text/plain; charset=utf-8",

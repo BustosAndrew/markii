@@ -169,7 +169,7 @@ const SITE_DOCS = {
     description:
       "The store summary an AI agent reads at that storefront's own domain — byte for byte " +
       "what a shopper's agent sees. Read it to answer 'what do agents know about my store'.",
-    render: (data: SiteData) => Promise.resolve(renderLlmsTxt(data)),
+    render: (data: SiteData) => renderLlmsTxt(data),
   },
   "agent.md": {
     mimeType: "text/markdown",

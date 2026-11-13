@@ -23,6 +23,7 @@ vi.mock("@/lib/api/builder", async (importOriginal) => ({
 
 const { Inspector } = await import("./inspector");
 const { PublishDialog } = await import("./dialogs");
+const { PagesPanel } = await import("./panels");
 
 const heading: BlockDescription = {
   type: "heading",
@@ -140,5 +141,27 @@ describe("the publish dialog", () => {
     dialog();
     await waitFor(() => expect(screen.getByText("An image has no alt text.")).toBeTruthy());
     expect((screen.getByRole("button", { name: "Publish" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+});
+
+describe("the page SEO form (M5)", () => {
+  // builder.updatePage replaces seo whole: a save that sends one field wipes the rest.
+  const page = { id: 5, handle: "shipping", title: "Shipping", deleted: false, published: true, path: "/pages/shipping", updatedAt: "2026-11-12T00:00:00Z" };
+  const seo = { description: "Delivery times", ogImage: "https://cdn.test/share.jpg", noindex: true };
+
+  it("sends every field with each save, so editing one keeps the others", () => {
+    const onRename = vi.fn();
+    render(<PagesPanel pages={[page]} currentId={5} currentSeo={seo} disabled={false} onOpen={noop} onCreate={async () => true} onRename={onRename} onDelete={noop} onRestore={noop} />);
+    const title = screen.getByLabelText("Search title");
+    fireEvent.change(title, { target: { value: "Shipping & returns" } });
+    fireEvent.blur(title);
+    expect(onRename).toHaveBeenLastCalledWith(5, { seo: { title: "Shipping & returns", ...seo } });
+  });
+
+  it("says that hiding a page hides it from agents too, and saves the switch at once", () => {
+    const onRename = vi.fn();
+    render(<PagesPanel pages={[page]} currentId={5} currentSeo={{ description: "Delivery times" }} disabled={false} onOpen={noop} onCreate={async () => true} onRename={onRename} onDelete={noop} onRestore={noop} />);
+    fireEvent.click(screen.getByRole("switch", { name: "Hide from search engines and AI agents" }));
+    expect(onRename).toHaveBeenLastCalledWith(5, { seo: { description: "Delivery times", noindex: true } });
   });
 });

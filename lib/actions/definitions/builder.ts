@@ -614,7 +614,9 @@ const seoSchema = z
   .object({
     title: z.string().max(120).optional(),
     description: z.string().max(320).optional(),
+    // Kept out of search results, the sitemap, llms.txt and llms-full.txt alike (M5).
     noindex: z.boolean().optional(),
+    ogImage: z.string().max(2000).regex(/^https:\/\/\S+$/, "Use an https:// image URL.").optional(),
   })
   .strict();
 
@@ -659,8 +661,10 @@ export const createPage = defineAction({
 export const updatePage = defineAction({
   id: "builder.updatePage",
   description:
-    "Change a page's title, handle (its /pages/{handle} address) or SEO title and description in " +
-    "the draft. The home page's handle cannot change.",
+    "Change a page's title, handle (its /pages/{handle} address) or SEO in the draft. seo is " +
+    "replaced whole: { title, description, ogImage (https share image), noindex }. The SEO " +
+    "description is also how llms.txt describes the page to agents; noindex keeps the page out of " +
+    "search engines, the sitemap, llms.txt and llms-full.txt. The home page's handle cannot change.",
   input: z.object({ siteId, pageId, title: z.string().trim().min(1).max(120).optional(), handle: handle.optional(), seo: seoSchema.optional() }).strict(),
   permission: "cms.write",
   riskTier: "low",

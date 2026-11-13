@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { StorefrontBuilderPage } from "@/components/storefront/builder-page";
 import { logTraffic } from "@/lib/agents";
 import { loadSite, pageFor, storefrontHalted } from "@/lib/storefront";
+import { pageSocialMetadata } from "@/lib/storefront-meta";
 
 /**
  * A merchant's own page — about, shipping, FAQ — designed in the builder and
@@ -20,10 +21,13 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (!data) return {};
   const page = await pageFor(data, handle);
   if (!page) return {};
+  const title = page.seo.title || `${page.title} — ${data.site.name}`;
+  const description = page.seo.description || undefined;
   return {
-    title: page.seo.title || `${page.title} — ${data.site.name}`,
-    description: page.seo.description || undefined,
+    title,
+    description,
     robots: data.site.indexed && !page.seo.noindex ? undefined : { index: false },
+    ...pageSocialMetadata(data, { title, description, path: `/pages/${page.handle}`, seo: page.seo }),
   };
 }
 
@@ -42,5 +46,18 @@ export default async function BuilderPageRoute({ params }: Props) {
     userAgent: (await headers()).get("user-agent"),
   });
 
-  return <StorefrontBuilderPage data={data} tree={page.tree} documentId={page.id} />;
+  return (
+    <StorefrontBuilderPage
+      data={data}
+      tree={page.tree}
+      documentId={page.id}
+      extra={{
+        page: {
+          name: page.seo.title || page.title,
+          description: page.seo.description || undefined,
+          url: `${data.baseUrl.replace(/\/$/, "")}/pages/${page.handle}`,
+        },
+      }}
+    />
+  );
 }

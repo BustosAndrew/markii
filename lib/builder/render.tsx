@@ -55,6 +55,8 @@ export type RenderContext = {
   region?: RegionHandle;
   /** The current search, so a header search box on the results page shows what was searched. */
   searchQuery?: string;
+  /** A page's own `WebPage` JSON-LD (M5). Absent on templates, whose routes emit Product / CollectionPage. */
+  page?: PageLd;
   /**
    * The document being drawn. In the preview it is stamped as `data-mk-doc`, so
    * a click on the header while the editor has the home page open can switch
@@ -472,6 +474,102 @@ export function pageJsonLd(tree: PageNode): object[] {
   ];
 }
 
+/** What a page's `WebPage` JSON-LD says about it (M5). Set for pages, not templates — their routes describe them. */
+export type PageLd = { name: string; description?: string; url: string };
+
+/** A block hidden from shoppers here contributes no structured data either — the same rule as rendering, live. */
+function visibleTo(node: PageNode, ctx: RenderContext): boolean {
+  return !node.visibleWhen || evaluateCondition(node.visibleWhen, ctx.values) === true;
+}
+
+function itemList(items: Product[], ctx: RenderContext, name?: string) {
+  return {
+    "@context": "https://schema.org",
+    "@type": "ItemList",
+    ...(name ? { name } : {}),
+    numberOfItems: items.length,
+    itemListElement: items.map((p, i) => ({ "@type": "ListItem", position: i + 1, url: `${base(ctx)}/p/${p.slug}`, name: p.name })),
+  };
+}
+
+/**
+ * Everything a builder document contributes to the page's one JSON-LD script
+ * (`docs/BUILDER.md` §6 — "commerce blocks must implement jsonLd"): `WebPage`
+ * for a page, `FAQPage` from its FAQs, and an `ItemList` for each product
+ * listing a shopper can see — grids, featured products, repeaters.
+ *
+ * Listings of the collection a template shows are left to the route, whose
+ * `CollectionPage` already carries that list; a second copy would be noise.
+ */
+export async function documentJsonLd(tree: PageNode, ctx: RenderContext): Promise<object[]> {
+  const out: object[] = [];
+  if (ctx.page) {
+    out.push({
+      "@context": "https://schema.org",
+      "@type": "WebPage",
+      name: ctx.page.name,
+      ...(ctx.page.description ? { description: ctx.page.description } : {}),
+      url: ctx.page.url,
+      isPartOf: { "@type": "WebSite", name: ctx.values.store.name, url: ctx.values.store.url },
+    });
+  }
+  const faqs: { question: string; answer: string }[] = [];
+  const lists: Promise<object | null>[] = [];
+  const enabled = ctx.products.filter((x) => x.enabled);
+
+  const walk = (n: PageNode) => {
+    if (!visibleTo(n, ctx)) return;
+    const p = boundProps(n, ctx.values);
+    switch (n.type) {
+      case "faq":
+        faqs.push(...((p.items as { question: string; answer: string }[]) ?? []));
+        break;
+      case "productGrid": {
+        const limit = Number(p.limit ?? 12);
+        if (p.source === "all") lists.push(Promise.resolve(itemList(enabled.slice(0, limit), ctx)));
+        else if (p.source === "category") {
+          const cat = ctx.categories.find((c) => c.slug === p.categorySlug);
+          if (cat) lists.push(Promise.resolve(itemList(enabled.filter((x) => x.categoryId === cat.id).slice(0, limit), ctx, cat.name)));
+        } else if (p.source === "collection") {
+          const coll = ctx.collections.find((c) => c.handle === p.collectionHandle);
+          if (coll) lists.push(storefrontMembersOf(coll, limit).then((m) => itemList(m.filter((x) => x.enabled).slice(0, limit), ctx, coll.title)));
+        }
+        break;
+      }
+      case "productCard": {
+        const product = enabled.find((x) => x.slug === p.productSlug);
+        if (product) lists.push(Promise.resolve(itemList([product], ctx)));
+        break;
+      }
+      case "repeater": {
+        const source = p.source as RepeaterSource;
+        if (source === "collection.products") break;
+        const items = repeaterItems(source, ctx);
+        if (items?.length) lists.push(Promise.resolve(itemList(items.slice(0, Number(p.limit ?? 12)), ctx)));
+        return; // its children are the per-item design, not more listings
+      }
+    }
+    (n.children ?? []).forEach(walk);
+  };
+  walk(tree);
+
+  if (faqs.length) {
+    out.push({
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      mainEntity: faqs.map((f) => ({
+        "@type": "Question",
+        name: f.question,
+        acceptedAnswer: { "@type": "Answer", text: markdownText(f.answer) },
+      })),
+    });
+  }
+  for (const list of await Promise.all(lists)) {
+    if (list && (list as { numberOfItems: number }).numberOfItems > 0) out.push(list);
+  }
+  return out;
+}
+
 /** Types the renderer handles — a unit test holds this equal to the registry. */
 export const RENDERED_TYPES = [
   "root", "section", "columns", "column", "grid", "row", "repeater", "spacer", "divider", "heading", "text",
@@ -488,8 +586,8 @@ function docAttr(ctx: RenderContext) {
  * The JSON-LD string is built by `JSON.stringify` and only ever contains data
  * — `<` is escaped so a merchant's FAQ text cannot close the script tag.
  */
-export function BuilderPage({ tree, ctx }: { tree: PageNode; ctx: RenderContext }) {
-  const jsonLd = pageJsonLd(tree);
+export async function BuilderPage({ tree, ctx }: { tree: PageNode; ctx: RenderContext }) {
+  const jsonLd = await documentJsonLd(tree, ctx);
   return (
     <>
       <style dangerouslySetInnerHTML={{ __html: compileStyles(tree) }} />

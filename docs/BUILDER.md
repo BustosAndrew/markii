@@ -351,6 +351,11 @@ value }`) rather than a parsed expression — the same whitelist, with nothing t
 today and a per-shopper page is a caching decision of its own. Menus are a `navMenu` block in a
 region, not a separate table. The editor previews a template against the store's first product or
 collection and follows links inside the preview to any other.
+**M5 is built (2026-11-12)** — §6's protocol-preview consumer and §14's generators: the sitemap,
+`llms.txt` and a new `llms-full.txt` read the published pages (`noindex` ones excluded from all
+three), the Markdown is rendered from the tree with the HTML's bindings and visibility, and the
+renderer contributes `WebPage`, `FAQPage` and `ItemList` JSON-LD — commerce blocks now implement
+§5's `jsonLd` requirement. Product data still comes from the catalogue, never from a block.
 
 0. **Action registry + `defineAction` primitive** — built back in **Phase C** (`docs/BACKEND.md` §1),
    so it already exists and commerce mutations already use it

@@ -36,7 +36,7 @@ carry an explicit status — **never call a `PLANNED` endpoint and never fake it
 | 16 | Accounts, organizations, staff | partial — `/api/auth/*`, `/api/me`, `/api/org`, `/api/org/staff*`, `/api/org/tokens*`, `/api/org/switch`, **org scoping of §1–8**, and **MFA** (`/api/auth/mfa*`, enrol · challenge · recover, D40) are ✅ LIVE; the **audit log** (`/api/org/audit`, 2026-09-06) and **sessions** (`/api/org/sessions*`, 2026-09-07) are ✅ LIVE. **§16 is complete** — every `*_API_LIVE` constant in `lib/api/org.ts` is now `true`. (Tokens and org switching were listed as planned until 2026-08-03, and **MFA until 2026-08-18** — all three were already routed.) Frontend: `/dashboard/settings/account`, `/dashboard/settings/team`, `/dashboard/settings/audit`, the sidebar org switcher, `/mfa/*` | **A** |
 | 17 | Billing, plans, metering, threshold fees | ✅ **LIVE, and merchants are charged** (corrected 2026-08-18 — this row claimed "nothing is charged" long after it did). Usage ledger, threshold fee engine, meter, plan catalog, entitlements, period-close assessments, the **Stripe webhook** (verified + idempotent, platform **and** Connect handlers), subscriptions, plan changes with a Stripe-computed proration preview, cancellation at period end, payment methods, invoice history, and **threshold-fee invoicing onto the same invoice**. Scheduled monthly (§25). Add-on *purchase* alone refuses `409` — Agent Ops and Chargeback Assist are Phase F and do not exist | B |
 | 18 | Commerce core (variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping, **memberships**) | partial — §18.1–18.6 ✅ LIVE, including the §18.4 card rail (Stripe Connect direct charges) and **§18.6 Stripe Tax** (2026-08-17); §18.5 gift cards are ⛔ **deferred** (D33). §18.7 order operations (incl. **processor-executed card refunds**), §18.8 digital delivery, and §18.9 membership gating + shopper login ✅ LIVE — **including recurring/auto-renewing membership billing** (Stripe Subscriptions on the merchant's own Connect account; this row claimed otherwise until 2026-08-18). `STRIPE_CONNECT_WEBHOOK_SECRET` is **set and verified in production** (2026-09-07) — this row called it outstanding for weeks after it was configured. `pnpm stripe:webhooks` confirms the Connect endpoint subscribes to all nine required events including `invoice.created`. Genuine Stripe-generated Connect delivery was proven 2026-09-08 through the CLI (`stripe trigger … --stripe-account`), which this row called unproven for five days after | C |
-| 19 | Site builder & content | partial ✅ (M1 foundation · M2 editor + preview · M3 brand agent · M4 templates, regions, bindings) · M5–M7 🟡 | D |
+| 19 | Site builder & content | partial ✅ (M1 foundation · M2 editor + preview · M3 brand agent · M4 templates, regions, bindings · M5 agent documents) · M6–M7 🟡 | D |
 | 20 | Disputes & chargebacks | 🟡 PLANNED | F |
 | 21 | Agent Ops add-on | ⤴ **Superseded by §27** (D47, 2026-10-15) — built as free beta merchant agents rather than a last-phase paid add-on; the add-on billing and the settings/audit endpoints remain unbuilt | F |
 | 22 | **Action registry & MCP** — agent-native architecture | ✅ LIVE (registry, invoke, dry-run, audit, **undo** — 2026-08-18, and the **MCP server** — 2026-09-07: tools, prompts **and resources**). `undoable` is now derived from an `inverse()` and refused if declared without one, which corrected four actions that claimed it falsely | **Registry: C · MCP: D** |
@@ -2972,7 +2972,7 @@ memberships* above.)
 
 ---
 
-## 19. Site builder & content — partial ✅ LIVE (M1 foundation 2026-10-31 · M2 editor + live preview 2026-11-01 · M3 brand agent 2026-11-02 · M4 templates, regions, bindings 2026-11-03) — Phase D, D51
+## 19. Site builder & content — partial ✅ LIVE (M1 foundation 2026-10-31 · M2 editor + live preview 2026-11-01 · M3 brand agent 2026-11-02 · M4 templates, regions, bindings 2026-11-03 · M5 agent documents 2026-11-12) — Phase D, D51
 
 Architecture in **`docs/BUILDER.md`**. Pages are versioned JSON node trees, never HTML strings.
 **Reads are REST; every write is a registry action** (`POST /api/actions/builder.*`), so the
@@ -3029,7 +3029,26 @@ through `POST /api/actions/:id/undo` except publish, discard and restore.
 published pages; the published theme tokens reach every storefront page through `ThemeRoot`.
 Published HTML carries no editor attributes and no builder JavaScript; FAQ blocks publish
 `FAQPage` JSON-LD. **The editor is `/dashboard/websites/{slug}/design`** (M2), and the **brand agent** is
-its Agent tab (M3, §27). **Not built yet:** generators from the tree (M5), custom code (M6), the editor polish of M7.
+its Agent tab (M3, §27). **Not built yet:** custom code (M6), the editor polish of M7.
+**Agent documents from the published design (M5, 2026-11-12).** The merchant's own published pages
+now reach every document an agent or crawler reads, all from **one list** (`lib/storefront-docs.ts`):
+published pages only, and **never a page whose SEO says `noindex`** — hiding a page from search
+engines hides it from agents too. The sitemap lists them; `llms.txt` gains a `## Pages` section
+(title, address, the page's SEO description) and a link to **`/llms-full.txt`** — new: the full text
+of every listed page, home first, as Markdown (the llms.txt convention's full-text companion),
+rendered from the published tree with the same bindings, visibility and catalogue as the HTML
+(`lib/builder/to-markdown.ts`; product listings come out as links with price and stock).
+`agent.md` points at it by page name. `llms-full.txt` is gated like `llms.txt` (agent discovery off
+or the store halted → `404`), `404`s when no page is published, and is logged as agent traffic.
+
+**Structured data**: every builder page carries `WebPage` (name, description, URL, `isPartOf` the
+store), an `FAQPage` from its FAQ blocks, and an **`ItemList` per product listing a shopper can see**
+— grids, featured products, repeaters (§6's "commerce blocks must implement jsonLd", built). Hidden
+blocks contribute nothing. Templates add no `WebPage`, and listings of the collection a template
+shows are left to the route's own `CollectionPage`. The home page — designed or fixed — carries
+`WebSite` with a `SearchAction` on `/search?q=`. **Per-page SEO** gains `ogImage` (https) beside
+`title`, `description` and `noindex`; pages emit Open Graph tags and a canonical link on the store's
+real address. `builder.updatePage` replaces `seo` **whole** — send every field.
 
 **Templates, regions and data binding (M4, 2026-11-03).** A **template** (`kind: "template"`,
 handle `product` or `collection`) is the layout every product or collection page renders with; a
@@ -3445,14 +3464,16 @@ preview tabs):
 | `/p/{productSlug}` | product page + JSON-LD | ✅ LIVE |
 | `/search?q=…` | search results page — a plain `GET` form in the header, no island; `noindex` regardless of the site setting | ✅ LIVE (2026-09-13, G6) |
 | `/api/search?q=…` | the same search as JSON, for agents (§18.4 table) | ✅ LIVE (2026-09-13, G6) |
-| `/llms.txt` | LLM-readable store summary | ✅ LIVE |
+| `/llms.txt` | LLM-readable store summary; lists the store's published pages (§19 M5) | ✅ LIVE |
+| `/llms-full.txt` | the full text of the store's published pages as Markdown, home first; noindex pages left out; `404` with none published or agent discovery off | ✅ LIVE (2026-11-12, §19 M5) |
 | `/agent.md` | agent protocol + purchase instructions | ✅ LIVE |
-| `/sitemap.xml` | sitemap | ✅ LIVE |
+| `/sitemap.xml` | sitemap — catalogue, collections, and published builder pages except noindex ones | ✅ LIVE |
 | `/api/checkout` | x402 payment endpoint (402 challenge → settle) | ✅ LIVE |
 | `/api/cart*` · `/api/checkout/session*` | cart + checkout API | ✅ LIVE (§18.4) — both rails (this row said "card rail PLANNED" for weeks after Stripe Connect direct charges shipped) |
 | `/cart` | the human cart page (§18.4) — the sanctioned island; checkout continues from it | ✅ LIVE (this row said PLANNED for weeks after `app/%5Fsites/[site]/cart/page.tsx` shipped) |
 | `/collections` · `/collections/{handle}` | published collections — index, and one collection as product cards with a Schema.org `CollectionPage` + `ItemList` of the product URLs. Manual order or rules evaluated per request; enabled products only; an unpublished handle is a 404 like one that never existed. Also in `llms.txt` (`## Collections`), the sitemap, and the header nav once any is published | ✅ LIVE (2026-09-14, §18.2) |
-| `/blog` · `/pages/{handle}` | builder-authored content | 🟡 PLANNED (§19) |
+| `/pages/{handle}` | a builder page, once published — `WebPage` / `FAQPage` / `ItemList` JSON-LD, Open Graph, canonical | ✅ LIVE (2026-10-31, §19 — this row said PLANNED until 2026-11-12) |
+| `/blog` | builder-authored posts | 🟡 PLANNED (§19) |
 | `/account` | shopper account — sign in/up, memberships, cancel a renewal (§18.3, §18.9) | ✅ LIVE (row corrected 2026-09-14) |
 
 In local dev, storefronts are reachable at `http://localhost:3000/_sites/{siteSlug}/…`.
