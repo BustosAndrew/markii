@@ -78,6 +78,17 @@ import { find, insertionPoint, nodeScopes } from "./tree";
  * did" is the same button.
  */
 
+/** `400 VALIDATION_ERROR` with `details.problems` — custom CSS and head code. */
+function validationProblems(error: unknown): string[] | null {
+  if (!(error instanceof ApiClientError) || error.code !== "VALIDATION_ERROR") return null;
+  const details = error.details;
+  if (!details || typeof details !== "object" || Array.isArray(details)) return null;
+  const problems = (details as { problems?: unknown }).problems;
+  if (!Array.isArray(problems) || problems.length === 0) return null;
+  if (!problems.every((item) => typeof item === "string")) return null;
+  return problems;
+}
+
 const POLL_MS = 2_000;
 /** Re-mint the preview well before its two hours run out. */
 const PREVIEW_REFRESH_MS = 90 * 60 * 1000;
@@ -314,7 +325,11 @@ export function DesignEditor({
   // ---------- writing ----------
 
   const run = useCallback(
-    async <T,>(fn: () => Promise<ActionOutcome<T>>, actionId: string, opts: { record?: boolean } = {}): Promise<ActionOutcome<T> | null> => {
+    async <T,>(
+      fn: () => Promise<ActionOutcome<T>>,
+      actionId: string,
+      opts: { record?: boolean; onError?: (error: unknown) => void } = {},
+    ): Promise<ActionOutcome<T> | null> => {
       setBusy(true);
       setError(null);
       try {
@@ -327,11 +342,13 @@ export function DesignEditor({
         reloadFrame();
         return out;
       } catch (e) {
+        opts.onError?.(e);
         if (e instanceof ApiClientError && e.code === "AGENT_EDITING") {
           setLock((l) => ({ ...l, active: true }));
           setError("The brand agent is editing this design. Your change was not saved.");
         } else {
-          setError(publicErrorMessage(e, "That change could not be saved."));
+          const problems = validationProblems(e);
+          setError(problems ? problems.join(" ") : publicErrorMessage(e, "That change could not be saved."));
         }
         return null;
       } finally {
@@ -667,7 +684,15 @@ export function DesignEditor({
                 onTokens={(patch) => void run(() => setDesignTokens(sid, patch), "builder.setThemeTokens")}
                 customCss={started.customCss}
                 canWriteCode={canEdit}
-                onCustomCss={(css) => void run(() => setCustomCss(sid, css), "builder.setCustomCss")}
+                onCustomCss={async (css) => {
+                  let problems: string[] = [];
+                  const out = await run(() => setCustomCss(sid, css), "builder.setCustomCss", {
+                    onError: (error) => {
+                      problems = validationProblems(error) ?? [];
+                    },
+                  });
+                  return out ? [] : problems;
+                }}
                 headHtml={started.headHtml}
                 canWriteScripts={canEdit && canWriteScripts}
                 onHeadCode={async (html) => {

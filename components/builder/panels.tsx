@@ -337,7 +337,8 @@ export function ThemePanel({
   canWriteCode: boolean;
   onTheme: (id: ThemeId) => void;
   onTokens: (patch: Record<string, unknown>) => void;
-  onCustomCss: (css: string) => void;
+  /** Empty array: saved. Non-empty: `details.problems` from a refused save. */
+  onCustomCss: (css: string) => Promise<string[]>;
   /** M6: the draft's custom scripts, as stored (cleaned). */
   headHtml: string;
   /** `cms.scripts` — owner, administrator, developer. */
@@ -499,8 +500,9 @@ function HeadCodeField({
  * refusal comes back through the editor's error bar. The brand agent has no
  * way to write it — the action refuses anything but a signed-in person.
  */
-function CustomCssField({ css, disabled, onSave }: { css: string; disabled: boolean; onSave: (css: string) => void }) {
+function CustomCssField({ css, disabled, onSave }: { css: string; disabled: boolean; onSave: (css: string) => Promise<string[]> }) {
   const [draft, setDraft] = useState(css);
+  const [problems, setProblems] = useState<string[]>([]);
   return (
     <section className="space-y-2 border-t border-border pt-4" aria-label="Custom CSS">
       <div>
@@ -517,10 +519,20 @@ function CustomCssField({ css, disabled, onSave }: { css: string; disabled: bool
         disabled={disabled}
         maxLength={20_000}
         onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => draft !== css && onSave(draft)}
+        onBlur={async () => {
+          if (draft === css) return;
+          setProblems(await onSave(draft));
+        }}
         className="w-full rounded-[var(--radius-control)] border border-border bg-surface p-2 font-mono text-xs text-foreground disabled:opacity-60"
         placeholder={".promo-banner {\n  letter-spacing: 0.04em;\n}"}
       />
+      {problems.length ? (
+        <ul className="space-y-1 rounded-[var(--radius-control)] border border-error-border bg-error-bg p-3 text-xs text-error-text" role="alert">
+          {problems.map((problem) => (
+            <li key={problem}>{problem}</li>
+          ))}
+        </ul>
+      ) : null}
     </section>
   );
 }

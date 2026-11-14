@@ -81,7 +81,7 @@ API-independent work so you don't outrun the backend") no longer applies to A, B
 | **Catalog agent** | §27 | ✅ **LIVE, screen built** (beta) | Opened from **Agents** in the dashboard header (`AgentsNavMenu`). Propose-only; the merchant approves. MCP (§22) is a different surface — do not confuse them |
 | **Assistant** | §27 | ✅ **LIVE, screen built** (beta, 2026-10-17) | Opened from **Agents** in the dashboard header. Read-only — answers questions, checks setup, routes to pages/agents. Reuses `AgentPanel` with `agent="assistant"` |
 | **Setup checklist** | §28 | ✅ **LIVE, screen built** (2026-10-17) | Overview card via `getSetupStatus()`. `firstRun` leads the page; `next` is the headline. No local ticks — refetch by revisiting |
-| Site builder | §19 | ✅ **LIVE, screens built** (D51 M1–M4) | `/dashboard/websites/[slug]/design` — editor, live preview, the brand agent in its Agent tab, and (M4) templates, regions and data bindings in the Pages tab and inspector. M5–M7 (generators, custom code, editor polish) are not started |
+| Site builder | §19 | ✅ **LIVE, screens built** (D51 M1–M6) | `/dashboard/websites/[slug]/design` — editor, live preview, brand agent, templates/regions/bindings (M4), page SEO + agent documents (M5), custom CSS/HTML/classes and Theme-tab custom scripts (M6). **M7 editor polish is not started** |
 | **Brand agent** | §27 | ✅ **LIVE, screen built** (beta, 2026-11-02) | Lives in the site editor, not a drawer: directory `surface: "editor"`, and the Agents menu navigates to `href`. Edits the draft directly; Stop is `stopBrandAgent` |
 | Channels, Test Lab | §10 · §12 · §20 | ⛔ Deferred | Out of launch scope — do not start |
 | Platform admin | §26 | ✅ LIVE, screens built | `/admin` when `me.operator`. Suspend/reinstate and **Reset MFA** (`resetPlatformMfa`). Never on merchant nav for anyone else |
@@ -1165,11 +1165,13 @@ The team is two people, so launch is a deliberate subset of the full plan
 | **Readiness** | Score card, issues list, issue drawer |
 | **Catalog agent** | Header **Agents** menu; propose → approve. Beta |
 | **Assistant** | Header **Agents** menu; read-only. Beta |
+| **Brand agent** | Site editor Agent tab. Draft edits; merchant publishes. Beta |
 | **Setup checklist** | Overview card from `GET /api/setup` |
+| **Site builder** (D51 M1–M6) | `/dashboard/websites/[slug]/design` — editor, preview, templates, SEO, custom CSS/HTML/scripts |
 
-**Deferred past launch — do not start these:** the site builder, Channels, Agent Test Lab, the full
-analytics funnel, native email campaigns. The Catalog agent chat (D47 / §27) is in launch scope
-and the dashboard panel is built; further merchant agents are not.
+**Deferred past launch — do not start these:** **M7 editor polish**, Channels, Agent Test Lab, the full
+analytics funnel, native email campaigns. The Catalog, assistant and brand agents (§27) are in
+launch scope and built.
 
 ---
 
@@ -1224,9 +1226,9 @@ responses rather than the shapes they were first written to:
 
 ### 4. Not to be built
 
-Add-on **purchase** (`409`, the products do not exist), the site builder, Channels, Test Lab, Agent
-Ops chat, native email campaigns. Email surfaces must say mail is not configured rather than imply
-it was sent.
+Add-on **purchase** (`409`, the products do not exist), **M7 editor polish**, Channels, Test Lab,
+native email campaigns. Email surfaces must say mail is not configured rather than imply it was
+sent. Do not restyle the design editor as a way of starting M7.
 
 ---
 
