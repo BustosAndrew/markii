@@ -43,6 +43,13 @@ export type SiteData = {
    */
   customCss: string;
   /**
+   * The merchant's **published** head code — custom scripts (M6). Never the
+   * draft: the preview does not run merchant scripts (they would report the
+   * merchant's own editing as store traffic, on an origin framed by the
+   * dashboard). Rendered by `StoreTop`, never on the cart or account pages.
+   */
+  headHtml: string;
+  /**
    * True when this request is the builder's live preview of this site (D51):
    * pages render the **draft**, `theme` is the draft theme, and `baseUrl` keeps
    * every link inside the preview. Never true for a shopper — it needs a
@@ -118,6 +125,7 @@ export async function loadSite(siteSlug: string): Promise<SiteData | null> {
       draftTokens: siteDesigns.draftTokens,
       draftCustomCss: siteDesigns.draftCustomCss,
       publishedCustomCss: siteDesigns.publishedCustomCss,
+      publishedHeadHtml: siteDesigns.publishedHeadHtml,
     })
     .from(siteDesigns)
     .where(eq(siteDesigns.siteId, site.id))
@@ -142,6 +150,7 @@ export async function loadSite(siteSlug: string): Promise<SiteData | null> {
       ? resolveTheme(design.draftThemeId, design.draftTokens)
       : resolveTheme(site.themeId, design?.publishedTokens),
     customCss: (inPreview ? design?.draftCustomCss : design?.publishedCustomCss) ?? "",
+    headHtml: inPreview ? "" : (design?.publishedHeadHtml ?? ""),
     preview: inPreview,
     standing,
     /** A lapsed trial, the last rung of dunning (D10), or a platform suspension (G12) — Markii's hold, not the merchant's. */

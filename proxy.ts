@@ -6,6 +6,15 @@ import {
   type PreviewRequest,
 } from "./lib/builder/preview-url";
 import { normalizeHost, resolveCustomDomain } from "./lib/domains";
+import { CROSS_ORIGIN_REFUSAL, crossOriginWriteRefused } from "./lib/http/cross-origin";
+import {
+  cspHeaderName,
+  cspMode,
+  dashboardOriginForProxy,
+  isSensitiveStorefrontPath,
+  newNonce,
+  storefrontCsp,
+} from "./lib/storefront/csp";
 import { storefrontSlugFromPath } from "./lib/storefront/fair-use";
 import { throttleStorefront } from "./lib/storefront/fair-use-guard";
 import { updateSupabaseSession } from "./lib/supabase/middleware";
@@ -19,6 +28,46 @@ import { updateSupabaseSession } from "./lib/supabase/middleware";
 export const config = {
   matcher: ["/((?!_next|uploads|favicon\\.ico|icon\\.svg).*)"],
 };
+
+/**
+ * Storefront Content-Security-Policy (D51 M6, `lib/storefront/csp.ts`).
+ *
+ * A fresh nonce per request, set on the **request** as well as the response:
+ * Next reads the nonce out of the request's CSP header and stamps it on its own
+ * scripts, and `x-nonce` is how a server component (the merchant's head code,
+ * the preview bridge) reads it to stamp ours. API routes get none — they serve
+ * JSON, and nothing in them renders a script.
+ */
+type Csp = { headers: Headers; apply<T extends Response>(res: T): T };
+
+function storefrontCspFor(req: NextRequest, rest: string, opts: { preview: boolean }): Csp {
+  const headers = new Headers(req.headers);
+  // Never trust a nonce or policy a client sent.
+  headers.delete("x-nonce");
+  headers.delete("content-security-policy");
+  headers.delete("content-security-policy-report-only");
+  const mode = cspMode();
+  const isApi = rest === "/api" || rest.startsWith("/api/");
+  if (mode === "off" || isApi) return { headers, apply: (res) => res };
+  const nonce = newNonce();
+  const policy = storefrontCsp({
+    nonce,
+    sensitive: isSensitiveStorefrontPath(rest),
+    frameAncestor: opts.preview ? dashboardOriginForProxy() : null,
+    dev: process.env.NODE_ENV === "development",
+    https: process.env.NODE_ENV === "production" && req.nextUrl.protocol === "https:",
+  });
+  headers.set("x-nonce", nonce);
+  // Next looks for the nonce here whichever mode the response is in.
+  headers.set("content-security-policy", policy);
+  return {
+    headers,
+    apply: (res) => {
+      res.headers.set(cspHeaderName(mode), policy);
+      return res;
+    },
+  };
+}
 
 /**
  * The builder's live preview (D51): `/t/{token}/{slug}/…` on the preview host
@@ -45,11 +94,11 @@ function previewResponse(req: NextRequest, preview: PreviewRequest): NextRespons
   }
   const url = req.nextUrl.clone();
   url.pathname = `/_sites/${preview.slug}${preview.rest}`;
-  const headers = new Headers(req.headers);
-  headers.set(PREVIEW_TOKEN_HEADER, preview.token);
-  const res = NextResponse.rewrite(url, { request: { headers } });
+  const csp = storefrontCspFor(req, preview.rest, { preview: true });
+  csp.headers.set(PREVIEW_TOKEN_HEADER, preview.token);
+  const res = NextResponse.rewrite(url, { request: { headers: csp.headers } });
   for (const [k, v] of Object.entries(guard)) res.headers.set(k, v);
-  return res;
+  return csp.apply(res);
 }
 
 /** Signed-in-only areas of the platform. Everything else is public. */
@@ -59,6 +108,25 @@ function isProtectedPath(pathname: string) {
 
 export async function proxy(req: NextRequest, event: NextFetchEvent) {
   const waitUntil = (work: Promise<unknown>) => event.waitUntil(work);
+
+  /**
+   * First, on every host: a browser write from another origin carrying cookies
+   * is refused (`lib/http/cross-origin.ts`). Sibling subdomains are the same
+   * *site*, so `SameSite=Lax` does not stop one storefront's script — merchant
+   * head code — from posting to the dashboard or another store with a
+   * visitor's cookies attached.
+   */
+  if (
+    crossOriginWriteRefused({
+      method: req.method,
+      host: req.headers.get("host") ?? "",
+      hasCookie: Boolean(req.headers.get("cookie")),
+      secFetchSite: req.headers.get("sec-fetch-site"),
+      origin: req.headers.get("origin"),
+    })
+  ) {
+    return NextResponse.json(CROSS_ORIGIN_REFUSAL, { status: 403, headers: { "cache-control": "no-store" } });
+  }
 
   const requestHost = normalizeHost(req.headers.get("host") ?? "");
   const preview = parsePreviewRequest(requestHost, req.nextUrl.pathname);
@@ -73,7 +141,13 @@ export async function proxy(req: NextRequest, event: NextFetchEvent) {
    * before the throttle needed to see it.
    */
   const directSlug = storefrontSlugFromPath(req.nextUrl.pathname);
-  if (directSlug) return throttleStorefront(req, directSlug, waitUntil) ?? NextResponse.next();
+  if (directSlug) {
+    const throttled = throttleStorefront(req, directSlug, waitUntil);
+    if (throttled) return throttled;
+    const rest = req.nextUrl.pathname.replace(/^\/_sites\/[^/]+/, "") || "/";
+    const csp = storefrontCspFor(req, rest, { preview: false });
+    return csp.apply(NextResponse.next({ request: { headers: csp.headers } }));
+  }
 
   const host = normalizeHost(req.headers.get("host") ?? "");
   const root = normalizeHost(process.env.ROOT_DOMAIN ?? "");
@@ -123,6 +197,7 @@ export async function proxy(req: NextRequest, event: NextFetchEvent) {
   if (throttled) return throttled;
 
   const url = req.nextUrl.clone();
+  const csp = storefrontCspFor(req, url.pathname, { preview: false });
   url.pathname = `/_sites/${slug}${url.pathname === "/" ? "" : url.pathname}`;
-  return NextResponse.rewrite(url);
+  return csp.apply(NextResponse.rewrite(url, { request: { headers: csp.headers } }));
 }

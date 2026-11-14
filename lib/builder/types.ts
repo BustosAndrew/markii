@@ -96,6 +96,8 @@ export const NODE_ID_PATTERN = /^n_[a-z0-9]{10}$/;
 /** Custom code limits (M6): one custom HTML block's cleaned HTML, and a site's theme CSS. */
 export const CUSTOM_HTML_MAX = 20_000;
 export const CUSTOM_CSS_MAX = 20_000;
+/** M6: the merchant's head code (custom scripts), before cleaning. */
+export const HEAD_CODE_MAX = 20_000;
 
 /** Hard limits, enforced in `./tree` on every write. */
 export const TREE_LIMITS = {

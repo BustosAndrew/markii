@@ -322,6 +322,9 @@ export function ThemePanel({
   onTheme,
   onTokens,
   onCustomCss,
+  headHtml,
+  canWriteScripts,
+  onHeadCode,
 }: {
   themeId: ThemeId;
   tokens: DesignTokens;
@@ -335,6 +338,12 @@ export function ThemePanel({
   onTheme: (id: ThemeId) => void;
   onTokens: (patch: Record<string, unknown>) => void;
   onCustomCss: (css: string) => void;
+  /** M6: the draft's custom scripts, as stored (cleaned). */
+  headHtml: string;
+  /** `cms.scripts` — owner, administrator, developer. */
+  canWriteScripts: boolean;
+  /** Saves; resolves to what the server dropped, or null when the save failed. */
+  onHeadCode: (html: string) => Promise<string[] | null>;
 }) {
   return (
     <div className="space-y-5 p-3">
@@ -410,7 +419,78 @@ export function ThemePanel({
       </section>
 
       <CustomCssField key={customCss} css={customCss} disabled={disabled || !canWriteCode} onSave={onCustomCss} />
+      <HeadCodeField key={headHtml} html={headHtml} disabled={disabled} canWrite={canWriteScripts} onSave={onHeadCode} />
     </div>
+  );
+}
+
+/**
+ * Custom scripts (M6 head code). An explicit Save, not save-on-blur: saving
+ * asks for a fresh authenticator code, and a modal that appears because focus
+ * moved would be a surprise. After saving, the field shows what was stored and
+ * lists anything the server dropped.
+ */
+function HeadCodeField({
+  html,
+  disabled,
+  canWrite,
+  onSave,
+}: {
+  html: string;
+  disabled: boolean;
+  canWrite: boolean;
+  onSave: (html: string) => Promise<string[] | null>;
+}) {
+  const [draft, setDraft] = useState(html);
+  const [removed, setRemoved] = useState<string[]>([]);
+  return (
+    <section className="space-y-2 border-t border-border pt-4" aria-label="Custom scripts">
+      <div>
+        <Label htmlFor="th-head">Custom scripts</Label>
+        <p className="text-xs text-muted">
+          For analytics and pixels: paste the vendor&rsquo;s snippet. Runs on every storefront page once published — never on the cart or account pages, and never in this preview.
+          Kept: &lt;script&gt;, &lt;meta name&gt;, &lt;link rel=&quot;preconnect&quot;&gt; and &lt;noscript&gt; tracking images. Saving asks for your authenticator code.
+        </p>
+      </div>
+      {canWrite ? (
+        <>
+          <textarea
+            id="th-head"
+            rows={8}
+            spellCheck={false}
+            value={draft}
+            disabled={disabled}
+            maxLength={20_000}
+            onChange={(e) => setDraft(e.target.value)}
+            className="w-full rounded-[var(--radius-control)] border border-border bg-surface p-2 font-mono text-xs text-foreground disabled:opacity-60"
+            placeholder={'<script async src="https://www.googletagmanager.com/gtag/js?id=G-XXXX"></script>'}
+          />
+          <button
+            type="button"
+            className="rounded-[var(--radius-control)] border border-border px-3 py-1.5 text-sm text-foreground hover:bg-hover disabled:opacity-50"
+            disabled={disabled || draft === html}
+            onClick={async () => {
+              const dropped = await onSave(draft);
+              if (dropped) setRemoved(dropped);
+            }}
+          >
+            Save scripts
+          </button>
+          {removed.length ? (
+            <div role="status" className="rounded-[var(--radius-control)] border border-warning-border bg-warning-bg p-3 text-xs text-warning-text">
+              <p className="font-medium">Saved without:</p>
+              <ul className="mt-1 list-disc pl-4">
+                {removed.map((r) => (
+                  <li key={r}>{r}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </>
+      ) : (
+        <p className="text-xs text-muted">{html ? "This store has custom scripts. " : ""}Only an owner, administrator or developer can change them.</p>
+      )}
+    </section>
   );
 }
 

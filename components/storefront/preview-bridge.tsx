@@ -1,9 +1,11 @@
 import { dashboardOrigin } from "@/lib/builder/preview";
+import { requestNonce } from "@/lib/storefront/nonce";
 
 /**
- * The builder's live-preview bridge (D51, M2) — the **only** script a
- * storefront page ever carries outside the sanctioned islands, and only in the
- * preview. `ThemeRoot` renders it when `data.preview` is true; published pages
+ * The builder's live-preview bridge (D51, M2) — a script a storefront page
+ * carries only in the preview. (The merchant's own custom scripts, M6, are the
+ * other non-island script, and never run in the preview.) It takes the
+ * request's CSP nonce like every script we render. `ThemeRoot` renders it when `data.preview` is true; published pages
  * never include it (a test asserts there is no `data-mk-node` or bridge in
  * live HTML).
  *
@@ -47,11 +49,12 @@ const STYLE =
   "[data-mk-empty]{min-height:4rem;border:1px dashed var(--sf-border);display:flex;align-items:center;justify-content:center}" +
   "[data-mk-empty]::after{content:'Choose ' attr(data-mk-empty);color:var(--sf-muted);font-size:.875rem}";
 
-export function PreviewBridge() {
+export async function PreviewBridge() {
+  const nonce = await requestNonce();
   return (
     <>
       <style dangerouslySetInnerHTML={{ __html: STYLE }} />
-      <script dangerouslySetInnerHTML={{ __html: SCRIPT(dashboardOrigin()) }} />
+      <script nonce={nonce} dangerouslySetInnerHTML={{ __html: SCRIPT(dashboardOrigin()) }} />
     </>
   );
 }

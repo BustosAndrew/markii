@@ -640,7 +640,16 @@ custom code**: `setCustomCss` is `high`, and every generic tree edit refuses a c
 an agent or token (`assertCustomCodeAuthor` in the builder actions — the rule lives on what an edit
 *does*, because `addBlock` is the brand agent's own low-risk tool). **None of it renders on the cart
 or account pages** (`StoreTop`/`StoreFooter` `minimal`): CSS alone can read what a shopper types.
-Scripts, `<head>` injection and a storefront CSP wait on an owner decision.
+**Custom scripts are built too (owner decision 2026-11-13)** — head code via `builder.setHeadCode`:
+a new **`cms.scripts`** permission, `high`, **step-up**; rebuilt into script/meta/preconnect/noscript-image
+on save; rendered by `StoreTop` with the request's CSP nonce, never on the cart, account or preview.
+**Migration 0048** must be applied first. No script inside a custom HTML block. **Storefronts carry a
+nonce CSP** (`lib/storefront/csp.ts`, set in `proxy.ts`; `'strict-dynamic'`, cart and account limited to
+the store and Stripe) — a script a storefront server component renders must take `requestNonce()`.
+**And `proxy.ts` refuses cookie-carrying cross-origin writes on every host** (`403
+CROSS_ORIGIN_REFUSED`, `lib/http/cross-origin.ts`): sibling subdomains are one *site*, so `SameSite=Lax`
+did not stop a storefront script posting to the dashboard with a visiting merchant's cookies. Host-only
+cookies keep a session from being *read* there; this keeps it from being *used*.
 
 **Stripe Tax on Markii's own subscription is built as of 2026-09-13** (G3). `automatic_tax` on every
 platform-account subscription create, change and preview — **no `Stripe-Account` header**, the

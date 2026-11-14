@@ -36,7 +36,7 @@ carry an explicit status — **never call a `PLANNED` endpoint and never fake it
 | 16 | Accounts, organizations, staff | partial — `/api/auth/*`, `/api/me`, `/api/org`, `/api/org/staff*`, `/api/org/tokens*`, `/api/org/switch`, **org scoping of §1–8**, and **MFA** (`/api/auth/mfa*`, enrol · challenge · recover, D40) are ✅ LIVE; the **audit log** (`/api/org/audit`, 2026-09-06) and **sessions** (`/api/org/sessions*`, 2026-09-07) are ✅ LIVE. **§16 is complete** — every `*_API_LIVE` constant in `lib/api/org.ts` is now `true`. (Tokens and org switching were listed as planned until 2026-08-03, and **MFA until 2026-08-18** — all three were already routed.) Frontend: `/dashboard/settings/account`, `/dashboard/settings/team`, `/dashboard/settings/audit`, the sidebar org switcher, `/mfa/*` | **A** |
 | 17 | Billing, plans, metering, threshold fees | ✅ **LIVE, and merchants are charged** (corrected 2026-08-18 — this row claimed "nothing is charged" long after it did). Usage ledger, threshold fee engine, meter, plan catalog, entitlements, period-close assessments, the **Stripe webhook** (verified + idempotent, platform **and** Connect handlers), subscriptions, plan changes with a Stripe-computed proration preview, cancellation at period end, payment methods, invoice history, and **threshold-fee invoicing onto the same invoice**. Scheduled monthly (§25). Add-on *purchase* alone refuses `409` — Agent Ops and Chargeback Assist are Phase F and do not exist | B |
 | 18 | Commerce core (variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping, **memberships**) | partial — §18.1–18.6 ✅ LIVE, including the §18.4 card rail (Stripe Connect direct charges) and **§18.6 Stripe Tax** (2026-08-17); §18.5 gift cards are ⛔ **deferred** (D33). §18.7 order operations (incl. **processor-executed card refunds**), §18.8 digital delivery, and §18.9 membership gating + shopper login ✅ LIVE — **including recurring/auto-renewing membership billing** (Stripe Subscriptions on the merchant's own Connect account; this row claimed otherwise until 2026-08-18). `STRIPE_CONNECT_WEBHOOK_SECRET` is **set and verified in production** (2026-09-07) — this row called it outstanding for weeks after it was configured. `pnpm stripe:webhooks` confirms the Connect endpoint subscribes to all nine required events including `invoice.created`. Genuine Stripe-generated Connect delivery was proven 2026-09-08 through the CLI (`stripe trigger … --stripe-account`), which this row called unproven for five days after | C |
-| 19 | Site builder & content | partial ✅ (M1 foundation · M2 editor + preview · M3 brand agent · M4 templates, regions, bindings · M5 agent documents · M6 custom CSS/HTML) · scripts, M7 🟡 | D |
+| 19 | Site builder & content | partial ✅ (M1 foundation · M2 editor + preview · M3 brand agent · M4 templates, regions, bindings · M5 agent documents · M6 custom code, scripts, storefront CSP) · M7 🟡 | D |
 | 20 | Disputes & chargebacks | 🟡 PLANNED | F |
 | 21 | Agent Ops add-on | ⤴ **Superseded by §27** (D47, 2026-10-15) — built as free beta merchant agents rather than a last-phase paid add-on; the add-on billing and the settings/audit endpoints remain unbuilt | F |
 | 22 | **Action registry & MCP** — agent-native architecture | ✅ LIVE (registry, invoke, dry-run, audit, **undo** — 2026-08-18, and the **MCP server** — 2026-09-07: tools, prompts **and resources**). `undoable` is now derived from an `inverse()` and refused if declared without one, which corrected four actions that claimed it falsely | **Registry: C · MCP: D** |
@@ -3008,6 +3008,7 @@ All `cms.read`. Writes are `cms.write`:
 | `builder.setBinding` · `setVisibility` | low | ✅ | M4: bind props to data paths (`null` unbinds) / show a block only when a condition holds (`null`: always) |
 | `builder.setCustomClass` | low | ✅ | M6: a block's custom classes (`null` clears) |
 | `builder.setCustomCss` | **high** | — | M6: the site's theme CSS, checked on save. A person only |
+| `builder.setHeadCode` | **high**, step-up | — | M6: the storefront's custom scripts. `cms.scripts`, a person only |
 | `builder.deletePage` · `restorePage` | medium | — | Soft delete in the draft; a deleted page keeps serving until publish. On a template or region it is **reset**: the built-in layout returns at publish |
 | `builder.publish` | **high** | — | Atomic publish; tokens and agents get `HUMAN_APPROVAL_REQUIRED` |
 | `builder.discardDraft` · `restoreVersion` | medium | — | Draft back to live / a version copied into the draft. Not undoable |
@@ -3031,7 +3032,7 @@ through `POST /api/actions/:id/undo` except publish, discard and restore.
 published pages; the published theme tokens reach every storefront page through `ThemeRoot`.
 Published HTML carries no editor attributes and no builder JavaScript; FAQ blocks publish
 `FAQPage` JSON-LD. **The editor is `/dashboard/websites/{slug}/design`** (M2), and the **brand agent** is
-its Agent tab (M3, §27). **Not built yet:** custom scripts and `<head>` injection, the editor polish of M7.
+its Agent tab (M3, §27). **Not built yet:** the editor polish of M7.
 **Custom code (M6, 2026-11-13) — levels 1–3 of `docs/BUILDER.md` §8; scripts are not built.**
 **Migration 0047** adds `site_designs.draft_custom_css` / `published_custom_css` — apply it before
 deploying this code, or every storefront page fails reading the design row.
@@ -3056,10 +3057,39 @@ deploying this code, or every storefront page fails reading the design row.
 - Checks: `EMPTY_CUSTOM_HTML` and `CSS_BUDGET` (§13's ~50 KB across block, document and custom CSS),
   both warnings.
 
-**Not built, pending the owner's decision:** custom JavaScript (§8 level 3's opt-in scripts),
-`<head>` injection (level 4 — analytics pixels), and a storefront Content-Security-Policy with
-per-request nonces. A CSP across every storefront page touches Stripe checkout, fonts and Next's own
-scripts, so it ships as its own step rather than inside this one.
+**Custom scripts, the storefront CSP and the cross-origin guard (M6, 2026-11-13 — owner decision:
+head snippets only, no script in a custom HTML block, the CSP as its own step).** **Migration 0048**
+adds `site_designs.draft_head_html` / `published_head_html` — apply it before deploying this code.
+
+- **`builder.setHeadCode`** — `{ siteId, html }` → `{ headHtml, removed, revision }`. Permission
+  **`cms.scripts`** (new; owner, administrator, developer), **`high`** (agents and API tokens get
+  `403 HUMAN_APPROVAL_REQUIRED`) and **step-up** (`403 MFA_REQUIRED` without a second factor in the
+  last 15 minutes). The snippet is rebuilt (`lib/builder/head-code.ts`) into `<script>` (https `src`
+  or inline), `<meta name|property>`, `<link rel=preconnect|dns-prefetch>` and `<noscript>` https
+  images; anything else is dropped and named in `removed` — `<meta http-equiv>`, iframes, stylesheets,
+  a pasted `nonce`, event handlers. `400 VALIDATION_ERROR` with `details.problems` when nothing usable
+  is left or it is over 20,000 characters. Undo is the same action (step-up again).
+- **Draft → publish like the rest of the design.** `headHtml` and `headHtmlChanged` on the design
+  summary; `HEAD_CODE_CHANGED` (warning) in the checks while the draft differs from what is live;
+  published, discarded, versioned and restored with everything else. **Restoring a version whose
+  scripts differ from the draft's** needs a person holding `cms.scripts` (`403`, `details.reason:
+  "custom_code"`), so a token cannot bring back a removed tag that way.
+- **Where it runs**: every storefront page through `StoreTop`, with this request's CSP nonce on each
+  script — **never on the cart or account, never in the builder preview**, never as a draft. React
+  hoists `<meta>`, `<link>` and `async` scripts into `<head>`; inline scripts run at the top of the
+  body.
+- **Storefront CSP** (`lib/storefront/csp.ts`, set in `proxy.ts`): a fresh nonce per request;
+  `script-src 'nonce-…' 'strict-dynamic'`, `object-src 'none'`, `base-uri 'none'`,
+  `frame-ancestors 'none'` (the preview: the dashboard origin). Cart and account limit
+  `connect-src`/`frame-src` to the store and Stripe; other pages allow `https:` there so analytics can
+  report. Not on storefront `/api/*`. `STOREFRONT_CSP=report-only|off` exists for an incident.
+- **Cross-origin writes are refused on every host** (`lib/http/cross-origin.ts`, first thing in
+  `proxy.ts`): a non-GET that carries cookies and that the browser marks as from another origin
+  (`Sec-Fetch-Site: same-site|cross-site`, or a foreign `Origin`) gets `403 CROSS_ORIGIN_REFUSED`.
+  Sibling subdomains are one *site*, so `SameSite=Lax` let a script on `{slug}.markii.shop` post to
+  the dashboard with a visiting merchant's cookies — harmless while storefronts ran no merchant
+  script, not once they do. Servers, webhooks and API tokens send neither header, or no cookie, and
+  pass.
 **Agent documents from the published design (M5, 2026-11-12).** The merchant's own published pages
 now reach every document an agent or crawler reads, all from **one list** (`lib/storefront-docs.ts`):
 published pages only, and **never a page whose SEO says `noindex`** — hiding a page from search

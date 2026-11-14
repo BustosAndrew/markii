@@ -48,6 +48,19 @@ export const PERMISSIONS = [
    * deliberately widens it.
    */
   "org.audit",
+  /**
+   * Write the storefront's custom scripts — head code for analytics and pixels
+   * (D51 M6, owner decision 2026-11-13).
+   *
+   * **Separate from `cms.write`** because a script is not a design edit: it
+   * runs in every shopper's browser on the store's own origin, where it can
+   * read what product pages show and call the storefront's own APIs as that
+   * shopper. Today the same three roles hold both (`developer` explicitly,
+   * owner and administrator through the whole array), so nothing changes for
+   * anyone — what this buys is that a design-only role added later does not
+   * inherit script access by holding `cms.write`.
+   */
+  "cms.scripts",
 ] as const;
 
 /**
@@ -95,7 +108,7 @@ const ROLE_PERMISSIONS: Record<StaffRole, readonly Permission[]> = {
    * Builds with custom code and integrations. Gets `cms.write` and tokens, but
    * no authority over money or customer data beyond reading it.
    */
-  developer: [...READ_ONLY, "cms.write", "tokens.manage"],
+  developer: [...READ_ONLY, "cms.write", "cms.scripts", "tokens.manage"],
 
   viewer: READ_ONLY,
 };

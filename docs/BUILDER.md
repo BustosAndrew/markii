@@ -359,9 +359,14 @@ renderer contributes `WebPage`, `FAQPage` and `ItemList` JSON-LD — commerce bl
 **M6 is built for levels 1–3 without scripts (2026-11-13)** — custom classes, theme CSS (checked on
 save, `high`), and a custom HTML block rebuilt from an allowlist on save and on render. Custom code is
 a person's alone — agents and API tokens are refused it through every action that could write it —
-and none of it runs on the cart or account pages or reaches the agent documents. **Not built:**
-opt-in scripts, `<head>` injection and the storefront CSP with per-store nonces; they wait on an
-owner decision about which pages may run merchant JavaScript and how strict the policy is.
+and none of it runs on the cart or account pages or reaches the agent documents. **Custom scripts
+are built too (owner decision 2026-11-13)**: head snippets only — `<script>`, verification `<meta>`,
+preconnects and `<noscript>` pixels — written by a person holding `cms.scripts` with a fresh second
+factor, published with the design, and run on every storefront page except the cart, account and
+preview. **No script inside a custom HTML block** (level 3's opt-in block scripts were declined). The
+storefront CSP ships with them: a per-request nonce with `'strict-dynamic'`, and the cart and account
+limited to the store and Stripe. Building it found that `SameSite=Lax` does not separate sibling
+subdomains, so `proxy.ts` now refuses cookie-carrying cross-origin writes on every host.
 
 0. **Action registry + `defineAction` primitive** — built back in **Phase C** (`docs/BACKEND.md` §1),
    so it already exists and commerce mutations already use it

@@ -51,12 +51,17 @@ describe("which builder actions an agent may run itself (D51)", () => {
   });
 
   it("never includes anything that changes what shoppers see, or is irreversible", () => {
-    for (const id of ["builder.publish", "builder.discardDraft", "builder.restoreVersion", "builder.deletePage", "builder.restorePage", "builder.startDesign", "builder.stopAgent", "builder.setCustomCss"]) {
+    for (const id of ["builder.publish", "builder.discardDraft", "builder.restoreVersion", "builder.deletePage", "builder.restorePage", "builder.startDesign", "builder.stopAgent", "builder.setCustomCss", "builder.setHeadCode"]) {
       expect(getAction(id)?.agentExecution, id).toBeUndefined();
     }
     expect(getAction("builder.publish")?.riskTier).toBe("high");
     // M6: custom CSS is high, so agents and API tokens are refused it by the registry.
     expect(getAction("builder.setCustomCss")?.riskTier).toBe("high");
+    // Custom scripts: high, step-up, and a permission of their own — not cms.write.
+    const head = getAction("builder.setHeadCode");
+    expect(head?.riskTier).toBe("high");
+    expect(head?.requiresStepUp).toBe(true);
+    expect(head?.permission).toBe("cms.scripts");
   });
 
   it("every agent-executable action is low risk, step-up free and undoable", () => {

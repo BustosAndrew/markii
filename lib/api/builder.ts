@@ -68,6 +68,14 @@ export type DesignSummary =
       tokens: DesignTokens;
       /** M6: the draft's custom CSS ("" when none). Saved with `setCustomCss` — by a person only. */
       customCss: string;
+      /**
+       * M6: the draft's custom scripts (head code), stored cleaned — show this,
+       * not what was typed. Saved with `setHeadCode` (`cms.scripts`, a person,
+       * step-up). Never run in the preview.
+       */
+      headHtml: string;
+      /** The draft's custom scripts differ from what is live. */
+      headHtmlChanged: boolean;
       /** WCAG AA contrast warnings for the draft theme, ready to show. */
       contrast: string[];
       revision: number;
@@ -227,6 +235,19 @@ export const setNodeBindings = (input: { siteId: number; pageId: number; nodeId:
  * `url()`); show them. Not applied on the cart or account pages.
  */
 export const setCustomCss = (siteId: number, css: string) => invokeAction<Revisioned>("builder.setCustomCss", { siteId, css });
+
+/**
+ * Replace the storefront's custom scripts (M6 head code — analytics and pixels).
+ * `cms.scripts` + `high` + step-up: a signed-in person with a fresh second
+ * factor (the client's step-up modal handles `403 MFA_REQUIRED` and retries);
+ * agents and API tokens get `403 HUMAN_APPROVAL_REQUIRED`. The code is rebuilt
+ * on save: `headHtml` is what was stored and `removed` names what was dropped
+ * (an iframe, `<meta http-equiv>`, a non-https src…) — show both. `400
+ * VALIDATION_ERROR` with `details.problems` when nothing usable is left or it
+ * is over 20,000 characters.
+ */
+export const setHeadCode = (siteId: number, html: string) =>
+  invokeAction<{ headHtml: string; removed: string[] } & Revisioned>("builder.setHeadCode", { siteId, html });
 
 /** A block's custom classes (M6); `null` clears. `mk-` / `sf-` names are refused. */
 export const setNodeCustomClass = (input: { siteId: number; pageId: number; nodeId: string; customClass: string | null }) =>

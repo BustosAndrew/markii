@@ -1,7 +1,8 @@
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { ApiError, conflict, notFound } from "../../api";
-import { blockingErrors, checkCssBudget, checkPage, checkTheme, type CheckResult } from "../../builder/checks";
+import { blockingErrors, checkCssBudget, checkHeadCode, checkPage, checkTheme, type CheckResult } from "../../builder/checks";
+import { cleanHeadCode } from "../../builder/head-code";
 import { conditionSchema } from "../../builder/bindings";
 import { cssProblems } from "../../builder/sanitize";
 import { DEFAULT_REGION_TREES, DEFAULT_TEMPLATE_TREES, PRESETS, blankPageTree, defaultHomeTree } from "../../builder/presets";
@@ -35,6 +36,7 @@ import { styleSchema } from "../../builder/styles";
 import {
   BREAKPOINTS,
   CUSTOM_CSS_MAX,
+  HEAD_CODE_MAX,
   HOME_HANDLE,
   REGION_HANDLES,
   SHARED_DOCUMENT_TITLES,
@@ -586,6 +588,50 @@ export const setCustomCss = defineAction({
   },
 });
 
+/**
+ * Custom scripts — the storefront's head code (M6; owner decision 2026-11-13:
+ * head snippets for analytics and pixels, and no script in a custom HTML
+ * block). The strictest action in the builder, because a script is not a
+ * design edit — it runs in every shopper's browser on the store's origin:
+ *
+ * - **`cms.scripts`**, not `cms.write` (`lib/auth/permissions.ts`).
+ * - **`high`** — agents and API tokens are refused `HUMAN_APPROVAL_REQUIRED`.
+ * - **Step-up** — a second factor within 15 minutes, so a stolen session
+ *   cannot plant a card skimmer on a product page. Undo is this same action,
+ *   so it asks again.
+ *
+ * The input is rebuilt (`cleanHeadCode`): what survives is stored, what does
+ * not is returned as `removed` so the editor can say so.
+ */
+export const setHeadCode = defineAction({
+  id: "builder.setHeadCode",
+  description:
+    "Replace the storefront's custom scripts (head code) in the draft — <script>, <meta name>, " +
+    "<link rel=preconnect> and <noscript> tracking images, for analytics and pixels. Runs on every " +
+    "storefront page except the cart and account once published. A person with a fresh second factor " +
+    "must do this; agents and API tokens are refused.",
+  input: z.object({ siteId, html: z.string().max(HEAD_CODE_MAX * 2) }).strict(),
+  permission: "cms.scripts",
+  riskTier: "high",
+  requiresStepUp: true,
+  undoable: true,
+  inverse: (r) => {
+    const input = r.input as { siteId: number };
+    const d = r.diff.find((x) => x.path === "draftHeadHtml");
+    if (!d) return null;
+    return { actionId: "builder.setHeadCode", input: { siteId: input.siteId, html: (d.before as string) ?? "" } };
+  },
+  async run(input, ctx) {
+    const { html, removed, problems } = cleanHeadCode(input.html);
+    if (problems.length) throw new ApiError("VALIDATION_ERROR", 400, problems.join(" "), { problems, removed });
+    const design = await lockDesign(ctx, input.siteId);
+    if (design.draftHeadHtml === html) return { headHtml: html, removed, revision: null };
+    await ctx.db.update(siteDesigns).set({ draftHeadHtml: html }).where(eq(siteDesigns.siteId, input.siteId));
+    ctx.recordDiff({ entity: "siteDesign", entityId: String(input.siteId), path: "draftHeadHtml", before: design.draftHeadHtml, after: html });
+    return { headHtml: html, removed, revision: await bumpRevision(ctx, input.siteId) };
+  },
+});
+
 const stylePatchSchema = z
   .object(
     Object.fromEntries(Object.entries(styleSchema.shape).map(([k, v]) => [k, (v as z.ZodOptional<z.ZodType>).unwrap().nullable().optional()])),
@@ -931,7 +977,7 @@ export const restorePage = defineAction({
 export async function draftChecks(
   ctx: Pick<ActionContext, "db">,
   site: number,
-  design: { draftThemeId: string; draftTokens: DesignTokens; draftCustomCss: string },
+  design: { draftThemeId: string; draftTokens: DesignTokens; draftCustomCss: string; draftHeadHtml: string; publishedHeadHtml: string },
 ) {
   const docs = await ctx.db.select().from(siteDocuments).where(eq(siteDocuments.siteId, site));
   const facts = await catalogFacts(ctx.db, site);
@@ -940,6 +986,7 @@ export async function draftChecks(
   for (const doc of live) results.push(...checkPage(doc.draftTree, facts, doc.handle, doc.kind));
   results.push(...checkTheme(resolveTheme(design.draftThemeId, design.draftTokens)));
   results.push(...checkCssBudget(live.map((d) => d.draftTree), design.draftCustomCss));
+  results.push(...checkHeadCode(design.draftHeadHtml, design.publishedHeadHtml));
   return { docs, results };
 }
 
@@ -987,6 +1034,7 @@ export const publish = defineAction({
       .set({
         publishedTokens: design.draftTokens,
         publishedCustomCss: design.draftCustomCss,
+        publishedHeadHtml: design.draftHeadHtml,
         publishedRevision: design.draftRevision,
         publishedVersion: version,
         publishedAt: new Date(),
@@ -1000,6 +1048,7 @@ export const publish = defineAction({
         themeId: design.draftThemeId,
         tokens: design.draftTokens,
         customCss: design.draftCustomCss,
+        headHtml: design.draftHeadHtml,
         documents: live.map((d) => ({ id: d.id, kind: d.kind, handle: d.handle, title: d.title, seo: d.seo, tree: d.draftTree })),
       },
       note: input.note ?? null,
@@ -1044,7 +1093,12 @@ export const discardDraft = defineAction({
     }
     await ctx.db
       .update(siteDesigns)
-      .set({ draftThemeId: site.themeId, draftTokens: design.publishedTokens, draftCustomCss: design.publishedCustomCss })
+      .set({
+        draftThemeId: site.themeId,
+        draftTokens: design.publishedTokens,
+        draftCustomCss: design.publishedCustomCss,
+        draftHeadHtml: design.publishedHeadHtml,
+      })
       .where(eq(siteDesigns.siteId, input.siteId));
     const revision = await bumpRevision(ctx, input.siteId);
     // Nothing differs from what is live now.
@@ -1063,13 +1117,28 @@ export const restoreVersion = defineAction({
   permission: "cms.write",
   riskTier: "medium",
   async run(input, ctx) {
-    await lockDesign(ctx, input.siteId);
+    const design = await lockDesign(ctx, input.siteId);
     const [snap] = await ctx.db
       .select()
       .from(siteDesignVersions)
       .where(and(eq(siteDesignVersions.siteId, input.siteId), eq(siteDesignVersions.version, input.version)))
       .limit(1);
     if (!snap) throw notFound("Version");
+    /**
+     * Restoring brings back that version's scripts — possibly ones removed on
+     * purpose, a compromised vendor's tag. Writing scripts by the back door is
+     * still writing them, so it takes what `builder.setHeadCode` takes, short
+     * of step-up (it does not go live until a person publishes it).
+     */
+    const restoredHead = snap.snapshot.headHtml ?? "";
+    if (restoredHead !== design.draftHeadHtml && (ctx.actor.type !== "user" || !(await ctx.can("cms.scripts")))) {
+      throw new ApiError(
+        "FORBIDDEN",
+        403,
+        "This version has different custom scripts from the draft. Restoring it needs a person who may edit custom scripts.",
+        { reason: "custom_code" },
+      );
+    }
 
     const docs = await ctx.db.select().from(siteDocuments).where(eq(siteDocuments.siteId, input.siteId));
     const wanted = new Map(snap.snapshot.documents.map((d) => [d.id, d]));
@@ -1087,7 +1156,12 @@ export const restoreVersion = defineAction({
     await ctx.db
       .update(siteDesigns)
       // A version from before custom CSS existed had none.
-      .set({ draftThemeId: snap.snapshot.themeId as "studio", draftTokens: snap.snapshot.tokens, draftCustomCss: snap.snapshot.customCss ?? "" })
+      .set({
+        draftThemeId: snap.snapshot.themeId as "studio",
+        draftTokens: snap.snapshot.tokens,
+        draftCustomCss: snap.snapshot.customCss ?? "",
+        draftHeadHtml: restoredHead,
+      })
       .where(eq(siteDesigns.siteId, input.siteId));
     ctx.recordDiff({ entity: "siteDesign", entityId: String(input.siteId), path: "draft", before: null, after: { restoredVersion: input.version } });
     return { version: input.version, revision: await bumpRevision(ctx, input.siteId) };

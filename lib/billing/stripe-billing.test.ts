@@ -300,6 +300,8 @@ describe("billing action registration", () => {
       "billing.changePlan",
       "billing.invoiceAssessments",
       "billing.setDefaultPaymentMethod",
+      // Custom scripts run in every shopper's browser: a stolen session must not plant a skimmer (D51 M6).
+      "builder.setHeadCode",
       "email.addSendingDomain",
       "orders.refund",
       "payments.connectRail",

@@ -24,6 +24,7 @@ import {
   restoreDesignVersion,
   setDesignTheme,
   setCustomCss,
+  setHeadCode,
   setDesignTokens,
   setNodeBindings,
   setNodeCustomClass,
@@ -90,9 +91,12 @@ type Step = { actionId: string; invocationId: string };
 export function DesignEditor({
   site,
   canEdit,
+  canWriteScripts = false,
 }: {
   site: { id: number; slug: string; name: string; storefrontUrl: string | null };
   canEdit: boolean;
+  /** `cms.scripts` — may edit the storefront's custom scripts (M6). */
+  canWriteScripts?: boolean;
 }) {
   const [registry, setRegistry] = useState<BlockRegistry | null>(null);
   const [design, setDesign] = useState<DesignSummary | null>(null);
@@ -664,6 +668,12 @@ export function DesignEditor({
                 customCss={started.customCss}
                 canWriteCode={canEdit}
                 onCustomCss={(css) => void run(() => setCustomCss(sid, css), "builder.setCustomCss")}
+                headHtml={started.headHtml}
+                canWriteScripts={canEdit && canWriteScripts}
+                onHeadCode={async (html) => {
+                  const out = await run(() => setHeadCode(sid, html), "builder.setHeadCode");
+                  return out ? (out.result?.removed ?? []) : null;
+                }}
               />
             ) : null}
           </div>

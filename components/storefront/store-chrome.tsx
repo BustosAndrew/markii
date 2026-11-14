@@ -1,3 +1,4 @@
+import { StoreHeadCode } from "@/components/storefront/head-code";
 import { SiteHeader } from "@/components/storefront/site-header";
 import { BuilderRegion, type RenderContext } from "@/lib/builder/render";
 import { cssProblems } from "@/lib/builder/sanitize";
@@ -40,6 +41,7 @@ export async function StoreTop({
    * The cart and account pages. The fixed header drops its search box and
    * collections link; a designed header is used as designed, except that no
    * custom HTML renders in it (M6) — shoppers type passwords and card details here.
+   * Nor do the merchant's custom scripts.
    */
   minimal?: boolean;
 }) {
@@ -48,6 +50,8 @@ export async function StoreTop({
   const topCategories = bundle.categories.filter((c) => !c.parentSlug);
   return (
     <>
+      {/* M6 custom scripts: never where shoppers type secrets, never in the preview (`headHtml` is "" there). */}
+      {!minimal && data.headHtml ? <StoreHeadCode html={data.headHtml} /> : null}
       {regions.announcement ? (
         <BuilderRegion
           region="announcement"

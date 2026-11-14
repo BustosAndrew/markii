@@ -495,6 +495,21 @@ The audit list carries both directions now — `undoneBy` on the original row, `
 so a history screen can strike through a reversed change and label its reversal without a second
 query. Both are `string | null` on `ActionInvocation`.
 
+### 🟢 New 2026-11-13 — custom scripts, and two refusals any screen can now meet (D51 M6)
+
+- **`lib/api/builder.ts`**: `setHeadCode(siteId, html)` → `{ headHtml, removed }`; `DesignSummary.headHtml`
+  and `headHtmlChanged`. **`lib/api/org.ts`**: `canWriteScripts(role)` (`cms.scripts` — owner,
+  administrator, developer). Saving asks for a second factor: the step-up modal handles `403
+  MFA_REQUIRED` and retries. Show `removed` after saving — it is what the server dropped from the paste.
+- Editor: the Theme tab's **Custom scripts** field (explicit Save, not on blur). The publish dialog
+  shows `HEAD_CODE_CHANGED` like any warning. Scripts never run in the preview — say so, as the field does.
+- **`403 CROSS_ORIGIN_REFUSED`** can now come back from any write: the proxy refuses a cookie-carrying
+  request a browser marks as from another origin. Same-origin `fetch` from the dashboard is unaffected;
+  a screen that posts to another Markii host (none does today) would be refused.
+- **Storefront pages now carry a strict CSP.** A script a storefront server component renders itself
+  must take `nonce={await requestNonce()}` (`lib/storefront/nonce.ts`) or the browser blocks it — Next's
+  own scripts and the islands get the nonce automatically.
+
 ### 🟢 New 2026-11-13 — custom CSS, custom HTML and custom classes (D51 M6)
 
 - **`lib/api/builder.ts`**: `setCustomCss(siteId, css)` and `setNodeCustomClass(...)`; `DesignSummary.customCss`;

@@ -3052,6 +3052,15 @@ export const siteDesigns = pgTable("site_designs", {
    */
   draftCustomCss: text("draft_custom_css").notNull().default(""),
   publishedCustomCss: text("published_custom_css").notNull().default(""),
+  /**
+   * The merchant's head code — custom scripts for analytics and pixels (M6,
+   * owner decision 2026-11-13; `lib/builder/head-code.ts`). Stored cleaned.
+   * Written only by a signed-in person holding `cms.scripts`, with step-up;
+   * rendered with the request's CSP nonce on every storefront page except the
+   * cart, account and the builder preview.
+   */
+  draftHeadHtml: text("draft_head_html").notNull().default(""),
+  publishedHeadHtml: text("published_head_html").notNull().default(""),
   draftRevision: integer("draft_revision").notNull().default(0),
   /** `draftRevision` at the last publish; unequal means there are unpublished changes. */
   publishedRevision: integer("published_revision").notNull().default(0),
@@ -3120,6 +3129,8 @@ export const siteDesignVersions = pgTable(
         tokens: DesignTokens;
         /** M6. Absent in snapshots taken before custom CSS existed — read as "". */
         customCss?: string;
+        /** M6 head code. Absent in snapshots taken before it existed — read as "". */
+        headHtml?: string;
         documents: { id: number; kind: string; handle: string; title: string; seo: PageSeo; tree: PageNode }[];
       }>()
       .notNull(),

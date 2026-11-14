@@ -235,6 +235,25 @@ export function checkCssBudget(trees: PageNode[], customCss: string): CheckResul
   ];
 }
 
+/**
+ * Head code differs from what is live (M6). A warning so the publish dialog
+ * names it: whoever presses publish should know they are shipping a script
+ * change, which may not be theirs — they hold `cms.write`, the author held
+ * `cms.scripts`.
+ */
+export function checkHeadCode(draftHeadHtml: string, publishedHeadHtml: string): CheckResult[] {
+  if (draftHeadHtml === publishedHeadHtml) return [];
+  return [
+    {
+      severity: "warning",
+      code: "HEAD_CODE_CHANGED",
+      message: draftHeadHtml
+        ? "This publish changes the store's custom scripts. They will run on every storefront page except the cart and account."
+        : "This publish removes the store's custom scripts.",
+    },
+  ];
+}
+
 export function checkTheme(theme: ThemeTokens): CheckResult[] {
   return contrastWarnings(theme).map((w) => ({ severity: "warning" as const, code: "LOW_CONTRAST", message: w.message }));
 }

@@ -3,7 +3,7 @@ import "server-only";
 import { and, asc, desc, eq, isNotNull } from "drizzle-orm";
 import { notFound } from "@/lib/api";
 import { collections, db, products, siteDesignVersions, siteDesigns, siteDocuments, type SiteDesign } from "@/lib/db";
-import { blockingErrors, checkCssBudget, checkPage, checkTheme, type CheckResult } from "./checks";
+import { blockingErrors, checkCssBudget, checkHeadCode, checkPage, checkTheme, type CheckResult } from "./checks";
 import { catalogFacts, leaseActive } from "./store";
 import { resolveTheme, type DesignTokens } from "./tokens";
 import { REGION_HANDLES, SHARED_DOCUMENT_TITLES, type RegionHandle, type TemplateHandle } from "./types";
@@ -86,6 +86,10 @@ export async function designSummary(siteId: number) {
     tokens: design.draftTokens,
     /** M6: the draft's custom CSS. Written by a person only (`builder.setCustomCss` is high). */
     customCss: design.draftCustomCss,
+    /** M6: the draft's head code (custom scripts), stored cleaned. Written with `builder.setHeadCode` — `cms.scripts`, a person only. */
+    headHtml: design.draftHeadHtml,
+    /** Whether the draft's head code differs from what is live. */
+    headHtmlChanged: design.draftHeadHtml !== design.publishedHeadHtml,
     contrast: checkTheme(theme).map((c) => c.message),
     revision: design.draftRevision,
     publishedRevision: design.publishedRevision,
@@ -146,6 +150,7 @@ export async function designChecks(siteId: number): Promise<{ results: CheckResu
   for (const doc of live) results.push(...checkPage(doc.draftTree, facts, doc.handle, doc.kind));
   results.push(...checkTheme(resolveTheme(design.draftThemeId, design.draftTokens as DesignTokens)));
   results.push(...checkCssBudget(live.map((d) => d.draftTree), design.draftCustomCss));
+  results.push(...checkHeadCode(design.draftHeadHtml, design.publishedHeadHtml));
   return { results, blocking: blockingErrors(results).length };
 }
 

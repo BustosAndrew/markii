@@ -304,7 +304,7 @@ export function themeStylesheet(theme: ThemeTokens): string {
 .sf-product-media img{max-width:100%;width:100%;border-radius:var(--sf-radius);background:var(--sf-border);display:block}
 .sf-product-body{min-width:0}
 .sf-buy{background:var(--sf-surface);border:1px solid var(--sf-border);border-radius:var(--sf-radius);padding:1rem;overflow-x:auto;font-family:ui-monospace,monospace;font-size:.8rem;margin:1rem 0}
-.sf-btn{display:inline-block;background:var(--sf-accent);color:var(--sf-accent-text);padding:.65rem 1.1rem;border-radius:var(--sf-radius);text-decoration:none;font-weight:600;font-size:.9rem;border:none;cursor:pointer;font-family:inherit}
+.sf-btn,.sf-shell a.sf-btn{display:inline-block;background:var(--sf-accent);color:var(--sf-accent-text);padding:.65rem 1.1rem;border-radius:var(--sf-radius);text-decoration:none;font-weight:600;font-size:.9rem;border:none;cursor:pointer;font-family:inherit}
 .sf-list{list-style:none;padding:0;margin:1rem 0 0}
 .sf-list li{border-bottom:1px solid var(--sf-border);padding:.85rem 0;display:flex;flex-wrap:wrap;gap:.5rem 1rem;justify-content:space-between;align-items:baseline}
 .sf-gate{margin:1rem 0;padding:.75rem 1rem;border:1px solid var(--sf-border);border-radius:var(--sf-radius);font-size:.9375rem}

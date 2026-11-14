@@ -1,6 +1,6 @@
 import { getMe, getSite } from "@/lib/api/server";
 import { loadOrError } from "@/lib/api/load";
-import { canWriteCms } from "@/lib/api/org";
+import { canWriteCms, canWriteScripts } from "@/lib/api/org";
 import { FetchError } from "@/components/dashboard/fetch-error";
 import { DesignEditor } from "@/components/builder/design-editor";
 import { PageHeader } from "@/components/ui/page-header";
@@ -28,6 +28,7 @@ export default async function DesignEditorPage({ params }: { params: Promise<{ s
     <DesignEditor
       site={{ id: site.id, slug: site.slug, name: site.name, storefrontUrl: site.storefrontUrl || null }}
       canEdit={canWriteCms(meResult.data?.role)}
+      canWriteScripts={canWriteScripts(meResult.data?.role)}
     />
   );
 }

@@ -61,6 +61,11 @@ export function canWriteCms(role: StaffRole | null | undefined): boolean {
   return role === "owner" || role === "administrator" || role === "developer";
 }
 
+/** `cms.scripts` — owner, administrator, and developer. Gates the storefront's custom scripts (D51 M6). */
+export function canWriteScripts(role: StaffRole | null | undefined): boolean {
+  return role === "owner" || role === "administrator" || role === "developer";
+}
+
 /** `catalog.write` — owner, administrator, and catalog manager. */
 export function canWriteCatalog(role: StaffRole | null | undefined): boolean {
   return role === "owner" || role === "administrator" || role === "catalog_manager";
