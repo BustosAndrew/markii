@@ -36,7 +36,7 @@ carry an explicit status — **never call a `PLANNED` endpoint and never fake it
 | 16 | Accounts, organizations, staff | partial — `/api/auth/*`, `/api/me`, `/api/org`, `/api/org/staff*`, `/api/org/tokens*`, `/api/org/switch`, **org scoping of §1–8**, and **MFA** (`/api/auth/mfa*`, enrol · challenge · recover, D40) are ✅ LIVE; the **audit log** (`/api/org/audit`, 2026-09-06) and **sessions** (`/api/org/sessions*`, 2026-09-07) are ✅ LIVE. **§16 is complete** — every `*_API_LIVE` constant in `lib/api/org.ts` is now `true`. (Tokens and org switching were listed as planned until 2026-08-03, and **MFA until 2026-08-18** — all three were already routed.) Frontend: `/dashboard/settings/account`, `/dashboard/settings/team`, `/dashboard/settings/audit`, the sidebar org switcher, `/mfa/*` | **A** |
 | 17 | Billing, plans, metering, threshold fees | ✅ **LIVE, and merchants are charged** (corrected 2026-08-18 — this row claimed "nothing is charged" long after it did). Usage ledger, threshold fee engine, meter, plan catalog, entitlements, period-close assessments, the **Stripe webhook** (verified + idempotent, platform **and** Connect handlers), subscriptions, plan changes with a Stripe-computed proration preview, cancellation at period end, payment methods, invoice history, and **threshold-fee invoicing onto the same invoice**. Scheduled monthly (§25). Add-on *purchase* alone refuses `409` — Agent Ops and Chargeback Assist are Phase F and do not exist | B |
 | 18 | Commerce core (variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping, **memberships**) | partial — §18.1–18.6 ✅ LIVE, including the §18.4 card rail (Stripe Connect direct charges) and **§18.6 Stripe Tax** (2026-08-17); §18.5 gift cards are ⛔ **deferred** (D33). §18.7 order operations (incl. **processor-executed card refunds**), §18.8 digital delivery, and §18.9 membership gating + shopper login ✅ LIVE — **including recurring/auto-renewing membership billing** (Stripe Subscriptions on the merchant's own Connect account; this row claimed otherwise until 2026-08-18). `STRIPE_CONNECT_WEBHOOK_SECRET` is **set and verified in production** (2026-09-07) — this row called it outstanding for weeks after it was configured. `pnpm stripe:webhooks` confirms the Connect endpoint subscribes to all nine required events including `invoice.created`. Genuine Stripe-generated Connect delivery was proven 2026-09-08 through the CLI (`stripe trigger … --stripe-account`), which this row called unproven for five days after | C |
-| 19 | Site builder & content | partial ✅ (M1 foundation · M2 editor + preview · M3 brand agent · M4 templates, regions, bindings · M5 agent documents) · M6–M7 🟡 | D |
+| 19 | Site builder & content | partial ✅ (M1 foundation · M2 editor + preview · M3 brand agent · M4 templates, regions, bindings · M5 agent documents · M6 custom CSS/HTML) · scripts, M7 🟡 | D |
 | 20 | Disputes & chargebacks | 🟡 PLANNED | F |
 | 21 | Agent Ops add-on | ⤴ **Superseded by §27** (D47, 2026-10-15) — built as free beta merchant agents rather than a last-phase paid add-on; the add-on billing and the settings/audit endpoints remain unbuilt | F |
 | 22 | **Action registry & MCP** — agent-native architecture | ✅ LIVE (registry, invoke, dry-run, audit, **undo** — 2026-08-18, and the **MCP server** — 2026-09-07: tools, prompts **and resources**). `undoable` is now derived from an `inverse()` and refused if declared without one, which corrected four actions that claimed it falsely | **Registry: C · MCP: D** |
@@ -2972,7 +2972,7 @@ memberships* above.)
 
 ---
 
-## 19. Site builder & content — partial ✅ LIVE (M1 foundation 2026-10-31 · M2 editor + live preview 2026-11-01 · M3 brand agent 2026-11-02 · M4 templates, regions, bindings 2026-11-03 · M5 agent documents 2026-11-12) — Phase D, D51
+## 19. Site builder & content — partial ✅ LIVE (M1 foundation 2026-10-31 · M2 editor + live preview 2026-11-01 · M3 brand agent 2026-11-02 · M4 templates, regions, bindings 2026-11-03 · M5 agent documents 2026-11-12 · M6 custom CSS/HTML 2026-11-13) — Phase D, D51
 
 Architecture in **`docs/BUILDER.md`**. Pages are versioned JSON node trees, never HTML strings.
 **Reads are REST; every write is a registry action** (`POST /api/actions/builder.*`), so the
@@ -3006,6 +3006,8 @@ All `cms.read`. Writes are `cms.write`:
 | `builder.createPage` · `updatePage` | low | ✅ | Pages at `/pages/{handle}`; title, handle, SEO. Home's handle is fixed, and so are templates' and regions' |
 | `builder.customizeTemplate` · `customizeRegion` | low | ✅ | M4: start the product/collection template or the announcement/header/footer region from the built-in layout. `{ pageId, created }`; idempotent |
 | `builder.setBinding` · `setVisibility` | low | ✅ | M4: bind props to data paths (`null` unbinds) / show a block only when a condition holds (`null`: always) |
+| `builder.setCustomClass` | low | ✅ | M6: a block's custom classes (`null` clears) |
+| `builder.setCustomCss` | **high** | — | M6: the site's theme CSS, checked on save. A person only |
 | `builder.deletePage` · `restorePage` | medium | — | Soft delete in the draft; a deleted page keeps serving until publish. On a template or region it is **reset**: the built-in layout returns at publish |
 | `builder.publish` | **high** | — | Atomic publish; tokens and agents get `HUMAN_APPROVAL_REQUIRED` |
 | `builder.discardDraft` · `restoreVersion` | medium | — | Draft back to live / a version copied into the draft. Not undoable |
@@ -3029,7 +3031,35 @@ through `POST /api/actions/:id/undo` except publish, discard and restore.
 published pages; the published theme tokens reach every storefront page through `ThemeRoot`.
 Published HTML carries no editor attributes and no builder JavaScript; FAQ blocks publish
 `FAQPage` JSON-LD. **The editor is `/dashboard/websites/{slug}/design`** (M2), and the **brand agent** is
-its Agent tab (M3, §27). **Not built yet:** custom code (M6), the editor polish of M7.
+its Agent tab (M3, §27). **Not built yet:** custom scripts and `<head>` injection, the editor polish of M7.
+**Custom code (M6, 2026-11-13) — levels 1–3 of `docs/BUILDER.md` §8; scripts are not built.**
+**Migration 0047** adds `site_designs.draft_custom_css` / `published_custom_css` — apply it before
+deploying this code, or every storefront page fails reading the design row.
+
+- **Custom classes** — `node.customClass`, up to 5 tokens, `mk-`/`sf-` refused. `builder.setCustomClass`
+  (low, the brand agent may run it).
+- **Theme CSS** — `builder.setCustomCss` (**high**: agents and API tokens get
+  `403 HUMAN_APPROVAL_REQUIRED`). Checked, not rewritten: `400 VALIDATION_ERROR` with
+  `details.problems` for `<`, `@import`, non-https `url()`, `expression()`/`javascript:`/
+  `behavior`/`-moz-binding`, unbalanced braces, or more than 20,000 characters. Published, discarded,
+  versioned and restored with the rest of the design; `customCss` on the design summary.
+- **Custom HTML block** (`html`, category `advanced`) — rebuilt from an allowlist on save **and**
+  on render (`lib/builder/sanitize.ts`): no script, style, iframe, form, svg, object or event
+  handler; links http(s)/mailto/tel/relative only; images https only; `data-mk-*` and `mk-`/`sf-`
+  classes stripped. **Only a signed-in person may write it**: any tree edit that adds or changes
+  custom HTML — `addBlock`, `insertNodes`, `setProps`, `duplicateNode` — from an agent or API token
+  is `403 HUMAN_APPROVAL_REQUIRED` with `details.reason: "custom_code"`. Removing one is anyone's.
+- **Never on the cart or account pages** — neither the theme CSS nor any custom HTML, including in
+  the header and footer regions (CSS alone can read what a shopper types). **Never in agent
+  documents** — custom HTML is absent from `llms-full.txt`; the sitemap, `llms.txt` and `agent.md`
+  never carried page content.
+- Checks: `EMPTY_CUSTOM_HTML` and `CSS_BUDGET` (§13's ~50 KB across block, document and custom CSS),
+  both warnings.
+
+**Not built, pending the owner's decision:** custom JavaScript (§8 level 3's opt-in scripts),
+`<head>` injection (level 4 — analytics pixels), and a storefront Content-Security-Policy with
+per-request nonces. A CSP across every storefront page touches Stripe checkout, fonts and Next's own
+scripts, so it ships as its own step rather than inside this one.
 **Agent documents from the published design (M5, 2026-11-12).** The merchant's own published pages
 now reach every document an agent or crawler reads, all from **one list** (`lib/storefront-docs.ts`):
 published pages only, and **never a page whose SEO says `noindex`** — hiding a page from search

@@ -3044,6 +3044,14 @@ export const siteDesigns = pgTable("site_designs", {
   draftThemeId: text("draft_theme_id", { enum: ["studio", "atlas", "noir", "bloom"] }).notNull(),
   draftTokens: jsonb("draft_tokens").$type<DesignTokens>().notNull().default({}),
   publishedTokens: jsonb("published_tokens").$type<DesignTokens>().notNull().default({}),
+  /**
+   * The merchant's theme CSS (M6, `docs/BUILDER.md` §8 level 2), checked on save
+   * (`lib/builder/sanitize.ts` `cssProblems`). Written only by a person — the
+   * action is `high`, so agents and API tokens are refused. Never served on the
+   * cart or account pages.
+   */
+  draftCustomCss: text("draft_custom_css").notNull().default(""),
+  publishedCustomCss: text("published_custom_css").notNull().default(""),
   draftRevision: integer("draft_revision").notNull().default(0),
   /** `draftRevision` at the last publish; unequal means there are unpublished changes. */
   publishedRevision: integer("published_revision").notNull().default(0),
@@ -3110,6 +3118,8 @@ export const siteDesignVersions = pgTable(
       .$type<{
         themeId: string;
         tokens: DesignTokens;
+        /** M6. Absent in snapshots taken before custom CSS existed — read as "". */
+        customCss?: string;
         documents: { id: number; kind: string; handle: string; title: string; seo: PageSeo; tree: PageNode }[];
       }>()
       .notNull(),

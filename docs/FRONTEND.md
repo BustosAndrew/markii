@@ -495,6 +495,18 @@ The audit list carries both directions now — `undoneBy` on the original row, `
 so a history screen can strike through a reversed change and label its reversal without a second
 query. Both are `string | null` on `ActionInvocation`.
 
+### 🟢 New 2026-11-13 — custom CSS, custom HTML and custom classes (D51 M6)
+
+- **`lib/api/builder.ts`**: `setCustomCss(siteId, css)` and `setNodeCustomClass(...)`; `DesignSummary.customCss`;
+  `PageNode.customClass`; block category `advanced` (the `html` block); `FieldSpec` kind `code`.
+- **`setCustomCss` refusals to show**: `400 VALIDATION_ERROR` with `details.problems` (a list of
+  sentences), and `403 HUMAN_APPROVAL_REQUIRED` for API tokens. **Custom HTML** comes back cleaned —
+  re-read the block after saving and show what is stored, not what was typed.
+- Editor: the Theme tab has a Custom CSS editor; the inspector has "Custom classes" on every block and
+  a code editor for the Custom HTML block (Add tab → Advanced).
+- **`StoreFooter` takes `minimal`** like `StoreTop`, and emits the theme CSS last. Cart and account pass
+  it; a new page where shoppers type secrets must pass it too, or the merchant's CSS runs there.
+
 ### 🟢 New 2026-11-12 — page SEO and agent documents (D51 M5)
 
 - **`PageSeo` gains `ogImage`** (https). **`builder.updatePage` replaces `seo` whole**, so a form must

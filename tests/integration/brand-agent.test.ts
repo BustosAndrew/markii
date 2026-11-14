@@ -282,4 +282,25 @@ describe("brand agent", () => {
     // Shoppers still see the fixed product page: the agent cannot publish.
     expect((await shopper.getRaw(`/_sites/${slug}/p/test-product-one`)).text).not.toContain('class="mk-page"');
   });
+
+  /** M6: the agent may style with the merchant's classes, but custom HTML is a person's to write. */
+  it("sets a custom class, and is refused custom HTML through its generic add-block tool", async () => {
+    const section = (await homeTree()).children[0];
+    const res = await turn(
+      mock({
+        toolCalls: [
+          { toolName: "builder_setCustomClass", input: { pageId: homeId, nodeId: headingId, customClass: "shout" } },
+          { toolName: "builder_addBlock", input: { pageId: homeId, parentId: section.id, type: "html", props: { html: "<p>agent code</p>" } } },
+        ],
+        text: "Done.",
+      }),
+    );
+    expect(res.status, res.text.slice(0, 300)).toBe(200);
+    expect(await leaseReleased()).toBe(true);
+    expect((await homeTree()).children[0].children[0].customClass).toBe("shout");
+    expect(JSON.stringify(await homeTree())).not.toContain("agent code");
+    expect(res.text).toContain("HUMAN_APPROVAL_REQUIRED");
+    // And there is no custom-CSS tool to call at all.
+    expect(res.text).not.toContain("builder_setCustomCss");
+  });
 });

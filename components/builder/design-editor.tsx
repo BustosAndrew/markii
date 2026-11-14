@@ -23,8 +23,10 @@ import {
   restoreDesignPage,
   restoreDesignVersion,
   setDesignTheme,
+  setCustomCss,
   setDesignTokens,
   setNodeBindings,
+  setNodeCustomClass,
   setNodeProps,
   setNodeStyles,
   setNodeVisibility,
@@ -659,6 +661,9 @@ export function DesignEditor({
                 disabled={readOnly || busy}
                 onTheme={(id) => void run(() => setDesignTheme(sid, id), "builder.setTheme")}
                 onTokens={(patch) => void run(() => setDesignTokens(sid, patch), "builder.setThemeTokens")}
+                customCss={started.customCss}
+                canWriteCode={canEdit}
+                onCustomCss={(css) => void run(() => setCustomCss(sid, css), "builder.setCustomCss")}
               />
             ) : null}
           </div>
@@ -704,6 +709,9 @@ export function DesignEditor({
             }
             onStyles={(styles) =>
               selected && void run(() => setNodeStyles({ siteId: sid, pageId: pid, nodeId: selected.id, breakpoint, styles }), "builder.setStyles")
+            }
+            onCustomClass={(customClass) =>
+              selected && void run(() => setNodeCustomClass({ siteId: sid, pageId: pid, nodeId: selected.id, customClass }), "builder.setCustomClass")
             }
             onIntent={(intent) =>
               selected && void run(() => setNodeProps({ siteId: sid, pageId: pid, nodeId: selected.id, props: {}, intent }), "builder.setProps")

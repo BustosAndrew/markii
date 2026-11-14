@@ -632,6 +632,16 @@ sitemap, `llms.txt` and the new **`llms-full.txt`** (every published page's text
 with a `SearchAction`. **`builder.updatePage` replaces `seo` whole**, so a form that sends one field
 wipes the others — the editor's SEO form sends all four.
 
+**Custom CSS, custom HTML and custom classes are built as of 2026-11-13 (M6, `docs/BUILDER.md` §8
+levels 1–3) — custom JavaScript is not.** **Migration 0047** (two text columns on `site_designs`)
+must be applied before this code deploys. Custom HTML is **rebuilt from an allowlist, never filtered
+in place** (`lib/builder/sanitize.ts`), on save and again on render. **Only a signed-in person writes
+custom code**: `setCustomCss` is `high`, and every generic tree edit refuses a custom-HTML change from
+an agent or token (`assertCustomCodeAuthor` in the builder actions — the rule lives on what an edit
+*does*, because `addBlock` is the brand agent's own low-risk tool). **None of it renders on the cart
+or account pages** (`StoreTop`/`StoreFooter` `minimal`): CSS alone can read what a shopper types.
+Scripts, `<head>` injection and a storefront CSP wait on an owner decision.
+
 **Stripe Tax on Markii's own subscription is built as of 2026-09-13** (G3). `automatic_tax` on every
 platform-account subscription create, change and preview — **no `Stripe-Account` header**, the
 opposite direction of money from §18.6 — decided from two facts that are reported apart and never

@@ -18,7 +18,7 @@ export function AddPanel({
   onAddBlock: (type: string) => void;
   onAddPreset: (preset: string) => void;
 }) {
-  const groups = ["layout", "content", "media", "commerce", "navigation"] as const;
+  const groups = ["layout", "content", "media", "commerce", "navigation", "advanced"] as const;
   return (
     <div className="space-y-5 p-3">
       <section>
@@ -317,16 +317,24 @@ export function ThemePanel({
   contrast,
   registry,
   disabled,
+  customCss,
+  canWriteCode,
   onTheme,
   onTokens,
+  onCustomCss,
 }: {
   themeId: ThemeId;
   tokens: DesignTokens;
   contrast: string[];
   registry: BlockRegistry;
   disabled: boolean;
+  /** M6: the draft's custom CSS. */
+  customCss: string;
+  /** Whether this viewer may save custom code at all (a person with edit rights). */
+  canWriteCode: boolean;
   onTheme: (id: ThemeId) => void;
   onTokens: (patch: Record<string, unknown>) => void;
+  onCustomCss: (css: string) => void;
 }) {
   return (
     <div className="space-y-5 p-3">
@@ -400,6 +408,39 @@ export function ThemePanel({
           </div>
         ))}
       </section>
+
+      <CustomCssField key={customCss} css={customCss} disabled={disabled || !canWriteCode} onSave={onCustomCss} />
     </div>
+  );
+}
+
+/**
+ * The site's custom CSS (M6). Saves on blur; the server checks it and a
+ * refusal comes back through the editor's error bar. The brand agent has no
+ * way to write it — the action refuses anything but a signed-in person.
+ */
+function CustomCssField({ css, disabled, onSave }: { css: string; disabled: boolean; onSave: (css: string) => void }) {
+  const [draft, setDraft] = useState(css);
+  return (
+    <section className="space-y-2 border-t border-border pt-4" aria-label="Custom CSS">
+      <div>
+        <Label htmlFor="th-css">Custom CSS</Label>
+        <p className="text-xs text-muted">
+          Applied after the theme on every page except the cart and account pages. Target your own classes (set them on a block in the inspector). No @import; images by https:// address only.
+        </p>
+      </div>
+      <textarea
+        id="th-css"
+        rows={10}
+        spellCheck={false}
+        value={draft}
+        disabled={disabled}
+        maxLength={20_000}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => draft !== css && onSave(draft)}
+        className="w-full rounded-[var(--radius-control)] border border-border bg-surface p-2 font-mono text-xs text-foreground disabled:opacity-60"
+        placeholder={".promo-banner {\n  letter-spacing: 0.04em;\n}"}
+      />
+    </section>
   );
 }

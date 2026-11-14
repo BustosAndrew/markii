@@ -233,7 +233,37 @@ function Field({ spec, props, commit, disabled, data }: { spec: FieldSpec; props
       );
     case "items":
       return <ItemsField key={JSON.stringify(value ?? [])} spec={spec} value={value} onCommit={(v) => commit({ [spec.name]: v })} disabled={disabled} />;
+    case "code":
+      return <CodeField key={String(value ?? "")} spec={spec} value={value} onCommit={(v) => commit({ [spec.name]: v })} disabled={disabled} />;
   }
+}
+
+/**
+ * Custom HTML (M6). The server cleans it on save, so what comes back can be
+ * shorter than what was typed — the field shows the stored, cleaned version.
+ */
+function CodeField({ spec, value, onCommit, disabled }: { spec: Extract<FieldSpec, { kind: "code" }>; value: unknown; onCommit: (v: string) => void; disabled: boolean }) {
+  const [draft, setDraft] = useState(String(value ?? ""));
+  const id = `f-${spec.name}`;
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={id}>{spec.label}</Label>
+      <textarea
+        id={id}
+        rows={10}
+        spellCheck={false}
+        value={draft}
+        maxLength={spec.maxLength}
+        disabled={disabled}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => draft !== String(value ?? "") && onCommit(draft)}
+        className="w-full rounded-[var(--radius-control)] border border-border bg-surface p-2 font-mono text-xs text-foreground disabled:opacity-60"
+      />
+      <p className="text-xs text-muted">
+        Cleaned when saved: scripts, styles, iframes, forms and event handlers are removed. Not shown on the cart or account pages, and not read by AI agents.
+      </p>
+    </div>
+  );
 }
 
 type DataList = BlockRegistry["data"];
@@ -381,6 +411,7 @@ export function Inspector({
   onProps,
   onStyles,
   onIntent,
+  onCustomClass,
   onBindings,
   onVisibility,
   onDuplicate,
@@ -399,6 +430,8 @@ export function Inspector({
   onProps: Commit;
   onStyles: (styles: Record<string, unknown>) => void;
   onIntent: (intent: string | null) => void;
+  /** M6: the block's custom classes; null clears. */
+  onCustomClass: (customClass: string | null) => void;
   onBindings: (patch: Record<string, string | null>) => void;
   onVisibility: (when: Condition | null) => void;
   onDuplicate: () => void;
@@ -490,6 +523,14 @@ export function Inspector({
           <Toggle checked={current.hidden === true} onChange={(v) => onStyles({ hidden: v ? true : null })} label="Hide at this size" disabled={disabled} />
         </div>
       </section>
+
+      <TextField
+        key={`${node.id}-class-${node.customClass ?? ""}`}
+        spec={{ name: "customClass", label: "Custom classes (for your custom CSS)", kind: "text", maxLength: 220 }}
+        value={node.customClass ?? ""}
+        onCommit={(v) => onCustomClass(v.trim() ? v.trim() : null)}
+        disabled={disabled}
+      />
 
       <TextField
         key={`${node.id}-${node.intent ?? ""}`}

@@ -80,6 +80,11 @@ export type PageNode = {
   bindings?: Record<string, string>;
   /** Render only when this holds — a whitelisted comparison, never an expression to evaluate. */
   visibleWhen?: Condition;
+  /**
+   * Classes the merchant's theme CSS styles (`docs/BUILDER.md` §8 level 1).
+   * Space-separated; `mk-` and `sf-` are reserved for the builder and themes.
+   */
+  customClass?: string;
 };
 
 export const CONDITION_OPS = ["exists", "missing", "eq", "neq", "gt", "gte", "lt", "lte"] as const;
@@ -87,6 +92,10 @@ export type ConditionOp = (typeof CONDITION_OPS)[number];
 export type Condition = { path: string; op: ConditionOp; value?: string | number | boolean };
 
 export const NODE_ID_PATTERN = /^n_[a-z0-9]{10}$/;
+
+/** Custom code limits (M6): one custom HTML block's cleaned HTML, and a site's theme CSS. */
+export const CUSTOM_HTML_MAX = 20_000;
+export const CUSTOM_CSS_MAX = 20_000;
 
 /** Hard limits, enforced in `./tree` on every write. */
 export const TREE_LIMITS = {

@@ -28,4 +28,6 @@ export const BRAND_DRAFT_ACTIONS = [
   "builder.customizeRegion",
   "builder.setBinding",
   "builder.setVisibility",
+  // M6: classes only — custom HTML and CSS are a person's to write, and the registry refuses an agent.
+  "builder.setCustomClass",
 ] as const;

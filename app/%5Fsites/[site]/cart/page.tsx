@@ -35,7 +35,7 @@ export default async function CartPage({ params }: Props) {
           }}
         />
       </main>
-      <StoreFooter data={data} />
+      <StoreFooter data={data} minimal />
     </ThemeRoot>
   );
 }

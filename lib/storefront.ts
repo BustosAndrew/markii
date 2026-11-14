@@ -37,6 +37,12 @@ export type SiteData = {
    */
   theme: ThemeTokens;
   /**
+   * The merchant's theme CSS (M6) — published, or the draft's in the preview.
+   * Emitted last on every page by `StoreFooter`, never on the cart or account
+   * pages (`minimal`).
+   */
+  customCss: string;
+  /**
    * True when this request is the builder's live preview of this site (D51):
    * pages render the **draft**, `theme` is the draft theme, and `baseUrl` keeps
    * every link inside the preview. Never true for a shopper — it needs a
@@ -110,6 +116,8 @@ export async function loadSite(siteSlug: string): Promise<SiteData | null> {
       publishedTokens: siteDesigns.publishedTokens,
       draftThemeId: siteDesigns.draftThemeId,
       draftTokens: siteDesigns.draftTokens,
+      draftCustomCss: siteDesigns.draftCustomCss,
+      publishedCustomCss: siteDesigns.publishedCustomCss,
     })
     .from(siteDesigns)
     .where(eq(siteDesigns.siteId, site.id))
@@ -133,6 +141,7 @@ export async function loadSite(siteSlug: string): Promise<SiteData | null> {
     theme: inPreview && design
       ? resolveTheme(design.draftThemeId, design.draftTokens)
       : resolveTheme(site.themeId, design?.publishedTokens),
+    customCss: (inPreview ? design?.draftCustomCss : design?.publishedCustomCss) ?? "",
     preview: inPreview,
     standing,
     /** A lapsed trial, the last rung of dunning (D10), or a platform suspension (G12) — Markii's hold, not the merchant's. */

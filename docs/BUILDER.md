@@ -356,6 +356,12 @@ collection and follows links inside the preview to any other.
 three), the Markdown is rendered from the tree with the HTML's bindings and visibility, and the
 renderer contributes `WebPage`, `FAQPage` and `ItemList` JSON-LD — commerce blocks now implement
 §5's `jsonLd` requirement. Product data still comes from the catalogue, never from a block.
+**M6 is built for levels 1–3 without scripts (2026-11-13)** — custom classes, theme CSS (checked on
+save, `high`), and a custom HTML block rebuilt from an allowlist on save and on render. Custom code is
+a person's alone — agents and API tokens are refused it through every action that could write it —
+and none of it runs on the cart or account pages or reaches the agent documents. **Not built:**
+opt-in scripts, `<head>` injection and the storefront CSP with per-store nonces; they wait on an
+owner decision about which pages may run merchant JavaScript and how strict the policy is.
 
 0. **Action registry + `defineAction` primitive** — built back in **Phase C** (`docs/BACKEND.md` §1),
    so it already exists and commerce mutations already use it

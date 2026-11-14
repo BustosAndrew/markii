@@ -61,6 +61,7 @@ function inspector(disabled: boolean, opts: { scopes?: string[]; node?: PageNode
       onProps={noop}
       onStyles={noop}
       onIntent={noop}
+      onCustomClass={noop}
       onBindings={opts.onBindings ?? noop}
       onVisibility={noop}
       onDuplicate={noop}

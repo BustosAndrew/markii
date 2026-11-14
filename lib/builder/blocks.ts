@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { REPEATER_SOURCES, type DataScope, type ValueType } from "./bindings";
 import { safeHref } from "./markdown";
-import { SPACE_TOKENS, type NodeStyles } from "./types";
+import { CUSTOM_HTML_MAX, SPACE_TOKENS, type NodeStyles } from "./types";
 
 /**
  * The block registry ("stacks", `docs/BUILDER.md` §5).
@@ -31,9 +31,11 @@ export type FieldSpec =
   | { name: string; label: string; kind: "category" }
   | { name: string; label: string; kind: "collection" }
   | { name: string; label: string; kind: "stringList"; maxItems: number; maxLength: number }
-  | { name: string; label: string; kind: "items"; maxItems: number; fields: FieldSpec[] };
+  | { name: string; label: string; kind: "items"; maxItems: number; fields: FieldSpec[] }
+  /** M6: a monospace editor for custom code. Saved by a person only. */
+  | { name: string; label: string; kind: "code"; language: "html"; maxLength: number };
 
-export type BlockCategory = "layout" | "content" | "commerce" | "media" | "navigation";
+export type BlockCategory = "layout" | "content" | "commerce" | "media" | "navigation" | "advanced";
 
 export type BlockDefinition = {
   type: string;
@@ -789,6 +791,28 @@ const DEFINITIONS: BlockDefinition[] = [
       { name: "cart", label: "Cart link", kind: "boolean" },
     ],
     semantics: { element: "div (form + links)" },
+  }),
+
+  // ---------- M6: custom code ----------
+
+  block({
+    type: "html",
+    label: "Custom HTML",
+    category: "advanced",
+    description:
+      "The merchant's own HTML, cleaned on save: scripts, styles, iframes, forms, SVG and event " +
+      "handlers are removed, links and images are limited to safe addresses. Style it with the " +
+      "theme's custom CSS. Never shown on the cart or account pages, and never in llms.txt.",
+    usageHints: [
+      "Only a person can write custom HTML. Agents and API tokens cannot add or change it.",
+      "Prefer real blocks — they stay accessible, editable and readable by agents.",
+    ],
+    schema: z.object({ html: z.string().max(CUSTOM_HTML_MAX).default("") }).strict(),
+    defaults: { props: { html: "" } },
+    children: "none",
+    insertable: true,
+    editorPanel: [{ name: "html", label: "HTML", kind: "code", language: "html", maxLength: CUSTOM_HTML_MAX }],
+    semantics: { element: "div" },
   }),
 ];
 

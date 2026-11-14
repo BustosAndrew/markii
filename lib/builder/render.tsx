@@ -5,6 +5,7 @@ import type { Category, Collection, Product } from "@/lib/db";
 import { storefrontMembersOf } from "@/lib/storefront/collections";
 import { REPEATER_SOURCES, boundProps, evaluateCondition, type DataValues, type RepeaterSource } from "./bindings";
 import { markdownText, parseMarkdown, safeHref, type Inline } from "./markdown";
+import { sanitizeHtml } from "./sanitize";
 import { compileStyles, nodeClass } from "./styles";
 import type { PageNode, RegionHandle } from "./types";
 import { productView } from "./views";
@@ -58,6 +59,12 @@ export type RenderContext = {
   /** A page's own `WebPage` JSON-LD (M5). Absent on templates, whose routes emit Product / CollectionPage. */
   page?: PageLd;
   /**
+   * The cart or account page (M6): no custom HTML renders, even in the header
+   * and footer — shoppers type passwords and card details here, and code the
+   * merchant pasted from somewhere has no business beside them.
+   */
+  sensitive?: boolean;
+  /**
    * The document being drawn. In the preview it is stamped as `data-mk-doc`, so
    * a click on the header while the editor has the home page open can switch
    * the editor to the header.
@@ -78,7 +85,8 @@ function base(ctx: RenderContext) {
 }
 
 function attrs(node: PageNode, ctx: RenderContext, ...extra: (string | false | undefined)[]) {
-  const className = [`mk-b-${node.type}`, nodeClass(node.id), ...extra].filter(Boolean).join(" ");
+  // The merchant's own classes last (M6) — validated tokens, never mk- or sf-.
+  const className = [`mk-b-${node.type}`, nodeClass(node.id), ...extra, node.customClass].filter(Boolean).join(" ");
   return ctx.preview ? { className, "data-mk-node": node.id } : { className };
 }
 
@@ -433,6 +441,13 @@ function Node({ node, ctx }: { node: PageNode; ctx: RenderContext }): ReactNode 
           {p.showName !== false || !p.logoSrc ? ctx.values.store.name : null}
         </a>
       );
+    case "html": {
+      if (ctx.sensitive) return ctx.preview ? <div {...attrs(node, ctx)} data-mk-empty="custom HTML — hidden on cart and account pages" /> : null;
+      // Cleaned again on the way out: a stricter rule made later also covers HTML saved before it.
+      const html = sanitizeHtml(String(p.html ?? ""));
+      if (!html) return <Empty node={node} ctx={ctx} what="custom HTML" />;
+      return <div {...attrs(node, ctx)} dangerouslySetInnerHTML={{ __html: html }} />;
+    }
     case "storeLinks":
       return (
         <div {...attrs(node, ctx, "sf-header-actions")}>
@@ -574,7 +589,7 @@ export async function documentJsonLd(tree: PageNode, ctx: RenderContext): Promis
 export const RENDERED_TYPES = [
   "root", "section", "columns", "column", "grid", "row", "repeater", "spacer", "divider", "heading", "text",
   "image", "button", "list", "accordion", "faq", "testimonial", "video", "productGrid", "productCard",
-  "collectionList", "productBuy", "productGallery", "navMenu", "storeBrand", "storeLinks",
+  "collectionList", "productBuy", "productGallery", "navMenu", "storeBrand", "storeLinks", "html",
 ] as const;
 
 function docAttr(ctx: RenderContext) {

@@ -3,7 +3,7 @@ import "server-only";
 import { and, asc, desc, eq, isNotNull } from "drizzle-orm";
 import { notFound } from "@/lib/api";
 import { collections, db, products, siteDesignVersions, siteDesigns, siteDocuments, type SiteDesign } from "@/lib/db";
-import { blockingErrors, checkPage, checkTheme, type CheckResult } from "./checks";
+import { blockingErrors, checkCssBudget, checkPage, checkTheme, type CheckResult } from "./checks";
 import { catalogFacts, leaseActive } from "./store";
 import { resolveTheme, type DesignTokens } from "./tokens";
 import { REGION_HANDLES, SHARED_DOCUMENT_TITLES, type RegionHandle, type TemplateHandle } from "./types";
@@ -84,6 +84,8 @@ export async function designSummary(siteId: number) {
     started: true as const,
     themeId: design.draftThemeId,
     tokens: design.draftTokens,
+    /** M6: the draft's custom CSS. Written by a person only (`builder.setCustomCss` is high). */
+    customCss: design.draftCustomCss,
     contrast: checkTheme(theme).map((c) => c.message),
     revision: design.draftRevision,
     publishedRevision: design.publishedRevision,
@@ -140,8 +142,10 @@ export async function designChecks(siteId: number): Promise<{ results: CheckResu
   const docs = await db.select().from(siteDocuments).where(eq(siteDocuments.siteId, siteId));
   const facts = await catalogFacts(db, siteId);
   const results: CheckResult[] = [];
-  for (const doc of docs.filter((d) => !d.draftDeleted)) results.push(...checkPage(doc.draftTree, facts, doc.handle, doc.kind));
+  const live = docs.filter((d) => !d.draftDeleted);
+  for (const doc of live) results.push(...checkPage(doc.draftTree, facts, doc.handle, doc.kind));
   results.push(...checkTheme(resolveTheme(design.draftThemeId, design.draftTokens as DesignTokens)));
+  results.push(...checkCssBudget(live.map((d) => d.draftTree), design.draftCustomCss));
   return { results, blocking: blockingErrors(results).length };
 }
 

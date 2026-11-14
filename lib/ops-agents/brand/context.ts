@@ -9,7 +9,7 @@ import { BREAKPOINTS, HOME_HANDLE, type PageNode } from "../../builder/types";
 import { actionInvocations, db, sites, staff, type DiffEntry } from "../../db";
 import { ownSitesForStaff } from "../../tenancy";
 import type { ReadScope } from "../catalog/reads";
-import { describeChanges, NOT_A_DESIGN_CHANGE, outlineTree, type ChangeRow } from "./format";
+import { customCssClasses, describeChanges, NOT_A_DESIGN_CHANGE, outlineTree, type ChangeRow } from "./format";
 
 /**
  * The brand agent's live context (D51) — **what makes it see every edit the
@@ -127,6 +127,12 @@ export async function liveContext(input: {
   );
   out.push(`Site: #${site.id} ${site.name} (${site.slug}, ${site.status})`);
   out.push(`Theme: ${summary.themeId}. Token overrides: ${JSON.stringify(summary.tokens ?? {})}`);
+  const classes = customCssClasses(summary.customCss);
+  out.push(
+    summary.customCss
+      ? `Custom CSS: ${summary.customCss.length} characters, written by the merchant. Classes it defines: ${classes.length ? classes.join(", ") : "none"}.`
+      : "Custom CSS: none.",
+  );
   if (summary.contrast.length) out.push(`Contrast warnings: ${summary.contrast.join(" ")}`);
   out.push(
     summary.hasUnpublishedChanges

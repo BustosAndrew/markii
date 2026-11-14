@@ -1,8 +1,9 @@
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { ApiError, conflict, notFound } from "../../api";
-import { blockingErrors, checkPage, checkTheme, type CheckResult } from "../../builder/checks";
+import { blockingErrors, checkCssBudget, checkPage, checkTheme, type CheckResult } from "../../builder/checks";
 import { conditionSchema } from "../../builder/bindings";
+import { cssProblems } from "../../builder/sanitize";
 import { DEFAULT_REGION_TREES, DEFAULT_TEMPLATE_TREES, PRESETS, blankPageTree, defaultHomeTree } from "../../builder/presets";
 import {
   bumpRevision,
@@ -21,7 +22,9 @@ import {
   moveNode,
   nodeInputSchema,
   removeNodes,
+  customHtmlOf,
   setBindings,
+  setCustomClass as setNodeCustomClass,
   setIntent,
   setProps,
   setStyles,
@@ -31,6 +34,7 @@ import {
 import { styleSchema } from "../../builder/styles";
 import {
   BREAKPOINTS,
+  CUSTOM_CSS_MAX,
   HOME_HANDLE,
   REGION_HANDLES,
   SHARED_DOCUMENT_TITLES,
@@ -94,11 +98,37 @@ async function editPage<T extends { root: PageNode }>(
   const doc = await loadPage(ctx.db, site, page);
   const out = treeOp(() => op(doc.draftTree));
   if (!changed(out)) return { out, revision: null };
+  assertCustomCodeAuthor(ctx, doc.draftTree, out.root);
   await saveTree(ctx, doc.id, out.root);
   return { out, revision: await bumpRevision(ctx, site) };
 }
 
 const pageEntity = (id: number) => ({ entity: "sitePage", entityId: String(id) });
+
+/**
+ * Custom code is written by a person, never by an agent or an API token
+ * (`docs/BUILDER.md` §8: "an agent may draft it, never execute it
+ * unreviewed"). The generic tree edits — add, insert, duplicate, set props —
+ * are low risk and some are the brand agent's own tools, so the rule cannot
+ * live in their risk tier: it lives here, on what the edit *does*. An edit
+ * that adds custom HTML or changes it is refused unless a signed-in person
+ * made it; removing it is anyone's to do, because taking code out is never
+ * the risk.
+ */
+function assertCustomCodeAuthor(ctx: ActionContext, before: PageNode, after: PageNode) {
+  if (ctx.actor.type === "user") return;
+  const was = customHtmlOf(before);
+  for (const [id, html] of customHtmlOf(after)) {
+    if (html !== "" && was.get(id) !== html) {
+      throw new ApiError(
+        "HUMAN_APPROVAL_REQUIRED",
+        403,
+        "Custom HTML can only be written by a person signed in to the editor — not by an agent or an API token.",
+        { nodeId: id, reason: "custom_code" },
+      );
+    }
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Starting a design
@@ -487,6 +517,75 @@ export const setVisibility = defineAction({
   },
 });
 
+// ---------------------------------------------------------------------------
+// Custom code (M6, `docs/BUILDER.md` §8)
+// ---------------------------------------------------------------------------
+
+export const setCustomClass = defineAction({
+  id: "builder.setCustomClass",
+  description:
+    "Give a block classes the store's custom CSS can style (space-separated, up to 5; letters, " +
+    "digits, - and _; names starting mk- or sf- are reserved). null clears them. Only useful once " +
+    "the merchant's custom CSS defines the class.",
+  input: z.object({ siteId, pageId, nodeId, customClass: z.string().max(220).nullable() }).strict(),
+  permission: "cms.write",
+  riskTier: "low",
+  agentExecution: "draft",
+  undoable: true,
+  inverse: (r) => {
+    const input = r.input as { siteId: number; pageId: number; nodeId: string };
+    const d = r.diff.find((x) => x.path === `nodes.${input.nodeId}.customClass`);
+    if (!d) return null;
+    return { actionId: "builder.setCustomClass", input: { siteId: input.siteId, pageId: input.pageId, nodeId: input.nodeId, customClass: (d.before as string | null) ?? null } };
+  },
+  async run(input, ctx) {
+    const { out, revision } = await editPage(
+      ctx,
+      input.siteId,
+      input.pageId,
+      (tree) => setNodeCustomClass(tree, input.nodeId, input.customClass),
+      (o) => o.before !== o.after,
+    );
+    if (revision !== null) {
+      ctx.recordDiff({ ...pageEntity(input.pageId), path: `nodes.${input.nodeId}.customClass`, before: out.before, after: out.after });
+    }
+    return { nodeId: input.nodeId, customClass: out.after, revision };
+  },
+});
+
+/**
+ * Theme CSS — `high`, so a person writes it: agents and API tokens are refused
+ * `HUMAN_APPROVAL_REQUIRED` by the registry (§8: custom code is high risk).
+ * Checked, not rewritten (`cssProblems`): a refusal names what to fix.
+ */
+export const setCustomCss = defineAction({
+  id: "builder.setCustomCss",
+  description:
+    "Replace the site's custom CSS in the draft — rules for the whole storefront, applied after " +
+    "the theme and every block's own styles. No @import, no \"<\", url() https only. Not applied " +
+    "on the cart or account pages. A person must do this; agents and API tokens are refused.",
+  input: z.object({ siteId, css: z.string().max(CUSTOM_CSS_MAX * 2) }).strict(),
+  permission: "cms.write",
+  riskTier: "high",
+  undoable: true,
+  inverse: (r) => {
+    const input = r.input as { siteId: number };
+    const d = r.diff.find((x) => x.path === "draftCustomCss");
+    if (!d) return null;
+    return { actionId: "builder.setCustomCss", input: { siteId: input.siteId, css: (d.before as string) ?? "" } };
+  },
+  async run(input, ctx) {
+    const css = input.css.replace(/\r\n/g, "\n").trim();
+    const problems = cssProblems(css);
+    if (problems.length) throw new ApiError("VALIDATION_ERROR", 400, problems.join(" "), { problems });
+    const design = await lockDesign(ctx, input.siteId);
+    if (design.draftCustomCss === css) return { revision: null };
+    await ctx.db.update(siteDesigns).set({ draftCustomCss: css }).where(eq(siteDesigns.siteId, input.siteId));
+    ctx.recordDiff({ entity: "siteDesign", entityId: String(input.siteId), path: "draftCustomCss", before: design.draftCustomCss, after: css });
+    return { revision: await bumpRevision(ctx, input.siteId) };
+  },
+});
+
 const stylePatchSchema = z
   .object(
     Object.fromEntries(Object.entries(styleSchema.shape).map(([k, v]) => [k, (v as z.ZodOptional<z.ZodType>).unwrap().nullable().optional()])),
@@ -829,12 +928,18 @@ export const restorePage = defineAction({
 // ---------------------------------------------------------------------------
 
 /** Every draft page plus the draft theme, checked as publish would check them. */
-export async function draftChecks(ctx: Pick<ActionContext, "db">, site: number, design: { draftThemeId: string; draftTokens: DesignTokens }) {
+export async function draftChecks(
+  ctx: Pick<ActionContext, "db">,
+  site: number,
+  design: { draftThemeId: string; draftTokens: DesignTokens; draftCustomCss: string },
+) {
   const docs = await ctx.db.select().from(siteDocuments).where(eq(siteDocuments.siteId, site));
   const facts = await catalogFacts(ctx.db, site);
   const results: CheckResult[] = [];
-  for (const doc of docs.filter((d) => !d.draftDeleted)) results.push(...checkPage(doc.draftTree, facts, doc.handle, doc.kind));
+  const live = docs.filter((d) => !d.draftDeleted);
+  for (const doc of live) results.push(...checkPage(doc.draftTree, facts, doc.handle, doc.kind));
   results.push(...checkTheme(resolveTheme(design.draftThemeId, design.draftTokens)));
+  results.push(...checkCssBudget(live.map((d) => d.draftTree), design.draftCustomCss));
   return { docs, results };
 }
 
@@ -881,6 +986,7 @@ export const publish = defineAction({
       .update(siteDesigns)
       .set({
         publishedTokens: design.draftTokens,
+        publishedCustomCss: design.draftCustomCss,
         publishedRevision: design.draftRevision,
         publishedVersion: version,
         publishedAt: new Date(),
@@ -893,6 +999,7 @@ export const publish = defineAction({
       snapshot: {
         themeId: design.draftThemeId,
         tokens: design.draftTokens,
+        customCss: design.draftCustomCss,
         documents: live.map((d) => ({ id: d.id, kind: d.kind, handle: d.handle, title: d.title, seo: d.seo, tree: d.draftTree })),
       },
       note: input.note ?? null,
@@ -935,7 +1042,10 @@ export const discardDraft = defineAction({
         await ctx.db.delete(siteDocuments).where(eq(siteDocuments.id, doc.id));
       }
     }
-    await ctx.db.update(siteDesigns).set({ draftThemeId: site.themeId, draftTokens: design.publishedTokens }).where(eq(siteDesigns.siteId, input.siteId));
+    await ctx.db
+      .update(siteDesigns)
+      .set({ draftThemeId: site.themeId, draftTokens: design.publishedTokens, draftCustomCss: design.publishedCustomCss })
+      .where(eq(siteDesigns.siteId, input.siteId));
     const revision = await bumpRevision(ctx, input.siteId);
     // Nothing differs from what is live now.
     await ctx.db.update(siteDesigns).set({ publishedRevision: revision }).where(eq(siteDesigns.siteId, input.siteId));
@@ -976,7 +1086,8 @@ export const restoreVersion = defineAction({
     }
     await ctx.db
       .update(siteDesigns)
-      .set({ draftThemeId: snap.snapshot.themeId as "studio", draftTokens: snap.snapshot.tokens })
+      // A version from before custom CSS existed had none.
+      .set({ draftThemeId: snap.snapshot.themeId as "studio", draftTokens: snap.snapshot.tokens, draftCustomCss: snap.snapshot.customCss ?? "" })
       .where(eq(siteDesigns.siteId, input.siteId));
     ctx.recordDiff({ entity: "siteDesign", entityId: String(input.siteId), path: "draft", before: null, after: { restoredVersion: input.version } });
     return { version: input.version, revision: await bumpRevision(ctx, input.siteId) };

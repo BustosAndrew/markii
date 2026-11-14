@@ -40,6 +40,7 @@ describe("which builder actions an agent may run itself (D51)", () => {
       "builder.moveNode",
       "builder.removeNodes",
       "builder.setBinding",
+      "builder.setCustomClass",
       "builder.setProps",
       "builder.setStyles",
       "builder.setTheme",
@@ -50,10 +51,12 @@ describe("which builder actions an agent may run itself (D51)", () => {
   });
 
   it("never includes anything that changes what shoppers see, or is irreversible", () => {
-    for (const id of ["builder.publish", "builder.discardDraft", "builder.restoreVersion", "builder.deletePage", "builder.restorePage", "builder.startDesign", "builder.stopAgent"]) {
+    for (const id of ["builder.publish", "builder.discardDraft", "builder.restoreVersion", "builder.deletePage", "builder.restorePage", "builder.startDesign", "builder.stopAgent", "builder.setCustomCss"]) {
       expect(getAction(id)?.agentExecution, id).toBeUndefined();
     }
     expect(getAction("builder.publish")?.riskTier).toBe("high");
+    // M6: custom CSS is high, so agents and API tokens are refused it by the registry.
+    expect(getAction("builder.setCustomCss")?.riskTier).toBe("high");
   });
 
   it("every agent-executable action is low risk, step-up free and undoable", () => {

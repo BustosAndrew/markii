@@ -180,7 +180,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
           </>
         )}
       </main>
-      <StoreFooter data={data} />
+      <StoreFooter data={data} minimal />
     </ThemeRoot>
   );
 }

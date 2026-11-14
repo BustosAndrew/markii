@@ -105,6 +105,7 @@ const DRAFT_TOOL_LABEL: Record<string, string> = {
   builder_customizeRegion: "Started customising a shared region",
   builder_setBinding: "Connected a block to store data",
   builder_setVisibility: "Set when a block shows",
+  builder_setCustomClass: "Set a block's custom class",
 };
 
 function draftToolNote(output: unknown): { applied: boolean; note: string | null } {

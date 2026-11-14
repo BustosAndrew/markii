@@ -61,6 +61,16 @@ export function outlineTree(root: PageNode, opts: { selectedId?: string | null; 
   return lines.join("\n");
 }
 
+/**
+ * The class names the merchant's custom CSS defines (M6) — what the agent may
+ * put on a block with `builder_setCustomClass`. The CSS itself stays out of the
+ * instructions: it can be 20 KB, and the agent may not edit it anyway.
+ */
+export function customCssClasses(css: string): string[] {
+  const code = css.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\{[^{}]*\}/g, "{}");
+  return [...new Set([...code.matchAll(/\.([A-Za-z_][\w-]*)/g)].map((m) => m[1]))].filter((c) => !/^(mk|sf)-/.test(c)).slice(0, 60);
+}
+
 /** A builder invocation as the context reads it from the audit table. */
 export type ChangeRow = {
   actionId: string;

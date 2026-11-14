@@ -1,5 +1,6 @@
 import { SiteHeader } from "@/components/storefront/site-header";
 import { BuilderRegion, type RenderContext } from "@/lib/builder/render";
+import { cssProblems } from "@/lib/builder/sanitize";
 import { storeView } from "@/lib/builder/views";
 import { regionsFor, type SiteData } from "@/lib/storefront";
 
@@ -35,7 +36,11 @@ export async function StoreTop({
 }: {
   data: SiteData;
   searchQuery?: string;
-  /** The fixed header's cart/account variant — no search box or collections link. A designed header is used as designed. */
+  /**
+   * The cart and account pages. The fixed header drops its search box and
+   * collections link; a designed header is used as designed, except that no
+   * custom HTML renders in it (M6) — shoppers type passwords and card details here.
+   */
   minimal?: boolean;
 }) {
   const regions = await regionsFor(data);
@@ -47,11 +52,15 @@ export async function StoreTop({
         <BuilderRegion
           region="announcement"
           tree={regions.announcement.tree}
-          ctx={builderContext(data, { documentId: regions.announcement.id })}
+          ctx={builderContext(data, { documentId: regions.announcement.id, sensitive: minimal })}
         />
       ) : null}
       {regions.header ? (
-        <BuilderRegion region="header" tree={regions.header.tree} ctx={builderContext(data, { documentId: regions.header.id, searchQuery })} />
+        <BuilderRegion
+          region="header"
+          tree={regions.header.tree}
+          ctx={builderContext(data, { documentId: regions.header.id, searchQuery, sensitive: minimal })}
+        />
       ) : (
         <SiteHeader
           siteName={site.name}
@@ -68,8 +77,24 @@ export async function StoreTop({
   );
 }
 
-export async function StoreFooter({ data }: { data: SiteData }) {
+/**
+ * The footer region, then the merchant's theme CSS (M6) — last on the page, so
+ * it wins over the theme and every block's own styles, as a theme stylesheet
+ * should. **Neither on the cart or account pages** (`minimal`): CSS alone can
+ * read what a shopper types — an attribute selector per character, each
+ * fetching a URL — so the merchant's styles stop where passwords start.
+ */
+export async function StoreFooter({ data, minimal = false }: { data: SiteData; minimal?: boolean }) {
   const regions = await regionsFor(data);
-  if (!regions.footer) return null;
-  return <BuilderRegion region="footer" tree={regions.footer.tree} ctx={builderContext(data, { documentId: regions.footer.id })} />;
+  return (
+    <>
+      {regions.footer ? (
+        <BuilderRegion region="footer" tree={regions.footer.tree} ctx={builderContext(data, { documentId: regions.footer.id, sensitive: minimal })} />
+      ) : null}
+      {data.customCss && !minimal && cssProblems(data.customCss).length === 0 ? (
+        // Checked on save and again here: it cannot contain "<", so it cannot leave this element.
+        <style data-mk-custom-css="" dangerouslySetInnerHTML={{ __html: data.customCss }} />
+      ) : null}
+    </>
+  );
 }

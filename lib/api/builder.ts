@@ -66,6 +66,8 @@ export type DesignSummary =
       started: true;
       themeId: ThemeId;
       tokens: DesignTokens;
+      /** M6: the draft's custom CSS ("" when none). Saved with `setCustomCss` — by a person only. */
+      customCss: string;
       /** WCAG AA contrast warnings for the draft theme, ready to show. */
       contrast: string[];
       revision: number;
@@ -94,7 +96,7 @@ export type PageDocument = {
 export type BlockDescription = {
   type: string;
   label: string;
-  category: "layout" | "content" | "commerce" | "media" | "navigation";
+  category: "layout" | "content" | "commerce" | "media" | "navigation" | "advanced";
   description: string;
   usageHints: string[];
   children: "none" | "any" | string[];
@@ -217,6 +219,18 @@ export const customizeRegion = (siteId: number, region: RegionHandle) =>
 /** Bind props to data paths (`null` unbinds). A path must be one of `BlockRegistry.data.bindings`. */
 export const setNodeBindings = (input: { siteId: number; pageId: number; nodeId: string; bindings: Record<string, string | null> }) =>
   invokeAction<{ changed: string[] } & Revisioned>("builder.setBinding", input);
+
+/**
+ * Replace the site's custom CSS (M6). `high`: a signed-in person only — agents
+ * and API tokens get `403 HUMAN_APPROVAL_REQUIRED`. A refusal on content is
+ * `400 VALIDATION_ERROR` with `details.problems` (no "<", no @import, https-only
+ * `url()`); show them. Not applied on the cart or account pages.
+ */
+export const setCustomCss = (siteId: number, css: string) => invokeAction<Revisioned>("builder.setCustomCss", { siteId, css });
+
+/** A block's custom classes (M6); `null` clears. `mk-` / `sf-` names are refused. */
+export const setNodeCustomClass = (input: { siteId: number; pageId: number; nodeId: string; customClass: string | null }) =>
+  invokeAction<{ customClass: string | null } & Revisioned>("builder.setCustomClass", input);
 
 /** Show a block only when `when` holds; `null` shows it always. */
 export const setNodeVisibility = (input: { siteId: number; pageId: number; nodeId: string; when: Condition | null }) =>

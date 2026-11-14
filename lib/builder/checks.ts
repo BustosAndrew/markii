@@ -1,5 +1,7 @@
 import { REPEATER_SOURCES, scopeOf, scopesFor, type DataScope, type RepeaterSource } from "./bindings";
+import { BLOCK_CSS } from "./block-css";
 import { getBlock } from "./blocks";
+import { compileStyles } from "./styles";
 import { contrastWarnings } from "./tokens";
 import type { ThemeTokens } from "@/lib/storefront/themes";
 import type { DocumentKind, PageNode } from "./types";
@@ -147,6 +149,9 @@ export function checkPage(
           push("warning", "EMPTY_MENU", "A menu has no links.", node.id);
         }
         break;
+      case "html":
+        if (!String(p.html ?? "").trim()) push("warning", "EMPTY_CUSTOM_HTML", "A custom HTML block is empty.", node.id);
+        break;
       case "storeBrand":
         if (p.logoSrc && !p.showName && !String(p.logoAlt ?? "").trim()) {
           push("warning", "MISSING_ALT", "The logo has no alt text and the store's name is hidden, so the home link has no name.", node.id);
@@ -208,6 +213,26 @@ export function checkPage(
 /** The props, reduced to the keys the defaults have, for a placeholder comparison. */
 function stripDefaults(props: Record<string, unknown>, defaults: Record<string, unknown>) {
   return Object.fromEntries(Object.keys(defaults).map((k) => [k, props[k]]));
+}
+
+/** `docs/BUILDER.md` §13: a storefront page's CSS stays under ~50 KB. */
+export const CSS_BUDGET_BYTES = 50_000;
+
+/**
+ * The CSS a page could carry — the shared block rules, every document's own
+ * styles, the custom CSS — against the budget. A warning, not an error: it is
+ * slow, not broken.
+ */
+export function checkCssBudget(trees: PageNode[], customCss: string): CheckResult[] {
+  const total = BLOCK_CSS.length + trees.reduce((n, t) => n + compileStyles(t).length, 0) + customCss.length;
+  if (total <= CSS_BUDGET_BYTES) return [];
+  return [
+    {
+      severity: "warning",
+      code: "CSS_BUDGET",
+      message: `The storefront's CSS comes to about ${Math.round(total / 1000)} KB, over the ${CSS_BUDGET_BYTES / 1000} KB budget — pages will load slower. Trim the custom CSS or simplify styles.`,
+    },
+  ];
 }
 
 export function checkTheme(theme: ThemeTokens): CheckResult[] {

@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { BINDING_PATHS, bindingsSchema, conditionSchema } from "./bindings";
 import { BLOCKS, canContain, getBlock, type BlockDefinition } from "./blocks";
+import { CLASS_TOKEN, reservedClass, sanitizeHtml } from "./sanitize";
 import { nodeStylesSchema, styleSchema } from "./styles";
 import {
   NODE_ID_PATTERN,
@@ -112,6 +113,19 @@ function validBindings(node: PageNode, def: BlockDefinition): Record<string, str
   return parsed.data;
 }
 
+/** A node's custom classes (M6 level 1): up to five tokens, none in the builder's or themes' namespace. */
+function validCustomClass(node: PageNode): string | undefined {
+  const raw = node.customClass?.trim();
+  if (!raw) return undefined;
+  const tokens = raw.split(/\s+/);
+  if (tokens.length > 5) throw new TreeError("INVALID", `At most 5 custom classes on one block (${node.id}).`, { nodeId: node.id });
+  for (const t of tokens) {
+    if (!CLASS_TOKEN.test(t)) throw new TreeError("INVALID", `"${t}" is not a usable class name: letters, digits, - and _, starting with a letter.`, { nodeId: node.id });
+    if (reservedClass(t)) throw new TreeError("INVALID", `Class names starting mk- or sf- belong to the builder and the themes ("${t}").`, { nodeId: node.id });
+  }
+  return [...new Set(tokens)].join(" ");
+}
+
 function validCondition(node: PageNode): Condition | undefined {
   if (!node.visibleWhen) return undefined;
   const parsed = conditionSchema.safeParse(node.visibleWhen);
@@ -161,6 +175,8 @@ export function validateTree(root: PageNode): PageNode {
     } catch (e) {
       throw new TreeError("INVALID", `Invalid ${node.type} (${node.id}): ${issuesOf(e)}`, { nodeId: node.id });
     }
+    // Custom HTML is stored clean: whatever wrote this tree, the draft holds what will ship (M6).
+    if (node.type === "html") props = { ...props, html: sanitizeHtml(String(props.html ?? "")) };
     if (JSON.stringify(props).length > TREE_LIMITS.maxPropsBytes) {
       throw new TreeError("LIMIT", `The ${node.type} block ${node.id} holds too much content; split it up.`);
     }
@@ -188,12 +204,14 @@ export function validateTree(root: PageNode): PageNode {
 
     const bindings = validBindings(node, def);
     const visibleWhen = validCondition(node);
+    const customClass = validCustomClass(node);
 
     const out: PageNode = { id: node.id, type: node.type, props };
     if (styles) out.styles = styles;
     if (node.intent) out.intent = node.intent;
     if (bindings) out.bindings = bindings;
     if (visibleWhen) out.visibleWhen = visibleWhen;
+    if (customClass) out.customClass = customClass;
     if (def.children !== "none") {
       out.children = children.map((c) => check(c, node.type, depth + 1, inRepeater || node.type === "repeater"));
     }
@@ -219,6 +237,7 @@ export type NodeInput = {
   intent?: string;
   bindings?: Record<string, string>;
   visibleWhen?: Condition;
+  customClass?: string;
   children?: NodeInput[];
 };
 
@@ -239,6 +258,7 @@ function nodeInputAtDepth(depth: number): z.ZodType<NodeInput> {
     // Checked against the block in validateTree; here only the shape, so undo can put back what was removed.
     bindings: z.record(z.string().max(40), z.string().max(80)).optional(),
     visibleWhen: conditionSchema.optional(),
+    customClass: z.string().max(220).optional(),
   };
   if (depth === 0) return z.object(fields).strict() as unknown as z.ZodType<NodeInput>;
   return z
@@ -273,6 +293,7 @@ export function buildNode(input: NodeInput, taken: Set<string>, id: IdGenerator 
   if (input.intent) node.intent = input.intent;
   if (input.bindings && Object.keys(input.bindings).length) node.bindings = { ...input.bindings };
   if (input.visibleWhen) node.visibleWhen = { ...input.visibleWhen };
+  if (input.customClass) node.customClass = input.customClass;
 
   if (def.children !== "none") {
     const kids = input.children ?? defaultChildren(input.type);
@@ -394,6 +415,7 @@ export function duplicateNode(
     intent: n.intent,
     bindings: n.bindings ? { ...n.bindings } : undefined,
     visibleWhen: n.visibleWhen ? { ...n.visibleWhen } : undefined,
+    customClass: n.customClass,
     children: n.children?.map(strip),
   });
   const { root: next, inserted } = insertNodes(
@@ -500,6 +522,32 @@ export function setVisibility(
   if (when) hit.node.visibleWhen = when;
   else delete hit.node.visibleWhen;
   return { root: validateTree(next), before, changed: !same(before, when) };
+}
+
+/** Set or clear (`null`) a node's custom classes. */
+export function setCustomClass(root: PageNode, nodeId: string, customClass: string | null): { root: PageNode; before: string | null; after: string | null } {
+  const next = clone(root);
+  const hit = mustLocate(next, nodeId);
+  if (!hit.parent) throw new TreeError("INVALID", "The page root takes no custom class.");
+  const before = hit.node.customClass ?? null;
+  if (customClass?.trim()) hit.node.customClass = customClass.trim();
+  else delete hit.node.customClass;
+  const validated = validateTree(next);
+  return { root: validated, before, after: locate(validated, nodeId)!.node.customClass ?? null };
+}
+
+/**
+ * The custom HTML in a tree, by node id (M6) — what an action compares before
+ * and after an edit to tell whether it wrote custom code.
+ */
+export function customHtmlOf(root: PageNode): Map<string, string> {
+  const out = new Map<string, string>();
+  const walk = (n: PageNode) => {
+    if (n.type === "html") out.set(n.id, String(n.props.html ?? ""));
+    (n.children ?? []).forEach(walk);
+  };
+  walk(root);
+  return out;
 }
 
 export function setIntent(root: PageNode, nodeId: string, intent: string | null): { root: PageNode; before: string | null } {
