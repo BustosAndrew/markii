@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { BlockRegistry, DesignPage, DesignTokens, PageSeo, SharedDocument, ThemeId } from "@/lib/api/builder";
+import type { BlockRegistry, DesignPage, DesignTokens, PageSeo, SavedBlock, SharedDocument, ThemeId } from "@/lib/api/builder";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/field";
 import { Toggle } from "@/components/ui/toggle";
@@ -12,15 +12,82 @@ export function AddPanel({
   disabled,
   onAddBlock,
   onAddPreset,
+  clipboard,
+  onPaste,
+  saved,
+  onInsertSaved,
+  onDeleteSaved,
 }: {
   registry: BlockRegistry;
   disabled: boolean;
   onAddBlock: (type: string) => void;
   onAddPreset: (preset: string) => void;
+  /** M7: what Copy put on the clipboard, if anything. */
+  clipboard: { count: number; label: string } | null;
+  onPaste: () => void;
+  /** M7: the site's saved blocks; null while loading or when they could not be read. */
+  saved: SavedBlock[] | null;
+  onInsertSaved: (block: SavedBlock) => void;
+  onDeleteSaved: (block: SavedBlock) => void;
 }) {
   const groups = ["layout", "content", "media", "commerce", "navigation", "advanced"] as const;
+  const [confirming, setConfirming] = useState<number | null>(null);
+  const label = (type: string) => registry.blocks.find((b) => b.type === type)?.label ?? type;
   return (
     <div className="space-y-5 p-3">
+      {clipboard ? (
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={onPaste}
+          aria-keyshortcuts="Control+V"
+          className="w-full rounded-[var(--radius-control)] border border-dashed border-brand/60 px-3 py-2 text-left text-sm hover:border-brand disabled:opacity-50"
+        >
+          <span className="block font-medium text-foreground">Paste {clipboard.count === 1 ? "block" : `${clipboard.count} blocks`}</span>
+          <span className="block truncate text-xs text-muted">{clipboard.label}</span>
+        </button>
+      ) : null}
+      <section aria-label="Saved blocks">
+        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Saved blocks</h3>
+        {saved === null ? (
+          <p className="text-xs text-muted">Loading saved blocks…</p>
+        ) : saved.length === 0 ? (
+          <p className="text-xs text-muted">None yet. Select a block and use &ldquo;Save as a reusable block&rdquo; in the inspector.</p>
+        ) : (
+          <ul className="grid gap-1.5">
+            {saved.map((b) => (
+              <li key={b.id} className="flex items-stretch gap-1">
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => onInsertSaved(b)}
+                  className="min-w-0 flex-1 rounded-[var(--radius-control)] border border-border px-3 py-2 text-left text-sm hover:border-brand disabled:opacity-50"
+                >
+                  <span className="block truncate font-medium text-foreground">{b.name}</span>
+                  <span className="block text-xs text-muted">
+                    {label(b.type)} · {b.nodeCount} {b.nodeCount === 1 ? "block" : "blocks"}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  disabled={disabled}
+                  aria-label={confirming === b.id ? `Confirm deleting saved block ${b.name}` : `Delete saved block ${b.name}`}
+                  onClick={() => {
+                    if (confirming === b.id) {
+                      setConfirming(null);
+                      onDeleteSaved(b);
+                    } else setConfirming(b.id);
+                  }}
+                  onBlur={() => setConfirming((c) => (c === b.id ? null : c))}
+                  className={`shrink-0 rounded-[var(--radius-control)] border px-2 text-xs disabled:opacity-50 ${confirming === b.id ? "border-error-border bg-error-bg text-error-text" : "border-border text-muted hover:text-foreground"}`}
+                >
+                  {confirming === b.id ? "Confirm" : "Delete"}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
       <section>
         <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Sections</h3>
         <div className="grid gap-1.5">

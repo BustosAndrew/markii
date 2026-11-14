@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Monitor, Redo2, Smartphone, Tablet, Undo2 } from "lucide-react";
+import { Laptop, Monitor, Redo2, Smartphone, Tablet, Undo2 } from "lucide-react";
 import { undoInvocation, type ActionOutcome } from "@/lib/api/actions";
 import {
   addBlock,
@@ -10,18 +10,23 @@ import {
   customizeRegion,
   customizeTemplate,
   deleteDesignPage,
+  deleteSavedBlock,
   discardDesignDraft,
   duplicateNode,
   getBlockRegistry,
   getDesign,
   getDesignPage,
   getDesignRevision,
+  insertNodes,
   insertPreset,
+  listSavedBlocks,
   moveNode,
+  moveNodes,
   publishDesign,
   removeNodes,
   restoreDesignPage,
   restoreDesignVersion,
+  saveBlock,
   setDesignTheme,
   setCustomCss,
   setHeadCode,
@@ -39,8 +44,11 @@ import {
   type BlockRegistry,
   type Breakpoint,
   type DesignSummary,
+  type NodeInput,
+  type PageNode,
   type PageDocument,
   type RegionHandle,
+  type SavedBlock,
   type TemplateHandle,
 } from "@/lib/api/builder";
 import { listCategories } from "@/lib/api/categories";
@@ -52,10 +60,10 @@ import { Button, ButtonLink } from "@/components/ui/button";
 import { ErrorState } from "@/components/ui/error-state";
 import { BrandChat } from "./brand-chat";
 import { HistoryDialog, PublishDialog } from "./dialogs";
-import { Inspector, type PickerData } from "./inspector";
-import { LayerTree } from "./layer-tree";
+import { BREAKPOINT_LABEL, Inspector, MultiInspector, type PickerData } from "./inspector";
+import { LayerTree, type SelectMode } from "./layer-tree";
 import { AddPanel, PagesPanel, SharedLayoutsPanel, ThemePanel } from "./panels";
-import { find, insertionPoint, nodeScopes } from "./tree";
+import { BREAKPOINT_ORDER, docOrder, find, insertionPoint, nodeLabel, nodeScopes, outermost, planDuplicate, planPaste, toInput, type Move } from "./tree";
 
 /**
  * The site editor (`docs/BUILDER.md` §11, D51 M2): the page's layers and
@@ -94,8 +102,42 @@ const POLL_MS = 2_000;
 const PREVIEW_REFRESH_MS = 90 * 60 * 1000;
 
 type Tab = "agent" | "layers" | "add" | "pages" | "theme";
-type Viewport = "desktop" | "tablet" | "phone";
-const VIEWPORT_WIDTH: Record<Viewport, string> = { desktop: "100%", tablet: "768px", phone: "390px" };
+const TABS: Tab[] = ["agent", "layers", "add", "pages", "theme"];
+
+/**
+ * The preview follows the breakpoint being edited (M7), at that breakpoint's
+ * **narrowest** width: styles are mobile-first, so a size shows every rule
+ * from the sizes below it and none from above — an edit at "All screens" is
+ * never hidden by a desktop override the merchant cannot see.
+ */
+const FRAME: Record<Breakpoint, { width: string; minWidth?: string; icon: typeof Monitor; short: string }> = {
+  base: { width: "390px", icon: Smartphone, short: "All" },
+  sm: { width: "640px", icon: Tablet, short: "640+" },
+  md: { width: "768px", icon: Laptop, short: "768+" },
+  lg: { width: "100%", minWidth: "1024px", icon: Monitor, short: "1024+" },
+};
+
+/** The clipboard survives a reload and reaches other tabs and stores (per browser, never the server). */
+const CLIPBOARD_KEY = "markii.builder.clipboard.v1";
+type Clip = { nodes: NodeInput[]; label: string };
+function readClip(): Clip | null {
+  try {
+    const raw = window.localStorage.getItem(CLIPBOARD_KEY);
+    const v = raw ? (JSON.parse(raw) as Clip) : null;
+    return v && Array.isArray(v.nodes) && v.nodes.length && typeof v.label === "string" ? v : null;
+  } catch {
+    return null;
+  }
+}
+function writeClip(clip: Clip) {
+  try {
+    window.localStorage.setItem(CLIPBOARD_KEY, JSON.stringify(clip));
+  } catch {
+    // Storage blocked or full: the clipboard still works for this tab.
+  }
+}
+
+type SaveState = "idle" | "saving" | "saved" | "error";
 
 type Step = { actionId: string; invocationId: string };
 
@@ -113,9 +155,18 @@ export function DesignEditor({
   const [design, setDesign] = useState<DesignSummary | null>(null);
   const [pageId, setPageId] = useState<number | null>(null);
   const [page, setPage] = useState<PageDocument | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  /** Selected node ids; the last is the primary one the inspector and the agent see (M7). */
+  const [selection, setSelection] = useState<string[]>([]);
+  const selectedId = selection[selection.length - 1] ?? null;
+  const setSelectedId = useCallback((id: string | null) => setSelection(id ? [id] : []), []);
   const [breakpoint, setBreakpoint] = useState<Breakpoint>("base");
-  const [viewport, setViewport] = useState<Viewport>("desktop");
+  // Read once, lazily: nothing renders the clipboard before the editor has loaded, so the server's null cannot mismatch.
+  const [clip, setClip] = useState<Clip | null>(() => (typeof window === "undefined" ? null : readClip()));
+  const [saved, setSaved] = useState<SavedBlock[] | null>(null);
+  const [saveState, setSaveState] = useState<SaveState>("idle");
+  /** One live region for the whole editor; `n` makes a repeated message announce again. */
+  const [announcement, setAnnouncement] = useState({ text: "", n: 0 });
+  const announce = useCallback((text: string) => setAnnouncement((a) => ({ text, n: a.n + 1 })), []);
   const [tab, setTab] = useState<Tab>("agent");
   const [preview, setPreview] = useState<{ url: string; origin: string; basePath: string } | null>(null);
   const [frameSrc, setFrameSrc] = useState<string | null>(null);
@@ -194,8 +245,27 @@ export function DesignEditor({
       if (pageRef.current === id) setPage(doc);
       if (path !== null) reloadFrame(path);
     },
-    [site.id, reloadFrame],
+    [site.id, reloadFrame, setSelectedId],
   );
+
+  const loadSaved = useCallback(async () => {
+    try {
+      setSaved((await listSavedBlocks(site.id)).items);
+    } catch {
+      setSaved([]);
+    }
+  }, [site.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    listSavedBlocks(site.id).then(
+      (r) => !cancelled && setSaved(r.items),
+      () => !cancelled && setSaved([]),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [site.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -311,7 +381,7 @@ export function DesignEditor({
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [preview]);
+  }, [preview, setSelectedId]);
 
   const highlight = useCallback(
     (scroll: boolean) => {
@@ -332,8 +402,10 @@ export function DesignEditor({
     ): Promise<ActionOutcome<T> | null> => {
       setBusy(true);
       setError(null);
+      setSaveState("saving");
       try {
         const out = await fn();
+        setSaveState("saved");
         if (out.undoable && opts.record !== false) {
           setUndoStack((s) => [...s.slice(-49), { actionId, invocationId: out.invocationId }]);
           setRedoStack([]);
@@ -342,6 +414,7 @@ export function DesignEditor({
         reloadFrame();
         return out;
       } catch (e) {
+        setSaveState("error");
         opts.onError?.(e);
         if (e instanceof ApiClientError && e.code === "AGENT_EDITING") {
           setLock((l) => ({ ...l, active: true }));
@@ -369,12 +442,14 @@ export function DesignEditor({
       setRedoStack((s) => [...s, { actionId: out.undoneWith, invocationId: out.invocationId }]);
       await refresh();
       reloadFrame();
+      setSaveState("saved");
+      announce("Undone.");
     } catch (e) {
       setError(publicErrorMessage(e, "That could not be undone."));
     } finally {
       setBusy(false);
     }
-  }, [undoStack, refresh, reloadFrame]);
+  }, [undoStack, refresh, reloadFrame, announce]);
 
   const redo = useCallback(async () => {
     const step = redoStack[redoStack.length - 1];
@@ -387,12 +462,14 @@ export function DesignEditor({
       setUndoStack((s) => [...s, { actionId: out.undoneWith, invocationId: out.invocationId }]);
       await refresh();
       reloadFrame();
+      setSaveState("saved");
+      announce("Redone.");
     } catch (e) {
       setError(publicErrorMessage(e, "That could not be redone."));
     } finally {
       setBusy(false);
     }
-  }, [redoStack, refresh, reloadFrame]);
+  }, [redoStack, refresh, reloadFrame, announce]);
 
   // ---------- the brand agent ----------
 
@@ -455,19 +532,157 @@ export function DesignEditor({
     [refresh, reloadFrame],
   );
 
+  // ---------- selections, clipboard, bulk edits (M7) ----------
+
+  const tree = page?.tree ?? null;
+  const sid = site.id;
+  const pid = page?.id ?? 0;
+  const label = useCallback((n: PageNode) => (registry ? nodeLabel(n, new Map(registry.blocks.map((b) => [b.type, b]))) : n.type), [registry]);
+
+  const select = useCallback(
+    (id: string, mode: SelectMode) => {
+      setSelection((cur) => {
+        if (mode === "toggle") return cur.includes(id) ? cur.filter((x) => x !== id) : [...cur.filter((x) => x !== tree?.id), id];
+        if (mode === "range" && tree && cur.length) {
+          const order = docOrder(tree).filter((x) => x !== tree.id);
+          const a = order.indexOf(cur[cur.length - 1]);
+          const b = order.indexOf(id);
+          if (a < 0 || b < 0) return [id];
+          const [lo, hi] = a < b ? [a, b] : [b, a];
+          return [...order.slice(lo, hi + 1).filter((x) => x !== id), id];
+        }
+        return [id];
+      });
+    },
+    [tree],
+  );
+
+  const copySelection = useCallback(
+    (cut: boolean) => {
+      if (!tree) return;
+      const ids = outermost(tree, selection);
+      if (!ids.length) return announce("Select a block to copy.");
+      const nodes = ids.map((id) => find(tree, id)!.node);
+      const next: Clip = { nodes: nodes.map(toInput), label: nodes.map(label).join(", ").slice(0, 120) };
+      setClip(next);
+      writeClip(next);
+      if (!cut) return announce(ids.length === 1 ? `Copied ${label(nodes[0])}.` : `Copied ${ids.length} blocks.`);
+      void run(() => removeNodes({ siteId: sid, pageId: pid, nodeIds: ids }), "builder.removeNodes").then((out) => {
+        if (!out) return;
+        setSelectedId(null);
+        announce(ids.length === 1 ? `Cut ${label(nodes[0])}.` : `Cut ${ids.length} blocks.`);
+      });
+    },
+    [tree, selection, label, announce, run, sid, pid, setSelectedId],
+  );
+
+  const pasteNodes = useCallback(
+    async (nodes: NodeInput[], what: string) => {
+      if (!tree || !registry) return;
+      const blocks = new Map(registry.blocks.map((b) => [b.type, b]));
+      const placements = planPaste(tree, selectedId, nodes, blocks);
+      if (!placements) return setError(`${what} cannot go there. Select a section first.`);
+      const out = await run(() => insertNodes({ siteId: sid, pageId: pid, placements }), "builder.insertNodes");
+      const ids = out?.result?.inserted.map((i) => i.nodeId) ?? [];
+      if (!ids.length) return;
+      setSelection(ids);
+      announce(`${what} added.`);
+    },
+    [tree, registry, selectedId, run, sid, pid, announce],
+  );
+
+  const paste = useCallback(() => {
+    const current = readClip() ?? clip;
+    if (!current) return announce("The clipboard is empty. Copy a block first.");
+    void pasteNodes(current.nodes, current.nodes.length === 1 ? "Pasted block" : `${current.nodes.length} pasted blocks`);
+  }, [clip, pasteNodes, announce]);
+
+  const duplicateSelection = useCallback(async () => {
+    if (!tree) return;
+    const placements = planDuplicate(tree, selection);
+    if (!placements.length) return;
+    const out = await run(() => insertNodes({ siteId: sid, pageId: pid, placements }), "builder.insertNodes");
+    const ids = out?.result?.inserted.map((i) => i.nodeId).reverse() ?? [];
+    if (!ids.length) return;
+    setSelection(ids);
+    announce(ids.length === 1 ? "Duplicated." : `Duplicated ${ids.length} blocks.`);
+  }, [tree, selection, run, sid, pid, announce]);
+
+  const removeSelection = useCallback(async () => {
+    if (!tree) return;
+    const ids = outermost(tree, selection);
+    if (!ids.length) return;
+    const what = ids.length === 1 ? label(find(tree, ids[0])!.node) : `${ids.length} blocks`;
+    if (await run(() => removeNodes({ siteId: sid, pageId: pid, nodeIds: ids }), "builder.removeNodes")) {
+      setSelectedId(null);
+      announce(`Deleted ${what}. Undo with Ctrl+Z.`);
+    }
+  }, [tree, selection, label, run, sid, pid, setSelectedId, announce]);
+
+  const moveMany = useCallback(
+    async (moves: Move[]) => Boolean(await run(() => moveNodes({ siteId: sid, pageId: pid, moves }), "builder.moveNodes")),
+    [run, sid, pid],
+  );
+
+  const saveSelectedBlock = useCallback(
+    async (name: string) => {
+      if (!tree || !selectedId) return false;
+      const hit = find(tree, selectedId);
+      if (!hit?.parent) return false;
+      // The library is not the design: saving is not a step on the undo stack.
+      const out = await run(() => saveBlock({ siteId: sid, name, node: toInput(hit.node) }), "builder.saveBlock", { record: false });
+      if (!out) return false;
+      await loadSaved();
+      announce(`Saved "${name}" to your saved blocks.`);
+      return true;
+    },
+    [tree, selectedId, run, sid, loadSaved, announce],
+  );
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
       if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable)) return;
+      const mod = e.ctrlKey || e.metaKey;
+      const key = e.key.toLowerCase();
+      // Copying a block is not an edit, so it works while read-only — but never steal a copy of selected text.
+      if (mod && key === "c" && !e.shiftKey) {
+        if (window.getSelection()?.toString()) return;
+        if (!selection.length) return;
+        e.preventDefault();
+        copySelection(false);
+        return;
+      }
+      if (key === "escape" && selection.length && !document.querySelector("[role=dialog]")) {
+        setSelectedId(null);
+        announce("Selection cleared.");
+        return;
+      }
       if (readOnly || busy) return;
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+      if (mod && key === "z") {
         e.preventDefault();
         void (e.shiftKey ? redo() : undo());
+      } else if (mod && key === "y") {
+        e.preventDefault();
+        void redo();
+      } else if (mod && key === "x" && selection.length) {
+        if (window.getSelection()?.toString()) return;
+        e.preventDefault();
+        copySelection(true);
+      } else if (mod && key === "v") {
+        e.preventDefault();
+        paste();
+      } else if (mod && key === "d" && selection.length) {
+        e.preventDefault();
+        void duplicateSelection();
+      } else if ((key === "delete" || key === "backspace") && selection.length && !mod) {
+        e.preventDefault();
+        void removeSelection();
       }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [undo, redo, readOnly, busy]);
+  }, [undo, redo, readOnly, busy, selection, copySelection, paste, duplicateSelection, removeSelection, setSelectedId, announce]);
 
   // ---------- render ----------
 
@@ -481,10 +696,8 @@ export function DesignEditor({
     );
   }
 
-  const tree = page?.tree ?? null;
   const selected = tree ? find(tree, selectedId)?.node ?? null : null;
-  const sid = site.id;
-  const pid = page?.id ?? 0;
+  const multi = tree ? outermost(tree, selection) : [];
 
   const add = async (type: string, preset?: string) => {
     if (!tree) return;
@@ -494,8 +707,14 @@ export function DesignEditor({
       ? await run(() => insertPreset({ siteId: sid, pageId: pid, ...at, preset }), "builder.insertPreset")
       : await run(() => addBlock({ siteId: sid, pageId: pid, ...at, type }), "builder.addBlock");
     const nodeId = (out?.result as { nodeId?: string } | undefined)?.nodeId;
-    if (nodeId) setSelectedId(nodeId);
+    if (nodeId) {
+      setSelectedId(nodeId);
+      announce(`${preset ? registry.presets.find((x) => x.id === preset)?.label ?? "Section" : blocks.get(type)?.label ?? type} added.`);
+    }
   };
+
+  const saveText =
+    saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved to draft" : saveState === "error" ? "Last change not saved" : null;
 
   return (
     <div className="flex h-[calc(100dvh-8rem)] min-h-[600px] flex-col overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface">
@@ -504,28 +723,28 @@ export function DesignEditor({
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold text-foreground">{site.name}</p>
           <p className="text-xs text-muted">
+            {saveText ? <span className={saveState === "error" ? "text-error-text" : undefined}>{saveText} · </span> : null}
             {started.hasUnpublishedChanges ? "Unpublished changes" : started.publishedVersion ? `Live: version ${started.publishedVersion}` : "Not published yet"}
           </p>
         </div>
-        <div className="flex items-center gap-0.5 rounded-[var(--radius-control)] border border-border p-0.5" role="group" aria-label="Preview width">
-          {(
-            [
-              ["desktop", Monitor, "Desktop"],
-              ["tablet", Tablet, "Tablet"],
-              ["phone", Smartphone, "Phone"],
-            ] as const
-          ).map(([v, Icon, label]) => (
-            <button
-              key={v}
-              type="button"
-              aria-label={label}
-              aria-pressed={viewport === v}
-              onClick={() => setViewport(v)}
-              className={`rounded p-1.5 ${viewport === v ? "bg-brand/10 text-foreground" : "text-muted hover:bg-hover"}`}
-            >
-              <Icon className="h-4 w-4" />
-            </button>
-          ))}
+        <div className="flex items-center gap-0.5 rounded-[var(--radius-control)] border border-border p-0.5" role="group" aria-label="Screen size: what the preview shows and which styles you edit">
+          {BREAKPOINT_ORDER.map((bp) => {
+            const Icon = FRAME[bp].icon;
+            return (
+              <button
+                key={bp}
+                type="button"
+                aria-label={`${BREAKPOINT_LABEL[bp]} — preview at ${FRAME[bp].minWidth ?? FRAME[bp].width} wide`}
+                title={BREAKPOINT_LABEL[bp]}
+                aria-pressed={breakpoint === bp}
+                onClick={() => setBreakpoint(bp)}
+                className={`flex items-center gap-1 rounded px-1.5 py-1 text-xs ${breakpoint === bp ? "bg-brand/10 text-foreground" : "text-muted hover:bg-hover"}`}
+              >
+                <Icon aria-hidden className="h-4 w-4" />
+                <span aria-hidden>{FRAME[bp].short}</span>
+              </button>
+            );
+          })}
         </div>
         <Button variant="ghost" aria-label="Undo" disabled={readOnly || busy || undoStack.length === 0} onClick={() => void undo()}>
           <Undo2 className="h-4 w-4" />
@@ -582,13 +801,33 @@ export function DesignEditor({
       >
         {/* Left */}
         <aside className="flex min-h-0 flex-col border-r border-border" aria-label="Editor tools">
-          <div className="flex border-b border-border" role="tablist">
-            {(["agent", "layers", "add", "pages", "theme"] as const).map((t) => (
+          <div
+            className="flex border-b border-border"
+            role="tablist"
+            aria-label="Editor tools"
+            onKeyDown={(e) => {
+              const i = TABS.indexOf(tab);
+              const next =
+                e.key === "ArrowRight" ? TABS[(i + 1) % TABS.length]
+                : e.key === "ArrowLeft" ? TABS[(i - 1 + TABS.length) % TABS.length]
+                : e.key === "Home" ? TABS[0]
+                : e.key === "End" ? TABS[TABS.length - 1]
+                : null;
+              if (!next) return;
+              e.preventDefault();
+              setTab(next);
+              document.getElementById(`editor-tab-${next}`)?.focus();
+            }}
+          >
+            {TABS.map((t) => (
               <button
                 key={t}
+                id={`editor-tab-${t}`}
                 type="button"
                 role="tab"
                 aria-selected={tab === t}
+                aria-controls="editor-tabpanel"
+                tabIndex={tab === t ? 0 : -1}
                 onClick={() => setTab(t)}
                 className={`flex-1 px-2 py-2 text-xs font-medium capitalize ${tab === t ? "border-b-2 border-brand text-foreground" : "text-muted hover:text-foreground"}`}
               >
@@ -596,7 +835,7 @@ export function DesignEditor({
               </button>
             ))}
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto" role="tabpanel">
+          <div id="editor-tabpanel" className="min-h-0 flex-1 overflow-y-auto" role="tabpanel" aria-labelledby={`editor-tab-${tab}`}>
             {/* Kept mounted so a reply keeps streaming while the merchant looks at another tab. */}
             <div hidden={tab !== "agent"}>
               <BrandChat
@@ -613,16 +852,32 @@ export function DesignEditor({
               <LayerTree
                 root={tree}
                 registry={blocks}
-                selectedId={selectedId}
-                onSelect={setSelectedId}
+                selection={selection}
+                onSelect={select}
+                announce={announce}
                 disabled={readOnly || busy}
                 onMove={async (nodeId, parentId, index) =>
                   Boolean(await run(() => moveNode({ siteId: sid, pageId: pid, nodeId, parentId, index }), "builder.moveNode"))
                 }
+                onMoveMany={moveMany}
               />
             ) : null}
             {tab === "add" ? (
-              <AddPanel registry={registry} disabled={readOnly || busy || !tree} onAddBlock={(t) => void add(t)} onAddPreset={(p) => void add("section", p)} />
+              <AddPanel
+                registry={registry}
+                disabled={readOnly || busy || !tree}
+                onAddBlock={(t) => void add(t)}
+                onAddPreset={(p) => void add("section", p)}
+                clipboard={clip ? { count: clip.nodes.length, label: clip.label } : null}
+                onPaste={paste}
+                saved={saved}
+                onInsertSaved={(b) => void pasteNodes([b.node], `Saved block "${b.name}"`)}
+                onDeleteSaved={async (b) => {
+                  if (!(await run(() => deleteSavedBlock(sid, b.id), "builder.deleteSavedBlock", { record: false }))) return;
+                  await loadSaved();
+                  announce(`Deleted saved block "${b.name}". Pages that use it keep their copy.`);
+                }}
+              />
             ) : null}
             {tab === "pages" ? (
               <>
@@ -705,7 +960,7 @@ export function DesignEditor({
         </aside>
 
         {/* Preview */}
-        <section className="flex min-h-0 justify-center overflow-auto bg-hover p-3" aria-label="Live preview">
+        <section className="flex min-h-0 overflow-auto bg-hover p-3" aria-label="Live preview">
           {frameSrc ? (
             <iframe
               ref={frameRef}
@@ -714,8 +969,8 @@ export function DesignEditor({
               onLoad={() => highlight(false)}
               // Its own origin; allow-same-origin gives it *that* origin, never the dashboard's.
               sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-              className="h-full rounded border border-border bg-white shadow-[var(--shadow-sm)]"
-              style={{ width: VIEWPORT_WIDTH[viewport], maxWidth: "100%" }}
+              className="mx-auto h-full shrink-0 rounded border border-border bg-white shadow-[var(--shadow-sm)]"
+              style={{ width: FRAME[breakpoint].width, minWidth: FRAME[breakpoint].minWidth }}
             />
           ) : (
             <p className="self-center text-sm text-muted">Preparing the preview…</p>
@@ -724,6 +979,16 @@ export function DesignEditor({
 
         {/* Inspector */}
         <aside className="min-h-0 overflow-y-auto border-l border-border" aria-label="Inspector">
+          {multi.length > 1 && tree ? (
+            <MultiInspector
+              labels={multi.map((id) => label(find(tree, id)!.node))}
+              disabled={readOnly || busy}
+              onDuplicate={() => void duplicateSelection()}
+              onCopy={() => copySelection(false)}
+              onRemove={() => void removeSelection()}
+              onClear={() => setSelectedId(null)}
+            />
+          ) : (
           <Inspector
             node={selected}
             block={selected ? blocks.get(selected.type) : undefined}
@@ -755,15 +1020,23 @@ export function DesignEditor({
               if (!selected) return;
               const out = await run(() => duplicateNode({ siteId: sid, pageId: pid, nodeId: selected.id }), "builder.duplicateNode");
               const nodeId = (out?.result as { nodeId?: string } | undefined)?.nodeId;
-              if (nodeId) setSelectedId(nodeId);
+              if (nodeId) {
+                setSelectedId(nodeId);
+                announce("Duplicated.");
+              }
             }}
-            onRemove={async () => {
-              if (!selected) return;
-              if (await run(() => removeNodes({ siteId: sid, pageId: pid, nodeIds: [selected.id] }), "builder.removeNodes")) setSelectedId(null);
-            }}
+            onRemove={() => void removeSelection()}
+            onCopy={() => copySelection(false)}
+            onSaveBlock={saveSelectedBlock}
           />
+          )}
         </aside>
       </div>
+
+      <p className="sr-only" aria-live="polite" aria-atomic="true">
+        {announcement.text}
+        {announcement.n % 2 ? "\u00a0" : ""}
+      </p>
 
       <PublishDialog
         open={dialog === "publish"}

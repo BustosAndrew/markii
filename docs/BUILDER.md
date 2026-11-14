@@ -367,6 +367,10 @@ preview. **No script inside a custom HTML block** (level 3's opt-in block script
 storefront CSP ships with them: a per-request nonce with `'strict-dynamic'`, and the cart and account
 limited to the store and Stripe. Building it found that `SameSite=Lax` does not separate sibling
 subdomains, so `proxy.ts` now refuses cookie-carrying cross-origin writes on every host.
+**M7 is built (2026-11-14)** — the rest of §11: a breakpoint switcher that also sets the preview width,
+inherited-versus-overridden styles in the inspector, multi-select and bulk move (`builder.moveNodes`,
+one undo), copy/paste within and across pages, reusable saved blocks per site, an explicit save state,
+and a keyboard-complete layer tree (one tab stop, arrow-key navigation, every action announced).
 
 0. **Action registry + `defineAction` primitive** — built back in **Phase C** (`docs/BACKEND.md` §1),
    so it already exists and commerce mutations already use it

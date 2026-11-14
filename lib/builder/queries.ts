@@ -2,7 +2,7 @@ import "server-only";
 
 import { and, asc, desc, eq, isNotNull } from "drizzle-orm";
 import { notFound } from "@/lib/api";
-import { collections, db, products, siteDesignVersions, siteDesigns, siteDocuments, type SiteDesign } from "@/lib/db";
+import { collections, db, products, siteDesignVersions, siteDesigns, siteDocuments, siteSavedBlocks, type SiteDesign } from "@/lib/db";
 import { blockingErrors, checkCssBudget, checkHeadCode, checkPage, checkTheme, type CheckResult } from "./checks";
 import { catalogFacts, leaseActive } from "./store";
 import { resolveTheme, type DesignTokens } from "./tokens";
@@ -152,6 +152,24 @@ export async function designChecks(siteId: number): Promise<{ results: CheckResu
   results.push(...checkCssBudget(live.map((d) => d.draftTree), design.draftCustomCss));
   results.push(...checkHeadCode(design.draftHeadHtml, design.publishedHeadHtml));
   return { results, blocking: blockingErrors(results).length };
+}
+
+/** The site's saved blocks (M7), by name. `node` is ready to pass to `builder.insertNodes`. */
+export async function savedBlocks(siteId: number) {
+  const rows = await db
+    .select()
+    .from(siteSavedBlocks)
+    .where(eq(siteSavedBlocks.siteId, siteId))
+    .orderBy(asc(siteSavedBlocks.name));
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    type: r.node.type,
+    nodeCount: r.nodeCount,
+    node: r.node,
+    createdBy: r.createdBy,
+    createdAt: r.createdAt.toISOString(),
+  }));
 }
 
 export async function designVersions(siteId: number) {

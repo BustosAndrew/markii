@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, count, eq } from "drizzle-orm";
 import { z } from "zod";
 import { ApiError, conflict, notFound } from "../../api";
 import { blockingErrors, checkCssBudget, checkHeadCode, checkPage, checkTheme, type CheckResult } from "../../builder/checks";
@@ -21,6 +21,7 @@ import {
   duplicateNode,
   insertNodes,
   moveNode,
+  moveNodes,
   nodeInputSchema,
   removeNodes,
   customHtmlOf,
@@ -30,8 +31,10 @@ import {
   setProps,
   setStyles,
   setVisibility as setNodeVisibility,
+  type Moved,
   type Removed,
 } from "../../builder/tree";
+import { SAVED_BLOCKS_PER_SITE, normalizeSavedBlock } from "../../builder/saved-blocks";
 import { styleSchema } from "../../builder/styles";
 import {
   BREAKPOINTS,
@@ -47,7 +50,7 @@ import {
   type RegionHandle,
   type TemplateHandle,
 } from "../../builder/types";
-import { siteDesignVersions, siteDesigns, siteDocuments, sites } from "../../db";
+import { siteDesignVersions, siteDesigns, siteDocuments, siteSavedBlocks, sites } from "../../db";
 import { defineAction } from "../registry";
 import type { ActionContext } from "../types";
 
@@ -344,6 +347,61 @@ export const moveNode_ = defineAction({
       ctx.recordDiff({ ...pageEntity(input.pageId), path: `nodes.${input.nodeId}.position`, before: out.from, after: out.to });
     }
     return { from: out.from, to: out.to, revision };
+  },
+});
+
+/**
+ * Several blocks moved as one edit — the editor's bulk move (M7). Moves apply
+ * in order, each seeing the tree the last one left, so one undo puts every
+ * block back: the inverse replays the list reversed, each to where it was.
+ */
+export const moveNodes_ = defineAction({
+  id: "builder.moveNodes",
+  description:
+    "Move several blocks in one step: moves apply in order, each { nodeId, parentId, index? } seeing " +
+    "the page as the previous move left it. One undo puts them all back.",
+  input: z
+    .object({
+      siteId,
+      pageId,
+      moves: z
+        .array(z.object({ nodeId, parentId: nodeId, index: z.number().int().min(0).optional() }).strict())
+        .min(1)
+        .max(50),
+    })
+    .strict(),
+  permission: "cms.write",
+  riskTier: "low",
+  agentExecution: "draft",
+  undoable: true,
+  inverse: (r) => {
+    const input = r.input as { siteId: number; pageId: number };
+    const result = r.result as { moved: Moved[] };
+    if (!result?.moved?.length) return null;
+    return {
+      actionId: "builder.moveNodes",
+      input: {
+        siteId: input.siteId,
+        pageId: input.pageId,
+        moves: [...result.moved].reverse().map((m) => ({ nodeId: m.nodeId, parentId: m.from.parentId, index: m.from.index })),
+      },
+      conflictCheck: "none",
+    };
+  },
+  async run(input, ctx) {
+    const { out, revision } = await editPage(
+      ctx,
+      input.siteId,
+      input.pageId,
+      (tree) => moveNodes(tree, input.moves),
+      (o) => o.moved.some((m) => m.from.parentId !== m.to.parentId || m.from.index !== m.to.index),
+    );
+    if (revision !== null) {
+      for (const m of out.moved) {
+        ctx.recordDiff({ ...pageEntity(input.pageId), path: `nodes.${m.nodeId}.position`, before: m.from, after: m.to });
+      }
+    }
+    return { moved: out.moved, revision };
   },
 });
 
@@ -966,6 +1024,82 @@ export const restorePage = defineAction({
     await ctx.db.update(siteDocuments).set({ draftDeleted: false, updatedAt: new Date() }).where(eq(siteDocuments.id, doc.id));
     ctx.recordDiff({ ...pageEntity(doc.id), path: "deleted", before: true, after: false });
     return { pageId: doc.id, revision: await bumpRevision(ctx, input.siteId) };
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Saved blocks (M7) — a per-site library, not part of the draft
+// ---------------------------------------------------------------------------
+
+/**
+ * Keep a block, and everything inside it, to insert on any page later. Not a
+ * draft edit — the library is not the design and nothing here reaches shoppers
+ * — so it takes no edit lease and bumps no revision. Not an agent action: the
+ * library is the merchant's. The saved shape is validated and cleaned like any
+ * insert (`normalizeSavedBlock`); inserting it later is `builder.insertNodes`,
+ * which checks it again — including who may add custom HTML.
+ */
+export const saveBlock = defineAction({
+  id: "builder.saveBlock",
+  description:
+    "Save a block and everything inside it to this site's saved blocks, under a name, to insert " +
+    "on any page later (builder.insertNodes with the saved node). Names are unique per site.",
+  input: z.object({ siteId, name: z.string().trim().min(1).max(60), node: nodeInputSchema }).strict(),
+  permission: "cms.write",
+  riskTier: "low",
+  undoable: true,
+  inverse: (r) => {
+    const input = r.input as { siteId: number };
+    const result = r.result as { savedBlockId: number };
+    return { actionId: "builder.deleteSavedBlock", input: { siteId: input.siteId, savedBlockId: result.savedBlockId }, conflictCheck: "none" };
+  },
+  async run(input, ctx) {
+    await ownedSite(ctx.db, ctx.actor.orgId!, input.siteId);
+    const { node, nodeCount } = treeOp(() => normalizeSavedBlock(input.node));
+    const [{ n }] = await ctx.db.select({ n: count() }).from(siteSavedBlocks).where(eq(siteSavedBlocks.siteId, input.siteId));
+    if (n >= SAVED_BLOCKS_PER_SITE) {
+      throw new ApiError("CONFLICT", 409, `A site can keep ${SAVED_BLOCKS_PER_SITE} saved blocks. Delete one first.`, { reason: "limit" });
+    }
+    const [taken] = await ctx.db
+      .select({ id: siteSavedBlocks.id })
+      .from(siteSavedBlocks)
+      .where(and(eq(siteSavedBlocks.siteId, input.siteId), eq(siteSavedBlocks.name, input.name)))
+      .limit(1);
+    if (taken) throw new ApiError("CONFLICT", 409, `There is already a saved block called "${input.name}".`, { reason: "name_taken" });
+    const [row] = await ctx.db
+      .insert(siteSavedBlocks)
+      .values({ siteId: input.siteId, name: input.name, node, nodeCount, createdBy: `${ctx.actor.type}:${ctx.actor.id}` })
+      .returning({ id: siteSavedBlocks.id });
+    ctx.recordDiff({ entity: "savedBlock", entityId: String(row.id), path: "savedBlock", before: null, after: { name: input.name, type: node.type, nodeCount } });
+    return { savedBlockId: row.id, name: input.name, nodeCount };
+  },
+});
+
+/** Remove a saved block from the library. Pages that used it keep their copy — an insert copies. */
+export const deleteSavedBlock = defineAction({
+  id: "builder.deleteSavedBlock",
+  description: "Delete one of this site's saved blocks. Pages it was inserted into keep their copy.",
+  input: z.object({ siteId, savedBlockId: z.number().int().positive() }).strict(),
+  permission: "cms.write",
+  riskTier: "low",
+  undoable: true,
+  /** The diff keeps the name and the node, so undo saves it again (under a new id). */
+  inverse: (r) => {
+    const input = r.input as { siteId: number };
+    const d = r.diff.find((x) => x.path === "savedBlock");
+    const before = d?.before as { name?: string; node?: unknown } | null | undefined;
+    if (!before?.name || !before.node) return null;
+    return { actionId: "builder.saveBlock", input: { siteId: input.siteId, name: before.name, node: before.node }, conflictCheck: "none" };
+  },
+  async run(input, ctx) {
+    await ownedSite(ctx.db, ctx.actor.orgId!, input.siteId);
+    const [row] = await ctx.db
+      .delete(siteSavedBlocks)
+      .where(and(eq(siteSavedBlocks.id, input.savedBlockId), eq(siteSavedBlocks.siteId, input.siteId)))
+      .returning();
+    if (!row) throw notFound("Saved block");
+    ctx.recordDiff({ entity: "savedBlock", entityId: String(row.id), path: "savedBlock", before: { name: row.name, node: row.node }, after: null });
+    return { savedBlockId: row.id };
   },
 });
 

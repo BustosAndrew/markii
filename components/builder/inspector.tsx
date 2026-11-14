@@ -5,6 +5,15 @@ import type { BlockDescription, BlockRegistry, Breakpoint, Condition, FieldSpec,
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/field";
 import { Toggle } from "@/components/ui/toggle";
+import { inheritedStyle } from "./tree";
+
+/** How each breakpoint is named in the editor — the same words as the top bar's switcher. */
+export const BREAKPOINT_LABEL: Record<Breakpoint, string> = {
+  base: "All screens",
+  sm: "640px and up",
+  md: "768px and up",
+  lg: "1024px and up",
+};
 
 /**
  * The right-hand inspector (`docs/BUILDER.md` §11), **generated from the
@@ -416,6 +425,8 @@ export function Inspector({
   onVisibility,
   onDuplicate,
   onRemove,
+  onCopy,
+  onSaveBlock,
 }: {
   node: PageNode | null;
   block: BlockDescription | undefined;
@@ -436,6 +447,10 @@ export function Inspector({
   onVisibility: (when: Condition | null) => void;
   onDuplicate: () => void;
   onRemove: () => void;
+  /** M7: put this block on the editor's clipboard. */
+  onCopy: () => void;
+  /** M7: keep this block in the site's saved blocks. Resolves true when saved. */
+  onSaveBlock: (name: string) => Promise<boolean>;
 }) {
   if (!node) {
     return <p className="p-4 text-sm text-muted">Select a block on the page or in the layers list to edit it.</p>;
@@ -445,6 +460,18 @@ export function Inspector({
   }
   const props = node.props as Record<string, unknown>;
   const current = (node.styles?.[breakpoint] ?? {}) as Record<string, unknown>;
+  const setHere = STYLE_FIELDS.filter((f) => current[f.key] !== undefined).length + (current.border !== undefined ? 1 : 0) + (current.hidden !== undefined ? 1 : 0);
+  /** The empty option, saying what the field shows when it is not set at this size. */
+  const unsetLabel = (key: keyof StyleProps) => {
+    if (breakpoint === "base") return "Default";
+    const inherited = inheritedStyle(node.styles, breakpoint, key);
+    return inherited.from ? `Inherit: ${String(inherited.value)} (${BREAKPOINT_LABEL[inherited.from]})` : "Inherit: default";
+  };
+  const inheritedFlag = (key: "border" | "hidden") => {
+    if (breakpoint === "base" || current[key] !== undefined) return null;
+    const inherited = inheritedStyle(node.styles, breakpoint, key);
+    return inherited.from && inherited.value === true ? `On from ${BREAKPOINT_LABEL[inherited.from]}` : null;
+  };
 
   return (
     <div className="space-y-6 p-4">
@@ -486,18 +513,32 @@ export function Inspector({
       <section className="space-y-3" aria-label="Style">
         <div className="flex items-center justify-between gap-2">
           <h3 className="text-sm font-semibold text-foreground">Style</h3>
-          <Select aria-label="Screen size these styles apply to" className="w-auto py-1.5 text-xs" value={breakpoint} disabled={disabled} onChange={(e) => onBreakpoint(e.target.value as Breakpoint)}>
-            <option value="base">All screens</option>
-            <option value="sm">640px and up</option>
-            <option value="md">768px and up</option>
-            <option value="lg">1024px and up</option>
+          {/* Not disabled while read-only: choosing which size to look at is not an edit. */}
+          <Select aria-label="Screen size these styles apply to" className="w-auto py-1.5 text-xs" value={breakpoint} onChange={(e) => onBreakpoint(e.target.value as Breakpoint)}>
+            {(Object.keys(BREAKPOINT_LABEL) as Breakpoint[]).map((bp) => (
+              <option key={bp} value={bp}>
+                {BREAKPOINT_LABEL[bp]}
+              </option>
+            ))}
           </Select>
         </div>
+        <p className="text-xs text-muted">
+          {breakpoint === "base"
+            ? "Styles here apply to every screen size unless a larger size overrides them."
+            : `Styles here apply from ${BREAKPOINT_LABEL[breakpoint].replace(" and up", "")} up. Unset fields inherit from the smaller sizes.`}{" "}
+          {setHere ? `${setHere} set at this size.` : "None set at this size."}
+        </p>
         <div className="grid grid-cols-2 gap-3">
           {STYLE_FIELDS.map((f) => (
             <div key={f.key}>
               <Label htmlFor={`s-${f.key}`} className="text-xs">
                 {f.label}
+                {breakpoint !== "base" && current[f.key] !== undefined ? (
+                  <span className="ml-1 text-brand" title="Set at this size">
+                    <span aria-hidden>•</span>
+                    <span className="sr-only"> (set at this size)</span>
+                  </span>
+                ) : null}
               </Label>
               <Select
                 id={`s-${f.key}`}
@@ -508,7 +549,7 @@ export function Inspector({
                   onStyles({ [f.key]: e.target.value === "" ? null : f.key === "columns" ? Number(e.target.value) : e.target.value })
                 }
               >
-                <option value="">{breakpoint === "base" ? "Default" : "Inherit"}</option>
+                <option value="">{unsetLabel(f.key)}</option>
                 {f.options.map((o) => (
                   <option key={o} value={o}>
                     {o}
@@ -522,6 +563,13 @@ export function Inspector({
           <Toggle checked={current.border === true} onChange={(v) => onStyles({ border: v ? true : null })} label="Border" disabled={disabled} />
           <Toggle checked={current.hidden === true} onChange={(v) => onStyles({ hidden: v ? true : null })} label="Hide at this size" disabled={disabled} />
         </div>
+        {inheritedFlag("border") || inheritedFlag("hidden") ? (
+          <p className="text-xs text-muted">
+            {[inheritedFlag("border") ? `Border: ${inheritedFlag("border")}.` : null, inheritedFlag("hidden") ? `Hidden: ${inheritedFlag("hidden")}.` : null]
+              .filter(Boolean)
+              .join(" ")}
+          </p>
+        ) : null}
       </section>
 
       <TextField
@@ -540,12 +588,97 @@ export function Inspector({
         disabled={disabled}
       />
 
-      <div className="flex gap-2 border-t border-border pt-4">
-        <Button variant="secondary" disabled={disabled} onClick={onDuplicate}>
+      <div className="flex flex-wrap gap-2 border-t border-border pt-4">
+        <Button variant="secondary" disabled={disabled} onClick={onDuplicate} aria-keyshortcuts="Control+D">
           Duplicate
         </Button>
-        <Button variant="ghost" disabled={disabled} onClick={onRemove}>
+        <Button variant="secondary" onClick={onCopy} aria-keyshortcuts="Control+C">
+          Copy
+        </Button>
+        <Button variant="ghost" disabled={disabled} onClick={onRemove} aria-keyshortcuts="Delete">
           Delete
+        </Button>
+      </div>
+      <SaveBlockField key={node.id} disabled={disabled} onSave={onSaveBlock} />
+    </div>
+  );
+}
+
+/** M7: name a block and keep it in the site's saved blocks (Add tab → Saved). */
+function SaveBlockField({ disabled, onSave }: { disabled: boolean; onSave: (name: string) => Promise<boolean> }) {
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    if (!name.trim()) return;
+    setBusy(true);
+    try {
+      if (await onSave(name.trim())) setName("");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <form
+      className="space-y-1.5"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void save();
+      }}
+    >
+      <Label htmlFor="save-block-name" className="text-xs">
+        Save as a reusable block
+      </Label>
+      <div className="flex gap-2">
+        <Input id="save-block-name" value={name} maxLength={60} disabled={disabled || busy} placeholder="e.g. Shipping promise" onChange={(e) => setName(e.target.value)} />
+        <Button type="submit" variant="secondary" disabled={disabled || busy || !name.trim()}>
+          Save
+        </Button>
+      </div>
+      <p className="text-xs text-muted">Insert it on any page from Add → Saved blocks. Later edits here do not change the saved copy.</p>
+    </form>
+  );
+}
+
+/**
+ * M7: what the inspector shows with several blocks selected — no field editor
+ * (their fields differ), only what applies to all of them at once.
+ */
+export function MultiInspector({
+  labels,
+  disabled,
+  onDuplicate,
+  onCopy,
+  onRemove,
+  onClear,
+}: {
+  labels: string[];
+  disabled: boolean;
+  onDuplicate: () => void;
+  onCopy: () => void;
+  onRemove: () => void;
+  onClear: () => void;
+}) {
+  return (
+    <div className="space-y-4 p-4">
+      <h2 className="text-sm font-semibold text-foreground">{labels.length} blocks selected</h2>
+      <ul className="max-h-48 list-disc space-y-0.5 overflow-y-auto pl-4 text-xs text-muted">
+        {labels.map((l, i) => (
+          <li key={`${l}-${i}`}>{l}</li>
+        ))}
+      </ul>
+      <p className="text-xs text-muted">Move them together with Alt+↑ ↓ in the layers list, or drag any one of them.</p>
+      <div className="flex flex-wrap gap-2 border-t border-border pt-4">
+        <Button variant="secondary" disabled={disabled} onClick={onDuplicate}>
+          Duplicate all
+        </Button>
+        <Button variant="secondary" onClick={onCopy}>
+          Copy all
+        </Button>
+        <Button variant="ghost" disabled={disabled} onClick={onRemove}>
+          Delete all
+        </Button>
+        <Button variant="ghost" onClick={onClear}>
+          Clear selection
         </Button>
       </div>
     </div>

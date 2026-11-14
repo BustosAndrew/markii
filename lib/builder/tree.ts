@@ -400,6 +400,42 @@ export function moveNode(
   return { root: validateTree(next), from, to: { parentId: target.id, index: at } };
 }
 
+/**
+ * A node and its subtree as input for a new copy: everything but the ids, so
+ * inserting it mints fresh ones. What duplicate, copy/paste and saved blocks
+ * (M7) all carry. Keys with no value are left out rather than set undefined, so
+ * the result survives JSON and the strict input schema alike.
+ */
+export function nodeToInput(n: PageNode): NodeInput {
+  const out: NodeInput = { type: n.type, props: clone(n.props) };
+  if (n.styles && Object.keys(n.styles).length) out.styles = clone(n.styles);
+  if (n.intent) out.intent = n.intent;
+  if (n.bindings && Object.keys(n.bindings).length) out.bindings = { ...n.bindings };
+  if (n.visibleWhen) out.visibleWhen = { ...n.visibleWhen };
+  if (n.customClass) out.customClass = n.customClass;
+  if (n.children) out.children = n.children.map(nodeToInput);
+  return out;
+}
+
+export type NodeMove = { nodeId: string; parentId: string; index?: number };
+export type Moved = { nodeId: string; from: { parentId: string; index: number }; to: { parentId: string; index: number } };
+
+/**
+ * Several moves as one edit (M7 bulk move), applied in order — each sees the
+ * tree the previous one left. Replaying the reversed list, each node back to
+ * its `from`, restores the original exactly, which is the undo.
+ */
+export function moveNodes(root: PageNode, moves: NodeMove[]): { root: PageNode; moved: Moved[] } {
+  let next = root;
+  const moved: Moved[] = [];
+  for (const m of moves) {
+    const out = moveNode(next, m.nodeId, m.parentId, m.index);
+    next = out.root;
+    moved.push({ nodeId: m.nodeId, from: out.from, to: out.to });
+  }
+  return { root: next, moved };
+}
+
 /** A copy of a node and its subtree, with fresh ids, placed right after the original. */
 export function duplicateNode(
   root: PageNode,
@@ -408,19 +444,9 @@ export function duplicateNode(
 ): { root: PageNode; newId: string; parentId: string; index: number } {
   const hit = mustLocate(root, nodeId);
   if (!hit.parent) throw new TreeError("INVALID", "The page root cannot be duplicated.");
-  const strip = (n: PageNode): NodeInput => ({
-    type: n.type,
-    props: clone(n.props),
-    styles: n.styles ? clone(n.styles) : undefined,
-    intent: n.intent,
-    bindings: n.bindings ? { ...n.bindings } : undefined,
-    visibleWhen: n.visibleWhen ? { ...n.visibleWhen } : undefined,
-    customClass: n.customClass,
-    children: n.children?.map(strip),
-  });
   const { root: next, inserted } = insertNodes(
     root,
-    [{ parentId: hit.parent.id, index: hit.index + 1, node: strip(hit.node) }],
+    [{ parentId: hit.parent.id, index: hit.index + 1, node: nodeToInput(hit.node) }],
     id,
   );
   return { root: next, newId: inserted[0].nodeId, parentId: hit.parent.id, index: hit.index + 1 };

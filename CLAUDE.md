@@ -651,6 +651,15 @@ CROSS_ORIGIN_REFUSED`, `lib/http/cross-origin.ts`): sibling subdomains are one *
 did not stop a storefront script posting to the dashboard with a visiting merchant's cookies. Host-only
 cookies keep a session from being *read* there; this keeps it from being *used*.
 
+**M7 editor polish is built as of 2026-11-14 — owner decision**, reversing FRONTEND.md's same-day
+deferral. One breakpoint switcher drives both the styles edited and the preview width (each size at its
+narrowest, so mobile-first overrides cannot hide an edit); multi-select with bulk move
+(**`builder.moveNodes`**, one undo), copy/paste/duplicate as single `insertNodes` calls, and **saved
+blocks** (**migration 0049**, `site_saved_blocks`; `builder.saveBlock` / `deleteSavedBlock`, stored
+without ids and cleaned like any insert, not the agent's). The editor's bulk plans live in
+`components/builder/tree.ts` and are tested against the server's tree operations — they must agree to
+the index.
+
 **Stripe Tax on Markii's own subscription is built as of 2026-09-13** (G3). `automatic_tax` on every
 platform-account subscription create, change and preview — **no `Stripe-Account` header**, the
 opposite direction of money from §18.6 — decided from two facts that are reported apart and never

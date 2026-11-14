@@ -3143,6 +3143,33 @@ export const siteDesignVersions = pgTable(
 );
 
 /**
+ * A reusable saved block (D51 M7, `docs/BUILDER.md` §11): a block and
+ * everything inside it, kept per site so the merchant can insert it on any
+ * page. Stored **without node ids** — `node` is the input shape
+ * (`lib/builder/tree.ts` `NodeInput`), validated and cleaned when saved, so
+ * every insert mints fresh ids and passes the same checks as any other edit.
+ * Per site rather than per org because blocks name the site's own products,
+ * categories and collections.
+ */
+export const siteSavedBlocks = pgTable(
+  "site_saved_blocks",
+  {
+    id: serial("id").primaryKey(),
+    siteId: integer("site_id")
+      .notNull()
+      .references(() => sites.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /** `NodeInput`, ids stripped. Typed loosely here so the schema does not import the tree module. */
+    node: jsonb("node").$type<{ type: string; [key: string]: unknown }>().notNull(),
+    nodeCount: integer("node_count").notNull(),
+    /** `user:…` or `token:…`. */
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("site_saved_blocks_site_name_uq").on(t.siteId, t.name)],
+);
+
+/**
  * A live-preview session: the opaque token the editor's preview frame trades
  * for a cookie on the preview host (M2). Stored hashed; short-lived.
  */

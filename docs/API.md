@@ -36,7 +36,7 @@ carry an explicit status — **never call a `PLANNED` endpoint and never fake it
 | 16 | Accounts, organizations, staff | partial — `/api/auth/*`, `/api/me`, `/api/org`, `/api/org/staff*`, `/api/org/tokens*`, `/api/org/switch`, **org scoping of §1–8**, and **MFA** (`/api/auth/mfa*`, enrol · challenge · recover, D40) are ✅ LIVE; the **audit log** (`/api/org/audit`, 2026-09-06) and **sessions** (`/api/org/sessions*`, 2026-09-07) are ✅ LIVE. **§16 is complete** — every `*_API_LIVE` constant in `lib/api/org.ts` is now `true`. (Tokens and org switching were listed as planned until 2026-08-03, and **MFA until 2026-08-18** — all three were already routed.) Frontend: `/dashboard/settings/account`, `/dashboard/settings/team`, `/dashboard/settings/audit`, the sidebar org switcher, `/mfa/*` | **A** |
 | 17 | Billing, plans, metering, threshold fees | ✅ **LIVE, and merchants are charged** (corrected 2026-08-18 — this row claimed "nothing is charged" long after it did). Usage ledger, threshold fee engine, meter, plan catalog, entitlements, period-close assessments, the **Stripe webhook** (verified + idempotent, platform **and** Connect handlers), subscriptions, plan changes with a Stripe-computed proration preview, cancellation at period end, payment methods, invoice history, and **threshold-fee invoicing onto the same invoice**. Scheduled monthly (§25). Add-on *purchase* alone refuses `409` — Agent Ops and Chargeback Assist are Phase F and do not exist | B |
 | 18 | Commerce core (variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping, **memberships**) | partial — §18.1–18.6 ✅ LIVE, including the §18.4 card rail (Stripe Connect direct charges) and **§18.6 Stripe Tax** (2026-08-17); §18.5 gift cards are ⛔ **deferred** (D33). §18.7 order operations (incl. **processor-executed card refunds**), §18.8 digital delivery, and §18.9 membership gating + shopper login ✅ LIVE — **including recurring/auto-renewing membership billing** (Stripe Subscriptions on the merchant's own Connect account; this row claimed otherwise until 2026-08-18). `STRIPE_CONNECT_WEBHOOK_SECRET` is **set and verified in production** (2026-09-07) — this row called it outstanding for weeks after it was configured. `pnpm stripe:webhooks` confirms the Connect endpoint subscribes to all nine required events including `invoice.created`. Genuine Stripe-generated Connect delivery was proven 2026-09-08 through the CLI (`stripe trigger … --stripe-account`), which this row called unproven for five days after | C |
-| 19 | Site builder & content | partial ✅ (M1 foundation · M2 editor + preview · M3 brand agent · M4 templates, regions, bindings · M5 agent documents · M6 custom code, scripts, storefront CSP) · M7 🟡 | D |
+| 19 | Site builder & content | partial ✅ (M1 foundation · M2 editor + preview · M3 brand agent · M4 templates, regions, bindings · M5 agent documents · M6 custom code, scripts, storefront CSP · M7 editor polish, saved blocks) ✅ | D |
 | 20 | Disputes & chargebacks | 🟡 PLANNED | F |
 | 21 | Agent Ops add-on | ⤴ **Superseded by §27** (D47, 2026-10-15) — built as free beta merchant agents rather than a last-phase paid add-on; the add-on billing and the settings/audit endpoints remain unbuilt | F |
 | 22 | **Action registry & MCP** — agent-native architecture | ✅ LIVE (registry, invoke, dry-run, audit, **undo** — 2026-08-18, and the **MCP server** — 2026-09-07: tools, prompts **and resources**). `undoable` is now derived from an `inverse()` and refused if declared without one, which corrected four actions that claimed it falsely | **Registry: C · MCP: D** |
@@ -2972,7 +2972,7 @@ memberships* above.)
 
 ---
 
-## 19. Site builder & content — partial ✅ LIVE (M1 foundation 2026-10-31 · M2 editor + live preview 2026-11-01 · M3 brand agent 2026-11-02 · M4 templates, regions, bindings 2026-11-03 · M5 agent documents 2026-11-12 · M6 custom CSS/HTML 2026-11-13) — Phase D, D51
+## 19. Site builder & content — partial ✅ LIVE (M1 foundation 2026-10-31 · M2 editor + live preview 2026-11-01 · M3 brand agent 2026-11-02 · M4 templates, regions, bindings 2026-11-03 · M5 agent documents 2026-11-12 · M6 custom CSS/HTML 2026-11-13 · M7 editor polish 2026-11-14) — Phase D, D51
 
 Architecture in **`docs/BUILDER.md`**. Pages are versioned JSON node trees, never HTML strings.
 **Reads are REST; every write is a registry action** (`POST /api/actions/builder.*`), so the
@@ -2992,6 +2992,7 @@ its tokens — and writes a version snapshot.
 | `GET` | `/api/builder/sites/:idOrSlug/revision` | `{ started, revision, publishedRevision, agentLock }` — one indexed read; poll it to reload the preview |
 | `GET` | `/api/builder/sites/:idOrSlug/checks` | Pre-publish checks on the draft: `{ results[], blocking }` |
 | `GET` | `/api/builder/sites/:idOrSlug/versions` | Published versions, newest first |
+| `GET` | `/api/builder/sites/:idOrSlug/saved-blocks` | The site's saved blocks by name (M7); each `node` is ready for `builder.insertNodes` |
 | `POST` | `/api/builder/sites/:idOrSlug/preview-session` | `201 { url, expiresAt }` — a two-hour live-preview URL for the editor's iframe (M2). A route, not an action: the result is a credential and must stay out of the audit log, as API tokens do |
 
 All `cms.read`. Writes are `cms.write`:
@@ -3001,6 +3002,8 @@ All `cms.read`. Writes are `cms.write`:
 | `builder.startDesign` | low | — | Create the design: draft theme + a home page that reproduces today's storefront. Idempotent |
 | `builder.addBlock` · `insertNodes` · `insertPreset` | low | ✅ | Add one block / whole subtrees / a preset (hero, imageWithText, featureRow, faqSection, productShowcase) |
 | `builder.removeNodes` · `moveNode` · `duplicateNode` | low | ✅ | Structure edits |
+| `builder.moveNodes` | low | ✅ | M7: several moves as one step and one undo |
+| `builder.saveBlock` · `deleteSavedBlock` | low | — | M7: the site's saved-block library (not the draft) |
 | `builder.setProps` · `setStyles` | low | ✅ | Block content (validated by the block's schema) / style **tokens** per breakpoint (`base`, `sm` 640, `md` 768, `lg` 1024; `null` clears) |
 | `builder.setTheme` · `setThemeTokens` | low | ✅ | Base theme / token overrides (hex colours, curated fonts, radius and width scales; `null` resets). Result carries WCAG contrast warnings |
 | `builder.createPage` · `updatePage` | low | ✅ | Pages at `/pages/{handle}`; title, handle, SEO. Home's handle is fixed, and so are templates' and regions' |
@@ -3032,7 +3035,7 @@ through `POST /api/actions/:id/undo` except publish, discard and restore.
 published pages; the published theme tokens reach every storefront page through `ThemeRoot`.
 Published HTML carries no editor attributes and no builder JavaScript; FAQ blocks publish
 `FAQPage` JSON-LD. **The editor is `/dashboard/websites/{slug}/design`** (M2), and the **brand agent** is
-its Agent tab (M3, §27). **Not built yet:** the editor polish of M7.
+its Agent tab (M3, §27). **M7 is built too** — see the end of this section.
 **Custom code (M6, 2026-11-13) — levels 1–3 of `docs/BUILDER.md` §8; scripts are not built.**
 **Migration 0047** adds `site_designs.draft_custom_css` / `published_custom_css` — apply it before
 deploying this code, or every storefront page fails reading the design row.
@@ -3090,6 +3093,24 @@ adds `site_designs.draft_head_html` / `published_head_html` — apply it before 
   the dashboard with a visiting merchant's cookies — harmless while storefronts ran no merchant
   script, not once they do. Servers, webhooks and API tokens send neither header, or no cookie, and
   pass.
+**Editor polish (M7, 2026-11-14 — owner decision: built now, though FRONTEND.md had deferred it the
+same day).** **Migration 0049** adds `site_saved_blocks` (RLS on) — apply it before deploying.
+
+- **`builder.moveNodes`** — `{ siteId, pageId, moves: [{ nodeId, parentId, index? }] }`, applied in
+  order, each seeing the page the previous move left. One action, one undo (the inverse replays the
+  moves reversed, each back to its `from`). `low`, and the brand agent may run it like `moveNode`.
+- **Saved blocks** — `builder.saveBlock` `{ siteId, name, node }` → `{ savedBlockId, name, nodeCount }`
+  and `builder.deleteSavedBlock` `{ siteId, savedBlockId }`; `GET
+  /api/builder/sites/:idOrSlug/saved-blocks` → `{ items: [{ id, name, type, nodeCount, node,
+  createdBy, createdAt }] }` (`cms.read`). Per site, names unique (`409`, `details.reason:
+  "name_taken"`), 100 per site (`"limit"`). The node is stored **without ids**, built and cleaned like
+  any insert (custom HTML rebuilt from the allowlist); inserting it is `builder.insertNodes` with that
+  `node`, which checks it again — so a token still cannot place custom HTML that way. Not draft edits:
+  no lease, no revision, and **not the agent's** (no `agentExecution`). Deleting one leaves pages that
+  used it alone — an insert copies. Both undoable.
+- **Copy, paste and duplicate are `builder.insertNodes`** with id-less subtrees (paste across pages and
+  stores; the clipboard is per browser, never stored server-side). No new action.
+
 **Agent documents from the published design (M5, 2026-11-12).** The merchant's own published pages
 now reach every document an agent or crawler reads, all from **one list** (`lib/storefront-docs.ts`):
 published pages only, and **never a page whose SEO says `noindex`** — hiding a page from search

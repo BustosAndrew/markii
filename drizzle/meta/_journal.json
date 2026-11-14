@@ -344,6 +344,13 @@
       "when": 1794635990356,
       "tag": "0048_builder_head_code",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1794645503955,
+      "tag": "0049_builder_saved_blocks",
+      "breakpoints": true
     }
   ]
 }

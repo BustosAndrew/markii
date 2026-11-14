@@ -38,6 +38,8 @@ describe("which builder actions an agent may run itself (D51)", () => {
       "builder.insertNodes",
       "builder.insertPreset",
       "builder.moveNode",
+      // M7: bulk move. The saved-block library (saveBlock / deleteSavedBlock) is not a draft edit and is not the agent's.
+      "builder.moveNodes",
       "builder.removeNodes",
       "builder.setBinding",
       "builder.setCustomClass",

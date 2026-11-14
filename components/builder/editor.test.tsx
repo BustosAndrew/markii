@@ -24,6 +24,7 @@ vi.mock("@/lib/api/builder", async (importOriginal) => ({
 const { Inspector } = await import("./inspector");
 const { PublishDialog } = await import("./dialogs");
 const { PagesPanel } = await import("./panels");
+const { LayerTree } = await import("./layer-tree");
 
 const heading: BlockDescription = {
   type: "heading",
@@ -47,12 +48,15 @@ const heading: BlockDescription = {
 const node: PageNode = { id: "n_aaaaaaaaaa", type: "heading", props: { text: "Our story", level: 2 } };
 
 const noop = () => {};
-function inspector(disabled: boolean, opts: { scopes?: string[]; node?: PageNode; onBindings?: (p: Record<string, string | null>) => void } = {}) {
+function inspector(
+  disabled: boolean,
+  opts: { scopes?: string[]; node?: PageNode; onBindings?: (p: Record<string, string | null>) => void; breakpoint?: "base" | "sm" | "md" | "lg" } = {},
+) {
   return render(
     <Inspector
       node={opts.node ?? node}
       block={heading}
-      breakpoint="base"
+      breakpoint={opts.breakpoint ?? "base"}
       onBreakpoint={noop}
       disabled={disabled}
       data={{ products: [], categories: [], collections: [] }}
@@ -66,6 +70,8 @@ function inspector(disabled: boolean, opts: { scopes?: string[]; node?: PageNode
       onVisibility={noop}
       onDuplicate={noop}
       onRemove={noop}
+      onCopy={noop}
+      onSaveBlock={async () => true}
     />,
   );
 }
@@ -86,8 +92,90 @@ describe("the inspector", () => {
     for (const el of [screen.getByLabelText("Text"), screen.getByLabelText("Level"), screen.getByRole("button", { name: "Delete" })]) {
       expect((el as HTMLInputElement).disabled, el.outerHTML.slice(0, 60)).toBe(true);
     }
-    // M4: the data and visibility controls are writes too.
-    for (const el of screen.getAllByRole("combobox")) expect((el as HTMLSelectElement).disabled, el.id).toBe(true);
+    // M4: the data and visibility controls are writes too. Choosing which screen size to look at is not.
+    for (const el of screen.getAllByRole("combobox")) {
+      if (el.getAttribute("aria-label") === "Screen size these styles apply to") continue;
+      expect((el as HTMLSelectElement).disabled, el.id).toBe(true);
+    }
+  });
+});
+
+describe("the inspector at a breakpoint (M7)", () => {
+  const styled: PageNode = { ...node, styles: { base: { paddingY: "lg" }, md: { color: "accent" } } };
+
+  it("says what an unset style inherits, and from which size", () => {
+    inspector(false, { node: styled, breakpoint: "lg" });
+    const padding = document.getElementById("s-paddingY") as HTMLSelectElement;
+    expect(padding.value).toBe("");
+    expect(padding.selectedOptions[0].textContent).toBe("Inherit: lg (All screens)");
+    const color = document.getElementById("s-color") as HTMLSelectElement;
+    expect(color.selectedOptions[0].textContent).toBe("Inherit: accent (768px and up)");
+    expect((document.getElementById("s-gap") as HTMLSelectElement).selectedOptions[0].textContent).toBe("Inherit: default");
+  });
+
+  it("marks what is set at this size", () => {
+    inspector(false, { node: styled, breakpoint: "md" });
+    expect(screen.getByText("1 set at this size.", { exact: false })).toBeTruthy();
+    expect(screen.getByText("(set at this size)")).toBeTruthy();
+  });
+});
+
+describe("the layer tree (M7)", () => {
+  const blocks = new Map<string, BlockDescription>([
+    ["section", { ...heading, type: "section", label: "Section", children: "any", parents: null }],
+    ["heading", heading],
+  ]);
+  const h = (id: string, text: string): PageNode => ({ id, type: "heading", props: { text, level: 2 } });
+  const root: PageNode = {
+    id: "n_rootrootro",
+    type: "root",
+    props: {},
+    children: [{ id: "n_sectionaaa", type: "section", props: {}, children: [h("n_aaaaaaaaaa", "A"), h("n_bbbbbbbbbb", "B"), h("n_cccccccccc", "C")] }],
+  };
+  const tree = (selection: string[], handlers: Partial<{ onSelect: () => void; onMoveMany: () => Promise<boolean>; onMove: () => Promise<boolean> }> = {}) =>
+    render(
+      <LayerTree
+        root={root}
+        registry={blocks}
+        selection={selection}
+        onSelect={handlers.onSelect ?? noop}
+        onMove={handlers.onMove ?? (async () => true)}
+        onMoveMany={handlers.onMoveMany ?? (async () => true)}
+        announce={noop}
+        disabled={false}
+      />,
+    );
+  const row = (id: string) => document.querySelector(`[data-layer="${id}"]`) as HTMLButtonElement;
+
+  it("is one tab stop, on the selected layer", () => {
+    tree(["n_bbbbbbbbbb"]);
+    const stops = [...document.querySelectorAll("[data-layer]")].filter((el) => (el as HTMLElement).tabIndex === 0);
+    expect(stops.map((el) => el.getAttribute("data-layer"))).toEqual(["n_bbbbbbbbbb"]);
+  });
+
+  it("selects with the arrow keys, extends with Shift, toggles with Ctrl+click", () => {
+    const onSelect = vi.fn();
+    tree(["n_aaaaaaaaaa"], { onSelect });
+    fireEvent.keyDown(row("n_aaaaaaaaaa"), { key: "ArrowDown" });
+    expect(onSelect).toHaveBeenLastCalledWith("n_bbbbbbbbbb", "replace");
+    fireEvent.keyDown(row("n_aaaaaaaaaa"), { key: "ArrowDown", shiftKey: true });
+    expect(onSelect).toHaveBeenLastCalledWith("n_bbbbbbbbbb", "range");
+    fireEvent.click(row("n_cccccccccc"), { ctrlKey: true });
+    expect(onSelect).toHaveBeenLastCalledWith("n_cccccccccc", "toggle");
+  });
+
+  it("moves a selected group with Alt+arrow as one bulk move", async () => {
+    const onMoveMany = vi.fn(async () => true);
+    const onMove = vi.fn(async () => true);
+    tree(["n_aaaaaaaaaa", "n_bbbbbbbbbb"], { onMoveMany, onMove });
+    fireEvent.keyDown(row("n_bbbbbbbbbb"), { key: "ArrowDown", altKey: true });
+    await waitFor(() => expect(onMoveMany).toHaveBeenCalledTimes(1));
+    expect(onMove).not.toHaveBeenCalled();
+    // A and B step down past C: [C, A, B].
+    expect(onMoveMany).toHaveBeenCalledWith([
+      { nodeId: "n_aaaaaaaaaa", parentId: "n_sectionaaa", index: 2 },
+      { nodeId: "n_bbbbbbbbbb", parentId: "n_sectionaaa", index: 2 },
+    ]);
   });
 });
 

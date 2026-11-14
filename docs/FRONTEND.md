@@ -81,7 +81,7 @@ API-independent work so you don't outrun the backend") no longer applies to A, B
 | **Catalog agent** | §27 | ✅ **LIVE, screen built** (beta) | Opened from **Agents** in the dashboard header (`AgentsNavMenu`). Propose-only; the merchant approves. MCP (§22) is a different surface — do not confuse them |
 | **Assistant** | §27 | ✅ **LIVE, screen built** (beta, 2026-10-17) | Opened from **Agents** in the dashboard header. Read-only — answers questions, checks setup, routes to pages/agents. Reuses `AgentPanel` with `agent="assistant"` |
 | **Setup checklist** | §28 | ✅ **LIVE, screen built** (2026-10-17) | Overview card via `getSetupStatus()`. `firstRun` leads the page; `next` is the headline. No local ticks — refetch by revisiting |
-| Site builder | §19 | ✅ **LIVE, screens built** (D51 M1–M6) | `/dashboard/websites/[slug]/design` — editor, live preview, brand agent, templates/regions/bindings (M4), page SEO + agent documents (M5), custom CSS/HTML/classes and Theme-tab custom scripts (M6). **M7 editor polish is not started** |
+| Site builder | §19 | ✅ **LIVE, screens built** (D51 M1–M6) | `/dashboard/websites/[slug]/design` — editor, live preview, brand agent, templates/regions/bindings (M4), page SEO + agent documents (M5), custom CSS/HTML/classes and Theme-tab custom scripts (M6); breakpoint switcher, multi-select, copy/paste, saved blocks (M7) |
 | **Brand agent** | §27 | ✅ **LIVE, screen built** (beta, 2026-11-02) | Lives in the site editor, not a drawer: directory `surface: "editor"`, and the Agents menu navigates to `href`. Edits the draft directly; Stop is `stopBrandAgent` |
 | Channels, Test Lab | §10 · §12 · §20 | ⛔ Deferred | Out of launch scope — do not start |
 | Platform admin | §26 | ✅ LIVE, screens built | `/admin` when `me.operator`. Suspend/reinstate and **Reset MFA** (`resetPlatformMfa`). Never on merchant nav for anyone else |
@@ -494,6 +494,28 @@ makes an audit trail untrustworthy.
 The audit list carries both directions now — `undoneBy` on the original row, `undoOf` on the undo —
 so a history screen can strike through a reversed change and label its reversal without a second
 query. Both are `string | null` on `ActionInvocation`.
+
+### 🟢 New 2026-11-14 — editor polish: breakpoints, multi-select, copy/paste, saved blocks (D51 M7)
+
+**Owner decision 2026-11-14: M7 is built now**, reversing the same day's "deferred past launch" entry
+above. What changed in the editor (`components/builder/`):
+
+- **One breakpoint control.** The top bar's switcher (All · 640+ · 768+ · 1024+) sets both which styles
+  the inspector edits and the preview width — each size at its *narrowest* width, so an edit is never
+  hidden by an override from a larger size. The old Desktop/Tablet/Phone buttons are gone. The inspector
+  says what an unset field inherits ("Inherit: lg (All screens)") and marks fields set at this size.
+- **Selection is a list** (`selection: string[]`, last = primary). Layer tree: one tab stop; ↑/↓, Home/End;
+  Shift extends, Ctrl/⌘ toggles; Alt+↑/↓ moves the group (`moveNodes`); dragging a selected row drags all.
+  The inspector shows `MultiInspector` (duplicate/copy/delete all) for more than one.
+- **Keyboard**: Ctrl/⌘+C/X/V/D, Delete, Esc, Ctrl/⌘+Z / Shift+Z / Y. Copy works while read-only.
+- **Clipboard** in `localStorage` (`markii.builder.clipboard.v1`), so paste works across pages, tabs and
+  stores. Paste/duplicate are one `insertNodes` each — planned by `planPaste` / `planDuplicate` in
+  `components/builder/tree.ts`, which are unit-tested against the server's own tree operations.
+- **Saved blocks**: inspector "Save as a reusable block"; Add → Saved blocks (insert / delete with
+  confirm). `lib/api/builder.ts`: `listSavedBlocks`, `saveBlock`, `deleteSavedBlock`, `insertNodes`,
+  `moveNodes`, types `NodeInput`, `SavedBlock`. Library actions are not put on the editor's undo stack.
+- **Save state** in the top bar (Saving… / Saved to draft / Last change not saved), one polite live
+  region for every announcement, and the tool tabs follow the WAI-ARIA tabs pattern (arrow keys).
 
 ### 🟢 New 2026-11-13 — custom scripts, and two refusals any screen can now meet (D51 M6)
 
@@ -1167,9 +1189,9 @@ The team is two people, so launch is a deliberate subset of the full plan
 | **Assistant** | Header **Agents** menu; read-only. Beta |
 | **Brand agent** | Site editor Agent tab. Draft edits; merchant publishes. Beta |
 | **Setup checklist** | Overview card from `GET /api/setup` |
-| **Site builder** (D51 M1–M6) | `/dashboard/websites/[slug]/design` — editor, preview, templates, SEO, custom CSS/HTML/scripts |
+| **Site builder** (D51 M1–M7) | `/dashboard/websites/[slug]/design` — editor, preview, templates, SEO, custom CSS/HTML/scripts, saved blocks |
 
-**Deferred past launch — do not start these:** **M7 editor polish**, Channels, Agent Test Lab, the full
+**Deferred past launch — do not start these:** Channels, Agent Test Lab, the full
 analytics funnel, native email campaigns. The Catalog, assistant and brand agents (§27) are in
 launch scope and built.
 
@@ -1226,9 +1248,9 @@ responses rather than the shapes they were first written to:
 
 ### 4. Not to be built
 
-Add-on **purchase** (`409`, the products do not exist), **M7 editor polish**, Channels, Test Lab,
+Add-on **purchase** (`409`, the products do not exist), Channels, Test Lab,
 native email campaigns. Email surfaces must say mail is not configured rather than imply it was
-sent. Do not restyle the design editor as a way of starting M7.
+sent. (M7 editor polish came off this list on 2026-11-14 — the owner had it built; see below.)
 
 ---
 

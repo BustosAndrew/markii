@@ -16,6 +16,8 @@ export const BRAND_DRAFT_ACTIONS = [
   "builder.insertPreset",
   "builder.removeNodes",
   "builder.moveNode",
+  // M7: several moves as one undo step. Saved blocks are the merchant's library and stay theirs.
+  "builder.moveNodes",
   "builder.duplicateNode",
   "builder.setProps",
   "builder.setStyles",

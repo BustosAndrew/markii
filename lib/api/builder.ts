@@ -156,6 +156,36 @@ export const getDesignChecks = (site: string | number, init?: RequestInit) =>
     apiGet<{ results: CheckResult[]; blocking: number }>(`/api/builder/sites/${site}/checks`, undefined, init),
   );
 
+/**
+ * A block and its subtree as input for a new copy — no ids, so inserting mints
+ * fresh ones (M7: copy/paste, saved blocks). Mirrors the server's `NodeInput`.
+ */
+export type NodeInput = {
+  type: string;
+  props?: Record<string, unknown>;
+  styles?: PageNode["styles"];
+  intent?: string;
+  bindings?: Record<string, string>;
+  visibleWhen?: Condition;
+  customClass?: string;
+  children?: NodeInput[];
+};
+
+/** A saved block (M7). `node` goes straight into `insertNodes`. */
+export type SavedBlock = {
+  id: number;
+  name: string;
+  /** The outer block's type — what the library shows and what decides where it can go. */
+  type: string;
+  nodeCount: number;
+  node: NodeInput;
+  createdBy: string;
+  createdAt: string;
+};
+
+export const listSavedBlocks = (site: string | number, init?: RequestInit) =>
+  callWhenLive(BUILDER_API_LIVE, SECTION, () => apiGet<{ items: SavedBlock[] }>(`/api/builder/sites/${site}/saved-blocks`, undefined, init));
+
 export const listDesignVersions = (site: string | number, init?: RequestInit) =>
   callWhenLive(BUILDER_API_LIVE, SECTION, () => apiGet<{ items: DesignVersion[] }>(`/api/builder/sites/${site}/versions`, undefined, init));
 
@@ -189,6 +219,25 @@ export const moveNode = (input: { siteId: number; pageId: number; nodeId: string
 
 export const duplicateNode = (input: { siteId: number; pageId: number; nodeId: string }) =>
   invokeAction<{ nodeId: string } & Revisioned>("builder.duplicateNode", input);
+
+/**
+ * Insert whole subtrees in one undoable step — paste, bulk duplicate and saved
+ * blocks (M7). Placements apply in order; later indexes see earlier inserts.
+ * Custom HTML in a pasted block is re-cleaned, and refused from a token.
+ */
+export const insertNodes = (input: { siteId: number; pageId: number; placements: { parentId: string; index?: number; node: NodeInput }[] }) =>
+  invokeAction<{ inserted: { nodeId: string; parentId: string; index: number; type: string }[] } & Revisioned>("builder.insertNodes", input);
+
+/** Several moves as one undo step (M7 bulk move). Each sees the page as the previous left it. */
+export const moveNodes = (input: { siteId: number; pageId: number; moves: { nodeId: string; parentId: string; index?: number }[] }) =>
+  invokeAction<Revisioned>("builder.moveNodes", input);
+
+/** Save a block to the site's library (M7). `409 CONFLICT` with `details.reason` `name_taken` or `limit`. */
+export const saveBlock = (input: { siteId: number; name: string; node: NodeInput }) =>
+  invokeAction<{ savedBlockId: number; name: string; nodeCount: number }>("builder.saveBlock", input);
+
+export const deleteSavedBlock = (siteId: number, savedBlockId: number) =>
+  invokeAction<{ savedBlockId: number }>("builder.deleteSavedBlock", { siteId, savedBlockId });
 
 export const setNodeProps = (input: { siteId: number; pageId: number; nodeId: string; props: Record<string, unknown>; unset?: string[]; intent?: string | null }) =>
   invokeAction<{ changed: string[] } & Revisioned>("builder.setProps", input);
