@@ -71,7 +71,7 @@ function inspector(
       onDuplicate={noop}
       onRemove={noop}
       onCopy={noop}
-      onSaveBlock={async () => true}
+      onSaveBlock={async () => true as const}
     />,
   );
 }

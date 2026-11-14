@@ -94,6 +94,7 @@ const DRAFT_TOOL_LABEL: Record<string, string> = {
   builder_insertPreset: "Added a section",
   builder_removeNodes: "Removed blocks",
   builder_moveNode: "Moved a block",
+  builder_moveNodes: "Moved blocks",
   builder_duplicateNode: "Duplicated a block",
   builder_setProps: "Edited a block",
   builder_setStyles: "Restyled a block",

@@ -449,8 +449,8 @@ export function Inspector({
   onRemove: () => void;
   /** M7: put this block on the editor's clipboard. */
   onCopy: () => void;
-  /** M7: keep this block in the site's saved blocks. Resolves true when saved. */
-  onSaveBlock: (name: string) => Promise<boolean>;
+  /** M7: keep this block in the site's saved blocks. `true` when saved; otherwise the refusal to show. */
+  onSaveBlock: (name: string) => Promise<true | string>;
 }) {
   if (!node) {
     return <p className="p-4 text-sm text-muted">Select a block on the page or in the layers list to edit it.</p>;
@@ -605,14 +605,18 @@ export function Inspector({
 }
 
 /** M7: name a block and keep it in the site's saved blocks (Add tab → Saved). */
-function SaveBlockField({ disabled, onSave }: { disabled: boolean; onSave: (name: string) => Promise<boolean> }) {
+function SaveBlockField({ disabled, onSave }: { disabled: boolean; onSave: (name: string) => Promise<true | string> }) {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const save = async () => {
     if (!name.trim()) return;
     setBusy(true);
+    setError(null);
     try {
-      if (await onSave(name.trim())) setName("");
+      const result = await onSave(name.trim());
+      if (result === true) setName("");
+      else setError(result);
     } finally {
       setBusy(false);
     }
@@ -634,6 +638,7 @@ function SaveBlockField({ disabled, onSave }: { disabled: boolean; onSave: (name
           Save
         </Button>
       </div>
+      {error ? <p className="text-xs text-error-text">{error}</p> : null}
       <p className="text-xs text-muted">Insert it on any page from Add → Saved blocks. Later edits here do not change the saved copy.</p>
     </form>
   );

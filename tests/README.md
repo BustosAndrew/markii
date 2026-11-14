@@ -342,10 +342,10 @@ Two dev-loop faults produce failures that look like findings. Both are worth rul
 reading a stack trace, and both have caught someone recently.
 
 **`Duplicate action id` — you edited a registry module while the dev server was up.** A hot reload
-re-executes the module that registers the actions, and `defineAction` refuses the second
-registration. Every action invocation 500s afterwards, so a test fails at whatever assertion happens
-to come first — usually `expect(res.status).toBe(200)`, several lines above the thing you were
-actually testing.
+used to re-execute the module that registers the actions and `defineAction` refused the second
+registration, 500ing every action afterwards. In development it now replaces the same id; a real
+duplicate still throws on a cold start. If a running server already crashed on the old throw,
+restart it once before trusting a red test.
 
 This is at its most dangerous during a **falsification**, when a red result is exactly what you are
 hoping for: break a check, watch a test fail, conclude the check is load-bearing. If the failure is

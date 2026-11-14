@@ -10,14 +10,25 @@ import type { ActionDefinition, Actor, Permission } from "./types";
  * path around validation or permissions, because there is only one path.
  */
 
-const registry = new Map<string, ActionDefinition<never, unknown>>();
+/**
+ * Survives Turbopack HMR of this file. A module-level `new Map()` would empty
+ * the registry while definition modules that did not reload stay registered
+ * against the discarded copy.
+ */
+const registry = ((globalThis as typeof globalThis & {
+  __markiiActionRegistry?: Map<string, ActionDefinition<never, unknown>>;
+}).__markiiActionRegistry ??= new Map());
 
 export function defineAction<TInput, TResult>(
   def: ActionDefinition<TInput, TResult>,
 ): ActionDefinition<TInput, TResult> {
-  if (registry.has(def.id)) {
+  if (registry.has(def.id) && process.env.NODE_ENV !== "development") {
     // Two definitions for one id means one silently wins, and which one depends
     // on import order. Fail at module load instead.
+    //
+    // In `next dev`, Turbopack re-executes the definition module while this Map
+    // survives, so the same id registering again is a hot reload, not a duplicate.
+    // `pnpm test` and `pnpm build` still throw. See docs/BACKEND.md.
     throw new Error(`Duplicate action id "${def.id}"`);
   }
   if (!/^[a-z][a-zA-Z0-9]*\.[a-z][a-zA-Z0-9]*$/.test(def.id)) {

@@ -197,10 +197,8 @@ action. An `analyst` or `viewer` token legitimately shows only the ten read tool
 held until someone subscribes. Nothing about the store's data is withheld.
 
 **Every request 500s in dev, and the log says `Duplicate action id "..."`** — a hot-reload
-artifact, not your change. The registry is a module-level `Map` filled by side-effect imports, so
-when Turbopack re-evaluates `lib/actions/definitions/*` the ids register a second time and
-`defineAction` throws. It never recovers on its own and it takes **every** route that imports the
-registry with it, not just this one. **Restart the dev server.** A long-running dev server here is
+artifact from before `defineAction` started replacing the same id in development. Restart once if
+you still see it (an already-crashed worker does not recover). A long-running dev server here is
 worth suspecting generally: one left up for hours also degrades into 500s with a dead worker pool.
 
 **A tool call returns `isError: true`** — that is an *action* refusing, not the transport failing,

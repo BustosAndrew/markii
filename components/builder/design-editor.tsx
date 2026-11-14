@@ -625,13 +625,19 @@ export function DesignEditor({
   );
 
   const saveSelectedBlock = useCallback(
-    async (name: string) => {
-      if (!tree || !selectedId) return false;
+    async (name: string): Promise<true | string> => {
+      if (!tree || !selectedId) return "Select a block to save.";
       const hit = find(tree, selectedId);
-      if (!hit?.parent) return false;
+      if (!hit?.parent) return "The page itself cannot be saved as a block.";
       // The library is not the design: saving is not a step on the undo stack.
-      const out = await run(() => saveBlock({ siteId: sid, name, node: toInput(hit.node) }), "builder.saveBlock", { record: false });
-      if (!out) return false;
+      let refusal = "That block could not be saved.";
+      const out = await run(() => saveBlock({ siteId: sid, name, node: toInput(hit.node) }), "builder.saveBlock", {
+        record: false,
+        onError: (error) => {
+          refusal = publicErrorMessage(error, refusal);
+        },
+      });
+      if (!out) return refusal;
       await loadSaved();
       announce(`Saved "${name}" to your saved blocks.`);
       return true;

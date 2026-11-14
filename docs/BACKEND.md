@@ -888,25 +888,13 @@ goes live — that badge is the frontend's only signal that something is callabl
 > An hour was spent on this on 2026-09-08, including a reboot that changed nothing. `rm -rf .next`
 > fixed it immediately.
 
-> **Restart `pnpm dev` after editing anything the action registry imports, before believing a
-> test result.**
+> **A `Duplicate action id` 500 after editing a registry module is a crashed worker, not a finding.**
 >
-> `defineAction` refuses a duplicate id. A dev-server hot reload re-executes the module that
-> registers the definitions, so editing `lib/actions/definitions/*` — or anything they pull in, such
-> as `lib/billing/sweep.ts` or a `lib/billing/*` helper — throws `Duplicate action id` on the next
-> request. **Every action invocation then 500s**, which means every registry-backed route, the cron
-> sweeps, and the MCP server.
->
-> The cost is not the 500. It is that a test **fails for the wrong reason** and looks like it found
-> something. This caught the same person twice on 2026-09-08: once while falsifying a permission
-> check, where the test "failed" at `expect(res.status).toBe(200)` rather than at the assertion under
-> test and proved nothing; and once while falsifying `MAX_ROLLUP_AGE_MS`, where an unrelated billing
-> test went red. A falsification that fails at the wrong line is worse than no falsification, because
-> it is read as confirmation.
->
-> The tell is `Duplicate action id` in `.next/dev/logs/next-development.log`, or a 500 from a route
-> that was working a minute ago and whose code you did not touch. **Restart the server and re-run
-> before drawing any conclusion from a red test.**
+> `defineAction` still refuses a duplicate id on a cold start (`pnpm test`, `pnpm build`). In
+> `next dev` it **replaces** the same id, because Turbopack re-executes the definition module while
+> the registry Map survives. Editing `lib/actions/definitions/*` should no longer 500 the dashboard.
+> A genuine two-file duplicate will still throw the next time the process starts cold. If a worker
+> already crashed on the old throw, restart once before trusting a red test.
 
 ## Traps worth knowing in advance
 
@@ -915,7 +903,7 @@ goes live — that badge is the frontend's only signal that something is callabl
 | Forgetting an org filter on one route | Cross-tenant data leak |
 | Running `pnpm build` and `pnpm dev` against the same `.next` | Every page 500s with a Turbopack `0xc0000142`; route handlers keep working, so it reads as a code bug. `rm -rf .next` — see below |
 | Adding route folders while `pnpm dev` runs | Existing routes start answering Next's **HTML** 404 page — not the JSON envelope — and whole suites fail at `expected 404 to be 200` (45 tests, 2026-10-15, after `app/api/agents/*` was created under a running server; `.next/dev/types/validator.ts` was also left unparseable). An HTML 404 from a route that exists is the tell. Stop the server, `rm -rf .next`, restart |
-| Editing a registry module while `pnpm dev` runs | `Duplicate action id` on hot reload; every action 500s and tests fail at the wrong assertion, which reads as a real finding. Restart before trusting a red test — see above |
+| Editing a registry module while `pnpm dev` runs | Used to 500 every action (`Duplicate action id` on hot reload). `defineAction` now replaces in development; a real duplicate still throws on `pnpm test` / `pnpm build` |
 | Any auth mutation running in the browser | The session cookie cannot be `HttpOnly` (D30) — XSS in merchant custom code reaches an admin session |
 | Computing fees from `orders` instead of usage records | Wrong invoices after any refund |
 | Non-idempotent webhook handling | Double-charged merchants |
