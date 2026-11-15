@@ -11,13 +11,17 @@ import type { ActionDefinition, Actor, Permission } from "./types";
  */
 
 /**
- * Survives Turbopack HMR of this file. A module-level `new Map()` would empty
- * the registry while definition modules that did not reload stay registered
- * against the discarded copy.
+ * **Module-level, deliberately not on `globalThis`.** In `next dev` Turbopack
+ * can give different routes their own copies of these modules. A registry
+ * shared across copies hands a route a definition from another copy, whose
+ * `ApiError` is a different class — so `errorResponse`'s `instanceof` misses
+ * it and every refusal raised inside an action (409 name taken, 404, 409
+ * `AGENT_EDITING`) answered 500 once a second copy had loaded (2026-11-15).
+ * Per-copy registries keep each route's definitions, errors and checks from
+ * the same module graph — which is all a production build ever has anyway.
+ * Hot reload is handled in `defineAction` below, not by sharing.
  */
-const registry = ((globalThis as typeof globalThis & {
-  __markiiActionRegistry?: Map<string, ActionDefinition<never, unknown>>;
-}).__markiiActionRegistry ??= new Map());
+const registry = new Map<string, ActionDefinition<never, unknown>>();
 
 export function defineAction<TInput, TResult>(
   def: ActionDefinition<TInput, TResult>,
@@ -26,9 +30,11 @@ export function defineAction<TInput, TResult>(
     // Two definitions for one id means one silently wins, and which one depends
     // on import order. Fail at module load instead.
     //
-    // In `next dev`, Turbopack re-executes the definition module while this Map
-    // survives, so the same id registering again is a hot reload, not a duplicate.
-    // `pnpm test` and `pnpm build` still throw. See docs/BACKEND.md.
+    // In `next dev`, a hot reload re-executes the definition module while this
+    // module's Map survives, so the same id registering again is a reload, not
+    // a duplicate — it replaces. `pnpm test` and `pnpm build` still throw; a
+    // real two-file duplicate is caught there, not by restarting `pnpm dev`.
+    // See docs/BACKEND.md.
     throw new Error(`Duplicate action id "${def.id}"`);
   }
   if (!/^[a-z][a-zA-Z0-9]*\.[a-z][a-zA-Z0-9]*$/.test(def.id)) {
