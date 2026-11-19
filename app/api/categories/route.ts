@@ -2,7 +2,7 @@ import { and, count, desc, eq, ilike, isNull, or, type SQL } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { badRequest, boolParam, conflict, intParam, notFound, pagination, slugify } from "@/lib/api";
 import { orgHandler } from "@/lib/auth/handler";
-import { ownSites, siteScope, siteScopeForStaff } from "@/lib/tenancy";
+import { ownSites, siteScopeForStaff } from "@/lib/tenancy";
 import { categories, db, sites } from "@/lib/db";
 import { serializeCategories, serializeCategoryDetail } from "@/lib/queries";
 import { categoryCreateSchema } from "@/lib/validation";

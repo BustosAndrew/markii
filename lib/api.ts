@@ -59,6 +59,20 @@ export class ApiError extends Error {
        */
       | "HUMAN_APPROVAL_REQUIRED"
       /**
+       * The caller's access is limited to some stores and this change applies
+       * to the whole organization — billing, payout rails, integrations,
+       * sending domains, the org profile, a new store (D52). 403, its own code:
+       * the role is fine, the reach is not, so a screen should say "ask someone
+       * with access to all stores" rather than show a permissions error.
+       */
+      | "STORE_SCOPED"
+      /**
+       * A grant — token, invitation, role or store change — wider than the
+       * caller's own, or managing a member or token whose stores reach past the
+       * caller's (D52). `details.reason` is `"role"` or `"stores"`.
+       */
+      | "BEYOND_YOUR_ACCESS"
+      /**
        * The org is held by Markii itself (G12) — a platform operator's
        * decision, never a billing state. 403 with its own code: there is
        * nothing to pay (so not 402) and nothing to ask an admin for (so not

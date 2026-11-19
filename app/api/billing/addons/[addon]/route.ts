@@ -118,7 +118,7 @@ const refuseToSell = async (raw: string) => {
 
 export const POST = orgHandler(
   async (_req, { params }) => refuseToSell((await params).addon),
-  { permission: "billing.write" },
+  { permission: "billing.write", orgWide: true },
 );
 
 export const DELETE = orgHandler(
@@ -143,5 +143,5 @@ export const DELETE = orgHandler(
     }
     return refuseToSell(key);
   },
-  { permission: "billing.write" },
+  { permission: "billing.write", orgWide: true },
 );

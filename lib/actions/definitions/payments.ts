@@ -44,6 +44,7 @@ const railConfigSchemas: Record<PaymentRail, z.ZodType<Record<string, string>>> 
 
 export const connectRail = defineAction({
   id: "payments.connectRail",
+  orgWide: true,
   description:
     "Set or update where a store's payments are received. For x402 this is the wallet address " +
     "revenue is paid to. Stripe is not configured here — it connects through OAuth, and Markii " +
@@ -101,6 +102,7 @@ export const connectRail = defineAction({
 
 export const disconnectRail = defineAction({
   id: "payments.disconnectRail",
+  orgWide: true,
   description:
     "Stop accepting payments on a rail. For x402 this removes the wallet revenue is paid to, so " +
     "the store can no longer take payment that way.",

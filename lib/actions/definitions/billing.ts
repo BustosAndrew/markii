@@ -102,6 +102,7 @@ async function loadOrg(db: Parameters<typeof mirrorSubscription>[0], orgId: stri
  */
 export const changePlan = defineAction({
   id: "billing.changePlan",
+  orgWide: true,
   description:
     "Move the organization onto a plan and billing interval, or start its first subscription. " +
     "Call without `confirm` to get the proration preview and the exact amount due; call again " +
@@ -494,6 +495,7 @@ export const billingAddressSchema = z
  */
 export const updateBillingAddress = defineAction({
   id: "billing.updateBillingAddress",
+  orgWide: true,
   description:
     "Set the organization's billing address — where Markii invoices it, and what Stripe Tax " +
     "calculates sales tax on the subscription from. Takes effect from the next invoice.",
@@ -668,6 +670,7 @@ async function resolveExistingSubscription(
  */
 export const setCancellation = defineAction({
   id: "billing.setCancellation",
+  orgWide: true,
   description:
     "Schedule the subscription to end when the current period does, or withdraw a scheduled " +
     "cancellation. Access and entitlements continue until the period actually ends — this never " +
@@ -818,6 +821,7 @@ export const setCancellation = defineAction({
  */
 export const startPaymentMethodSetup = defineAction({
   id: "billing.startPaymentMethodSetup",
+  orgWide: true,
   description:
     "Return a Stripe SetupIntent client secret so a card can be collected in Stripe Elements. " +
     "Card details never reach Markii. Follow with billing.setDefaultPaymentMethod once Elements " +
@@ -905,6 +909,7 @@ export const startPaymentMethodSetup = defineAction({
  */
 export const closeBillingPeriod = defineAction({
   id: "billing.closePeriod",
+  orgWide: true,
   description:
     "Freeze a finished billing period into a threshold-fee assessment. Measures only — it bills " +
     "nothing; billing.invoiceAssessments does that. Idempotent: re-closing a period returns the " +
@@ -1006,6 +1011,7 @@ export const closeBillingPeriod = defineAction({
  */
 export const invoiceAssessments = defineAction({
   id: "billing.invoiceAssessments",
+  orgWide: true,
   description:
     "Bill closed threshold-fee assessments by adding them to the organization's next Markii " +
     "invoice. Each assessment bills exactly once. Call with dryRun to see what would be charged " +
@@ -1220,6 +1226,7 @@ export const invoiceAssessments = defineAction({
  */
 export const setDefaultCard = defineAction({
   id: "billing.setDefaultPaymentMethod",
+  orgWide: true,
   description:
     "Make a payment method the default for this organization's Markii invoices. Called with the " +
     "id Stripe Elements returns after a SetupIntent is confirmed.",

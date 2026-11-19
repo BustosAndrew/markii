@@ -490,9 +490,11 @@ export function DesignEditor({
       if (!toolName.startsWith("builder_")) return;
       const o = output as { status?: string; invocationId?: string; changes?: unknown[]; result?: { pageId?: number; created?: boolean } } | null;
       if (o?.status !== "applied" || !o.invocationId) return;
+      // Narrowing does not reach into the updater callback below, so hold the checked value.
+      const invocationId = o.invocationId;
       // An edit that changed nothing has nothing to undo; stacking it would make Undo answer 409.
       if (o.changes?.length) {
-        setUndoStack((st) => [...st.slice(-49), { actionId: toolName.replace("_", "."), invocationId: o.invocationId }]);
+        setUndoStack((st) => [...st.slice(-49), { actionId: toolName.replace("_", "."), invocationId }]);
         setRedoStack([]);
       }
       // Follow the document the agent just opened, including an already-customised

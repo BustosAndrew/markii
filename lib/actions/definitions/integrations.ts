@@ -41,6 +41,7 @@ const feedConfigSchemas: Record<CatalogFeed, z.ZodType<Record<string, string>>> 
 
 export const connectIntegration = defineAction({
   id: "integrations.connect",
+  orgWide: true,
   description:
     "Connect or update a catalog feed, so products publish to an outside shopping surface. " +
     "Payment rails are configured separately — see payments.connectRail.",
@@ -101,6 +102,7 @@ export const connectIntegration = defineAction({
 
 export const disconnectIntegration = defineAction({
   id: "integrations.disconnect",
+  orgWide: true,
   description:
     "Disconnect a catalog feed. Products stop publishing to that surface; nothing about payments " +
     "changes.",

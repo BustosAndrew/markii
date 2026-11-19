@@ -78,5 +78,5 @@ export const POST = orgHandler(
     // attached afterwards through `domains.connect`, which invalidates its own.
     return NextResponse.json(await serializeSite(row), { status: 201 });
   },
-  { permission: "cms.write" },
+  { permission: "cms.write", orgWide: true },
 );

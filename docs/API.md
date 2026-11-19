@@ -1784,6 +1784,28 @@ interface StaffMember {
 }
 ```
 
+**Per-store scoping is enforced everywhere as of 2026-11-19 (D52).** `storeIds` on a staff member
+or an API token narrows every org-scoped read and write — list and single-item routes and every
+registry action — not only the list routes that called `siteScopeForStaff`. Another store's item
+answers `404`, like a missing one. `[]` reaches no store. A digital asset with no store can be
+attached from any store, but `delivery.deleteAsset` refuses it (`403`) unless the caller reaches
+every store.
+
+**Role says what, `storeIds` says where, and both bound what a caller can hand out**
+(`lib/auth/reach.ts`):
+
+- **Org-wide changes need all-store reach** → `403 STORE_SCOPED`. That covers every action marked
+  `orgWide` (all of `billing.*`, `payments.*`, `integrations.*`, `email.*`, pinned by a unit test),
+  `PATCH /api/org`, `POST /api/sites`, the add-on routes, and uploading a digital asset with no store.
+- **A grant never exceeds its granter** → `403 BEYOND_YOUR_ACCESS`, `details.reason: "role" | "stores"`.
+  A token's or invitee's role must carry no permission the caller lacks, and its stores must lie
+  within the caller's. That applies to `POST /api/org/tokens`, `POST /api/org/staff/invite`, and the
+  new role and stores in `PATCH /api/org/staff/:id`. On the first two, an omitted `storeIds` means
+  the caller's own stores.
+- **You manage only those within your stores** → `403 BEYOND_YOUR_ACCESS`. That applies to
+  `PATCH`/`DELETE /api/org/staff/:id` and `DELETE /api/org/tokens/:id`, so a member scoped to one
+  store cannot disable an all-stores administrator or revoke an all-stores integration token.
+
 | Method | Route | Notes |
 |---|---|---|
 | `POST` | `/api/auth/sign-up` | `{ email, password, name? }` → creates the user *and* their first org. Optional `name` is the display name (a person or a company) — written to `user_metadata` and used as the first org's name and the owner staff row. Server-side (D30). **Rate limited** (below) |

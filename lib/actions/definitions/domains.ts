@@ -11,6 +11,7 @@ import {
 } from "../../domains/platform";
 import { dnsRecordsFor } from "../../domains/records";
 import { connectDomain, disconnectDomain, verifyDomain } from "../../domains/verification";
+import { ownSites } from "../../tenancy";
 import { defineAction } from "../registry";
 import type { ActionContext } from "../types";
 
@@ -34,7 +35,7 @@ async function ownedSite(ctx: ActionContext, siteId: number) {
   const [row] = await ctx.db
     .select()
     .from(sites)
-    .where(and(eq(sites.id, siteId), eq(sites.orgId, ctx.actor.orgId)))
+    .where(and(eq(sites.id, siteId), ownSites(ctx.actor.orgId)))
     .limit(1);
   // 404 rather than 403 for another org's site: a 403 confirms the id exists.
   if (!row) throw notFound("Site");

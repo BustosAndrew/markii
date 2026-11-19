@@ -495,6 +495,39 @@ The audit list carries both directions now — `undoneBy` on the original row, `
 so a history screen can strike through a reversed change and label its reversal without a second
 query. Both are `string | null` on `ActionInvocation`.
 
+### 🔴 New 2026-11-19 — per-store scoping is enforced now (D52); store-scoped members see less
+
+`StaffMember.storeIds` / a token's `storeIds` used to narrow a few list routes and nothing else. They
+now narrow **every** org-scoped read and write — single-item routes, lists, and every registry action.
+No type changed; what changes is what a store-scoped member gets back:
+
+- **Another store's item answers `404`**, exactly as a missing one does — product, order, customer,
+  discount, category, page, domain, download. Screens already handle 404; make sure none renders it
+  as "deleted" when the member simply cannot reach it.
+- **Lists are shorter.** Discounts, customers, collections, shipping zones and rates, inventory
+  levels, and the overview, analytics and finances pages used to show every store to a scoped member.
+  They now show that member's stores only. Totals are over those stores, so don't label them
+  "all stores" for a scoped member (`me.staff.storeIds !== "all"`).
+- **`delivery.deleteAsset` answers `403 FORBIDDEN`** for a file with no store (shared by every store)
+  unless the caller reaches all stores. Show its message; offer *detach* instead.
+- An empty `storeIds: []` reaches nothing, and every store-specific screen will be empty. That is
+  correct, not a loading bug.
+
+**Two new 403 codes (same day): role says *what*, `storeIds` says *where*.** Neither is a
+permissions problem, so neither should show the step-up modal or "your role cannot…":
+
+- **`STORE_SCOPED`** — a member scoped to some stores tried an org-wide change: any `billing.*`,
+  `payments.*`, `integrations.*` or `email.*` action, `PATCH /api/org`, `POST /api/sites`, the add-on
+  routes, or uploading a digital asset with no store. Say it needs someone with access to all
+  stores. Better: hide those controls when `me.staff.storeIds !== "all"`.
+- **`BEYOND_YOUR_ACCESS`** — a grant wider than the caller's own, or managing someone whose reach is
+  wider. `details.reason` is `"role"` (e.g. a `developer` minting an `administrator` token) or
+  `"stores"`. Applies to token creation and revocation, invitations, and staff edits and removal. The
+  token and invite forms should only offer roles and stores the caller holds.
+- **`storeIds` is optional on `POST /api/org/tokens` and `/api/org/staff/invite` now**, and an
+  omitted value means *the caller's own stores*, not `"all"`. An all-stores caller sees no change.
+- `GET /api/digital-assets` lists shared files plus the caller's own stores' files.
+
 ### 🟢 New 2026-11-14 — editor polish: breakpoints, multi-select, copy/paste, saved blocks (D51 M7)
 
 **Owner decision 2026-11-14: M7 is built now**, reversing the same day's "deferred past launch" entry

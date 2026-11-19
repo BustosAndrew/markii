@@ -2,7 +2,9 @@ import "server-only";
 
 import { errorResponse, forbidden } from "../api";
 import { assertAccountStanding } from "../billing/standing-guard";
+import { withStoreScope } from "../store-scope";
 import { roleHasPermission } from "./permissions";
+import { assertOrgWideReach } from "./reach";
 import { requireAuthContext, type AuthContext } from "./session";
 import { consumeTokenBudget, withTokenBudget, type TokenBudget } from "./token-rate-limit";
 
@@ -50,7 +52,16 @@ export type OrgRouteCtx = RouteCtx & {
  */
 export function orgHandler(
   fn: (req: Request, ctx: OrgRouteCtx) => Promise<Response>,
-  options: { permission?: string } = {},
+  options: {
+    permission?: string;
+    /**
+     * The route changes the whole organization rather than one store — the
+     * org profile, creating a store (D52). Refused (`403 STORE_SCOPED`) for a
+     * caller whose `storeIds` is not `"all"`, whatever their role. Actions
+     * carry the same rule as `orgWide` on their definition.
+     */
+    orgWide?: boolean;
+  } = {},
 ) {
   return async (req: Request, ctx: RouteCtx): Promise<Response> => {
     /**
@@ -75,6 +86,7 @@ export function orgHandler(
       if (options.permission && !roleHasPermission(session.role, options.permission)) {
         throw forbidden(`Your role (${session.role}) cannot ${options.permission}`);
       }
+      if (options.orgWide) assertOrgWideReach(session.storeIds, "This change");
 
       /**
        * Account standing (D45), for the **§1-8 routes that mutate outside the
@@ -133,7 +145,12 @@ export function orgHandler(
         }
       }
 
-      return withTokenBudget(await fn(req, { ...ctx, session, orgId: session.org.id }), budget);
+      // Per-store scoping for everything the handler does (`lib/store-scope.ts`):
+      // every `siteScope` / `ownSites` below narrows to the caller's stores.
+      const res = await withStoreScope(session.storeIds, () =>
+        fn(req, { ...ctx, session, orgId: session.org.id }),
+      );
+      return withTokenBudget(res, budget);
     } catch (e) {
       return withTokenBudget(errorResponse(e), budget);
     }

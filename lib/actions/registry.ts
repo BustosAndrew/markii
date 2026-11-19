@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { StoreIds } from "../store-scope";
 import type { ActionDefinition, Actor, Permission } from "./types";
 
 /**
@@ -164,6 +165,27 @@ export function setAuthorizationResolver(next: AuthorizationResolver) {
 
 export function authorize(actor: Actor, permission: Permission): Promise<boolean> {
   return resolver(actor, permission);
+}
+
+/**
+ * Which stores an actor may touch (`staff.storeIds`, `api_tokens.store_ids`),
+ * resolved from the actor's own record — the same rule as permissions, so a
+ * caller cannot widen its reach by asserting one. `invokeAction` runs each
+ * action inside it, which narrows every `siteScope` / `ownSites` in `run`.
+ *
+ * **Deny by default**: until a real resolver is installed an actor reaches no
+ * store, for the same reason `denyAll` answers no.
+ */
+export type StoreScopeResolver = (actor: Actor) => Promise<StoreIds>;
+
+let storeScopeResolver: StoreScopeResolver = async () => [];
+
+export function setStoreScopeResolver(next: StoreScopeResolver) {
+  storeScopeResolver = next;
+}
+
+export function resolveStoreScope(actor: Actor): Promise<StoreIds> {
+  return storeScopeResolver(actor);
 }
 
 /** True while no real resolver is installed — the registry is wired but not yet usable. */

@@ -487,7 +487,7 @@ export function ThemePanel({
       </section>
 
       <CustomCssField key={customCss} css={customCss} disabled={disabled || !canWriteCode} onSave={onCustomCss} />
-      <HeadCodeField key={headHtml} html={headHtml} disabled={disabled} canWrite={canWriteScripts} onSave={onHeadCode} />
+      <HeadCodeField html={headHtml}disabled={disabled} canWrite={canWriteScripts} onSave={onHeadCode} />
     </div>
   );
 }
@@ -511,6 +511,16 @@ function HeadCodeField({
 }) {
   const [draft, setDraft] = useState(html);
   const [removed, setRemoved] = useState<string[]>([]);
+  // Follow the stored value without remounting. A `key={html}` remount ran
+  // during Save's own refresh — before `onSave` resolved — so the "Saved
+  // without" list was set on a discarded instance and never shown. A change
+  // from elsewhere (undo, restore) clears it; Save sets it again afterwards.
+  const [seen, setSeen] = useState(html);
+  if (seen !== html) {
+    setSeen(html);
+    setDraft(html);
+    setRemoved([]);
+  }
   return (
     <section className="space-y-2 border-t border-border pt-4" aria-label="Custom scripts">
       <div>

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { conflict } from "@/lib/api";
 import { orgHandler } from "@/lib/auth/handler";
+import { assertGrantWithin } from "@/lib/auth/reach";
 import { newId } from "@/lib/auth/provisioning";
 import { serializeStaff } from "@/lib/auth/serialize";
 import { db, staff } from "@/lib/db";
@@ -18,7 +19,8 @@ const inviteSchema = z.object({
     "developer",
     "viewer",
   ]),
-  storeIds: z.union([z.literal("all"), z.array(z.number().int().positive())]).default("all"),
+  /** Omitted: the inviter's own stores, so a scoped inviter's default is not a refusal. */
+  storeIds: z.union([z.literal("all"), z.array(z.number().int().positive())]).optional(),
 });
 
 /**
@@ -32,6 +34,9 @@ export const POST = orgHandler(
   async (req, { orgId, session }) => {
     const input = inviteSchema.parse(await req.json());
     const email = input.email.toLowerCase();
+    // An invitation never exceeds the inviter's role or stores (D52).
+    const storeIds = input.storeIds ?? session.storeIds;
+    assertGrantWithin({ role: input.role, storeIds }, session);
 
     const [existing] = await db
       .select({ id: staff.id })
@@ -60,7 +65,7 @@ export const POST = orgHandler(
         userId: null,
         email,
         role: input.role,
-        storeIds: input.storeIds,
+        storeIds,
         status: "invited",
       })
       .returning();

@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { badRequest, forbidden, notFound } from "@/lib/api";
 import { orgHandler } from "@/lib/auth/handler";
+import { assertGrantWithin, assertManages } from "@/lib/auth/reach";
+import type { StoreIds } from "@/lib/store-scope";
 import { serializeStaff } from "@/lib/auth/serialize";
 import { db, staff } from "@/lib/db";
 
@@ -35,7 +37,12 @@ const staffUpdateSchema = z.object({
  *    `organizations.ownerId` and changes only by explicit transfer, so an
  *    administrator cannot demote or remove the person who owns billing.
  */
-async function loadEditableMember(id: string, orgId: string, actingUserId: string | null) {
+async function loadEditableMember(
+  id: string,
+  orgId: string,
+  actingUserId: string | null,
+  callerStores: StoreIds,
+) {
   const [member] = await db
     .select()
     .from(staff)
@@ -50,16 +57,24 @@ async function loadEditableMember(id: string, orgId: string, actingUserId: strin
   if (member.role === "owner") {
     throw forbidden("The organization owner cannot be modified here — transfer ownership instead");
   }
+  /**
+   * 3. **Reaching past your own stores** (D52). A store-scoped administrator
+   *    manages people within their stores; an all-stores administrator is
+   *    beyond them, or they could disable the person able to correct them.
+   */
+  assertManages(member, callerStores, "member");
   return member;
 }
 
 export const PATCH = orgHandler(
   async (req, { params, orgId, session }) => {
     const { id } = await params;
-    await loadEditableMember(id, orgId, session.user?.id ?? null);
+    await loadEditableMember(id, orgId, session.user?.id ?? null, session.storeIds);
 
     const input = staffUpdateSchema.parse(await req.json());
     if (Object.keys(input).length === 0) throw badRequest("No changes supplied");
+    // The new role and stores are a grant like any other: never wider than yours.
+    assertGrantWithin({ role: input.role, storeIds: input.storeIds }, session);
 
     const [row] = await db
       .update(staff)
@@ -75,7 +90,7 @@ export const PATCH = orgHandler(
 export const DELETE = orgHandler(
   async (_req, { params, orgId, session }) => {
     const { id } = await params;
-    await loadEditableMember(id, orgId, session.user?.id ?? null);
+    await loadEditableMember(id, orgId, session.user?.id ?? null, session.storeIds);
 
     await db.delete(staff).where(and(eq(staff.id, id), eq(staff.orgId, orgId)));
     return NextResponse.json({ deleted: true, id });

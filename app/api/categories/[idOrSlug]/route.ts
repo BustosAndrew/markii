@@ -2,7 +2,7 @@ import { and, eq, inArray, ne } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { badRequest, conflict, intParam, notFound } from "@/lib/api";
 import { orgHandler } from "@/lib/auth/handler";
-import { ownSites, siteScope } from "@/lib/tenancy";
+import { ownSites } from "@/lib/tenancy";
 import { categories, db, products, sites, type Category } from "@/lib/db";
 import {
   resolveCategory,
@@ -46,7 +46,13 @@ export const PATCH = orgHandler(async (req, { params, orgId }) => {
 
   const targetSiteId = input.siteId ?? category.siteId;
   if (input.siteId != null && input.siteId !== category.siteId) {
-    const [site] = await db.select({ id: sites.id }).from(sites).where(eq(sites.id, input.siteId)).limit(1);
+    // Org-scoped: without `ownSites` this moves the category — and every product
+    // in its subtree — into another tenant's store. Same rule as catalog.updateProduct.
+    const [site] = await db
+      .select({ id: sites.id })
+      .from(sites)
+      .where(and(eq(sites.id, input.siteId), ownSites(orgId)))
+      .limit(1);
     if (!site) throw notFound("Target site");
   }
 

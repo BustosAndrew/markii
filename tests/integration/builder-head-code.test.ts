@@ -79,8 +79,11 @@ describe("site builder — custom scripts (M6)", () => {
       const page = await storefront(path);
       const nonce = /'nonce-([^']+)'/.exec(page.headers.get("content-security-policy") ?? "")?.[1];
       expect(nonce, path).toBeTruthy();
-      expect(page.text, path).toMatch(new RegExp(`<script[^>]*src="https://www.googletagmanager.com/gtag/js\\?id=G-TEST123"[^>]*nonce="${nonce}"|<script[^>]*nonce="${nonce}"[^>]*src="https://www.googletagmanager.com/gtag/js\\?id=G-TEST123"`));
-      expect(page.text, path).toMatch(new RegExp(`<script nonce="${nonce}">window.dataLayer`));
+      // Base64 nonces carry `+` and `/`, which are regex syntax; unescaped, this
+      // failed on any run whose nonce happened to contain a `+`.
+      const n = nonce!.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+      expect(page.text, path).toMatch(new RegExp(`<script[^>]*src="https://www.googletagmanager.com/gtag/js\\?id=G-TEST123"[^>]*nonce="${n}"|<script[^>]*nonce="${n}"[^>]*src="https://www.googletagmanager.com/gtag/js\\?id=G-TEST123"`));
+      expect(page.text, path).toMatch(new RegExp(`<script nonce="${n}">window.dataLayer`));
       // Verification tags belong in <head>, where the verifier looks.
       const head = page.text.slice(0, page.text.indexOf("</head>"));
       expect(head, path).toContain('<meta name="google-site-verification" content="verify-me"');

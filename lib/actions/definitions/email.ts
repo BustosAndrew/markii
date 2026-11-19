@@ -32,6 +32,7 @@ async function ownedIdentity(ctx: ActionContext, identityId: number) {
 
 export const addSendingDomain = defineAction({
   id: "email.addSendingDomain",
+  orgWide: true,
   description:
     "Register a domain to send customer email from, and return the DNS records to publish. " +
     "Customer mail is always sent from the merchant's own domain — Markii never sends it from " +
@@ -130,6 +131,7 @@ export const addSendingDomain = defineAction({
 
 export const verifySendingDomain = defineAction({
   id: "email.verifySendingDomain",
+  orgWide: true,
   description:
     "Re-check a sending domain's DKIM records with AWS and update its status. Verification is " +
     "asynchronous on AWS's side, so this is how a merchant finds out DNS has propagated.",
@@ -168,6 +170,7 @@ export const verifySendingDomain = defineAction({
 
 export const removeSendingDomain = defineAction({
   id: "email.removeSendingDomain",
+  orgWide: true,
   description:
     "Remove a sending domain. Customer email stops immediately if this was the verified domain.",
   input: z.object({ identityId: z.number().int().positive() }).strict(),
@@ -209,6 +212,7 @@ export const removeSendingDomain = defineAction({
 
 export const suppressAddress = defineAction({
   id: "email.suppressAddress",
+  orgWide: true,
   description: "Stop sending customer email to an address.",
   input: z
     .object({
@@ -247,6 +251,7 @@ export const suppressAddress = defineAction({
 
 export const unsuppressAddress = defineAction({
   id: "email.unsuppressAddress",
+  orgWide: true,
   description:
     "Resume sending to a suppressed address. Addresses that reported mail as spam cannot be " +
     "re-enabled — that consent was withdrawn by the recipient, not by us.",

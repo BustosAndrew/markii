@@ -1,6 +1,7 @@
 import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { db, sites } from "./db";
+import { currentStoreScope } from "./store-scope";
 
 /**
  * Tenancy primitives (§16).
@@ -34,15 +35,29 @@ const MATCH_NOTHING = sql`false`;
  * it as a semi-join against `sites_org_idx`.
  */
 export function siteScope(orgId: OrgId, siteIdColumn: AnyPgColumn): SQL {
-  return inArray(
+  return narrowToCallerStores(
+    inArray(siteIdColumn, db.select({ id: sites.id }).from(sites).where(eq(sites.orgId, orgId))),
     siteIdColumn,
-    db.select({ id: sites.id }).from(sites).where(eq(sites.orgId, orgId)),
   );
 }
 
 /** Restricts the `sites` table itself. */
 export function ownSites(orgId: OrgId): SQL {
-  return eq(sites.orgId, orgId);
+  return narrowToCallerStores(eq(sites.orgId, orgId), sites.id);
+}
+
+/**
+ * Intersects an org filter with the current caller's stores
+ * (`lib/store-scope.ts`). Inside `orgHandler` or `invokeAction` that is the
+ * caller's `storeIds`; outside both it is `"all"` and the filter is unchanged.
+ * So a store-scoped member is narrowed by every existing org check — list,
+ * single-item lookup and action alike — without each one opting in.
+ */
+function narrowToCallerStores(orgFilter: SQL, siteIdColumn: AnyPgColumn): SQL {
+  const scope = currentStoreScope();
+  if (scope === "all") return orgFilter;
+  if (scope.length === 0) return MATCH_NOTHING;
+  return and(orgFilter, inArray(siteIdColumn, scope))!;
 }
 
 /**

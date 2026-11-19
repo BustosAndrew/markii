@@ -2,7 +2,9 @@ import { ApiError, forbidden, notFound } from "../api";
 import { assertStepUp } from "../auth/mfa";
 import { assertAccountStanding } from "../billing/standing-guard";
 import { actionInvocations, db, type DiffEntry } from "../db";
-import { authorize, getAction } from "./registry";
+import { assertOrgWideReach } from "../auth/reach";
+import { withStoreScope } from "../store-scope";
+import { authorize, getAction, resolveStoreScope } from "./registry";
 import type { ActionContext, Actor, InvocationOutcome } from "./types";
 
 /** Rolls the transaction back once a dry run has produced its diff. Never escapes. */
@@ -237,7 +239,20 @@ export async function invokeAction<TResult = unknown>(
   }
 
   try {
-    await db.transaction(async (tx) => {
+    /**
+     * **Per-store scoping, resolved here and nowhere else for actions.** Every
+     * `siteScope` / `ownSites` inside `run` narrows to these stores
+     * (`lib/store-scope.ts`), so an action that finds its product, order or
+     * page through those helpers — all of them do — answers 404 for a store the
+     * caller is not scoped to. Read from the actor's own record like the
+     * permission, never inherited from the route: MCP and agent turns reach
+     * this without an `orgHandler` around them. Effects run outside it, after
+     * commit, as Markii's own follow-through on a write already authorized.
+     */
+    const storeIds = await resolveStoreScope(actor);
+    // Org-wide settings need reach over every store, whatever the role (D52).
+    if (def.orgWide) assertOrgWideReach(storeIds, `"${def.id}"`);
+    await withStoreScope(storeIds, () => db.transaction(async (tx) => {
       const ctx: ActionContext = {
         actor,
         db: tx,
@@ -270,7 +285,7 @@ export async function invokeAction<TResult = unknown>(
         ipAddress: actor.request?.ip ?? null,
         userAgent: actor.request?.userAgent ?? null,
       });
-    });
+    }));
   } catch (e) {
     if (!(e instanceof DryRunRollback)) {
       /**

@@ -236,6 +236,38 @@ describe("tenancy and merchant configuration", () => {
       expect(rows[0].c).toBe(0);
     });
 
+    /**
+     * **Open from Phase A until 2026-11-19.** `PATCH /api/categories/:id` checked
+     * that a target `siteId` *existed*, never that it was the caller's — the
+     * `ownSites` import sat unused — and a cross-site move carries the whole
+     * subtree and every product in it. So org B could plant its products in
+     * org A's storefront. `catalog.updateProduct` had the same rule already.
+     */
+    it("cannot move a category (and its products) into A's store", async () => {
+      const site = await b.post("/api/sites", {
+        name: `Tenancy B cat ${Date.now()}`,
+        slug: `tenancy-b-cat-${Date.now()}`,
+      });
+      const siteB = site.json.id ?? site.json.site?.id;
+      const cat = await b.post("/api/categories", { siteId: siteB, name: "Planted" });
+      expect(cat.status).toBe(201);
+      const product = await b.post("/api/products", {
+        siteId: siteB,
+        name: "Planted product",
+        priceCents: 1000,
+        categoryId: cat.json.id,
+      });
+      expect(product.status).toBe(201);
+
+      const r = await b.patch(`/api/categories/${cat.json.id}`, { siteId: siteA });
+      expect(r.status).toBe(404);
+
+      const [c] = await sql`select site_id from categories where id = ${cat.json.id}`;
+      expect(c.site_id).toBe(siteB);
+      const [p] = await sql`select site_id from products where id = ${product.json.id}`;
+      expect(p.site_id).toBe(siteB);
+    });
+
     it("cannot WRITE to A's shipping rate", async () => {
       const r = await b.invoke("shipping.updateRate", { rateId: rateA, priceMinor: 1 });
       expect(refused(r)).toBe(true);

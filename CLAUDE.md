@@ -685,6 +685,20 @@ close. Every mutating route now passes a permission; only `actions/[id]` and
 refused **by name** on the site routes and moves only through `payments.connectRail` (D-entry in
 `docs/DECISIONS.md`).
 
+**Per-store scoping is enforced everywhere as of 2026-11-19** (D52). `storeIds` on a staff member
+or token used to narrow only the list routes that called `siteScopeForStaff`; no action and no
+single-item route checked it, so a member scoped to one store could edit every store. Now
+`siteScope` and `ownSites` themselves intersect with the caller's stores, carried in
+`AsyncLocalStorage` (`lib/store-scope.ts`). `orgHandler` sets it, and `invokeAction` **re-reads it from
+the staff or token row**, because MCP and agent turns reach the registry with no route around them.
+Outside both it is `all` (cron, storefront, webhooks), which is what every caller had before. **Use
+the helpers for any org check** — a hand-written `eq(sites.orgId, …)` gets no store scoping.
+**Role says what, stores say where** (`lib/auth/reach.ts`). Org-wide changes — `orgWide` actions
+(billing, payments, integrations, email), the org profile, a new store — refuse a scoped member
+(`403 STORE_SCOPED`). Tokens, invites and staff edits never exceed the caller's role or stores, and
+a scoped member manages no one wider (`403 BEYOND_YOUR_ACCESS`). That closed a developer minting an
+administrator token. **A new org-level action gets `orgWide: true`**; a unit test pins the modules.
+
 **Custom storefront domains are verified as of 2026-08-14, and that closed the same shape of hole
 one more time.** `sites.customDomain` was free text any `cms.write` role could write, and `proxy.ts`
 routes on it — so an org could claim a hostname it did not own and answer for it the moment that

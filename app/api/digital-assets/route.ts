@@ -1,11 +1,12 @@
-import { and, asc, count, eq, type SQL } from "drizzle-orm";
+import { and, asc, count, eq, isNull, or, type SQL } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { ApiError, badRequest, intParam, pagination } from "@/lib/api";
 import { orgHandler } from "@/lib/auth/handler";
 import { mediaQuotaFrom, mediaUsageFor, storageAllows } from "@/lib/commerce/media-usage";
 import { db, digitalAssets, sites } from "@/lib/db";
 import { entitlementsFor } from "@/lib/plans";
-import { ownSites } from "@/lib/tenancy";
+import { assertOrgWideReach } from "@/lib/auth/reach";
+import { ownSites, siteScope } from "@/lib/tenancy";
 import { PRIVATE_BUCKET, isStorageConfigured, uploadFile } from "@/lib/storage";
 
 /**
@@ -45,7 +46,12 @@ export const GET = orgHandler(
     const sp = new URL(req.url).searchParams;
     const { page, limit, offset } = pagination(sp);
 
-    const conds: SQL[] = [eq(digitalAssets.orgId, orgId)];
+    const conds: SQL[] = [
+      eq(digitalAssets.orgId, orgId),
+      // Shared files and the caller's own stores' files (D52) — `siteScope`
+      // narrows to the caller's stores.
+      or(isNull(digitalAssets.siteId), siteScope(orgId, digitalAssets.siteId))!,
+    ];
     const siteId = intParam(sp, "siteId");
     if (siteId != null) conds.push(eq(digitalAssets.siteId, siteId));
     const where = and(...conds);
@@ -103,6 +109,10 @@ export const POST = orgHandler(
         .where(and(eq(sites.id, siteId), ownSites(orgId)))
         .limit(1);
       if (!site) throw badRequest("That store does not belong to this organization");
+    } else {
+      // A file with no store is shared by every store; a member scoped to some
+      // stores uploads to one of theirs (D52), not into everyone's library.
+      assertOrgWideReach(session.storeIds, "A file shared by every store");
     }
 
     if (!isStorageConfigured()) {

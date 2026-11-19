@@ -183,6 +183,14 @@ export type ActionDefinition<TInput = unknown, TResult = unknown> = {
    */
   requiresStepUp?: boolean;
   /**
+   * The action changes the **whole organization**, not one store — billing,
+   * payout rails, integrations, sending domains (D52). `invokeAction` refuses
+   * it (`403 STORE_SCOPED`) for a caller whose `storeIds` is not `"all"`,
+   * whatever their role, because the change lands on stores they cannot reach.
+   * A registry test pins which modules must carry it.
+   */
+  orgWide?: true;
+  /**
    * The one exception to "an agent never executes anything" (D47), opened by
    * D51 for the brand agent: an action marked `"draft"` may be run by an
    * `agent` actor for real, not only as a dry run.

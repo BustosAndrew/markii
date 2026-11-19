@@ -40,5 +40,5 @@ export const PATCH = orgHandler(
 
     return NextResponse.json(serializeOrg(row));
   },
-  { permission: "org.write" },
+  { permission: "org.write", orgWide: true },
 );

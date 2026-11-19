@@ -1,16 +1,18 @@
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
-import { badRequest, conflict, notFound } from "../../api";
+import { badRequest, conflict, forbidden, notFound } from "../../api";
 import {
   digitalAssets,
   downloadGrants,
   licenceKeys,
+  orders,
   productDigitalAssets,
   products,
   variants,
 } from "../../db";
 import { expiryFor } from "../../commerce/delivery";
 import { deleteFile, PRIVATE_BUCKET } from "../../storage";
+import { currentStoreScope } from "../../store-scope";
 import { siteScope } from "../../tenancy";
 import { patchInverse } from "../inverse";
 import { defineAction } from "../registry";
@@ -41,7 +43,15 @@ async function ownedAsset(ctx: ActionContext, assetId: number) {
   const [row] = await ctx.db
     .select()
     .from(digitalAssets)
-    .where(and(eq(digitalAssets.id, assetId), eq(digitalAssets.orgId, ctx.actor.orgId)))
+    .where(
+      and(
+        eq(digitalAssets.id, assetId),
+        eq(digitalAssets.orgId, ctx.actor.orgId),
+        // A store's own asset is reachable from that store only; a shared one
+        // (no store) from any — `deleteAsset` asks more of a shared one.
+        or(isNull(digitalAssets.siteId), siteScope(ctx.actor.orgId, digitalAssets.siteId)),
+      ),
+    )
     .limit(1);
   if (!row) throw notFound("Digital asset");
   return row;
@@ -175,6 +185,11 @@ export const deleteDigitalAsset = defineAction({
   undoable: false,
   async run(input, ctx) {
     const asset = await ownedAsset(ctx, input.assetId);
+    // A shared asset may be sold by every store, so deleting it cuts off buyers
+    // in stores this caller is not scoped to. That takes reach over all of them.
+    if (asset.siteId == null && currentStoreScope() !== "all") {
+      throw forbidden("This file is shared by every store. Only someone with access to all stores can delete it.");
+    }
 
     const [{ n }] = await ctx.db
       .select({ n: sql<number>`count(*)::int` })
@@ -287,7 +302,16 @@ async function ownedGrant(ctx: ActionContext, grantId: number) {
     .select({ grant: downloadGrants })
     .from(downloadGrants)
     .innerJoin(digitalAssets, eq(digitalAssets.id, downloadGrants.assetId))
-    .where(and(eq(downloadGrants.id, grantId), eq(digitalAssets.orgId, ctx.actor.orgId)))
+    .innerJoin(orders, eq(orders.id, downloadGrants.orderId))
+    // The grant belongs to an order, and the order to a store: a member scoped
+    // to one store cannot revoke or reissue another store's buyers' downloads.
+    .where(
+      and(
+        eq(downloadGrants.id, grantId),
+        eq(digitalAssets.orgId, ctx.actor.orgId),
+        siteScope(ctx.actor.orgId, orders.siteId),
+      ),
+    )
     .limit(1);
   if (!row) throw notFound("Download");
   return row.grant;

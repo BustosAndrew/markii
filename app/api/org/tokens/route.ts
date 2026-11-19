@@ -2,6 +2,7 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { orgHandler } from "@/lib/auth/handler";
+import { assertGrantWithin } from "@/lib/auth/reach";
 import { assertGrowthAllowed } from "@/lib/billing/standing-guard";
 import { newId } from "@/lib/auth/provisioning";
 import { mintToken } from "@/lib/auth/tokens";
@@ -19,7 +20,8 @@ const createSchema = z.object({
     "developer",
     "viewer",
   ]),
-  storeIds: z.union([z.literal("all"), z.array(z.number().int().positive())]).default("all"),
+  /** Omitted: the creator's own stores, so a scoped creator's default is not a refusal. */
+  storeIds: z.union([z.literal("all"), z.array(z.number().int().positive())]).optional(),
 });
 
 function serializeToken(t: ApiToken) {
@@ -65,6 +67,16 @@ export const POST = orgHandler(
      * at what a human could do, so there is no capability lost by refusing the
      * top role here.
      */
+    /**
+     * **A token never exceeds its creator** (D52, §22 rule 4). `tokens.manage`
+     * is held by `developer`, and until this check a developer could mint an
+     * `administrator` token — billing, payouts, staff — and a member scoped to
+     * one store could mint an all-stores one. The creator is the caller's own
+     * role and stores, so a token minting a token is capped by that token.
+     */
+    const storeIds = input.storeIds ?? session.storeIds;
+    assertGrantWithin({ role: input.role, storeIds }, session);
+
     const minted = mintToken();
 
     const [row] = await db
@@ -76,7 +88,7 @@ export const POST = orgHandler(
         role: input.role,
         tokenHash: minted.hash,
         prefix: minted.prefix,
-        storeIds: input.storeIds,
+        storeIds,
         createdByUserId: session.user?.id ?? null,
       })
       .returning();

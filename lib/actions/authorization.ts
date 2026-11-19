@@ -3,7 +3,8 @@ import "server-only";
 import { and, eq, isNull } from "drizzle-orm";
 import { apiTokens, db, staff } from "../db";
 import { PLATFORM_PERMISSIONS, roleHasPermission } from "../auth/permissions";
-import { setAuthorizationResolver } from "./registry";
+import type { StoreIds } from "../store-scope";
+import { setAuthorizationResolver, setStoreScopeResolver } from "./registry";
 import type { Actor } from "./types";
 
 /**
@@ -77,4 +78,37 @@ async function resolve(actor: Actor, permission: string): Promise<boolean> {
   return roleHasPermission(member.role, permission);
 }
 
+/**
+ * The stores an actor reaches, read from the same rows `resolve` reads — the
+ * staff record (an agent gets its person's) or the token's own — so a caller
+ * cannot widen its reach by asserting one. Anything those rows would refuse
+ * (revoked, disabled, missing) reaches no store at all.
+ *
+ * `system` and `operator` reach every store of the org: neither has a
+ * `storeIds` to narrow by, and an operator holds `platform.*` and nothing else.
+ */
+async function resolveStores(actor: Actor): Promise<StoreIds> {
+  if (actor.type === "system" || actor.type === "operator") return "all";
+  if (!actor.orgId) return [];
+
+  if (actor.type === "token") {
+    const [token] = await db
+      .select({ storeIds: apiTokens.storeIds })
+      .from(apiTokens)
+      .where(and(eq(apiTokens.id, actor.id), eq(apiTokens.orgId, actor.orgId), isNull(apiTokens.revokedAt)))
+      .limit(1);
+    return token?.storeIds ?? [];
+  }
+
+  const userId = actor.type === "agent" ? actor.onBehalfOfUserId : actor.id;
+  const [member] = await db
+    .select({ storeIds: staff.storeIds, status: staff.status })
+    .from(staff)
+    .where(and(eq(staff.userId, userId), eq(staff.orgId, actor.orgId)))
+    .limit(1);
+  if (!member || member.status !== "active") return [];
+  return member.storeIds;
+}
+
 setAuthorizationResolver(resolve);
+setStoreScopeResolver(resolveStores);

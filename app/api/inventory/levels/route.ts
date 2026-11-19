@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, type SQL } from "drizzle-orm";
+import { and, asc, eq, type SQL } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { intParam, pagination } from "@/lib/api";
 import { orgHandler } from "@/lib/auth/handler";
