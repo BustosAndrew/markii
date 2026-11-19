@@ -491,24 +491,32 @@ export function DesignEditor({
       const o = output as { status?: string; invocationId?: string; changes?: unknown[]; result?: { pageId?: number; created?: boolean } } | null;
       if (o?.status !== "applied" || !o.invocationId) return;
       // An edit that changed nothing has nothing to undo; stacking it would make Undo answer 409.
-      if (!o.changes?.length) return;
-      // The agent's edit is undoable from here like any other, once it hands the pen back.
-      setUndoStack((st) => [...st.slice(-49), { actionId: toolName.replace("_", "."), invocationId: o.invocationId! }]);
-      setRedoStack([]);
-      // The agent started on a template or region: follow it there, so its next edits are the ones on screen.
-      const opened = o.result?.created && o.result.pageId ? o.result.pageId : null;
+      if (o.changes?.length) {
+        setUndoStack((st) => [...st.slice(-49), { actionId: toolName.replace("_", "."), invocationId: o.invocationId }]);
+        setRedoStack([]);
+      }
+      // Follow the document the agent just opened, including an already-customised
+      // template (`created: false`, empty diff) and a new page (`pageId` only).
+      const opened =
+        typeof o.result?.pageId === "number" &&
+        (typeof o.result.created === "boolean" || toolName === "builder_createPage")
+          ? o.result.pageId
+          : null;
       if (opened !== null) {
         void getDesign(site.id)
           .then((d) => {
             if (!d.started) return;
             setDesign(d);
-            // A template moves the preview to a sample product or collection; a region shows where we are.
             const template = d.templates.find((x) => x.id === opened);
-            return openDocument(opened, template ? template.previewPath : null);
+            const page = d.pages.find((x) => x.id === opened);
+            // A template moves the preview to a sample product or collection; a new
+            // page to its path; a region shows on whatever page is already open.
+            return openDocument(opened, template ? template.previewPath : page ? page.path : null);
           })
           .catch(() => {});
         return;
       }
+      if (!o.changes?.length) return;
       void refresh().then(() => reloadFrame(), () => {});
     },
     [refresh, reloadFrame, openDocument, site.id],

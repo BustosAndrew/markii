@@ -539,7 +539,7 @@ function HeadCodeField({
             disabled={disabled || draft === html}
             onClick={async () => {
               const dropped = await onSave(draft);
-              if (dropped) setRemoved(dropped);
+              setRemoved(dropped ?? []);
             }}
           >
             Save scripts
