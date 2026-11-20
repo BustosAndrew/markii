@@ -355,8 +355,9 @@ is required for the "your own Stripe account, your own rates" claim to be true) 
 (D5) · data architecture for global distribution (D6).
 
 **Phase-gated:** threshold basis and marginal application · trial and dunning terms · fulfillment
-scope · whether Orders ships read-only · cloneability/code export (decide before the theme system
-hardens) · concurrent human↔agent edit policy · chargeback stance.
+scope · whether Orders ships read-only · ~~cloneability/code export~~ (decided 2026-11-19, D53:
+store export, the storefront as a Next.js app on a shared renderer, and a portable theme package
+with its images inside, which also carries the marketplace and store-to-store copy) · concurrent human↔agent edit policy · chargeback stance.
 
 **Unplanned gaps that need a decision before they can be specced:** transactional email provider
 (**a commerce platform cannot launch without it**) · launch countries and currencies · sales tax on

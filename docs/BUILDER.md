@@ -392,12 +392,50 @@ Phase F with the chat UI.
 
 ## 16. Open decisions
 
-- **Cloneability / code export.** The article argues agent-native products should let users own the
-  code and database. For Markii this could be a genuine anti-lock-in differentiator against Shopify
-  ("export your store as a Next.js app") — or a support and security burden. Not decided; decide
-  before the theme system hardens, since export shape constrains it.
+- ~~Cloneability / code export~~ — **decided 2026-11-19 (D53): yes, two forms.** A **store export**
+  (catalog, customers, orders, files, design) that a self-hosted Markii imports, and **the storefront
+  as a Next.js app** the merchant deploys anywhere, running headless against the store's own
+  storefront API. **One renderer, not two:** the block registry, `render.tsx`, bindings and the
+  agent-document generators become a package that both Markii's storefront and the exported app
+  import, so an export cannot render, or describe to agents, differently from the live store. **That
+  split is a refactor, not a move:** today `lib/builder/` imports `@/lib/db` (9 files),
+  `@/lib/generators`, `@/lib/tenancy`, storefront themes and collections, and the storefront
+  `product-card` / `add-to-cart` components. The package side is the blocks, `render.tsx`, bindings,
+  styles, tokens and `to-markdown.ts`; data access (`store.ts`, `queries.ts`, `views.ts`) moves behind
+  an interface that Markii satisfies from the database and the exported app from the storefront API.
+  New renderer code should not add direct `@/lib/db` reads. **The package is Apache 2.0; the rest of
+  Markii stays FSL** (D53) — so nothing outside the drawing code may move into it, since anything
+  that does is permissively licensed for good from its first release. **The storefront API is not yet enough
+  to run headless** (checked 2026-11-19): it has cart, checkout, search, shopper auth and memberships,
+  but no product, collection, category or published-design reads, and shopper sessions are host-only
+  cookies — an app on another origin meets the cross-origin write guard in `proxy.ts` by design. A
+  headless export needs those reads plus a non-cookie shopper credential, decided with the same care
+  as D30.
 - Do merchants get raw template-language access, or only the four custom-code levels?
-- Theme marketplace; theme export/import between stores.
+- ~~Theme marketplace; theme export/import between stores~~ — **decided 2026-11-19 (D53): yes to
+  both, on one format.** The **theme package** (node documents for pages, templates and regions;
+  tokens; theme CSS; saved blocks; versioned JSON) is the unit for store-to-store copy, the
+  marketplace and the design half of a store export. Rules every new block and binding must keep
+  from now on, so packages stay portable:
+  - **Store data only through bindings or slugs/handles, never by row id.** A product or collection
+    id means nothing in another store. Today's blocks already comply (`productGrid`, `productCard`
+    use `categorySlug`, `collectionHandle`, `productSlug`); a handle the importing store lacks must
+    render empty, not fail.
+  - **Images travel inside the package.** Every image reference (`image` block `src`, page
+    `seo.image`, custom HTML `<img src>`, theme CSS `url()`) to the store's own media is copied in on
+    export and rewritten to `asset:{sha256}`; import uploads them to the importing store's
+    `public-media`, deduplicated by hash, and rewrites the tokens in the same draft edit. Quota is
+    checked for the whole package first (`409 QUOTA_EXCEEDED`), so nothing half-lands. External URLs
+    are kept with a warning in a store-to-store copy and refused in a marketplace submission until
+    bundled. Product images are not theme assets — they come from the importing store's catalog
+    through bindings. **A new place that can hold an image URL must join this list**, or a package
+    silently ships a link back to the seller's store.
+  - **Import is a draft edit by a person**, through the registry; it never publishes. Custom HTML is
+    rebuilt from the allowlist again on import.
+  - **Head scripts never travel in a marketplace theme**, and arrive *off* in a store-to-store copy
+    until someone holding `cms.scripts` re-approves them with step-up.
+  - **Markii is never in a paid theme's funds flow** (D4). Paid-versus-free-only, licensing and
+    designer review are still open and go to counsel with the licence.
 - ~~Concurrent-editing conflict policy~~ — **decided 2026-10-31 (D51): one writer at a time.** Writes
   to a site are serialised on its design row, and while the brand agent works it holds a lease that
   refuses every other writer (`AGENT_EDITING`) until stopped or expired.

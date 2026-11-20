@@ -971,7 +971,8 @@ beside a live preview, and chose the full `docs/BUILDER.md` builder to carry it.
 **Supabase** for database, auth, and file storage (replaces Neon; migrate before Phase A, schema
 unchanged). **Stripe Connect Standard** — merchants keep their own account; Markii never takes an
 `application_fee_amount`. **FSL-1.1-ALv2** licence: public source, self-hostable, no
-resale-as-a-service. Authorization lives in the action registry, **never** Postgres RLS — but
+resale-as-a-service — **except the builder's renderer package, which is Apache 2.0** once it is split
+out of `lib/builder/` (D53), because a store's Next.js export ships it. Only drawing code goes in it. Authorization lives in the action registry, **never** Postgres RLS — but
 enable RLS deny-by-default anyway, and never expose the service-role key to the browser.
 
 **Email is split by whose mail it is**, and the split is load-bearing — it is what keeps a
