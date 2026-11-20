@@ -100,7 +100,9 @@ const GRANTABLE_FROM: Record<StaffRole, readonly StaffRole[]> = {
   catalog_manager: ["catalog_manager", "analyst", "viewer"],
   commerce_manager: ["commerce_manager", "analyst", "viewer"],
   analyst: ["analyst", "viewer"],
-  viewer: ["viewer"],
+  // Analyst and viewer hold the same permissions, so each may grant the other.
+  // Pinned against the server's rule by `lib/api/org.test.ts`.
+  viewer: ["analyst", "viewer"],
 };
 
 export function grantableRoles(holder: StaffRole): StaffRole[] {
