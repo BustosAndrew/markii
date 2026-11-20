@@ -8,6 +8,7 @@ import {
   verifySendingDomain,
   type SendingDomain,
 } from "@/lib/api/email";
+import { ORG_WIDE_REACH_COPY } from "@/lib/api/org";
 import { ApiClientError } from "@/lib/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -32,9 +33,11 @@ const STATUS_LABEL: Record<SendingDomain["status"], string> = {
 export function EmailDomains({
   domains,
   providerConfigured,
+  canEdit = true,
 }: {
   domains: SendingDomain[];
   providerConfigured: boolean;
+  canEdit?: boolean;
 }) {
   const router = useRouter();
   const [domain, setDomain] = useState("");
@@ -121,6 +124,7 @@ export function EmailDomains({
                 </div>
               ) : null}
 
+              {canEdit ? (
               <div className="mt-4 flex flex-wrap gap-2">
                 {/*
                   Verification is a pull: nothing in this deployment schedules
@@ -143,6 +147,7 @@ export function EmailDomains({
                   Remove
                 </Button>
               </div>
+              ) : null}
 
               {d.lastCheckedAt ? (
                 <p className="mt-2 text-xs text-muted">
@@ -154,7 +159,7 @@ export function EmailDomains({
         </ul>
       )}
 
-      {providerConfigured ? (
+      {canEdit && providerConfigured ? (
         <form
           className="mt-5 border-t border-border pt-5"
           onSubmit={(e) => {
@@ -182,7 +187,7 @@ export function EmailDomains({
             </Button>
           </div>
         </form>
-      ) : (
+      ) : canEdit ? (
         /*
           No AWS credentials means adding a domain would fail at SES after the
           merchant filled the field. Not offering the form is more honest than
@@ -192,6 +197,10 @@ export function EmailDomains({
           Adding a sending domain needs Markii’s email provider to be connected first. Nothing you
           enter here could be registered with AWS yet, so the form is hidden rather than shown and
           made to fail.
+        </p>
+      ) : (
+        <p className="mt-5 border-t border-border pt-5 text-sm leading-6 text-muted">
+          {ORG_WIDE_REACH_COPY}
         </p>
       )}
 

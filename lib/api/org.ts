@@ -71,6 +71,56 @@ export function canWriteCatalog(role: StaffRole | null | undefined): boolean {
   return role === "owner" || role === "administrator" || role === "catalog_manager";
 }
 
+/**
+ * Org-wide writes (D52): billing, payouts, integrations, sending domains, the
+ * org profile, a new store. `storeIds === "all"` is the only reach that may.
+ */
+export function reachesAllStores(storeIds: number[] | "all" | null | undefined): boolean {
+  return storeIds === "all";
+}
+
+/** Roles a caller may grant — never `owner`, never a role with permissions they lack. */
+export const ASSIGNABLE_STAFF_ROLES: StaffRole[] = [
+  "administrator",
+  "catalog_manager",
+  "commerce_manager",
+  "analyst",
+  "developer",
+  "viewer",
+];
+
+/**
+ * Mirrors `lib/auth/permissions.ts` for grant UIs. Keep in step: a role listed
+ * here for a holder must be one `roleWithin` would accept.
+ */
+const GRANTABLE_FROM: Record<StaffRole, readonly StaffRole[]> = {
+  owner: ASSIGNABLE_STAFF_ROLES,
+  administrator: ASSIGNABLE_STAFF_ROLES,
+  developer: ["developer", "analyst", "viewer"],
+  catalog_manager: ["catalog_manager", "analyst", "viewer"],
+  commerce_manager: ["commerce_manager", "analyst", "viewer"],
+  analyst: ["analyst", "viewer"],
+  viewer: ["viewer"],
+};
+
+export function grantableRoles(holder: StaffRole): StaffRole[] {
+  return [...GRANTABLE_FROM[holder]];
+}
+
+/** Whether `requested` reaches no store that `reach` does not. */
+export function storesWithinReach(
+  requested: number[] | "all",
+  reach: number[] | "all",
+): boolean {
+  if (reach === "all") return true;
+  if (requested === "all") return false;
+  const allowed = new Set(reach);
+  return requested.every((id) => allowed.has(id));
+}
+
+export const ORG_WIDE_REACH_COPY =
+  "This applies to every store. Ask someone with access to all stores to change it.";
+
 export type Organization = {
   id: string;
   name: string;
@@ -124,6 +174,11 @@ export type MeResponse = {
   };
   org: Organization;
   role: StaffRole;
+  /**
+   * Where this person may act (D52). `"all"` is org-wide; a list is those
+   * stores only. Hide org-wide writes when this is not `"all"`.
+   */
+  storeIds: number[] | "all";
   /** Every org this user belongs to — render the switcher from this, no second call. */
   organizations: OrgMembership[];
   entitlements: Organization["entitlements"];
@@ -298,7 +353,7 @@ export function listStaff(init?: RequestInit) {
 }
 
 export function inviteStaff(
-  body: { email: string; role: StaffRole; storeIds: number[] | "all" },
+  body: { email: string; role: StaffRole; storeIds?: number[] | "all" },
   init?: RequestInit,
 ) {
   return callWhenLive(STAFF_API_LIVE, ORG_SECTION, () =>

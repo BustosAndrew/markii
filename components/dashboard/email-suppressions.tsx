@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { suppressAddress, unsuppressAddress, type Suppression } from "@/lib/api/email";
+import { ORG_WIDE_REACH_COPY } from "@/lib/api/org";
 import { ApiClientError } from "@/lib/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,7 +27,13 @@ const REASON_VARIANT: Record<Suppression["reason"], "warning" | "error" | "neutr
  * the **whole account**, so one merchant mailing dead addresses can cut off
  * every merchant on the platform.
  */
-export function EmailSuppressions({ suppressions }: { suppressions: Suppression[] }) {
+export function EmailSuppressions({
+  suppressions,
+  canEdit = true,
+}: {
+  suppressions: Suppression[];
+  canEdit?: boolean;
+}) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
@@ -74,7 +81,7 @@ export function EmailSuppressions({ suppressions }: { suppressions: Suppression[
                   it. Offering a button that is guaranteed to be rejected would
                   be worse than explaining why there isn't one.
                 */}
-                {s.removable ? (
+                {s.removable && canEdit ? (
                   <Button
                     variant="secondary"
                     disabled={busy !== null}
@@ -84,15 +91,16 @@ export function EmailSuppressions({ suppressions }: { suppressions: Suppression[
                   >
                     {busy === `remove-${s.email}` ? "Removing…" : "Remove"}
                   </Button>
-                ) : (
+                ) : !s.removable ? (
                   <span className="text-xs text-muted">Cannot be re-enabled</span>
-                )}
+                ) : null}
               </div>
             </li>
           ))}
         </ul>
       )}
 
+      {canEdit ? (
       <form
         className="mt-5 border-t border-border pt-5"
         onSubmit={(e) => {
@@ -121,6 +129,11 @@ export function EmailSuppressions({ suppressions }: { suppressions: Suppression[
           </Button>
         </div>
       </form>
+      ) : (
+        <p className="mt-5 border-t border-border pt-5 text-sm leading-6 text-muted">
+          {ORG_WIDE_REACH_COPY}
+        </p>
+      )}
 
       {error ? <FieldError>{error}</FieldError> : null}
     </section>

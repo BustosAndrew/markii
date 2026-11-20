@@ -1,6 +1,6 @@
 import { getMe, listSessions } from "@/lib/api/server";
 import { loadOrError } from "@/lib/api/load";
-import { canWriteOrg } from "@/lib/api/org";
+import { canWriteOrg, reachesAllStores } from "@/lib/api/org";
 import { SettingsShell } from "@/components/dashboard/settings-shell";
 import { EmailChangeForm } from "@/components/dashboard/email-change-form";
 import { OrgNameForm } from "@/components/dashboard/org-name-form";
@@ -29,7 +29,7 @@ export default async function SettingsAccountPage() {
       <div className="space-y-6">
         <UsernameForm currentName={me.data?.user.name ?? null} />
 
-        {me.data && canWriteOrg(me.data.role) ? (
+        {me.data && canWriteOrg(me.data.role) && reachesAllStores(me.data.storeIds) ? (
           <OrgNameForm currentName={me.data.org.name} />
         ) : null}
 

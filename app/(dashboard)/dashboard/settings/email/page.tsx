@@ -1,7 +1,9 @@
 import type { EmailSettings } from "@/lib/api/email";
+import { loadOrError } from "@/lib/api/load";
+import { reachesAllStores } from "@/lib/api/org";
 import { isPlannedError } from "@/lib/api/planned";
 // In-process, so the session cookie is inherited rather than dropped — see lib/api/server.ts.
-import { getEmailSettings } from "@/lib/api/server";
+import { getEmailSettings, getMe } from "@/lib/api/server";
 import { EmailDomains } from "@/components/dashboard/email-domains";
 import { EmailSuppressions } from "@/components/dashboard/email-suppressions";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +26,8 @@ export default async function SettingsEmailPage() {
   let data: EmailSettings | null = null;
   let planned = false;
   let error: string | null = null;
+  const me = await loadOrError(() => getMe());
+  const canEdit = reachesAllStores(me.data?.storeIds);
 
   try {
     data = await getEmailSettings();
@@ -64,8 +68,9 @@ export default async function SettingsEmailPage() {
         <EmailDomains
           domains={data.domains}
           providerConfigured={data.providerConfigured}
+          canEdit={canEdit}
         />
-        <EmailSuppressions suppressions={data.suppressions} />
+        <EmailSuppressions suppressions={data.suppressions} canEdit={canEdit} />
         <PlatformEmailCard platform={data.platformEmail} />
       </div>
     </SettingsShell>

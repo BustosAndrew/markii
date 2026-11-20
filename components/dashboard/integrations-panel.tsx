@@ -10,6 +10,7 @@ import {
   syncGoogle,
   type IntegrationsResponse,
 } from "@/lib/api/integrations";
+import { ORG_WIDE_REACH_COPY } from "@/lib/api/org";
 import { publicErrorMessage } from "@/lib/api/public-copy";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,8 +19,10 @@ import { FieldError, Input, Label, Textarea } from "@/components/ui/field";
 
 export function IntegrationsPanel({
   initial,
+  canEdit = true,
 }: {
   initial: IntegrationsResponse;
+  canEdit?: boolean;
 }) {
   const router = useRouter();
   const [google, setGoogle] = useState(initial.google);
@@ -96,6 +99,8 @@ export function IntegrationsPanel({
           </p>
         ) : null}
 
+        {canEdit ? (
+        <>
         <GoogleForm
           jsonRef={googleJsonRef}
           busy={busy}
@@ -157,6 +162,10 @@ export function IntegrationsPanel({
         {syncMessage ? (
           <p className="mt-2 text-sm text-muted">{syncMessage}</p>
         ) : null}
+        </>
+        ) : (
+          <p className="text-sm text-muted">{ORG_WIDE_REACH_COPY}</p>
+        )}
       </section>
 
       <FieldError>{error}</FieldError>

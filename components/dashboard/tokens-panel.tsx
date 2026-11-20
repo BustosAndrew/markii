@@ -5,6 +5,9 @@ import { useState } from "react";
 import {
   createToken,
   deleteToken,
+  grantableRoles,
+  reachesAllStores,
+  storesWithinReach,
   type CreatedToken,
   type ScopedToken,
   type StaffRole,
@@ -14,31 +17,27 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { FieldError, Input, Label, Select } from "@/components/ui/field";
 
-/** `owner` is refused by the API — a token that can do everything, forever, is the one worth stealing. */
-const TOKEN_ROLES: StaffRole[] = [
-  "administrator",
-  "catalog_manager",
-  "commerce_manager",
-  "analyst",
-  "developer",
-  "viewer",
-];
-
 export function TokensPanel({
   tokens,
   sites,
+  callerRole,
+  callerStoreIds,
 }: {
   tokens: ScopedToken[];
   sites: { id: number; name: string }[];
+  callerRole: StaffRole;
+  callerStoreIds: number[] | "all";
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [removing, setRemoving] = useState<ScopedToken | null>(null);
   const [label, setLabel] = useState("");
-  const [role, setRole] = useState<StaffRole>("viewer");
-  /** `"all"`, or a single store id. Narrower is safer, so it is offered up front. */
-  const [scope, setScope] = useState<string>("all");
+  const roles = grantableRoles(callerRole);
+  const [role, setRole] = useState<StaffRole>(roles[0] ?? "viewer");
+  const allStores = reachesAllStores(callerStoreIds);
+  /** `"all"`, `"own"` (omit — the caller's stores), or a single store id. */
+  const [scope, setScope] = useState<string>(allStores ? "all" : "own");
   const [minted, setMinted] = useState<CreatedToken | null>(null);
 
   async function run(key: string, fn: () => Promise<unknown>) {
@@ -88,13 +87,17 @@ export function TokensPanel({
                     : "never used"}
                 </p>
               </div>
-              <Button
-                variant="secondary"
-                disabled={busy !== null}
-                onClick={() => setRemoving(t)}
-              >
-                Revoke
-              </Button>
+              {storesWithinReach(t.storeIds, callerStoreIds) ? (
+                <Button
+                  variant="secondary"
+                  disabled={busy !== null}
+                  onClick={() => setRemoving(t)}
+                >
+                  Revoke
+                </Button>
+              ) : (
+                <span className="text-xs text-muted">Beyond your stores</span>
+              )}
             </li>
           ))}
         </ul>
@@ -110,7 +113,11 @@ export function TokensPanel({
             const created = await createToken({
               label: value,
               role,
-              storeIds: scope === "all" ? "all" : [Number(scope)],
+              ...(scope === "all"
+                ? { storeIds: "all" as const }
+                : scope === "own"
+                  ? {}
+                  : { storeIds: [Number(scope)] }),
             });
             setLabel("");
             // Shown once, and only here — the server keeps a hash, so this is
@@ -139,14 +146,14 @@ export function TokensPanel({
             disabled={busy !== null}
             onChange={(e) => setRole(e.target.value as StaffRole)}
           >
-            {TOKEN_ROLES.map((r) => (
+            {roles.map((r) => (
               <option key={r} value={r}>
                 {r}
               </option>
             ))}
           </Select>
         </div>
-        {sites.length > 1 ? (
+        {allStores || sites.length > 1 ? (
           <div>
             <Label htmlFor="token-scope">Scope</Label>
             <Select
@@ -156,7 +163,7 @@ export function TokensPanel({
               disabled={busy !== null}
               onChange={(e) => setScope(e.target.value)}
             >
-              <option value="all">All stores</option>
+              {allStores ? <option value="all">All stores</option> : <option value="own">Your stores</option>}
               {sites.map((s) => (
                 <option key={s.id} value={String(s.id)}>
                   {s.name}
@@ -165,7 +172,7 @@ export function TokensPanel({
             </Select>
           </div>
         ) : null}
-        <Button type="submit" disabled={busy !== null || !label.trim()}>
+        <Button type="submit" disabled={busy !== null || !label.trim() || roles.length === 0}>
           {busy === "create" ? "Creating…" : "Create token"}
         </Button>
       </form>

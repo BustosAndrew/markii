@@ -1,5 +1,7 @@
 import Link from "next/link";
-import { getOverview, getReadinessOverview, getSetupStatus } from "@/lib/api/server";
+import { getMe, getOverview, getReadinessOverview, getSetupStatus } from "@/lib/api/server";
+import { loadOrError } from "@/lib/api/load";
+import { reachesAllStores } from "@/lib/api/org";
 import type { ReadinessReport } from "@/lib/api/readiness";
 import type { SetupChecklist } from "@/lib/api/setup";
 import { isPlannedError } from "@/lib/api/planned";
@@ -24,6 +26,9 @@ export default async function DashboardOverviewPage() {
   let readinessError: string | null = null;
   let setup: SetupChecklist | null = null;
   let setupError: string | null = null;
+
+  const me = await loadOrError(() => getMe());
+  const canCreateSite = reachesAllStores(me.data?.storeIds);
 
   try {
     data = await getOverview();
@@ -71,11 +76,15 @@ export default async function DashboardOverviewPage() {
     <div>
       <PageHeader
         title="Overview"
-        description="Sites, agent traffic, and balances across your Markii stores."
+        description={
+          canCreateSite
+            ? "Sites, agent traffic, and balances across your Markii stores."
+            : "Sites, agent traffic, and balances for the stores you can access."
+        }
         actions={
-          data && data.sites.total === 0 ? undefined : (
+          canCreateSite && data && data.sites.total !== 0 ? (
             <ButtonLink href="/dashboard/websites/new">New website</ButtonLink>
-          )
+          ) : undefined
         }
       />
 
@@ -90,9 +99,9 @@ export default async function DashboardOverviewPage() {
           title="No websites yet"
           description="Create a site to import a catalog and deploy an agent-readable storefront."
           action={
-            <ButtonLink href="/dashboard/websites/new">
-              Create website
-            </ButtonLink>
+            canCreateSite ? (
+              <ButtonLink href="/dashboard/websites/new">Create website</ButtonLink>
+            ) : undefined
           }
         />
       ) : null}
@@ -121,7 +130,7 @@ export default async function DashboardOverviewPage() {
               }`}
               href="/dashboard/orders/settlements"
             />
-            <CreateSiteCard />
+            {canCreateSite ? <CreateSiteCard /> : null}
           </div>
 
           <ReadinessCard

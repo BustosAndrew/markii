@@ -1860,6 +1860,7 @@ user is. Never read identity from a client-side session:
   "user": { "id": "...", "name": null, "email": "merchant@example.com" },
   "org": { "...": "Organization, above" },
   "role": "owner",
+  "storeIds": "all",
   "entitlements": { "...": "§17 Entitlements — mirrors org.entitlements" }
 }
 ```

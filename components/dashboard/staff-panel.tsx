@@ -4,7 +4,10 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import {
   deleteStaff,
+  grantableRoles,
   inviteStaff,
+  reachesAllStores,
+  storesWithinReach,
   updateStaff,
   type StaffMember,
   type StaffRole,
@@ -22,15 +25,6 @@ import { FieldError, Input, Label, Select } from "@/components/ui/field";
  * it too; leaving it out of the picker means nobody discovers that by being
  * rejected.
  */
-const ASSIGNABLE_ROLES: StaffRole[] = [
-  "administrator",
-  "catalog_manager",
-  "commerce_manager",
-  "analyst",
-  "developer",
-  "viewer",
-];
-
 const ROLE_LABEL: Record<StaffRole, string> = {
   owner: "Owner",
   administrator: "Administrator",
@@ -45,17 +39,26 @@ export function StaffPanel({
   staff,
   seatLimit,
   currentUserId,
+  callerRole,
+  callerStoreIds,
+  sites,
 }: {
   staff: StaffMember[];
   seatLimit: number | null;
   currentUserId: string | null;
+  callerRole: StaffRole;
+  callerStoreIds: number[] | "all";
+  sites: { id: number; name: string }[];
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [removing, setRemoving] = useState<StaffMember | null>(null);
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState<StaffRole>("viewer");
+  const roles = grantableRoles(callerRole);
+  const [role, setRole] = useState<StaffRole>(roles[0] ?? "viewer");
+  const allStores = reachesAllStores(callerStoreIds);
+  const [scope, setScope] = useState<string>(allStores ? "all" : "own");
 
   const seatsFull = seatLimit !== null && staff.length >= seatLimit;
 
@@ -102,6 +105,7 @@ export function StaffPanel({
             {staff.map((m) => {
               const isOwner = m.role === "owner";
               const isSelf = currentUserId !== null && m.userId === currentUserId;
+              const canManage = !isOwner && !isSelf && storesWithinReach(m.storeIds, callerStoreIds);
               return (
                 <tr key={m.id} className="border-b border-border last:border-0">
                   <td className="py-3 pr-4">
@@ -114,9 +118,7 @@ export function StaffPanel({
                       the API refuses both, so offering a control that cannot
                       work would just be a rejection waiting to happen.
                     */}
-                    {isOwner || isSelf ? (
-                      <span className="text-foreground">{ROLE_LABEL[m.role]}</span>
-                    ) : (
+                    {canManage && roles.includes(m.role) ? (
                       <Select
                         aria-label={`Role for ${m.email}`}
                         className="w-44"
@@ -128,12 +130,14 @@ export function StaffPanel({
                           )
                         }
                       >
-                        {ASSIGNABLE_ROLES.map((r) => (
+                        {roles.map((r) => (
                           <option key={r} value={r}>
                             {ROLE_LABEL[r]}
                           </option>
                         ))}
                       </Select>
+                    ) : (
+                      <span className="text-foreground">{ROLE_LABEL[m.role]}</span>
                     )}
                   </td>
                   <td className="py-3 pr-4 text-muted">
@@ -155,9 +159,7 @@ export function StaffPanel({
                     </Badge>
                   </td>
                   <td className="py-3 text-right">
-                    {isOwner || isSelf ? (
-                      <span className="text-xs text-muted">{isOwner ? "Owner" : "You"}</span>
-                    ) : (
+                    {canManage ? (
                       <Button
                         variant="secondary"
                         disabled={busy !== null}
@@ -165,6 +167,8 @@ export function StaffPanel({
                       >
                         Remove
                       </Button>
+                    ) : (
+                      <span className="text-xs text-muted">{isOwner ? "Owner" : isSelf ? "You" : "Beyond your stores"}</span>
                     )}
                   </td>
                 </tr>
@@ -181,7 +185,15 @@ export function StaffPanel({
           const value = email.trim();
           if (!value) return;
           void run("invite", async () => {
-            await inviteStaff({ email: value, role, storeIds: "all" });
+            await inviteStaff({
+              email: value,
+              role,
+              ...(scope === "all"
+                ? { storeIds: "all" as const }
+                : scope === "own"
+                  ? {}
+                  : { storeIds: [Number(scope)] }),
+            });
             setEmail("");
           });
         }}
@@ -207,14 +219,33 @@ export function StaffPanel({
             disabled={busy !== null || seatsFull}
             onChange={(e) => setRole(e.target.value as StaffRole)}
           >
-            {ASSIGNABLE_ROLES.map((r) => (
+            {roles.map((r) => (
               <option key={r} value={r}>
                 {ROLE_LABEL[r]}
               </option>
             ))}
           </Select>
         </div>
-        <Button type="submit" disabled={busy !== null || seatsFull || !email.trim()}>
+        {allStores || sites.length > 1 ? (
+          <div>
+            <Label htmlFor="invite-scope">Stores</Label>
+            <Select
+              id="invite-scope"
+              className="mt-1.5 w-48"
+              value={scope}
+              disabled={busy !== null || seatsFull}
+              onChange={(e) => setScope(e.target.value)}
+            >
+              {allStores ? <option value="all">All stores</option> : <option value="own">Your stores</option>}
+              {sites.map((s) => (
+                <option key={s.id} value={String(s.id)}>
+                  {s.name}
+                </option>
+              ))}
+            </Select>
+          </div>
+        ) : null}
+        <Button type="submit" disabled={busy !== null || seatsFull || !email.trim() || roles.length === 0}>
           {busy === "invite" ? "Inviting…" : "Send invite"}
         </Button>
       </form>

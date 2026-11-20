@@ -12,6 +12,7 @@ import {
   type PaymentsResponse,
   type RailStatus,
 } from "@/lib/api/payments";
+import { ORG_WIDE_REACH_COPY } from "@/lib/api/org";
 import { publicErrorMessage } from "@/lib/api/public-copy";
 import { Badge } from "@/components/ui/badge";
 import { Button, ButtonLink } from "@/components/ui/button";
@@ -26,10 +27,12 @@ export function PaymentsPanel({
   initial,
   flash,
   flashReason,
+  canEdit = true,
 }: {
   initial: PaymentsResponse;
   flash?: "connected" | "cancelled" | "error" | null;
   flashReason?: string | null;
+  canEdit?: boolean;
 }) {
   const router = useRouter();
   const [rails, setRails] = useState(initial.rails);
@@ -100,6 +103,8 @@ export function PaymentsPanel({
             ? "This rail can accept payments."
             : "Connect a wallet before storefronts can take x402 payments."}
         </p>
+        {canEdit ? (
+        <>
         <X402Form
           busy={busy}
           onSave={async (walletAddress) => {
@@ -140,6 +145,10 @@ export function PaymentsPanel({
             Disconnect
           </Button>
         ) : null}
+        </>
+        ) : (
+          <p className="text-sm text-muted">{ORG_WIDE_REACH_COPY}</p>
+        )}
       </RailCard>
 
       <RailCard
@@ -152,6 +161,7 @@ export function PaymentsPanel({
           <StripeConnectedBody
             stripe={stripe}
             busy={busy}
+            canEdit={canEdit}
             onReconnect={async () => {
               setBusy(true);
               setError(null);
@@ -170,6 +180,7 @@ export function PaymentsPanel({
             <p className="mb-3 text-sm leading-6 text-muted">
               You will be sent to Stripe to authorise. Markii never asks for your secret key.
             </p>
+            {canEdit ? (
             <Button
               type="button"
               disabled={busy}
@@ -187,6 +198,9 @@ export function PaymentsPanel({
             >
               Connect with Stripe
             </Button>
+            ) : (
+              <p className="text-sm text-muted">{ORG_WIDE_REACH_COPY}</p>
+            )}
           </>
         )}
       </RailCard>
@@ -291,11 +305,13 @@ export function PaymentsPanel({
 function StripeConnectedBody({
   stripe,
   busy,
+  canEdit,
   onReconnect,
   onDisconnect,
 }: {
   stripe: RailStatus;
   busy: boolean;
+  canEdit: boolean;
   onReconnect: () => void;
   onDisconnect: () => void;
 }) {
@@ -366,18 +382,24 @@ function StripeConnectedBody({
           Open Stripe dashboard
           <ExternalLink className="size-3.5" strokeWidth={1.75} />
         </ButtonLink>
-        <Button type="button" variant="secondary" disabled={busy} onClick={onReconnect}>
-          Reconnect
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          className="text-error-text"
-          disabled={busy}
-          onClick={onDisconnect}
-        >
-          Disconnect
-        </Button>
+        {canEdit ? (
+          <>
+            <Button type="button" variant="secondary" disabled={busy} onClick={onReconnect}>
+              Reconnect
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              className="text-error-text"
+              disabled={busy}
+              onClick={onDisconnect}
+            >
+              Disconnect
+            </Button>
+          </>
+        ) : (
+          <p className="text-sm text-muted">{ORG_WIDE_REACH_COPY}</p>
+        )}
       </div>
     </div>
   );

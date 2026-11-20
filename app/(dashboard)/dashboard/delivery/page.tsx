@@ -1,5 +1,6 @@
-import { listDigitalAssets, listSites } from "@/lib/api/server";
+import { getMe, listDigitalAssets, listSites } from "@/lib/api/server";
 import { firstParam, loadOrError } from "@/lib/api/load";
+import { reachesAllStores } from "@/lib/api/org";
 import { DigitalAssetsPanel } from "@/components/dashboard/digital-assets-panel";
 import { FetchError } from "@/components/dashboard/fetch-error";
 import { ListFilters } from "@/components/ui/list-filters";
@@ -14,7 +15,7 @@ export default async function DeliveryPage({
   const siteIdRaw = firstParam(sp.siteId);
   const siteId = siteIdRaw ? Number(siteIdRaw) : undefined;
 
-  const [assetsResult, sitesResult] = await Promise.all([
+  const [assetsResult, sitesResult, me] = await Promise.all([
     loadOrError(() =>
       listDigitalAssets({
         siteId: Number.isFinite(siteId) ? siteId : undefined,
@@ -22,7 +23,9 @@ export default async function DeliveryPage({
       }),
     ),
     loadOrError(() => listSites({ limit: 100, sort: "name" })),
+    loadOrError(() => getMe()),
   ]);
+  const allStores = reachesAllStores(me.data?.storeIds);
 
   const sites = (sitesResult.data?.items ?? []).map((site) => ({
     id: site.id,
@@ -41,7 +44,7 @@ export default async function DeliveryPage({
           filters={[
             {
               key: "siteId",
-              label: "All storefronts",
+              label: allStores ? "All storefronts" : "Your storefronts",
               options: sites.map((site) => ({
                 value: String(site.id),
                 label: site.name,
@@ -56,6 +59,7 @@ export default async function DeliveryPage({
           initial={assetsResult.data}
           sites={sites}
           selectedSiteId={Number.isFinite(siteId) ? siteId ?? null : null}
+          reachesAllStores={allStores}
         />
       ) : (
         <FetchError

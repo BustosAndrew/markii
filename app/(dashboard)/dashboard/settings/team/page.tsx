@@ -37,6 +37,9 @@ export default async function SettingsTeamPage() {
             staff={staff.data.items}
             seatLimit={seatLimit}
             currentUserId={me.data?.user.id ?? null}
+            callerRole={me.data?.role ?? "viewer"}
+            callerStoreIds={me.data?.storeIds ?? []}
+            sites={siteOptions}
           />
         )}
 
@@ -46,7 +49,12 @@ export default async function SettingsTeamPage() {
             message={tokens.error ?? "Tokens could not be loaded."}
           />
         ) : (
-          <TokensPanel tokens={tokens.data.items} sites={siteOptions} />
+          <TokensPanel
+            tokens={tokens.data.items}
+            sites={siteOptions}
+            callerRole={me.data?.role ?? "viewer"}
+            callerStoreIds={me.data?.storeIds ?? []}
+          />
         )}
 
         <p className="text-sm leading-6 text-muted">

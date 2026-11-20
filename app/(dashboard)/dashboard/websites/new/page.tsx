@@ -1,6 +1,8 @@
 import { getMe, listSites } from "@/lib/api/server";
 import { loadOrError } from "@/lib/api/load";
+import { ORG_WIDE_REACH_COPY, reachesAllStores } from "@/lib/api/org";
 import { CreateWebsiteWizard } from "@/components/dashboard/create-website-wizard";
+import { FetchError } from "@/components/dashboard/fetch-error";
 import { tenantBaseUrl } from "@/lib/api";
 import { SLUG_MARK, storefrontAddress } from "@/lib/api/sites";
 
@@ -17,6 +19,10 @@ export default async function NewWebsitePage() {
    */
   const orgCurrency = meResult.data?.org.currency?.toUpperCase() ?? "USD";
   const usable = /^[A-Z]{3}$/.test(orgCurrency);
+
+  if (!reachesAllStores(meResult.data?.storeIds)) {
+    return <FetchError title="Cannot create a website" message={ORG_WIDE_REACH_COPY} />;
+  }
 
   return (
     <CreateWebsiteWizard

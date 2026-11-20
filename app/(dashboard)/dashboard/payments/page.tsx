@@ -1,5 +1,6 @@
-import { getPayments } from "@/lib/api/server";
+import { getMe, getPayments } from "@/lib/api/server";
 import { firstParam, loadOrError } from "@/lib/api/load";
+import { reachesAllStores } from "@/lib/api/org";
 import { PageHeader } from "@/components/ui/page-header";
 import { FetchError } from "@/components/dashboard/fetch-error";
 import { PaymentsPanel } from "@/components/dashboard/payments-panel";
@@ -13,7 +14,11 @@ export default async function PaymentsPage({
   const stripeFlash = firstParam(sp.stripe);
   const flashReason = firstParam(sp.reason);
 
-  const { data, error } = await loadOrError(() => getPayments());
+  const [me, payments] = await Promise.all([
+    loadOrError(() => getMe()),
+    loadOrError(() => getPayments()),
+  ]);
+  const { data, error } = payments;
 
   const flash =
     stripeFlash === "connected" ||
@@ -37,6 +42,7 @@ export default async function PaymentsPage({
       ) : (
         <PaymentsPanel
           initial={data}
+          canEdit={reachesAllStores(me.data?.storeIds)}
           flash={flash}
           flashReason={flashReason}
         />

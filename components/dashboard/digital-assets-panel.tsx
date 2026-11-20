@@ -62,10 +62,12 @@ export function DigitalAssetsPanel({
   initial,
   sites,
   selectedSiteId,
+  reachesAllStores = true,
 }: {
   initial: DigitalAssetList;
   sites: SiteOption[];
   selectedSiteId: number | null;
+  reachesAllStores?: boolean;
 }) {
   const router = useRouter();
   const [items, setItems] = useState(initial.items);
@@ -79,6 +81,9 @@ export function DigitalAssetsPanel({
   const [configurationRequired, setConfigurationRequired] = useState(false);
 
   const siteNameById = useMemo(() => new Map(sites.map((site) => [site.id, site.name])), [sites]);
+  const uploadSiteId =
+    selectedSiteId ?? (!reachesAllStores && sites.length === 1 ? (sites[0]?.id ?? null) : null);
+  const canUpload = reachesAllStores || uploadSiteId != null;
 
   return (
     <div className="space-y-6">
@@ -92,10 +97,16 @@ export function DigitalAssetsPanel({
             </p>
           </div>
           <Badge variant="info">
-            {selectedSiteId == null ? "Org-level scope" : "Filtered to one storefront"}
+            {uploadSiteId != null
+              ? "Filtered to one storefront"
+              : reachesAllStores
+                ? "Org-level scope"
+                : "Pick a storefront"}
           </Badge>
         </div>
 
+        {canUpload ? (
+        <>
         <form
           className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-end"
           onSubmit={async (event) => {
@@ -110,7 +121,7 @@ export function DigitalAssetsPanel({
             setConfigurationRequired(false);
             try {
               const uploaded = await uploadDigitalAsset(file, {
-                siteId: selectedSiteId ?? undefined,
+                siteId: uploadSiteId ?? undefined,
                 label: label.trim() || undefined,
               });
               setItems((prev) => [...prev, uploaded]);
@@ -158,9 +169,17 @@ export function DigitalAssetsPanel({
         </form>
 
         <p className="mt-3 text-xs leading-5 text-muted">
-          Uploads use the current site filter. With no site selected, the asset is stored at the
-          organization level and can be attached across storefronts.
+          {reachesAllStores
+            ? "Uploads use the current site filter. With no site selected, the asset is stored at the organization level and can be attached across storefronts."
+            : "Uploads attach to the selected storefront."}
         </p>
+        </>
+        ) : (
+          <p className="mt-5 text-sm leading-6 text-muted">
+            Uploading without a storefront shares the file with every store. Pick a storefront
+            above, or ask someone with access to all stores.
+          </p>
+        )}
         {configurationRequired ? (
           <p className="mt-3 rounded-[var(--radius-control)] bg-warning-bg px-3 py-2 text-sm text-warning-text">
             This deployment needs additional platform configuration before files can be stored.
@@ -246,18 +265,24 @@ export function DigitalAssetsPanel({
                       {new Date(asset.createdAt).toLocaleDateString()}
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <Button
-                        variant="ghost"
-                        className="text-error-text"
-                        disabled={busy}
-                        onClick={() => {
-                          setDeleteTarget(asset);
-                          setError(null);
-                          setNotice(null);
-                        }}
-                      >
-                        Delete
-                      </Button>
+                      {asset.siteId != null || reachesAllStores ? (
+                        <Button
+                          variant="ghost"
+                          className="text-error-text"
+                          disabled={busy}
+                          onClick={() => {
+                            setDeleteTarget(asset);
+                            setError(null);
+                            setNotice(null);
+                          }}
+                        >
+                          Delete
+                        </Button>
+                      ) : (
+                        <span className="text-xs text-muted">
+                          Shared — detach it from a product instead
+                        </span>
+                      )}
                     </td>
                   </tr>
                 ))}

@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { Suspense } from "react";
-import { getAnalyticsOverview } from "@/lib/api/server";
+import { getAnalyticsOverview, getMe } from "@/lib/api/server";
 import { firstParam, loadOrError } from "@/lib/api/load";
+import { reachesAllStores } from "@/lib/api/org";
 import { ButtonLink } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
@@ -19,9 +20,11 @@ export default async function AnalyticsPage({
   const from = firstParam(sp.from);
   const to = firstParam(sp.to);
 
-  const { data, error } = await loadOrError(() =>
-    getAnalyticsOverview({ q, from, to }),
-  );
+  const [overview, me] = await Promise.all([
+    loadOrError(() => getAnalyticsOverview({ q, from, to })),
+    loadOrError(() => getMe()),
+  ]);
+  const { data, error } = overview;
 
   const busiest = data?.byDay.length
     ? data.byDay.reduce((best, d) => (d.count > best.count ? d : best))
@@ -35,7 +38,11 @@ export default async function AnalyticsPage({
     <div>
       <PageHeader
         title="Analytics"
-        description="Agent traffic across all websites."
+        description={
+          reachesAllStores(me.data?.storeIds)
+            ? "Agent traffic across all websites."
+            : "Agent traffic for the stores you can access."
+        }
       />
 
       <Suspense fallback={null}>

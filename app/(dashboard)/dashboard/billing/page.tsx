@@ -7,7 +7,7 @@ import {
   listBillingPlans,
 } from "@/lib/api/server";
 import { loadConfigured, loadOrError } from "@/lib/api/load";
-import { canWriteBilling } from "@/lib/api/org";
+import { ORG_WIDE_REACH_COPY, canWriteBilling, reachesAllStores } from "@/lib/api/org";
 import { sanitizePublicCopy } from "@/lib/api/public-copy";
 import type {
   AddonResponse,
@@ -40,6 +40,7 @@ export default async function BillingPage() {
   const granted = subscription.data?.subscription?.entitlesPlan === true;
   const billingUnconfigured =
     subscription.configurationRequired || plans.configurationRequired;
+  const canEditBilling = canWriteBilling(me.data?.role) && reachesAllStores(me.data?.storeIds);
 
   return (
     <div>
@@ -49,15 +50,23 @@ export default async function BillingPage() {
       />
 
       <div className="space-y-10">
-        {subscription.data && canWriteBilling(me.data?.role) ? (
+        {canWriteBilling(me.data?.role) && !reachesAllStores(me.data?.storeIds) ? (
+          <p className="rounded-[var(--radius-control)] border border-border bg-surface-elevated p-4 text-sm leading-6 text-muted">
+            {ORG_WIDE_REACH_COPY}
+          </p>
+        ) : null}
+
+        {subscription.data && canEditBilling ? (
           <BillingAddressForm
             address={subscription.data.billingAddress}
             tax={subscription.data.tax}
           />
         ) : subscription.data?.tax.reason === "no_billing_address" ? (
           <p className="rounded-[var(--radius-control)] border border-warning-border bg-warning-bg px-4 py-3 text-sm leading-6 text-warning-text">
-            {subscription.data.tax.message} An owner or administrator can add
-            the billing address on this page.
+            {subscription.data.tax.message}{" "}
+            {canWriteBilling(me.data?.role) && !reachesAllStores(me.data?.storeIds)
+              ? ORG_WIDE_REACH_COPY
+              : "An owner or administrator can add the billing address on this page."}
           </p>
         ) : null}
 
@@ -68,7 +77,7 @@ export default async function BillingPage() {
           </p>
         ) : null}
 
-        {plans.data && subscription.data ? (
+        {plans.data && subscription.data && canEditBilling ? (
           <BillingPlanPicker
             plans={plans.data.items}
             currency={plans.data.currency}
@@ -86,7 +95,7 @@ export default async function BillingPage() {
           </p>
         ) : null}
 
-        {granted ? (
+        {granted && canEditBilling ? (
           <PaymentMethodForm
             paymentMethod={subscription.data?.subscription?.paymentMethod ?? null}
           />

@@ -27,7 +27,7 @@ import { entitlementsFor } from "@/lib/plans";
  * `tests/integration/mfa.test.ts`.
  */
 export const GET = handler(async () => {
-  const { user, org, role } = await requireSession();
+  const { user, org, role, staff } = await requireSession();
   const entitlements = entitlementsFor(org);
   /**
    * Account standing rides on `/api/me` rather than the billing endpoint
@@ -50,6 +50,7 @@ export const GET = handler(async () => {
     org: serializeOrg(org),
     standing: serializeStanding(standing),
     role,
+    storeIds: staff.storeIds,
     organizations: memberships.map((m) => ({
       id: m.org.id,
       name: m.org.name,

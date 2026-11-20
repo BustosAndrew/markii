@@ -1,5 +1,6 @@
 import { Suspense } from "react";
-import { listSites } from "@/lib/api/server";
+import { getMe, listSites } from "@/lib/api/server";
+import { reachesAllStores } from "@/lib/api/org";
 import { firstParam, loadOrError, parseLimit, parsePage } from "@/lib/api/load";
 import type { SiteStatus } from "@/lib/api/types";
 import { ButtonLink } from "@/components/ui/button";
@@ -21,6 +22,9 @@ export default async function WebsitesPage({
   const page = parsePage(sp.page);
   const limit = parseLimit(sp.limit);
   const openDesign = firstParam(sp.open) === "design";
+
+  const me = await loadOrError(() => getMe());
+  const canCreateSite = reachesAllStores(me.data?.storeIds);
 
   const { data, error } = await loadOrError(() =>
     listSites(
@@ -46,9 +50,9 @@ export default async function WebsitesPage({
             : "Agent storefronts across your Markii account."
         }
         actions={
-          data && data.items.length === 0 ? undefined : (
+          canCreateSite && data && data.items.length !== 0 ? (
             <ButtonLink href="/dashboard/websites/new">New website</ButtonLink>
-          )
+          ) : undefined
         }
       />
 
@@ -84,7 +88,9 @@ export default async function WebsitesPage({
               : "Create a site to import a catalog and deploy for agents."
           }
           action={
-            <ButtonLink href="/dashboard/websites/new">Create website</ButtonLink>
+            canCreateSite ? (
+              <ButtonLink href="/dashboard/websites/new">Create website</ButtonLink>
+            ) : undefined
           }
         />
       ) : null}
@@ -103,21 +109,23 @@ export default async function WebsitesPage({
                 }
               />
             ))}
-            <ButtonLink
-              href="/dashboard/websites/new"
-              variant="secondary"
-              className="min-h-[160px] flex-col items-start justify-between rounded-[var(--radius-card)] border-dashed px-5 py-5 text-left font-normal"
-            >
-              <span className="text-sm text-muted">Get started</span>
-              <span>
-                <span className="block text-lg font-semibold text-foreground">
-                  Create a website
+            {canCreateSite ? (
+              <ButtonLink
+                href="/dashboard/websites/new"
+                variant="secondary"
+                className="min-h-[160px] flex-col items-start justify-between rounded-[var(--radius-card)] border-dashed px-5 py-5 text-left font-normal"
+              >
+                <span className="text-sm text-muted">Get started</span>
+                <span>
+                  <span className="block text-lg font-semibold text-foreground">
+                    Create a website
+                  </span>
+                  <span className="mt-1 block text-sm text-muted">
+                    Import a catalog and go live.
+                  </span>
                 </span>
-                <span className="mt-1 block text-sm text-muted">
-                  Import a catalog and go live.
-                </span>
-              </span>
-            </ButtonLink>
+              </ButtonLink>
+            ) : null}
           </div>
           <Suspense fallback={null}>
             <Pagination page={data.page} limit={data.limit} total={data.total} />

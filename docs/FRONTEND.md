@@ -507,7 +507,7 @@ No type changed; what changes is what a store-scoped member gets back:
 - **Lists are shorter.** Discounts, customers, collections, shipping zones and rates, inventory
   levels, and the overview, analytics and finances pages used to show every store to a scoped member.
   They now show that member's stores only. Totals are over those stores, so don't label them
-  "all stores" for a scoped member (`me.staff.storeIds !== "all"`).
+  "all stores" for a scoped member (`me.storeIds !== "all"`).
 - **`delivery.deleteAsset` answers `403 FORBIDDEN`** for a file with no store (shared by every store)
   unless the caller reaches all stores. Show its message; offer *detach* instead.
 - An empty `storeIds: []` reaches nothing, and every store-specific screen will be empty. That is
@@ -519,7 +519,7 @@ permissions problem, so neither should show the step-up modal or "your role cann
 - **`STORE_SCOPED`** — a member scoped to some stores tried an org-wide change: any `billing.*`,
   `payments.*`, `integrations.*` or `email.*` action, `PATCH /api/org`, `POST /api/sites`, the add-on
   routes, or uploading a digital asset with no store. Say it needs someone with access to all
-  stores. Better: hide those controls when `me.staff.storeIds !== "all"`.
+  stores. Better: hide those controls when `me.storeIds !== "all"`.
 - **`BEYOND_YOUR_ACCESS`** — a grant wider than the caller's own, or managing someone whose reach is
   wider. `details.reason` is `"role"` (e.g. a `developer` minting an `administrator` token) or
   `"stores"`. Applies to token creation and revocation, invitations, and staff edits and removal. The
@@ -527,6 +527,9 @@ permissions problem, so neither should show the step-up modal or "your role cann
 - **`storeIds` is optional on `POST /api/org/tokens` and `/api/org/staff/invite` now**, and an
   omitted value means *the caller's own stores*, not `"all"`. An all-stores caller sees no change.
 - `GET /api/digital-assets` lists shared files plus the caller's own stores' files.
+- **`GET /api/me` carries `storeIds`** (`"all"` or a number list, same as the staff row) so the
+  shell can hide org-wide writes without a second call. `lib/api/org.ts`: `reachesAllStores()`,
+  `grantableRoles()`, `storesWithinReach()`.
 
 ### 🟢 New 2026-11-14 — editor polish: breakpoints, multi-select, copy/paste, saved blocks (D51 M7)
 
