@@ -671,8 +671,17 @@ file after it was deleted. **The renderer's boundary is drawn (2026-11-20)**: th
 only itself plus `lib/api/money.ts`, `lib/storefront/themes.ts` and `lib/api/types.ts`, and
 `lib/builder/renderer-boundary.test.ts` refuses anything else — **never add a `@/lib/db` read, a
 server-only module or a client island to it**; data arrives through the render context. The move into
-its own Apache package waits on the repo's `LICENSE`. The storefront read API, Next.js export, store
-export and marketplace are not built.
+its own Apache package waits on the repo's `LICENSE`. **The storefront read API is built (2026-11-20)** —
+`/api/store`, `/api/products[/{slug}]`, `/api/collections/{handle}` on the store host, public and
+credential-free, nothing a shopper cannot already see (`docs/API.md` §23). **An export's shopper
+sign-in, database and hosting are its owner's** (owner, 2026-11-20): Markii issues no cross-origin
+shopper credential. **Members-only products still sell from an export** through a per-store
+**storefront secret key** its server holds (`Authorization: Bearer mksk_live_…` +
+`Markii-Shopper-Email`, migration **0050**), resolved inside `currentCustomer()` so every shopper gate
+follows; a key with an `Origin` header is refused. **An action that returns a secret sets
+`redactResult`** — the audit row stores results. Licence files carry `Copyright 2026 Markii`
+(`LICENSE`, `TRADEMARK.md`, `packages/renderer/`). Next.js export, store export and marketplace are
+not built.
 
 **Stripe Tax on Markii's own subscription is built as of 2026-09-13** (G3). `automatic_tax` on every
 platform-account subscription create, change and preview — **no `Stripe-Account` header**, the

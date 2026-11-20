@@ -239,6 +239,13 @@ export type ActionDefinition<TInput = unknown, TResult = unknown> = {
    * long-lived and widely readable; a raw API key in it is a breach waiting.
    */
   redactInput?: (input: TInput) => unknown;
+  /**
+   * The same for the **result**, which the audit row stores too. For an action
+   * that hands back a secret exactly once — a storefront key's plaintext — the
+   * caller receives the real result and the audit row a redacted copy, so the
+   * secret exists nowhere after the response but the caller's hands.
+   */
+  redactResult?: (result: TResult) => unknown;
   run(input: TInput, ctx: ActionContext): Promise<TResult>;
 };
 

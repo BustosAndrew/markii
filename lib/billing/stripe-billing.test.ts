@@ -310,6 +310,8 @@ describe("billing action registration", () => {
       "platform.resetMfa",
       "platform.suspendOrg",
       "platform.unsuspendOrg",
+      // A storefront key acts as any customer of its store (D53): granting access.
+      "storefront.createKey",
     ]);
   });
 

@@ -277,7 +277,7 @@ export async function invokeAction<TResult = unknown>(
         orgId: actor.orgId,
         riskTier: def.riskTier,
         input: auditInput,
-        result: (result ?? null) as unknown,
+        result: (result != null && def.redactResult ? def.redactResult(result) : (result ?? null)) as unknown,
         diff,
         ok: true,
         undoable: def.undoable ?? false,

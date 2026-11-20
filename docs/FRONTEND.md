@@ -531,6 +531,33 @@ permissions problem, so neither should show the step-up modal or "your role cann
   shell can hide org-wide writes without a second call. `lib/api/org.ts`: `reachesAllStores()`,
   `grantableRoles()`, `storesWithinReach()`.
 
+### 🟢 New 2026-11-20 — storefront secret keys (D53) — needs a screen
+
+**Backend and typed client are live (`lib/api/storefront-keys.ts`); needs migration 0050; no screen
+yet.** A per-store secret an exported storefront's server uses so its signed-in shoppers can buy
+members-only products. Suggested home: the store's settings, beside the domain card, under
+"Exported storefront".
+
+- `listStorefrontKeys(site)` → `{ keys: [{ id, label, prefix, createdAt, lastUsedAt, revokedAt }] }`.
+  Permission `tokens.manage` (owner, administrator, developer) — others get `403`; show the
+  permission state, not an empty list.
+- `createStorefrontKey({ siteId, label })` → `result.key` is **the only copy that will ever exist**.
+  Show it once with a copy button and say so plainly; never put it in a toast, the URL or local
+  storage. `high` + **step-up** — `MfaStepUpProvider` handles the `403 MFA_REQUIRED`.
+- `revokeStorefrontKey({ siteId, keyId })` — immediate, not undoable, no step-up. Confirm first.
+- Copy to show beside the key: *"Put this in your exported store's server environment. Anyone who
+  has it can act as any of this store's customers. Never put it in browser code."*
+
+### 🟢 New 2026-11-20 — storefront read API (D53) — no screen needed
+
+Four public `GET` routes on a **store's own host** — `/api/store`, `/api/products`,
+`/api/products/{slug}`, `/api/collections/{handle}` (`docs/API.md` §23, shapes in
+`lib/storefront/read-api.ts`). They exist for headless storefronts and the coming Next.js export,
+not for the dashboard: **dashboard screens keep calling `/api/*` on the platform host**, and nothing
+here changes a dashboard response. Worth knowing if you build "view as a developer" or export UI:
+`GET /api/store` answers the **published** design as a theme package (no head code), `null` before
+anything is published.
+
 ### 🟢 New 2026-11-19 — copy a design between stores, export and import theme files (D53) — needs screens
 
 **Backend and typed client are live; there is no screen yet.** All in `lib/api/builder.ts`; contract in

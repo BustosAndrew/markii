@@ -3620,6 +3620,64 @@ preview tabs):
 
 In local dev, storefronts are reachable at `http://localhost:3000/_sites/{siteSlug}/…`.
 
+### Storefront read API — ✅ LIVE (2026-11-20, D53)
+
+What a headless storefront — an exported Next.js app above all — reads a store from. Public,
+unauthenticated, `GET` only, on the store's own host. **It adds a shape, not reach**: every field is
+already public on the store's pages, so cost, ledgers, tax codes, customers and **head code** are
+absent. Published design only, enabled products only, published collections only; a halted
+(paused, or billing-held) store answers `404` to all four, as its pages do, and so does a request
+under the builder preview. Answers `access-control-allow-origin: *` with **no**
+`allow-credentials` — no response depends on a session — and `cache-control: public, max-age=60`.
+Not traffic-logged: an export reads it on revalidation, not per visitor. Money is `priceMinor` +
+`currency` (D50). Shapes: `lib/storefront/read-api.ts`.
+
+| Route | Answers |
+|---|---|
+| `GET /api/store` | `{ store: { name, slug, url, purchasesEnabled, rails: { stripe, x402 } }, categories[], collections[], design }` — `design` is the **published** theme package (§19, `format: "markii.theme"`) with `savedBlocks: []` and no head code, or `null` when nothing is published (render the fixed layout) |
+| `GET /api/products?limit=&offset=` | `{ total, limit, offset, next, products[] }` — enabled, oldest first; `limit` default 50, max 250, a bad value clamps rather than 400s |
+| `GET /api/products/{slug}` | the product plus `options[]` and `variants[] { id, title, optionValues, priceMinor, available }` — the product page's own reads; `404` for unknown or disabled |
+| `GET /api/collections/{handle}?limit=` | `{ collection, products[] }` in the merchant's order, rules evaluated, enabled only; `404` unless published |
+
+A product is `{ id, slug, name, url, description, summary, sku, priceMinor, currency, stock,
+inStock, images, categoryId, suggestedProductIds, membersOnly, requiresTierId }`; the single-product
+route adds `requiresTier: { id, name } | null`. Cart and checkout for an export are the existing
+`/api/cart*` and `/api/checkout/session*` — token-addressed and cookie-free for a guest, which is why
+they already work headless.
+
+### Storefront secret keys — ✅ LIVE (2026-11-20, D53) · **needs migration 0050**
+
+How an exported store sells **members-only products and memberships**. The export's sign-in is its
+owner's, so Markii never gives a shopper a credential that works off its hosts; instead the
+export's **server** calls the storefront routes with
+
+```
+Authorization: Bearer mksk_live_…        # the store's secret key
+Markii-Shopper-Email: ada@example.com    # optional — a shopper the owner's sign-in has verified
+```
+
+and Markii resolves the email to the store's own `customers` row (creating it on first sight, as a
+guest checkout does). It happens in `currentCustomer()`, so **every** shopper gate inherits it:
+adding a gated product to a cart, `assertCartAccess` at checkout, `POST /api/checkout/subscription`
+(recurring memberships — the renewal webhook needs no session), and `GET /api/account/memberships` /
+`DELETE …/{id}/renewal`. With a key, the request's cookies are ignored. Without one, nothing changed.
+
+| Answer | When |
+|---|---|
+| `401` | the key is unknown, revoked, or another store's — one message for all three. Never a silent fall-back to guest |
+| `403` | the request carries an `Origin` header: a server's `fetch` sends none, so the key is in browser code. Revoke it |
+| `400` | `Markii-Shopper-Email` is present and not an address |
+| `401` from `/api/account/*` | a key with no shopper named — the server is a guest |
+
+**The owner's sign-in is the trust root**: whoever holds the key can act as any customer of that
+store, so the address must be one their sign-in verified. Keys are per store: `storefront.createKey
+{ siteId, label }` (`high`, **step-up**, `tokens.manage`; the plaintext is returned once and the audit
+row stores a placeholder — `redactResult`), `storefront.revokeKey { siteId, keyId }` (`medium`, no
+step-up — a leaked key must be quick to kill), and `GET /api/sites/:idOrSlug/storefront-keys`
+(`tokens.manage`; prefix, label, `lastUsedAt`, `revokedAt`). **Ceiling:** every request from one
+export server shares the storefront fair-use budget for that address (240/min), so cache reads and
+send only shopper actions through the key.
+
 **Fair use (G12, 2026-10-07).** Every storefront request — pages and storefront APIs, by hostname
 or by `/_sites/{slug}` path — is counted per store and client address in `proxy.ts`. Over
 `STOREFRONT_RATE_LIMIT` (default **240/min**) the answer is `429` with `Retry-After` and a plain-text

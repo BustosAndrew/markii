@@ -3194,3 +3194,46 @@ export const sitePreviewSessions = pgTable(
 export type SiteDesign = typeof siteDesigns.$inferSelect;
 export type SiteDocument = typeof siteDocuments.$inferSelect;
 export type SiteDesignVersion = typeof siteDesignVersions.$inferSelect;
+
+/**
+ * Storefront secret keys (D53, 2026-11-20) — how an **exported** storefront's
+ * own server vouches for its shoppers to this store's cart, checkout and
+ * membership routes.
+ *
+ * An export's sign-in is its owner's (owner, 2026-11-20), so Markii never
+ * issues a shopper a credential that works off its own hosts. Instead the
+ * merchant holds one secret per store, on their server, and says *which
+ * shopper* a request is for (`Markii-Shopper-Email`). Markii resolves that to
+ * the store's `customers` row by email — the record the merchant already owns —
+ * which is what lets a member buy and use members-only products from an export.
+ *
+ * **Deliberately not an `api_tokens` row.** A token is a staff credential into
+ * the dashboard API; this one opens nothing but one store's shopper routes, and
+ * keeping them in separate tables means a leaked storefront key can never be
+ * presented to `/api/*`, nor a staff token to a storefront.
+ */
+export const storefrontKeys = pgTable(
+  "storefront_keys",
+  {
+    id: serial("id").primaryKey(),
+    siteId: integer("site_id")
+      .notNull()
+      .references(() => sites.id, { onDelete: "cascade" }),
+    label: text("label").notNull(),
+    /** SHA-256 of the plaintext; the plaintext is shown once and never stored. */
+    keyHash: text("key_hash").notNull(),
+    /** Leading characters, for telling keys apart in a list. Not a secret. */
+    prefix: text("prefix").notNull(),
+    createdByUserId: text("created_by_user_id"),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    /** Soft revoke, like API tokens: the row stays so the audit log stays readable. */
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("storefront_keys_hash_uq").on(t.keyHash),
+    index("storefront_keys_site_idx").on(t.siteId),
+  ],
+);
+
+export type StorefrontKey = typeof storefrontKeys.$inferSelect;

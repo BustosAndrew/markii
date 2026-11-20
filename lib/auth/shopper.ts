@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm";
 import type { User } from "@supabase/supabase-js";
 import { customers, db } from "../db";
 import { getSupabaseServerClient } from "../supabase/server";
+import { storefrontDelegation } from "./storefront-keys";
 import { userKindOf } from "./user-kind";
 
 /**
@@ -154,6 +155,17 @@ export async function ensureCustomerForShopper(
 export async function currentCustomer(
   siteId: number,
 ): Promise<typeof customers.$inferSelect | null> {
+  /**
+   * An exported store's server vouching for its shopper (D53) wins outright,
+   * and the request's cookies are not consulted: a server-to-server call
+   * carries none, and mixing the two would let one request speak for two
+   * people. Every gate below this function — cart access, the membership
+   * gate, subscription checkout, the account routes — inherits it without a
+   * call site opting in, which is the point of putting it here.
+   */
+  const delegated = await storefrontDelegation(siteId);
+  if (delegated.kind === "server") return delegated.customer;
+
   const user = await getShopperUser();
   if (!user) return null;
   return ensureCustomerForShopper(siteId, user);
