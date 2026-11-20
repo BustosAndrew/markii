@@ -1,10 +1,8 @@
-import type { ComponentProps, ReactNode } from "react";
-import { AddToCart } from "@/components/storefront/add-to-cart";
-import { ProductCard } from "@/components/storefront/product-card";
-import type { Category, Collection, Product } from "@/lib/db";
-import { storefrontMembersOf } from "@/lib/storefront/collections";
+import type { ReactNode } from "react";
+import type { MembersOf, RenderCategory as Category, RenderCollection as Collection, RenderProduct as Product } from "./catalog";
 import { REPEATER_SOURCES, boundProps, evaluateCondition, type DataValues, type RepeaterSource } from "./bindings";
 import { markdownText, parseMarkdown, safeHref, type Inline } from "./markdown";
+import { ProductCard } from "./product-card";
 import { sanitizeHtml } from "./sanitize";
 import { compileStyles, nodeClass } from "./styles";
 import type { PageNode, RegionHandle } from "./types";
@@ -22,7 +20,15 @@ import { productView } from "./views";
  * Zero client JavaScript of its own: accordions and FAQs are `<details>`, and
  * every string goes through React, which escapes it. The one island is the
  * Buy block's Add to cart, the same sanctioned island the fixed product page
- * has always used.
+ * has always used — and the caller renders it (`ProductPurchase.buy`), so the
+ * drawing code never imports the cart.
+ *
+ * **The drawing code, and nothing else (D53).** This module and the ones it
+ * imports are what a store's Next.js export ships, under Apache 2.0 once split
+ * out. Everything outside drawing arrives through the context: the catalogue as
+ * the renderer's own shapes (`./catalog`), collection lookups as `membersOf`,
+ * the cart as a rendered element. `lib/builder/renderer-boundary.test.ts`
+ * refuses an import that crosses the line.
  *
  * **Data comes from `ctx.values`** (M4): bindings fill props from it and
  * conditions read it. The block CSS these classes rely on is emitted once per
@@ -32,7 +38,8 @@ import { productView } from "./views";
 
 /** What the product template's Buy block needs — everything the fixed product page computes. */
 export type ProductPurchase = {
-  addToCart: ComponentProps<typeof AddToCart>;
+  /** The Add to cart island, rendered by the caller — the drawing code does not know how a cart works. */
+  buy: ReactNode;
   gate: { tierName: string; unlocked: boolean } | null;
   /** The x402 checkout request an agent would send, or null when this product cannot be bought that way here. */
   agentCheckout: { request: string; agentMdHref: string } | null;
@@ -45,6 +52,8 @@ export type RenderContext = {
   categories: Category[];
   /** Published collections only. */
   collections: Collection[];
+  /** A collection's products, for a grid showing one collection (`./catalog`). */
+  membersOf: MembersOf;
   preview?: boolean;
   /** The data bindings and conditions read. `store` always; `product` / `collection` on their templates; `item` inside a repeater. */
   values: DataValues;
@@ -168,7 +177,7 @@ async function ProductGrid({ node, ctx, p }: { node: PageNode; ctx: RenderContex
     items = ctx.collectionProducts;
   } else {
     const coll = ctx.collections.find((c) => c.handle === props.collectionHandle);
-    items = coll ? (await storefrontMembersOf(coll, props.limit)).filter((x) => x.enabled) : [];
+    items = coll ? (await ctx.membersOf(coll.handle, props.limit)).filter((x) => x.enabled) : [];
   }
   return (
     <ul {...attrs(node, ctx, "sf-grid")}>
@@ -235,7 +244,7 @@ function ProductBuy({ node, ctx, p }: { node: PageNode; ctx: RenderContext; p: R
           )}
         </p>
       ) : null}
-      <AddToCart {...purchase.addToCart} />
+      {purchase.buy}
       {p.showAgentCheckout !== false && purchase.agentCheckout && !locked ? (
         <>
           <h2>Buy via agent</h2>
@@ -547,7 +556,7 @@ export async function documentJsonLd(tree: PageNode, ctx: RenderContext): Promis
           if (cat) lists.push(Promise.resolve(itemList(enabled.filter((x) => x.categoryId === cat.id).slice(0, limit), ctx, cat.name)));
         } else if (p.source === "collection") {
           const coll = ctx.collections.find((c) => c.handle === p.collectionHandle);
-          if (coll) lists.push(storefrontMembersOf(coll, limit).then((m) => itemList(m.filter((x) => x.enabled).slice(0, limit), ctx, coll.title)));
+          if (coll) lists.push(ctx.membersOf(coll.handle, limit).then((m) => itemList(m.filter((x) => x.enabled).slice(0, limit), ctx, coll.title)));
         }
         break;
       }

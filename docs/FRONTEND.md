@@ -531,6 +531,32 @@ permissions problem, so neither should show the step-up modal or "your role cann
   shell can hide org-wide writes without a second call. `lib/api/org.ts`: `reachesAllStores()`,
   `grantableRoles()`, `storesWithinReach()`.
 
+### 🟢 New 2026-11-19 — copy a design between stores, export and import theme files (D53) — needs screens
+
+**Backend and typed client are live; there is no screen yet.** All in `lib/api/builder.ts`; contract in
+`docs/API.md` §19 "Theme packages". The natural home is the design editor's Theme tab (or a "Design"
+menu): *Copy from another store…*, *Export theme*, *Import theme…*.
+
+- **`copyDesign({ siteId, fromSiteId, source?, discardUnpublished? })`** — the store picker should list
+  only the stores in `me.storeIds` reach (a scoped member gets `404` for the others). Default `source`
+  is `"published"`; on `409 reason: "nothing_published"` offer the draft instead.
+- **`exportTheme(site, source)`** → `{ url, expiresAt, images, headCodeLeftOut }`. Open `url` straight
+  away (five minutes); never store it. Show `images.external` / `images.unreadable` as a warning list
+  (each has a human `where`), and say so when `headCodeLeftOut` — scripts are never in a theme file.
+- **Import is three calls**, because the file goes straight to storage (past 4.5 MB a request cannot
+  carry it): `createThemeUpload(site)` → `fetch(uploadUrl, { method, headers, body: file })` →
+  `importThemeUpload(site, uploadId, { dryRun: true })` to show what will change, then again without
+  `dryRun`. A new `uploadId` per file; do not reuse one.
+- **Both replace the draft and are not undoable.** On `409 reason: "unpublished_changes"` show a
+  confirm ("Your unpublished changes will be replaced") and retry with `discardUnpublished: true`.
+  Nothing goes live until the merchant publishes — say that in the success state.
+- **`high` risk**: a signed-in person only. API tokens and agents get `403 HUMAN_APPROVAL_REQUIRED`, so
+  there is nothing to wire for the brand agent.
+- **After a copy**, `sourceHasHeadCode: true` means the source store has custom scripts that were not
+  copied. Offer "Copy scripts too", which is `setHeadCode` with the source's code — it asks for a fresh
+  second factor, which `MfaStepUpProvider` already handles.
+- `savedBlocks.skipped` lists blocks not added because the name was taken or the library is full.
+
 ### 🟢 New 2026-11-14 — editor polish: breakpoints, multi-select, copy/paste, saved blocks (D51 M7)
 
 **Owner decision 2026-11-14: M7 is built now**, reversing the same day's "deferred past launch" entry

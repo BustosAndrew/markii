@@ -4,6 +4,7 @@ import { BuilderRegion, type RenderContext } from "@/lib/builder/render";
 import { cssProblems } from "@/lib/builder/sanitize";
 import { storeView } from "@/lib/builder/views";
 import { regionsFor, type SiteData } from "@/lib/storefront";
+import { membersByHandle } from "@/lib/storefront/collections";
 
 /**
  * What surrounds every storefront page (M4): the announcement bar and the
@@ -24,6 +25,7 @@ export function builderContext(data: SiteData, extra: Partial<RenderContext> = {
     products: prods,
     categories: cats,
     collections: colls,
+    membersOf: membersByHandle(colls),
     preview,
     values: { store: storeView(site, { baseUrl, products: prods, collections: colls }) },
     ...extra,

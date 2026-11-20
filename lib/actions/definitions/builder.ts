@@ -35,6 +35,7 @@ import {
   type Removed,
 } from "../../builder/tree";
 import { SAVED_BLOCKS_PER_SITE, normalizeSavedBlock } from "../../builder/saved-blocks";
+import { pageSeoSchema } from "../../builder/theme-package";
 import { styleSchema } from "../../builder/styles";
 import {
   BREAKPOINTS,
@@ -77,7 +78,7 @@ const pageId = z.number().int().positive();
 const nodeId = z.string().regex(/^n_[a-z0-9]{10}$/, "A node id looks like n_ followed by 10 characters.");
 
 /** A tree error as the API reports it: a bad edit is 400, a stale id is 404. */
-function treeOp<T>(fn: () => T): T {
+export function treeOp<T>(fn: () => T): T {
   try {
     return fn();
   } catch (e) {
@@ -813,15 +814,8 @@ const handle = z
   .max(60)
   .refine((h) => h !== HOME_HANDLE, "The home page already exists.");
 
-const seoSchema = z
-  .object({
-    title: z.string().max(120).optional(),
-    description: z.string().max(320).optional(),
-    // Kept out of search results, the sitemap, llms.txt and llms-full.txt alike (M5).
-    noindex: z.boolean().optional(),
-    ogImage: z.string().max(2000).regex(/^https:\/\/\S+$/, "Use an https:// image URL.").optional(),
-  })
-  .strict();
+/** One schema for a page's SEO, shared with theme-package imports (D53). */
+const seoSchema = pageSeoSchema;
 
 export const createPage = defineAction({
   id: "builder.createPage",

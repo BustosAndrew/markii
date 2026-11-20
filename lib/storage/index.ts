@@ -80,7 +80,9 @@ export function isStorageConfigured(): boolean {
 export type UploadResult =
   | { ok: true; path: string; url: string | null; bytes: number }
   | StorageUnavailable
-  | { ok: false; code: "upload_failed"; message: string; resolution?: string };
+  | { ok: false; code: "upload_failed"; message: string; resolution?: string }
+  /** Only without `upsert`: an object is already stored at this path. */
+  | { ok: false; code: "already_exists"; message: string };
 
 /**
  * Stores a file and returns its path.
@@ -107,6 +109,11 @@ export async function uploadFile(input: {
   });
 
   if (error) {
+    // A content-addressed path that is already there holds these exact bytes (D53 theme assets).
+    const status = String((error as { statusCode?: string | number }).statusCode ?? "");
+    if (!input.upsert && (status === "409" || /already exists|duplicate/i.test(error.message))) {
+      return { ok: false, code: "already_exists", message: error.message };
+    }
     return { ok: false, code: "upload_failed", message: error.message };
   }
 
@@ -160,6 +167,73 @@ export async function signedDownloadUrl(input: {
     return { ok: false, code: "sign_failed", message: error?.message ?? "no URL returned" };
   }
   return { ok: true, url: data.signedUrl, expiresAt: new Date(Date.now() + ttl * 1000) };
+}
+
+/**
+ * The stable public address of a `public-media` object, without a network call.
+ * Null when storage is not configured.
+ */
+export function publicMediaUrl(path: string): string | null {
+  const client = storageClient();
+  if (!client) return null;
+  return client.storage.from(PUBLIC_BUCKET).getPublicUrl(path).data.publicUrl;
+}
+
+/**
+ * The object path behind a `public-media` URL, or null when the URL is anywhere
+ * else — another host, another bucket, a signed link. How a theme export tells
+ * the store's own images (bundled) from images hosted elsewhere (left as links).
+ */
+export function publicMediaPathOf(url: string): string | null {
+  const base = publicMediaUrl("");
+  if (!base) return null;
+  const prefix = base.endsWith("/") ? base : `${base}/`;
+  const bare = url.split(/[?#]/)[0];
+  if (!bare.startsWith(prefix)) return null;
+  const rest = bare.slice(prefix.length);
+  if (!rest) return null;
+  try {
+    const path = decodeURIComponent(rest);
+    return path.split("/").some((seg) => seg === ".." || seg === "") ? null : path;
+  } catch {
+    return null;
+  }
+}
+
+export type DownloadResult =
+  | { ok: true; bytes: Uint8Array; contentType: string }
+  | StorageUnavailable
+  | { ok: false; code: "download_failed"; message: string };
+
+/**
+ * Reads an object into memory, for server-side processing only — bundling a
+ * theme's images, reading an uploaded theme file. **Never a way to serve a
+ * file to a person** (G5): that is {@link signedDownloadUrl}.
+ */
+export async function downloadFile(bucket: string, path: string): Promise<DownloadResult> {
+  const client = storageClient();
+  if (!client) return unavailable();
+  const { data, error } = await client.storage.from(bucket).download(path);
+  if (error || !data) return { ok: false, code: "download_failed", message: error?.message ?? "no data returned" };
+  return { ok: true, bytes: new Uint8Array(await data.arrayBuffer()), contentType: data.type };
+}
+
+export type SignedUploadResult =
+  | { ok: true; url: string; token: string; path: string }
+  | StorageUnavailable
+  | { ok: false; code: "sign_failed"; message: string };
+
+/**
+ * A one-time URL the browser uploads a private file to directly (`PUT`), so
+ * the bytes never pass through a function — whose request body Vercel caps at
+ * 4.5 MB. Used for theme files (D53). Overwrites whatever is at `path`.
+ */
+export async function signedUploadUrl(path: string): Promise<SignedUploadResult> {
+  const client = storageClient();
+  if (!client) return unavailable();
+  const { data, error } = await client.storage.from(PRIVATE_BUCKET).createSignedUploadUrl(path, { upsert: true });
+  if (error || !data?.signedUrl) return { ok: false, code: "sign_failed", message: error?.message ?? "no URL returned" };
+  return { ok: true, url: data.signedUrl, token: data.token, path: data.path };
 }
 
 /** Removes an object. Missing is not an error — deletion is meant to be idempotent. */

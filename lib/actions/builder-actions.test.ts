@@ -64,6 +64,12 @@ describe("which builder actions an agent may run itself (D51)", () => {
     expect(head?.riskTier).toBe("high");
     expect(head?.requiresStepUp).toBe(true);
     expect(head?.permission).toBe("cms.scripts");
+    // D53: copying or importing a design writes theme CSS and custom HTML wholesale, so a person does it.
+    for (const id of ["builder.copyDesign", "builder.importTheme"]) {
+      expect(getAction(id)?.riskTier, id).toBe("high");
+      expect(getAction(id)?.agentExecution, id).toBeUndefined();
+      expect(getAction(id)?.undoable, id).toBeFalsy();
+    }
   });
 
   it("every agent-executable action is low risk, step-up free and undoable", () => {

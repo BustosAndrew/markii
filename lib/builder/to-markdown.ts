@@ -1,5 +1,5 @@
-import type { Category, Collection, Product } from "@/lib/db";
-import { formatPrice } from "@/lib/generators";
+import type { MembersOf, RenderCategory as Category, RenderCollection as Collection, RenderProduct as Product } from "./catalog";
+import { formatPrice } from "./format";
 import { REPEATER_SOURCES, boundProps, evaluateCondition, type DataValues, type RepeaterSource } from "./bindings";
 import { parseMarkdown, safeHref, type Inline } from "./markdown";
 import type { PageNode } from "./types";
@@ -31,7 +31,7 @@ export type MarkdownContext = {
   collections: Collection[];
   values: DataValues;
   /** A collection's storefront members, for a grid showing one. */
-  membersOf: (collection: Collection, limit: number) => Promise<Product[]>;
+  membersOf: MembersOf;
   headingOffset?: number;
 };
 
@@ -142,7 +142,7 @@ async function block(node: PageNode, ctx: MarkdownContext): Promise<string[]> {
         items = cat ? enabled().filter((x) => x.categoryId === cat.id) : [];
       } else if (p.source === "collection") {
         const coll = ctx.collections.find((c) => c.handle === p.collectionHandle);
-        items = coll ? (await ctx.membersOf(coll, limit)).filter((x) => x.enabled) : [];
+        items = coll ? (await ctx.membersOf(coll.handle, limit)).filter((x) => x.enabled) : [];
       }
       const lines = productLines(items.slice(0, limit), ctx, p.showPrice !== false);
       return lines ? [lines] : [];

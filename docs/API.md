@@ -3017,6 +3017,9 @@ its tokens — and writes a version snapshot.
 | `GET` | `/api/builder/sites/:idOrSlug/versions` | Published versions, newest first |
 | `GET` | `/api/builder/sites/:idOrSlug/saved-blocks` | The site's saved blocks by name (M7); each `node` is ready for `builder.insertNodes` |
 | `POST` | `/api/builder/sites/:idOrSlug/preview-session` | `201 { url, expiresAt }` — a two-hour live-preview URL for the editor's iframe (M2). A route, not an action: the result is a credential and must stay out of the audit log, as API tokens do |
+| `POST` | `/api/builder/sites/:idOrSlug/theme-export` | D53. `201 { url, expiresAt, source, documents, savedBlocks, images, headCodeLeftOut }` — the design as a theme package file with the store's own images inside, behind a five-minute link. Body `{ source: "draft" \| "published" }` (default draft). `cms.read`. A route: the result is a download link |
+| `POST` | `/api/builder/sites/:idOrSlug/theme-import/upload-url` | D53. `201 { uploadId, uploadUrl, method: "PUT", headers }` — the browser `PUT`s the file straight to private storage (past 4.5 MB a request cannot carry it). A new `uploadId` every time. `cms.write` |
+| `POST` | `/api/builder/sites/:idOrSlug/theme-import` | D53. `{ uploadId, discardUnpublished? }`, `?dryRun=1` — checks and stores the file's images in this org, then runs **`builder.importTheme`**. Answers the invocation outcome plus `images` |
 
 All `cms.read`. Writes are `cms.write`:
 
@@ -3039,9 +3042,11 @@ All `cms.read`. Writes are `cms.write`:
 | `builder.publish` | **high** | — | Atomic publish; tokens and agents get `HUMAN_APPROVAL_REQUIRED` |
 | `builder.discardDraft` · `restoreVersion` | medium | — | Draft back to live / a version copied into the draft. Not undoable |
 | `builder.stopAgent` | low | — | Stop the brand agent: frees its edit lease so the editor is writable at once. `{ stopped, sessionId }`; `stopped: false` when no agent was editing. The one write that gets through the lease. Not undoable |
+| `builder.copyDesign` | **high** | — | D53: another store's design (same org, both in the caller's stores) into this draft — theme, tokens, theme CSS, every page, template and region, saved blocks. `source: "published"` (default) or `"draft"`. Images stay as they are. Not undoable |
+| `builder.importTheme` | **high** | — | D53: a theme package (`format: "markii.theme"`, `version: 1`) into this draft. Every image must already be an https URL — files with bundled images go through `…/theme-import`. Not undoable |
 
 Every draft write answers with the new `revision` (null when nothing changed). All are undoable
-through `POST /api/actions/:id/undo` except publish, discard and restore.
+through `POST /api/actions/:id/undo` except publish, discard, restore, copy and import.
 
 **Refusals to handle by code:**
 - `409 AGENT_EDITING` — the brand agent holds the site's edit lease (owner, 2026-10-31: one writer
@@ -3059,7 +3064,7 @@ published pages; the published theme tokens reach every storefront page through 
 Published HTML carries no editor attributes and no builder JavaScript; FAQ blocks publish
 `FAQPage` JSON-LD. **The editor is `/dashboard/websites/{slug}/design`** (M2), and the **brand agent** is
 its Agent tab (M3, §27). **M7 is built too** — see the end of this section.
-**Custom code (M6, 2026-11-13) — levels 1–3 of `docs/BUILDER.md` §8; scripts are not built.**
+**Custom code (M6, 2026-11-13) — levels 1–3 of `docs/BUILDER.md` §8; custom scripts followed the same day (below).**
 **Migration 0047** adds `site_designs.draft_custom_css` / `published_custom_css` — apply it before
 deploying this code, or every storefront page fails reading the design row.
 
@@ -3133,6 +3138,39 @@ same day).** **Migration 0049** adds `site_saved_blocks` (RLS on) — apply it b
   used it alone — an insert copies. Both undoable.
 - **Copy, paste and duplicate are `builder.insertNodes`** with id-less subtrees (paste across pages and
   stores; the clipboard is per browser, never stored server-side). No new action.
+
+**Theme packages — copy, export, import (D53, 2026-11-19).** A store's design as one portable
+document (`lib/builder/theme-package.ts`): `format: "markii.theme"`, `version: 1`, `theme { themeId,
+tokens, customCss }`, `documents[] { kind, handle, title, seo, tree }`, `savedBlocks[] { name, node }`.
+The same format carries store-to-store copy, file export/import, and later the marketplace and the
+design half of a store export.
+
+- **What never travels:** head code (custom scripts) — the importing store keeps its own, and copying a
+  script across is `builder.setHeadCode` with its step-up (`copyDesign` answers `sourceHasHeadCode`,
+  the export answers `headCodeLeftOut`); and row ids — blocks name store data by slug and handle.
+- **Both writes are `high`** (theme CSS and custom HTML are a person's to write) and **replace the
+  draft, never what is live**. Neither is undoable, so both refuse with `409`, `details.reason:
+  "unpublished_changes"` when the draft holds unpublished work, unless `discardUnpublished: true`.
+  A store never designed gets a design started. Documents the package lacks leave the draft (a live
+  one keeps serving until publish); saved blocks join the library, and a name the store already uses
+  keeps the store's own (`skipped: [{ name, reason: "name_taken" | "limit" }]`).
+- **Images.** An image can sit in exactly four places — a block prop whose editor field is an image
+  (`image.src`, `storeBrand.logoSrc`, and any added later), a page's `seo.ogImage`, `<img src>` in
+  custom HTML, and `url()` in theme CSS — and one walker covers all four. A **copy** inside one org
+  keeps every URL: both stores share the org's uploads. An **export** copies the store's own uploads
+  (`public-media/{orgId}/…`) into the file as `asset:{sha256}` with the bytes in `assets[]`; images
+  hosted anywhere else, another org's uploads included, stay as links and are listed in
+  `images.external`. An **import** checks each image's hash, size and file signature, stores it at
+  `{orgId}/theme-assets/{sha256}.{ext}` in the importing org (content-addressed: the same theme twice
+  stores each image once), and rewrites the references. Limits: 100 images, 5 MB each, 25 MB in all
+  (`409 reason: "package_too_large"`). **Not counted against the storage quota** — G5 meters the files
+  merchants sell, and public images are uncounted by design.
+- **Files go through storage, never through a function body** (Vercel caps both directions at
+  4.5 MB): export writes one file per store to the private bucket and answers a five-minute link;
+  import is upload-url → browser `PUT` → import by `uploadId`. **Each upload has its own path**:
+  verified 2026-11-19, a server read of an object URL returned a file after it had been deleted, so a
+  reused slot could import the file a person had just replaced. A refused import can leave stored
+  images behind, at content-addressed paths a retry reuses.
 
 **Agent documents from the published design (M5, 2026-11-12).** The merchant's own published pages
 now reach every document an agent or crawler reads, all from **one list** (`lib/storefront-docs.ts`):

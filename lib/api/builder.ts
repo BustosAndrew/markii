@@ -328,3 +328,92 @@ export const discardDesignDraft = (siteId: number) => invokeAction<Revisioned>("
 /** Copies a version into the draft (not live until published). Irreversible — confirm first. */
 export const restoreDesignVersion = (siteId: number, version: number) =>
   invokeAction<{ version: number } & Revisioned>("builder.restoreVersion", { siteId, version });
+
+// ---------- moving a design between stores (D53) ----------
+
+/** Where one image reference sits, as the reports below name it — e.g. `page "home" › image n_…`. */
+export type ImageRef = { url: string; place: "block" | "seo" | "html" | "css"; where: string };
+
+/** What happened to a package's images. Show `external` and `unreadable` as warnings, never as errors. */
+export type ImageReport = {
+  /** Images carried inside the file (export) or stored in this org (import). */
+  bundled: number;
+  bytes: number;
+  /** Hosted outside the store's own uploads, so left as links — they break if that host removes them. */
+  external: ImageRef[];
+  /** The store's own uploads that could not be read; left as links. */
+  unreadable: ImageRef[];
+};
+
+export type DesignApplyResult = {
+  revision: number;
+  documents: number;
+  removedDocuments: number;
+  savedBlocks: { added: string[]; skipped: { name: string; reason: "name_taken" | "limit" }[] };
+  /** Custom scripts never travel: the store keeps its own. */
+  headCode: "kept";
+};
+
+/**
+ * Copy another store's design (same org) into this store's **draft** — not live
+ * until published. `high`: a signed-in person only. Refusals to handle by code:
+ * - `409 CONFLICT`, `details.reason: "unpublished_changes"` — the draft has work
+ *   that this would destroy. Confirm, then call again with `discardUnpublished: true`.
+ * - `409`, `reason: "nothing_published"` — the source has no live design; offer `source: "draft"`.
+ * - `409`, `reason: "no_design"` — the source store was never designed.
+ *
+ * `sourceHasHeadCode: true` means the source has custom scripts that were not
+ * copied; offer to copy them with `setHeadCode` (it asks for a fresh second factor).
+ */
+export const copyDesign = (input: { siteId: number; fromSiteId: number; source?: "published" | "draft"; discardUnpublished?: boolean }) =>
+  invokeAction<DesignApplyResult & { fromSiteId: number; sourceHasHeadCode: boolean }>("builder.copyDesign", input);
+
+export type ThemeExport = {
+  /** A five-minute download link to the `.json` file. Open it; do not store it. */
+  url: string;
+  expiresAt: string;
+  source: "draft" | "published";
+  documents: number;
+  savedBlocks: number;
+  images: ImageReport;
+  /** The store has custom scripts, which theme files never carry. Say so. */
+  headCodeLeftOut: boolean;
+};
+
+/**
+ * Export the design as a theme package file with the store's own images inside
+ * it (`cms.read`). `409 reason: "nothing_published"` for `source: "published"`
+ * on a store with nothing live; `409 reason: "package_too_large"` past 100
+ * images / 5 MB each / 25 MB total.
+ */
+export const exportTheme = (site: string | number, source: "draft" | "published" = "draft") =>
+  callWhenLive(BUILDER_API_LIVE, SECTION, () => apiPost<ThemeExport>(`/api/builder/sites/${site}/theme-export`, { source }));
+
+/**
+ * Import a theme package file, in three steps — the file goes **straight to
+ * storage**, because a theme with images is past the 4.5 MB a request may carry:
+ *
+ * 1. `createThemeUpload(site)` → `{ uploadId, uploadUrl, method, headers }`.
+ * 2. `fetch(uploadUrl, { method, headers, body: file })` from the browser.
+ * 3. `importThemeUpload(site, uploadId)` — with `dryRun: true` first to show
+ *    what it will do, then for real. Same refusals as `copyDesign`
+ *    (`unpublished_changes`), plus `400` for a file that is not a package or is
+ *    damaged, and `404 reason: "no_upload"` for an unknown or someone else's upload.
+ *
+ * Each upload gets a new `uploadId`; never reuse one for a different file.
+ */
+export const createThemeUpload = (site: string | number) =>
+  callWhenLive(BUILDER_API_LIVE, SECTION, () =>
+    apiPost<{ uploadId: string; uploadUrl: string; method: "PUT"; headers: Record<string, string> }>(
+      `/api/builder/sites/${site}/theme-import/upload-url`,
+      {},
+    ),
+  );
+
+export const importThemeUpload = (site: string | number, uploadId: string, opts: { discardUnpublished?: boolean; dryRun?: boolean } = {}) =>
+  callWhenLive(BUILDER_API_LIVE, SECTION, () =>
+    apiPost<{ invocationId: string; ok: boolean; dryRun: boolean; result?: DesignApplyResult; images: ImageReport }>(
+      `/api/builder/sites/${site}/theme-import${opts.dryRun ? "?dryRun=1" : ""}`,
+      { uploadId, discardUnpublished: opts.discardUnpublished ?? false },
+    ),
+  );

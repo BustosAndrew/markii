@@ -170,6 +170,7 @@ describe("a builder page's structured data", () => {
     products,
     categories,
     collections: [],
+    membersOf: async () => [],
     values: { store },
     page: { name: "Teas", description: "All our teas", url: "https://leaf.test/pages/teas" },
   };

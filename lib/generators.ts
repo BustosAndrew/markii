@@ -1,6 +1,7 @@
 import type { Product as SchemaProduct, WithContext } from "schema-dts";
 import { slugify, tenantBaseUrl } from "@/lib/api";
 import { decimalMinor } from "@/lib/api/money";
+import { formatPrice } from "./builder/format";
 import type { Category, Collection, Product, Site } from "@/lib/db";
 import { getTheme, themeDocumentStylesheet } from "@/lib/storefront/themes";
 
@@ -100,10 +101,8 @@ export function bundleFromDb(
  * `15.00 JPY`). Until 2026-10-29 this divided by 100 for every currency and a
  * yen product showed one price while charging 100× another (D49).
  */
-export function formatPrice(cents: number, currency: string): string {
-  const value = decimalMinor(cents, currency);
-  return currency === "USD" || currency === "USDC" ? `$${value}` : `${value} ${currency}`;
-}
+/** One definition, kept with the builder's drawing code (D53) so every surface shows the same price. */
+export { formatPrice };
 
 export function escapeHtml(s: string): string {
   return s

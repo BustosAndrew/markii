@@ -397,13 +397,22 @@ Phase F with the chat UI.
   as a Next.js app** the merchant deploys anywhere, running headless against the store's own
   storefront API. **One renderer, not two:** the block registry, `render.tsx`, bindings and the
   agent-document generators become a package that both Markii's storefront and the exported app
-  import, so an export cannot render, or describe to agents, differently from the live store. **That
-  split is a refactor, not a move:** today `lib/builder/` imports `@/lib/db` (9 files),
-  `@/lib/generators`, `@/lib/tenancy`, storefront themes and collections, and the storefront
-  `product-card` / `add-to-cart` components. The package side is the blocks, `render.tsx`, bindings,
-  styles, tokens and `to-markdown.ts`; data access (`store.ts`, `queries.ts`, `views.ts`) moves behind
-  an interface that Markii satisfies from the database and the exported app from the storefront API.
-  New renderer code should not add direct `@/lib/db` reads. **The package is Apache 2.0; the rest of
+  import, so an export cannot render, or describe to agents, differently from the live store. **The
+  boundary is drawn as of 2026-11-20 (stage 1 of the split), and a test holds it.** The drawing
+  code — everything reachable from `render.tsx`, `to-markdown.ts`, `views.ts`, `block-css.ts`,
+  `tokens.ts`, `theme-package.ts`, `product-card.tsx`, `catalog.ts` and `format.ts` — imports only
+  itself, `react`, `zod`, `cheerio`, `node:crypto`, and three pure modules that move with it
+  (`lib/api/money.ts`, `lib/storefront/themes.ts`, `lib/api/types.ts`);
+  `lib/builder/renderer-boundary.test.ts` walks the imports and refuses anything else (falsified: a
+  type-only `@/lib/db` import in `views.ts` fails it). What used to cross the line now arrives
+  through the render context: **the catalogue as the renderer's own shapes** (`lib/builder/catalog.ts`
+  — database rows fit them as they are), **collection lookups as `membersOf(handle, limit)`** (Markii's
+  side is `membersByHandle` in `lib/storefront/collections.ts`), and **the cart as a rendered element**
+  (`ProductPurchase.buy` — the product route renders `AddToCart`, the renderer only places it).
+  `formatPrice` and `ProductCard` moved in, and their old homes re-export them. **Stage 2, the move
+  into its own Apache-licensed package, waits on the repo's `LICENSE` and the copyright holder's legal
+  name** (D26, G9). Never add a `@/lib/db` read, a server-only module or a client island to the drawing
+  code — the test will say so. **The package is Apache 2.0; the rest of
   Markii stays FSL** (D53) — so nothing outside the drawing code may move into it, since anything
   that does is permissively licensed for good from its first release. **The storefront API is not yet enough
   to run headless** (checked 2026-11-19): it has cart, checkout, search, shopper auth and memberships,
@@ -421,19 +430,23 @@ Phase F with the chat UI.
     id means nothing in another store. Today's blocks already comply (`productGrid`, `productCard`
     use `categorySlug`, `collectionHandle`, `productSlug`); a handle the importing store lacks must
     render empty, not fail.
-  - **Images travel inside the package.** Every image reference (`image` block `src`, page
-    `seo.image`, custom HTML `<img src>`, theme CSS `url()`) to the store's own media is copied in on
-    export and rewritten to `asset:{sha256}`; import uploads them to the importing store's
-    `public-media`, deduplicated by hash, and rewrites the tokens in the same draft edit. Quota is
-    checked for the whole package first (`409 QUOTA_EXCEEDED`), so nothing half-lands. External URLs
-    are kept with a warning in a store-to-store copy and refused in a marketplace submission until
-    bundled. Product images are not theme assets — they come from the importing store's catalog
-    through bindings. **A new place that can hold an image URL must join this list**, or a package
-    silently ships a link back to the seller's store.
-  - **Import is a draft edit by a person**, through the registry; it never publishes. Custom HTML is
+  - **Images travel inside the package** (built 2026-11-19, `lib/builder/theme-package.ts`
+    `mapImages`). An image can sit in four places — a block prop whose editor field is `kind:
+    "image"` (found from the registry, so a new image prop joins on its own), a page's
+    `seo.ogImage`, custom HTML `<img src>`, theme CSS `url()` — and one walker covers all four. A
+    same-org copy keeps the URLs; an export copies the store's own uploads in as `asset:{sha256}`;
+    import checks hash, size and file signature and stores them content-addressed in the importing
+    org's `public-media`. Bounded by the package's own limits (100 images, 5 MB each, 25 MB), **not
+    the storage quota**, which meters only files merchants sell (G5). External URLs are kept and
+    reported; a marketplace submission will refuse them until bundled. Product images are not theme
+    assets — they come from the importing store's catalog through bindings. **A new place that can
+    hold an image URL must join `mapImages`**, or a package silently ships a link back to the seller's
+    store. The blog, forms and anything else that adds an image field inherit this rule.
+  - **Import is a draft edit by a person**, through the registry (`builder.copyDesign`,
+    `builder.importTheme`, both `high`); it never publishes. Every tree is validated and custom HTML
     rebuilt from the allowlist again on import.
-  - **Head scripts never travel in a marketplace theme**, and arrive *off* in a store-to-store copy
-    until someone holding `cms.scripts` re-approves them with step-up.
+  - **Head scripts never travel** — not in a marketplace theme, a file or a store-to-store copy. The
+    importing store keeps its own; copying one across is `builder.setHeadCode`, with step-up.
   - **Markii is never in a paid theme's funds flow** (D4). Paid-versus-free-only, licensing and
     designer review are still open and go to counsel with the licence.
 - ~~Concurrent-editing conflict policy~~ — **decided 2026-10-31 (D51): one writer at a time.** Writes

@@ -660,6 +660,20 @@ without ids and cleaned like any insert, not the agent's). The editor's bulk pla
 `components/builder/tree.ts` and are tested against the server's tree operations — they must agree to
 the index.
 
+**Theme packages are built as of 2026-11-19 (D53)** — a design as one portable document
+(`lib/builder/theme-package.ts`): **`builder.copyDesign`** between one org's stores and file
+**export/import** (`…/theme-export`, `…/theme-import`) with the store's own images inside by content
+hash. Both writes are `high`, replace the **draft** only, are not undoable, and refuse unpublished work
+without `discardUnpublished`. **Head code never travels.** One walker (`mapImages`) finds an image in
+all four places it can sit — **a new image field must join it**. Files go through storage, never a
+function body, and **each import upload takes a new path**: a server read of a storage URL returned a
+file after it was deleted. **The renderer's boundary is drawn (2026-11-20)**: the drawing code imports
+only itself plus `lib/api/money.ts`, `lib/storefront/themes.ts` and `lib/api/types.ts`, and
+`lib/builder/renderer-boundary.test.ts` refuses anything else — **never add a `@/lib/db` read, a
+server-only module or a client island to it**; data arrives through the render context. The move into
+its own Apache package waits on the repo's `LICENSE`. The storefront read API, Next.js export, store
+export and marketplace are not built.
+
 **Stripe Tax on Markii's own subscription is built as of 2026-09-13** (G3). `automatic_tax` on every
 platform-account subscription create, change and preview — **no `Stripe-Account` header**, the
 opposite direction of money from §18.6 — decided from two facts that are reported apart and never

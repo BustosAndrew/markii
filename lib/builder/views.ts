@@ -1,5 +1,5 @@
-import type { Category, Collection, Product, Site } from "@/lib/db";
-import { formatPrice } from "@/lib/generators";
+import type { RenderCategory as Category, RenderCollection as Collection, RenderProduct as Product } from "./catalog";
+import { formatPrice } from "./format";
 import type { CollectionView, ProductView, StoreView } from "./bindings";
 
 /**
@@ -52,7 +52,7 @@ export function collectionView(c: Collection, ctx: { baseUrl: string; productCou
   };
 }
 
-export function storeView(site: Pick<Site, "name">, ctx: { baseUrl: string; products: Product[]; collections: Collection[] }, now = new Date()): StoreView {
+export function storeView(site: { name: string }, ctx: { baseUrl: string; products: Product[]; collections: Collection[] }, now = new Date()): StoreView {
   return {
     name: site.name,
     url: `${trimBase(ctx.baseUrl)}/`,
@@ -63,7 +63,7 @@ export function storeView(site: Pick<Site, "name">, ctx: { baseUrl: string; prod
 }
 
 /** A product's related products, enabled only, in the merchant's order. */
-export function relatedProducts(p: Product, products: Product[]): Product[] {
+export function relatedProducts<P extends Product>(p: Product, products: P[]): P[] {
   const byId = new Map(products.filter((x) => x.enabled).map((x) => [x.id, x]));
-  return p.suggestedProductIds.map((id) => byId.get(id)).filter((x): x is Product => Boolean(x));
+  return p.suggestedProductIds.map((id) => byId.get(id)).filter((x): x is P => Boolean(x));
 }

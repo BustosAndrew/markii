@@ -34,6 +34,7 @@ import "./definitions/payments";
 import "./definitions/domains";
 import "./definitions/platform";
 import "./definitions/builder";
+import "./definitions/builder-package";
 
 export { defineAction, getAction, allActions, describeAction } from "./registry";
 export {

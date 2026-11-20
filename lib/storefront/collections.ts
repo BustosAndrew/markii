@@ -49,3 +49,15 @@ export async function storefrontMembersOf(collection: Collection, limit = 200): 
   const members = await membersOf(collection, limit, 0);
   return members.filter((p) => p.enabled);
 }
+
+/**
+ * The renderer's collection lookup (`lib/builder/catalog.ts` `MembersOf`),
+ * bound to the store's published collections. The drawing code asks by
+ * handle; this is Markii's side of that line, answering from the database.
+ */
+export function membersByHandle(published: Collection[]): (handle: string, limit: number) => Promise<Product[]> {
+  return async (handle, limit) => {
+    const collection = published.find((c) => c.handle === handle);
+    return collection ? storefrontMembersOf(collection, limit) : [];
+  };
+}

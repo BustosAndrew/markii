@@ -11,7 +11,7 @@ import {
 } from "./generators";
 import { defaultWallet } from "./integrations";
 import { publishedPages, type SiteData } from "./storefront";
-import { storefrontMembersOf } from "./storefront/collections";
+import { membersByHandle } from "./storefront/collections";
 
 /**
  * The agent-facing documents a storefront publishes, rendered from one
@@ -88,7 +88,7 @@ export async function renderLlmsFullTxt(data: SiteData): Promise<string | null> 
     categories: cats,
     collections: colls,
     values: { store: storeView(site, { baseUrl, products: prods, collections: colls }) },
-    membersOf: storefrontMembersOf,
+    membersOf: membersByHandle(colls),
     // The document's title is the h1; each page's own h1 sits under its ## section.
     headingOffset: 2,
   };

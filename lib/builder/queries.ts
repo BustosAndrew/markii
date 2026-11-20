@@ -186,3 +186,21 @@ export async function designVersions(siteId: number) {
     .limit(100);
   return rows.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() }));
 }
+
+/**
+ * Everything a theme package is built from (D53): the design row, every
+ * document and the saved blocks. Null when the design was never started.
+ */
+export async function packageSourceRows(siteId: number) {
+  const design = await designRow(siteId);
+  if (!design) return null;
+  const [documents, saved] = await Promise.all([
+    db.select().from(siteDocuments).where(eq(siteDocuments.siteId, siteId)).orderBy(asc(siteDocuments.id)),
+    db
+      .select({ name: siteSavedBlocks.name, node: siteSavedBlocks.node })
+      .from(siteSavedBlocks)
+      .where(eq(siteSavedBlocks.siteId, siteId))
+      .orderBy(asc(siteSavedBlocks.name)),
+  ]);
+  return { design, documents, savedBlocks: saved };
+}

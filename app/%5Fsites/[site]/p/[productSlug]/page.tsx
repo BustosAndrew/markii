@@ -129,7 +129,8 @@ export default async function ProductPage({ params }: Props) {
           product: {
             record: dbProduct,
             purchase: {
-              addToCart,
+              // The island is rendered here, on Markii's side: the drawing code never imports the cart (D53).
+              buy: <AddToCart {...addToCart} />,
               gate: gate ? { tierName: gate.tierName, unlocked: gate.unlocked } : null,
               agentCheckout: agentCheckout ? { request: agentCheckout, agentMdHref: `${baseUrl}/agent.md` } : null,
             },
