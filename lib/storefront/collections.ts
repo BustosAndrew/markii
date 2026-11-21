@@ -51,7 +51,7 @@ export async function storefrontMembersOf(collection: Collection, limit = 200): 
 }
 
 /**
- * The renderer's collection lookup (`lib/builder/catalog.ts` `MembersOf`),
+ * The renderer's collection lookup (`packages/renderer/src/catalog.ts` `MembersOf`),
  * bound to the store's published collections. The drawing code asks by
  * handle; this is Markii's side of that line, answering from the database.
  */

@@ -1,6 +1,5 @@
-import type { ThemeId } from "@/lib/api/types";
-
-export type { ThemeId };
+/** The built-in themes. Defined here, in the drawing code, and re-exported by `lib/api/types.ts`. */
+export type ThemeId = "studio" | "atlas" | "noir" | "bloom";
 
 export type ThemeTokens = {
   id: ThemeId;

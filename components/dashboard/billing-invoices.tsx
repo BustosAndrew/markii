@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { FeeAssessment, Invoice, InvoicesResponse } from "@/lib/api/billing";
-import { formatMinor } from "@/lib/api/money";
+import { formatMinor } from "@markii/renderer/money";
 import { Badge } from "@/components/ui/badge";
 
 function invoiceStatus(status: string): {

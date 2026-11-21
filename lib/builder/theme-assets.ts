@@ -13,7 +13,7 @@ import {
   type ImageRef,
   type ThemeFile,
   type ThemePackage,
-} from "./theme-package";
+} from "@markii/renderer/theme-package";
 
 /**
  * A theme package's images, carried inside the file (D53).

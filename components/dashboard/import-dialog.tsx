@@ -14,7 +14,7 @@ import {
   type ImportWarning,
 } from "@/lib/api/import";
 import { ApiClientError, type Site } from "@/lib/api/types";
-import { formatCents } from "@/lib/api/money";
+import { formatCents } from "@markii/renderer/money";
 import { assertCsvFile, assertPublicHttpsUrl } from "@/lib/validate-import";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

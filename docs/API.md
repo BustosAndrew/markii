@@ -3019,6 +3019,7 @@ its tokens — and writes a version snapshot.
 | `POST` | `/api/builder/sites/:idOrSlug/preview-session` | `201 { url, expiresAt }` — a two-hour live-preview URL for the editor's iframe (M2). A route, not an action: the result is a credential and must stay out of the audit log, as API tokens do |
 | `POST` | `/api/builder/sites/:idOrSlug/theme-export` | D53. `201 { url, expiresAt, source, documents, savedBlocks, images, headCodeLeftOut }` — the design as a theme package file with the store's own images inside, behind a five-minute link. Body `{ source: "draft" \| "published" }` (default draft). `cms.read`. A route: the result is a download link |
 | `POST` | `/api/builder/sites/:idOrSlug/theme-import/upload-url` | D53. `201 { uploadId, uploadUrl, method: "PUT", headers }` — the browser `PUT`s the file straight to private storage (past 4.5 MB a request cannot carry it). A new `uploadId` every time. `cms.write` |
+| `POST` | `/api/builder/sites/:idOrSlug/next-export` | D53, 2026-11-20. `201 { url, expiresAt, files, bytes, storeUrl, storeLive }` — the storefront as a **Next.js app** the merchant owns, a zip behind a five-minute link. It reads the store **live** through the storefront read API (§23) and draws with `@markii/renderer`, so design and catalogue changes need no re-export; it checks out on this store's hosted cart (`/cart?recover=`). Apache 2.0 throughout, **no secret inside**. `storeLive: false` for a draft or paused store — it exports, and shows nothing until live. `cms.read`. A route: it changes nothing |
 | `POST` | `/api/builder/sites/:idOrSlug/theme-import` | D53. `{ uploadId, discardUnpublished? }`, `?dryRun=1` — checks and stores the file's images in this org, then runs **`builder.importTheme`**. Answers the invocation outcome plus `images` |
 
 All `cms.read`. Writes are `cms.write`:
@@ -3076,7 +3077,7 @@ deploying this code, or every storefront page fails reading the design row.
   `behavior`/`-moz-binding`, unbalanced braces, or more than 20,000 characters. Published, discarded,
   versioned and restored with the rest of the design; `customCss` on the design summary.
 - **Custom HTML block** (`html`, category `advanced`) — rebuilt from an allowlist on save **and**
-  on render (`lib/builder/sanitize.ts`): no script, style, iframe, form, svg, object or event
+  on render (`packages/renderer/src/sanitize.ts`): no script, style, iframe, form, svg, object or event
   handler; links http(s)/mailto/tel/relative only; images https only; `data-mk-*` and `mk-`/`sf-`
   classes stripped. **Only a signed-in person may write it**: any tree edit that adds or changes
   custom HTML — `addBlock`, `insertNodes`, `setProps`, `duplicateNode` — from an agent or API token
@@ -3140,7 +3141,7 @@ same day).** **Migration 0049** adds `site_saved_blocks` (RLS on) — apply it b
   stores; the clipboard is per browser, never stored server-side). No new action.
 
 **Theme packages — copy, export, import (D53, 2026-11-19).** A store's design as one portable
-document (`lib/builder/theme-package.ts`): `format: "markii.theme"`, `version: 1`, `theme { themeId,
+document (`packages/renderer/src/theme-package.ts`): `format: "markii.theme"`, `version: 1`, `theme { themeId,
 tokens, customCss }`, `documents[] { kind, handle, title, seo, tree }`, `savedBlocks[] { name, node }`.
 The same format carries store-to-store copy, file export/import, and later the marketplace and the
 design half of a store export.
@@ -3179,7 +3180,7 @@ engines hides it from agents too. The sitemap lists them; `llms.txt` gains a `##
 (title, address, the page's SEO description) and a link to **`/llms-full.txt`** — new: the full text
 of every listed page, home first, as Markdown (the llms.txt convention's full-text companion),
 rendered from the published tree with the same bindings, visibility and catalogue as the HTML
-(`lib/builder/to-markdown.ts`; product listings come out as links with price and stock).
+(`packages/renderer/src/to-markdown.ts`; product listings come out as links with price and stock).
 `agent.md` points at it by page name. `llms-full.txt` is gated like `llms.txt` (agent discovery off
 or the store halted → `404`), `404`s when no page is published, and is logged as agent traffic.
 
@@ -3634,7 +3635,7 @@ Not traffic-logged: an export reads it on revalidation, not per visitor. Money i
 
 | Route | Answers |
 |---|---|
-| `GET /api/store` | `{ store: { name, slug, url, purchasesEnabled, rails: { stripe, x402 } }, categories[], collections[], design }` — `design` is the **published** theme package (§19, `format: "markii.theme"`) with `savedBlocks: []` and no head code, or `null` when nothing is published (render the fixed layout) |
+| `GET /api/store` | `{ store: { name, slug, url, themeId, agentDiscovery, purchasesEnabled, rails: { stripe, x402 } }, categories[], collections[], design }` — `design` is the **published** theme package (§19, `format: "markii.theme"`) with `savedBlocks: []` and no head code, or `null` when nothing is published (render the fixed layout) |
 | `GET /api/products?limit=&offset=` | `{ total, limit, offset, next, products[] }` — enabled, oldest first; `limit` default 50, max 250, a bad value clamps rather than 400s |
 | `GET /api/products/{slug}` | the product plus `options[]` and `variants[] { id, title, optionValues, priceMinor, available }` — the product page's own reads; `404` for unknown or disabled |
 | `GET /api/collections/{handle}?limit=` | `{ collection, products[] }` in the merchant's order, rules evaluated, enabled only; `404` unless published |
@@ -3661,6 +3662,8 @@ guest checkout does). It happens in `currentCustomer()`, so **every** shopper ga
 adding a gated product to a cart, `assertCartAccess` at checkout, `POST /api/checkout/subscription`
 (recurring memberships — the renewal webhook needs no session), and `GET /api/account/memberships` /
 `DELETE …/{id}/renewal`. With a key, the request's cookies are ignored. Without one, nothing changed.
+
+**A cart is claimed for the shopper who fills it** (2026-11-20): adding a line while a shopper is named — by session or by key — sets the cart's customer, never overwriting one. **Checkout and subscription checkout read the claim when the request names no shopper**, which is how a member sent from an export to this store's hosted cart (`/cart?recover={token}`) checks out without a session on this host. The tiers are still read at checkout, so a membership that lapsed since is refused.
 
 | Answer | When |
 |---|---|

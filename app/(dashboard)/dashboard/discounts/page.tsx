@@ -2,7 +2,7 @@ import Link from "next/link";
 import { getMe, listDiscounts, listSites } from "@/lib/api/server";
 import { DiscountPreviewPanel } from "@/components/dashboard/discount-preview";
 import { firstParam, loadOrError, parseLimit, parsePage } from "@/lib/api/load";
-import { formatMinor } from "@/lib/api/money";
+import { formatMinor } from "@markii/renderer/money";
 import type { Discount } from "@/lib/api/commerce";
 import { FetchError } from "@/components/dashboard/fetch-error";
 import { Badge } from "@/components/ui/badge";

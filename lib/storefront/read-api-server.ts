@@ -1,7 +1,7 @@
 import "server-only";
 import { notFound } from "@/lib/api";
 import { packageSourceRows } from "@/lib/builder/queries";
-import { packageFromDesign, type ThemePackage } from "@/lib/builder/theme-package";
+import { packageFromDesign, type ThemePackage } from "@markii/renderer/theme-package";
 import { loadSite, storefrontHalted, type SiteData } from "@/lib/storefront";
 
 /**

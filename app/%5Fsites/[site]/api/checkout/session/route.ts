@@ -72,8 +72,13 @@ export const POST = handler(async (req, { params }) => {
    * is the last point where a refusal costs nobody anything; the same check at
    * completion would take money on the x402 rail — which settles irreversibly —
    * and then decline to hand over the goods.
+   *
+   * **Whose membership:** the shopper signed in here, or else the customer the
+   * cart was claimed for when its lines were added — how a member sent from an
+   * exported storefront (D53) checks out on this host without a session on it.
+   * Either way the tiers are read now, so a lapse since is still refused.
    */
-  await assertCartAccess(site.id, priced.lines, await currentCustomerId(site.id));
+  await assertCartAccess(site.id, priced.lines, (await currentCustomerId(site.id)) ?? cart.customerId);
 
   /**
    * A recurring membership (§18.9) does not settle through a PaymentIntent — it

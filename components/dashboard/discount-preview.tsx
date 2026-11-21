@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { previewDiscounts, type DiscountPreview } from "@/lib/api/commerce";
-import { formatMinor } from "@/lib/api/money";
+import { formatMinor } from "@markii/renderer/money";
 import { publicErrorMessage } from "@/lib/api/public-copy";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

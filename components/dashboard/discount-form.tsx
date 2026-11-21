@@ -9,7 +9,7 @@ import {
   type Discount,
   type DiscountInput,
 } from "@/lib/api/commerce";
-import { currencyExponent, formatMinor } from "@/lib/api/money";
+import { currencyExponent, formatMinor } from "@markii/renderer/money";
 import { ApiClientError, type Site } from "@/lib/api/types";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";

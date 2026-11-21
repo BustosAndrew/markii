@@ -10,7 +10,7 @@ import {
   type Site,
   type ThemeId,
 } from "@/lib/api/types";
-import { THEMES } from "@/lib/storefront/themes";
+import { THEMES } from "@markii/renderer/themes";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { FieldError, Label } from "@/components/ui/field";

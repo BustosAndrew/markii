@@ -616,7 +616,7 @@ been saved with id `""`, so resumed transcripts rendered with duplicate React ke
 A product/collection **template** and the announcement/header/footer **regions** are ordinary
 documents (`kind` template/region; **no migration** — 0046 already allowed both), so every tree edit,
 undo, check and publish works on them; customise starts from the built-in layout and **reset is
-`builder.deletePage`**. Bindings and visibility are a **closed whitelist** (`lib/builder/bindings.ts`),
+`builder.deletePage`**. Bindings and visibility are a **closed whitelist** (`packages/renderer/src/bindings.ts`),
 never an expression; a path whose data the document lacks blocks publish rather than rendering a
 placeholder to shoppers. **Every storefront page renders `StoreTop`/`StoreFooter`**, never
 `SiteHeader` directly, or it shows a header the merchant replaced. **The product and collection
@@ -626,7 +626,7 @@ node styles. The brand agent can do all of it (four more `agentExecution: "draft
 
 **The agent documents read the published design as of 2026-11-12 (M5)** — `docs/API.md` §19. The
 sitemap, `llms.txt` and the new **`llms-full.txt`** (every published page's text as Markdown,
-`lib/builder/to-markdown.ts`) all read **one list in `lib/storefront-docs.ts`**: published pages,
+`packages/renderer/src/to-markdown.ts`) all read **one list in `lib/storefront-docs.ts`**: published pages,
 **never a `noindex` one** — hiding a page from search hides it from agents. Builder pages carry
 `WebPage`, `FAQPage` and an `ItemList` per visible product listing; the home page carries `WebSite`
 with a `SearchAction`. **`builder.updatePage` replaces `seo` whole**, so a form that sends one field
@@ -635,7 +635,7 @@ wipes the others — the editor's SEO form sends all four.
 **Custom CSS, custom HTML and custom classes are built as of 2026-11-13 (M6, `docs/BUILDER.md` §8
 levels 1–3) — custom JavaScript is not.** **Migration 0047** (two text columns on `site_designs`)
 must be applied before this code deploys. Custom HTML is **rebuilt from an allowlist, never filtered
-in place** (`lib/builder/sanitize.ts`), on save and again on render. **Only a signed-in person writes
+in place** (`packages/renderer/src/sanitize.ts`), on save and again on render. **Only a signed-in person writes
 custom code**: `setCustomCss` is `high`, and every generic tree edit refuses a custom-HTML change from
 an agent or token (`assertCustomCodeAuthor` in the builder actions — the rule lives on what an edit
 *does*, because `addBlock` is the brand agent's own low-risk tool). **None of it renders on the cart
@@ -661,17 +661,20 @@ without ids and cleaned like any insert, not the agent's). The editor's bulk pla
 the index.
 
 **Theme packages are built as of 2026-11-19 (D53)** — a design as one portable document
-(`lib/builder/theme-package.ts`): **`builder.copyDesign`** between one org's stores and file
+(`packages/renderer/src/theme-package.ts`): **`builder.copyDesign`** between one org's stores and file
 **export/import** (`…/theme-export`, `…/theme-import`) with the store's own images inside by content
 hash. Both writes are `high`, replace the **draft** only, are not undoable, and refuse unpublished work
 without `discardUnpublished`. **Head code never travels.** One walker (`mapImages`) finds an image in
 all four places it can sit — **a new image field must join it**. Files go through storage, never a
 function body, and **each import upload takes a new path**: a server read of a storage URL returned a
-file after it was deleted. **The renderer's boundary is drawn (2026-11-20)**: the drawing code imports
-only itself plus `lib/api/money.ts`, `lib/storefront/themes.ts` and `lib/api/types.ts`, and
-`lib/builder/renderer-boundary.test.ts` refuses anything else — **never add a `@/lib/db` read, a
-server-only module or a client island to it**; data arrives through the render context. The move into
-its own Apache package waits on the repo's `LICENSE`. **The storefront read API is built (2026-11-20)** —
+file after it was deleted. **The drawing code is its own package as of 2026-11-20** —
+`packages/renderer/` (`@markii/renderer/*`, a tsconfig path alias; **Apache 2.0** under its own
+`LICENSE`/`NOTICE`, everything else FSL). Tree ops, blocks, bindings, styles, tokens, the renderer,
+Markdown/JSON-LD, the theme package format, `money.ts` and `themes.ts` live there; `lib/builder/` keeps
+the server half (store, queries, lease, preview, assets). `lib/builder/renderer-boundary.test.ts`
+refuses any import from the package to anything outside it but `react`, `zod`, `cheerio` and
+`node:crypto` — **never add a `@/lib/db` read, a server-only module, an `@/` import or a client island
+there**; data arrives through the render context. **Code that moves into it becomes Apache for good.** **The storefront read API is built (2026-11-20)** —
 `/api/store`, `/api/products[/{slug}]`, `/api/collections/{handle}` on the store host, public and
 credential-free, nothing a shopper cannot already see (`docs/API.md` §23). **An export's shopper
 sign-in, database and hosting are its owner's** (owner, 2026-11-20): Markii issues no cross-origin
@@ -680,8 +683,12 @@ shopper credential. **Members-only products still sell from an export** through 
 `Markii-Shopper-Email`, migration **0050**), resolved inside `currentCustomer()` so every shopper gate
 follows; a key with an `Origin` header is refused. **An action that returns a secret sets
 `redactResult`** — the audit row stores results. Licence files carry `Copyright 2026 Markii`
-(`LICENSE`, `TRADEMARK.md`, `packages/renderer/`). Next.js export, store export and marketplace are
-not built.
+(`LICENSE`, `TRADEMARK.md`, `packages/renderer/`). **The Next.js export is built (2026-11-20)** —
+`…/next-export`, the renderer plus the Apache scaffold in `packages/renderer/next-app/`, reading the
+store live and checking out on its hosted cart (`/cart?recover=`). **The scaffold imports only itself,
+`@markii/renderer/*`, Next and React** — a test holds it, because anything else would ship FSL code
+to merchants. Adding a cart line **claims the cart** for the shopper named, and checkout reads the
+claim when no session is present. Store export and marketplace are not built.
 
 **Stripe Tax on Markii's own subscription is built as of 2026-09-13** (G3). `automatic_tax` on every
 platform-account subscription create, change and preview — **no `Stripe-Account` header**, the
@@ -994,7 +1001,7 @@ beside a live preview, and chose the full `docs/BUILDER.md` builder to carry it.
 **Supabase** for database, auth, and file storage (replaces Neon; migrate before Phase A, schema
 unchanged). **Stripe Connect Standard** — merchants keep their own account; Markii never takes an
 `application_fee_amount`. **FSL-1.1-ALv2** licence: public source, self-hostable, no
-resale-as-a-service — **except the builder's renderer package, which is Apache 2.0** once it is split
+resale-as-a-service — **except the builder's renderer package, which is Apache 2.0** now that it is split
 out of `lib/builder/` (D53), because a store's Next.js export ships it. Only drawing code goes in it. Authorization lives in the action registry, **never** Postgres RLS — but
 enable RLS deny-by-default anyway, and never expose the service-role key to the browser.
 

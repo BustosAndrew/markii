@@ -1,7 +1,7 @@
 import { lookup } from "node:dns/promises";
 import * as cheerio from "cheerio";
 import { badRequest, slugify } from "@/lib/api";
-import { currencyExponent } from "@/lib/api/money";
+import { currencyExponent } from "@markii/renderer/money";
 
 /**
  * The importer (§5) — parse a CSV, or read a Shopify / WooCommerce / JSON-LD

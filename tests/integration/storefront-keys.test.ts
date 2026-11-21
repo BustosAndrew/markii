@@ -98,6 +98,46 @@ describe("storefront secret keys", () => {
     if (cart) cleanup.cartIds.push(cart.id);
   });
 
+  /**
+   * The export hands the shopper to this store's hosted cart (`/cart?recover=`)
+   * to pay, where they hold no session. The cart was claimed for the member as
+   * its lines were added, and that claim — not a session — is what checkout's
+   * membership re-check reads. A guest's cart, claimed by nobody, is refused.
+   */
+  it("checks a member's cart out on the hosted checkout without a session there", async () => {
+    const [loc] = await sql`insert into locations (site_id, name, is_default) values (${siteId}, 'Main', true) returning id`;
+    cleanup.locationIds.push(loc.id);
+    const [v] = await sql`insert into variants (product_id, title, option_values, price_minor, requires_shipping, inventory_policy)
+      values (${gated.id}, 'Default', ${sql.json({ Edition: "Default" })}, 2000, false, 'deny') returning id`;
+    cleanup.variantIds.push(v.id);
+    await sql`insert into inventory_ledger (variant_id, location_id, available_delta, reason, actor_type)
+      values (${v.id}, ${loc.id}, 5, 'test seed', 'system')`;
+
+    const built = await server("/api/cart", { key, email: member, method: "POST", body: { productId: gated.id, variantId: v.id, quantity: 1 } });
+    expect(built.status, JSON.stringify(built.json)).toBe(201);
+    const [cart] = await sql`select id, customer_id from carts where token = ${built.json.token}`;
+    cleanup.cartIds.push(cart.id);
+    expect(cart.customer_id).not.toBeNull();
+
+    // The shopper's browser on the hosted checkout: no key, no cookie.
+    const session = await server("/api/checkout/session", { method: "POST", body: { cartToken: built.json.token, rail: "x402" } });
+    expect(session.status, JSON.stringify(session.json)).toBe(201);
+    cleanup.checkoutSessionIds.push(session.json.id);
+
+    // A lapse since the cart was filled is still caught: the claim names whose tiers to read, it grants none.
+    const later = await server("/api/cart", { key, email: member, method: "POST", body: { productId: gated.id, variantId: v.id, quantity: 1 } });
+    expect(later.status).toBe(201);
+    const [laterCart] = await sql`select id from carts where token = ${later.json.token}`;
+    cleanup.cartIds.push(laterCart.id);
+    await sql`update customer_memberships set revoked_at = now() where customer_id = ${cart.customer_id}`;
+    try {
+      const refused = await server("/api/checkout/session", { method: "POST", body: { cartToken: later.json.token, rail: "x402" } });
+      expect(refused.status).toBe(409);
+    } finally {
+      await sql`update customer_memberships set revoked_at = null where customer_id = ${cart.customer_id}`;
+    }
+  });
+
   it("answers the member's own memberships, and needs a named shopper to", async () => {
     const mine = await server("/api/account/memberships", { key, email: member });
     expect(mine.status).toBe(200);

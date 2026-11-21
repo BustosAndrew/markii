@@ -1,10 +1,10 @@
 import type { BlockDescription, Breakpoint, NodeInput, PageNode, StyleProps } from "@/lib/api/builder";
-import { scopesFor } from "@/lib/builder/bindings";
-import type { DocumentKind } from "@/lib/builder/types";
+import { scopesFor } from "@markii/renderer/bindings";
+import type { DocumentKind } from "@markii/renderer/types";
 
 /**
  * Read-only tree helpers for the editor. **Pure and client-safe** — the
- * server's `lib/builder/tree.ts` imports `node:crypto` and stays there. The
+ * server's `packages/renderer/src/tree.ts` imports `node:crypto` and stays there. The
  * editor never changes a tree itself: every edit is a registry action, and the
  * tree is re-read from the API afterwards.
  */

@@ -1,7 +1,7 @@
 import type { UsageResponse } from "@/lib/api/billing";
 import { ComingSoon } from "@/components/ui/coming-soon";
 import { LocalDateRange, LocalDateTime } from "@/components/ui/local-date";
-import { formatMinor } from "@/lib/api/money";
+import { formatMinor } from "@markii/renderer/money";
 import { cn } from "@/lib/utils";
 
 function money(amount: number | null, currency: string) {

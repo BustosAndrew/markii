@@ -9,8 +9,8 @@ import {
   evaluateCondition,
   scopesFor,
   type DataValues,
-} from "./bindings";
-import { BLOCKS } from "./blocks";
+} from "@markii/renderer/bindings";
+import { BLOCKS } from "@markii/renderer/blocks";
 import { blockingErrors, checkPage, type CatalogFacts } from "./checks";
 import {
   DEFAULT_REGION_TREES,
@@ -18,7 +18,7 @@ import {
   defaultCollectionTemplate,
   defaultHeaderRegion,
   defaultProductTemplate,
-} from "./presets";
+} from "@markii/renderer/presets";
 import {
   TreeError,
   duplicateNode,
@@ -31,9 +31,9 @@ import {
   setVisibility,
   validateTree,
   type IdGenerator,
-} from "./tree";
-import type { PageNode } from "./types";
-import { plainText, productView, storeView } from "./views";
+} from "@markii/renderer/tree";
+import type { PageNode } from "@markii/renderer/types";
+import { plainText, productView, storeView } from "@markii/renderer/views";
 
 /**
  * M4 — templates, global regions, data bindings, repeaters and conditional

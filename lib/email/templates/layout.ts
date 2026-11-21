@@ -1,4 +1,4 @@
-import { formatMinor } from "../../api/money";
+import { formatMinor } from "@markii/renderer/money";
 
 /**
  * The shared shell for merchant mail.

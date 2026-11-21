@@ -4,7 +4,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { ApiError, notFound } from "../../api";
 import type { AuthContext } from "../../auth/session";
-import { formatMinor } from "../../api/money";
+import { formatMinor } from "@markii/renderer/money";
 import { planCatalog } from "../../plans";
 import { computeReadiness } from "../../readiness/compute";
 import { setupStatus, type SetupStep } from "../../setup";

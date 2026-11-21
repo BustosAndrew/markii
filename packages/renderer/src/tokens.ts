@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { getTheme, type ThemeId, type ThemeTokens } from "@/lib/storefront/themes";
+import { getTheme, type ThemeId, type ThemeTokens } from "./themes";
 
 /**
  * A site's design tokens: overrides on top of one of the four themes

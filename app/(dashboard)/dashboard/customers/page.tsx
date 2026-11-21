@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { getMe, listCustomers, listSites } from "@/lib/api/server";
 import { firstParam, loadOrError, parseLimit, parsePage } from "@/lib/api/load";
-import { formatMinor } from "@/lib/api/money";
+import { formatMinor } from "@markii/renderer/money";
 import { FetchError } from "@/components/dashboard/fetch-error";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";

@@ -1,10 +1,10 @@
-import { REPEATER_SOURCES, scopeOf, scopesFor, type DataScope, type RepeaterSource } from "./bindings";
-import { BLOCK_CSS } from "./block-css";
-import { getBlock } from "./blocks";
-import { compileStyles } from "./styles";
-import { contrastWarnings } from "./tokens";
-import type { ThemeTokens } from "@/lib/storefront/themes";
-import type { DocumentKind, PageNode } from "./types";
+import { REPEATER_SOURCES, scopeOf, scopesFor, type DataScope, type RepeaterSource } from "@markii/renderer/bindings";
+import { BLOCK_CSS } from "@markii/renderer/block-css";
+import { getBlock } from "@markii/renderer/blocks";
+import { compileStyles } from "@markii/renderer/styles";
+import { contrastWarnings } from "@markii/renderer/tokens";
+import type { ThemeTokens } from "@markii/renderer/themes";
+import type { DocumentKind, PageNode } from "@markii/renderer/types";
 
 /**
  * Pre-publish checks (`docs/BUILDER.md` §12): **errors block publishing,

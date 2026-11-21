@@ -4,7 +4,7 @@ import { z } from "zod";
 import { ApiError } from "@/lib/api";
 import type { Actor } from "@/lib/actions/types";
 import { PRIVATE_BUCKET, downloadFile } from "@/lib/storage";
-import { themeFileSchema, type ThemeFile } from "./theme-package";
+import { themeFileSchema, type ThemeFile } from "@markii/renderer/theme-package";
 
 /**
  * Where an uploaded theme package waits to be imported (D53), in the private

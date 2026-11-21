@@ -11,7 +11,7 @@ import {
   type PlanChangePreview,
   type SubscriptionResponse,
 } from "@/lib/api/billing";
-import { formatMinor } from "@/lib/api/money";
+import { formatMinor } from "@markii/renderer/money";
 import { publicErrorMessage, sanitizePublicCopy } from "@/lib/api/public-copy";
 import { SubscriptionPayForm } from "@/components/dashboard/subscription-pay-form";
 import { Button } from "@/components/ui/button";

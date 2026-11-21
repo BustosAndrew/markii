@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { BLOCKS, canContain, describeBlocks, getBlock } from "./blocks";
+import { BLOCKS, canContain, describeBlocks, getBlock } from "@markii/renderer/blocks";
 import { checkPage, type CatalogFacts } from "./checks";
-import { markdownText, parseInline, parseMarkdown, safeHref } from "./markdown";
-import { PRESETS, blankPageTree, defaultHomeTree } from "./presets";
-import { RENDERED_TYPES, pageJsonLd, resolveHref } from "./render";
-import { compileStyles, declarations } from "./styles";
-import { applyTokenPatch, contrastRatio, contrastWarnings, mergedFontHref, resolveTheme } from "./tokens";
+import { markdownText, parseInline, parseMarkdown, safeHref } from "@markii/renderer/markdown";
+import { PRESETS, blankPageTree, defaultHomeTree } from "@markii/renderer/presets";
+import { RENDERED_TYPES, pageJsonLd, resolveHref } from "@markii/renderer/render";
+import { compileStyles, declarations } from "@markii/renderer/styles";
+import { applyTokenPatch, contrastRatio, contrastWarnings, mergedFontHref, resolveTheme } from "@markii/renderer/tokens";
 import {
   TreeError,
   buildNode,
@@ -19,9 +19,9 @@ import {
   setStyles,
   validateTree,
   type IdGenerator,
-} from "./tree";
-import { TREE_LIMITS, type PageNode } from "./types";
-import { getTheme } from "@/lib/storefront/themes";
+} from "@markii/renderer/tree";
+import { TREE_LIMITS, type PageNode } from "@markii/renderer/types";
+import { getTheme } from "@markii/renderer/themes";
 
 /**
  * The builder's pure core (D51). Every builder action is a thin wrapper over

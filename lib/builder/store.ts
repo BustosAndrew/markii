@@ -16,7 +16,7 @@ import {
 } from "@/lib/db";
 import { ownSites } from "@/lib/tenancy";
 import type { CatalogFacts } from "./checks";
-import type { PageNode } from "./types";
+import type { PageNode } from "@markii/renderer/types";
 
 /**
  * The builder's data access, for use **inside registry actions only** (§22

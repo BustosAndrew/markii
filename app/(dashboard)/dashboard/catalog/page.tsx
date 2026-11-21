@@ -11,7 +11,7 @@ import {
 } from "@/lib/api/server";
 import { firstParam, loadOrError, parseLimit, parsePage } from "@/lib/api/load";
 import { canWriteCatalog } from "@/lib/api/org";
-import { formatCents } from "@/lib/api/money";
+import { formatCents } from "@markii/renderer/money";
 import type { Category } from "@/lib/api/types";
 import { CollectionsTable } from "@/components/dashboard/collections-table";
 import { InventoryActions } from "@/components/dashboard/inventory-actions";

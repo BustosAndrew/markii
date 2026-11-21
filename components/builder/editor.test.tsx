@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BlockDescription, CheckResult, PageNode } from "@/lib/api/builder";
-import { describeBindings } from "@/lib/builder/bindings";
+import { describeBindings } from "@markii/renderer/bindings";
 
 /**
  * The editor's two renders where being wrong costs the merchant (D51, M2):

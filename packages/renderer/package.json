@@ -1,0 +1,20 @@
+{
+  "name": "@markii/renderer",
+  "version": "0.1.0",
+  "description": "Markii's drawing code: page node trees to HTML, Markdown and JSON-LD, and the theme package format.",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    "./*": "./src/*.ts",
+    "./render": "./src/render.tsx",
+    "./product-card": "./src/product-card.tsx"
+  },
+  "files": ["src", "!src/**/*.test.ts", "LICENSE", "NOTICE", "README.md"],
+  "peerDependencies": {
+    "cheerio": "^1.0.0",
+    "react": "^19.0.0",
+    "zod": "^4.0.0"
+  }
+}

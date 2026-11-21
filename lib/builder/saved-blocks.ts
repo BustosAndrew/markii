@@ -1,4 +1,4 @@
-import { countNodes, emptyRoot, insertNodes, nodeToInput, type NodeInput } from "./tree";
+import { countNodes, emptyRoot, insertNodes, nodeToInput, type NodeInput } from "@markii/renderer/tree";
 
 /** How many saved blocks one site may keep. A library, not a second page store. */
 export const SAVED_BLOCKS_PER_SITE = 100;

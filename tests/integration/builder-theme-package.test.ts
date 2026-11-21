@@ -181,6 +181,36 @@ describe("site builder — theme packages (D53)", () => {
     expect(tokened.status).toBe(400);
   });
 
+  /**
+   * The storefront as a Next.js app (D53): a zip behind a download link, read
+   * back through its own central directory. What matters is that it is the
+   * renderer plus the scaffold, names this store, and holds no secret.
+   */
+  it("exports the storefront as a Next.js project the merchant can deploy", async () => {
+    const res = await merchant.post(`/api/builder/sites/${a.id}/next-export`, {});
+    if (res.status === 503) return; // storage not configured on this deployment
+    expect(res.status, JSON.stringify(res.json)).toBe(201);
+    expect(res.json).toMatchObject({ storeLive: true });
+    expect(res.json.storeUrl).toContain(a.slug);
+
+    const zipped = Buffer.from(await (await fetch(res.json.url)).arrayBuffer());
+    expect(zipped.readUInt32LE(0)).toBe(0x04034b50);
+    const names: string[] = [];
+    const end = zipped.length - 22;
+    let p = zipped.readUInt32LE(end + 16);
+    for (let i = 0; i < zipped.readUInt16LE(end + 10); i++) {
+      const len = zipped.readUInt16LE(p + 28);
+      names.push(zipped.subarray(p + 46, p + 46 + len).toString("utf8"));
+      p += 46 + len;
+    }
+    expect(names).toEqual(expect.arrayContaining(["package.json", "LICENSE", "lib/shopper.ts", "renderer/src/render.tsx", "app/p/[slug]/page.tsx"]));
+    expect(names.some((n) => n.endsWith(".test.ts"))).toBe(false);
+    expect(res.json.files).toBe(names.length);
+
+    // No session, no export.
+    expect((await new Client().post(`/api/builder/sites/${a.id}/next-export`, {})).status).toBe(401);
+  });
+
   it("exports a file with the store's own image inside it, and imports it into another org's storage", async () => {
     const exported = await merchant.post(`/api/builder/sites/${a.id}/theme-export`, { source: "published" });
     if (exported.status === 503) return; // storage not configured on this deployment: nothing to prove here

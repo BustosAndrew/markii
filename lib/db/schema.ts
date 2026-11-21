@@ -1,6 +1,6 @@
 import { sql, type SQL } from "drizzle-orm";
-import type { DesignTokens } from "@/lib/builder/tokens";
-import type { PageNode, PageSeo } from "@/lib/builder/types";
+import type { DesignTokens } from "@markii/renderer/tokens";
+import type { PageNode, PageSeo } from "@markii/renderer/types";
 import {
   boolean,
   customType,
@@ -3046,7 +3046,7 @@ export const siteDesigns = pgTable("site_designs", {
   publishedTokens: jsonb("published_tokens").$type<DesignTokens>().notNull().default({}),
   /**
    * The merchant's theme CSS (M6, `docs/BUILDER.md` §8 level 2), checked on save
-   * (`lib/builder/sanitize.ts` `cssProblems`). Written only by a person — the
+   * (`packages/renderer/src/sanitize.ts` `cssProblems`). Written only by a person — the
    * action is `high`, so agents and API tokens are refused. Never served on the
    * cart or account pages.
    */
@@ -3146,7 +3146,7 @@ export const siteDesignVersions = pgTable(
  * A reusable saved block (D51 M7, `docs/BUILDER.md` §11): a block and
  * everything inside it, kept per site so the merchant can insert it on any
  * page. Stored **without node ids** — `node` is the input shape
- * (`lib/builder/tree.ts` `NodeInput`), validated and cleaned when saved, so
+ * (`packages/renderer/src/tree.ts` `NodeInput`), validated and cleaned when saved, so
  * every insert mints fresh ids and passes the same checks as any other edit.
  * Per site rather than per org because blocks name the site's own products,
  * categories and collections.

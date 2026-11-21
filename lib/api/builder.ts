@@ -1,8 +1,8 @@
-import type { describeBindings, ValueType } from "@/lib/builder/bindings";
-import type { FieldSpec } from "@/lib/builder/blocks";
+import type { describeBindings, ValueType } from "@markii/renderer/bindings";
+import type { FieldSpec } from "@markii/renderer/blocks";
 import type { CheckResult } from "@/lib/builder/checks";
-import type { DesignTokens } from "@/lib/builder/tokens";
-import type { Breakpoint, Condition, PageNode, PageSeo, RegionHandle, StyleProps, TemplateHandle } from "@/lib/builder/types";
+import type { DesignTokens } from "@markii/renderer/tokens";
+import type { Breakpoint, Condition, PageNode, PageSeo, RegionHandle, StyleProps, TemplateHandle } from "@markii/renderer/types";
 import { invokeAction } from "./actions";
 import { apiGet, apiPost } from "./client";
 import { callWhenLive } from "./planned";
@@ -388,6 +388,32 @@ export type ThemeExport = {
  */
 export const exportTheme = (site: string | number, source: "draft" | "published" = "draft") =>
   callWhenLive(BUILDER_API_LIVE, SECTION, () => apiPost<ThemeExport>(`/api/builder/sites/${site}/theme-export`, { source }));
+
+export type NextExport = {
+  /** A five-minute download link for `{slug}-storefront.zip`. Open it; do not store it. */
+  url: string;
+  expiresAt: string;
+  files: number;
+  bytes: number;
+  /** The store the app reads live — what goes in its `MARKII_STORE_URL`. */
+  storeUrl: string;
+  /**
+   * False while the store is a draft or paused: the app reads the live store,
+   * so it exports fine and shows nothing until the store is live. Say so
+   * beside the download rather than letting it be found after a deploy.
+   */
+  storeLive: boolean;
+};
+
+/**
+ * The storefront as a Next.js app the merchant owns and deploys anywhere (D53).
+ * It reads catalogue and design live from this store, checks out on this
+ * store's hosted checkout, and leaves shopper sign-in to its owner
+ * (`lib/shopper.ts` in the zip). `cms.read`; changes nothing. Members-only
+ * sales from it need a storefront key (`lib/api/storefront-keys.ts`).
+ */
+export const exportNextApp = (site: string | number) =>
+  callWhenLive(BUILDER_API_LIVE, SECTION, () => apiPost<NextExport>(`/api/builder/sites/${site}/next-export`, {}));
 
 /**
  * Import a theme package file, in three steps — the file goes **straight to

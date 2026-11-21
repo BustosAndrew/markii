@@ -6,7 +6,7 @@ import { ownSites } from "@/lib/tenancy";
 import { db, products, sites } from "@/lib/db";
 import { getIntegration, upsertIntegration } from "@/lib/integrations";
 import { storefrontUrl } from "@/lib/queries";
-import { decimalMinor } from "@/lib/api/money";
+import { decimalMinor } from "@markii/renderer/money";
 
 /** Push live sites' enabled products to Google Merchant Center (Content API v2.1). */
 export const POST = orgHandler(async (_req, { orgId }) => {

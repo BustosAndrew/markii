@@ -1,6 +1,6 @@
 import type { DiffEntry } from "../../db";
-import { describeCondition } from "../../builder/bindings";
-import type { PageNode } from "../../builder/types";
+import { describeCondition } from "@markii/renderer/bindings";
+import type { PageNode } from "@markii/renderer/types";
 
 /**
  * The pure half of the brand agent's live context (D51): how the current

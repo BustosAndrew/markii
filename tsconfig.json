@@ -19,7 +19,8 @@
       }
     ],
     "paths": {
-      "@/*": ["./*"]
+      "@/*": ["./*"],
+      "@markii/renderer/*": ["./packages/renderer/src/*"]
     }
   },
   "include": [

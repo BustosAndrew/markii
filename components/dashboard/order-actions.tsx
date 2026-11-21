@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { invokeAction } from "@/lib/api/actions";
-import { currencyExponent, formatMinor } from "@/lib/api/money";
+import { currencyExponent, formatMinor } from "@markii/renderer/money";
 import type { OrderDetail } from "@/lib/api/orders";
 import { ApiClientError } from "@/lib/api/types";
 import { Button } from "@/components/ui/button";

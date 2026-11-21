@@ -1,4 +1,4 @@
-import { formatCents } from "@/lib/api/money";
+import { formatCents } from "@markii/renderer/money";
 import { cn } from "@/lib/utils";
 
 export function MoneyText({

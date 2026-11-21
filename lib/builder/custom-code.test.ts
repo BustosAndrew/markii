@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { customCssClasses } from "@/lib/ops-agents/brand/format";
-import { cssProblems, sanitizeHtml } from "./sanitize";
-import { TreeError, customHtmlOf, emptyRoot, insertNodes, locate, setCustomClass, type IdGenerator } from "./tree";
+import { cssProblems, sanitizeHtml } from "@markii/renderer/sanitize";
+import { TreeError, customHtmlOf, emptyRoot, insertNodes, locate, setCustomClass, type IdGenerator } from "@markii/renderer/tree";
 
 /**
  * M6 — custom code (`docs/BUILDER.md` §8). The sanitiser is the boundary

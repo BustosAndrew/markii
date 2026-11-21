@@ -531,6 +531,32 @@ permissions problem, so neither should show the step-up modal or "your role cann
   shell can hide org-wide writes without a second call. `lib/api/org.ts`: `reachesAllStores()`,
   `grantableRoles()`, `storesWithinReach()`.
 
+### 🟢 New 2026-11-20 — export the storefront as a Next.js app (D53) — needs a button
+
+`exportNextApp(site)` in `lib/api/builder.ts` → `{ url, expiresAt, files, bytes, storeUrl, storeLive }`.
+Suggested home: the design editor's export menu beside the theme export. Open `url` (a five-minute
+zip link — don't store it). **When `storeLive` is false, say so beside the download**: the app reads
+the live store, so a draft or paused store exports fine and shows nothing. Copy worth showing:
+*"Your store as a Next.js app you host yourself. It reads your catalogue and design live from
+Markii and checks out here. Shopper sign-in is yours to add — see the README inside. Members-only
+products need a storefront key."* `cms.read`; nothing to confirm, nothing to undo.
+
+### 🔴 New 2026-11-20 — the drawing code moved: `@markii/renderer/*` (D53) — rebase your imports
+
+The renderer is its own Apache 2.0 package now, `packages/renderer/src/`, imported as
+**`@markii/renderer/<module>`** (tsconfig path alias, no install). **Every import in the repo was
+rewritten in the same change**, so `main` builds — but a branch started earlier will not:
+
+| Was | Now |
+|---|---|
+| `@/lib/api/money` | `@markii/renderer/money` |
+| `@/lib/storefront/themes` | `@markii/renderer/themes` |
+| `@/lib/builder/{tree,types,blocks,bindings,styles,tokens,render,views,markdown,sanitize,block-css,to-markdown,theme-package,catalog,format,product-card}` | `@markii/renderer/{same name}` |
+
+Unchanged: `@/lib/api/types` (still re-exports `ThemeId`), and everything server-side in
+`lib/builder/` (`store`, `queries`, `lease`, `preview`, …). **Never import an `@/` path from inside
+the package** — `lib/builder/renderer-boundary.test.ts` fails `pnpm test` on anything that does.
+
 ### 🟢 New 2026-11-20 — storefront secret keys (D53) — needs a screen
 
 **Backend and typed client are live (`lib/api/storefront-keys.ts`); needs migration 0050; no screen
@@ -653,7 +679,7 @@ What changed on shared surfaces:
   instead of `SiteHeader` directly — they render the merchant's published header, footer and
   announcement bar, or the fixed header exactly as before. A new storefront page must use them too,
   or it will show a header the merchant replaced. `minimal` is the cart/account variant.
-- **The block CSS moved into `ThemeRoot`** (`lib/builder/block-css.ts`), once per page, so several
+- **The block CSS moved into `ThemeRoot`** (`packages/renderer/src/block-css.ts`), once per page, so several
   builder documents on one page share one cascade. `BuilderPage` emits only its node styles now.
 - **`lib/api/builder.ts`**: `DesignSummary` gains `templates[]` / `regions[]` (`SharedDocument`);
   `BlockDescription` gains `bindable` and `requiresScope` and the category `navigation`;
@@ -734,7 +760,7 @@ and brand agent come next (M2–M3); nothing here needs a screen yet, but the co
   name. `priceCents` was always *charged* as the currency's minor unit; display divided by 100, so
   ¥1,500 read ¥15. Nothing changes for USD/EUR/GBP. **Stop treating `Cents` as hundredths
   anywhere**: no `/100`, no `* 100`.
-- **New `parseDecimalToMinor(value, currency)`** in `lib/api/money.ts` — the inverse of
+- **New `parseDecimalToMinor(value, currency)`** in `packages/renderer/src/money.ts` — the inverse of
   `decimalMinor`. Use it for any typed price. It refuses more decimals than the currency has
   (`19.999` USD, `1500.5` JPY) instead of rounding.
 - **`product-form.tsx`**: price label and placeholder follow the product's currency (`Price (JPY)`),
@@ -1002,7 +1028,7 @@ account exists. Contract in `docs/API.md` §16.
 backend-owned). Listed so the two places it becomes visible from the dashboard are not a surprise:
 
 - **The storefront header now carries a search box** on the home, category and product pages — a
-  plain `GET` form to `/search?q=`, styled through `.sf-search` in `lib/storefront/themes.ts`. If
+  plain `GET` form to `/search?q=`, styled through `.sf-search` in `packages/renderer/src/themes.ts`. If
   you are working on themes (build order §1), it is part of the header every theme lays out;
   the `stacked` header variant already centres it with the rest of `.sf-header-actions`.
 - **`llms.txt` and `agent.md` gained a line and a section** advertising `GET /api/search?q=`, so
@@ -1197,7 +1223,7 @@ real state. These are the open items, recorded so they are not rediscovered late
 | Gap | Where | Fix |
 |---|---|---|
 | ~~Sign-in runs in the browser~~ ✅ **fixed 2026-07-30** | `components/auth/auth-form.tsx` | Now posts to `/api/auth/*` through `lib/api/auth.ts`, gated on `AUTH_API_LIVE`; `lib/supabase/client.ts` is deleted, so no `createBrowserClient` exists in the tree (**D30**). The form stays disabled behind an API §16 notice until the backend ships the routes |
-| ~~Threshold meter hardcodes `/100`~~ ✅ **fixed 2026-07-30** | `components/dashboard/threshold-meter.tsx` | Uses `formatMinor(amountMinor, currency)` from `lib/api/money.ts`, which derives the exponent from the currency (**D31**). `formatCents` stays USD-shaped for the legacy §1–8 `Cents` fields |
+| ~~Threshold meter hardcodes `/100`~~ ✅ **fixed 2026-07-30** | `components/dashboard/threshold-meter.tsx` | Uses `formatMinor(amountMinor, currency)` from `packages/renderer/src/money.ts`, which derives the exponent from the currency (**D31**). `formatCents` stays USD-shaped for the legacy §1–8 `Cents` fields |
 | ~~No cart, variant picker, or checkout~~ ✅ **built** | `components/storefront/add-to-cart.tsx`, `cart-checkout.tsx` | The three sanctioned islands exist. Recurring-membership purchase is the remaining storefront flow |
 | ~~Every live endpoint gated off~~ ✅ **fixed 2026-08-02** | `lib/api/{readiness,billing,commerce}.ts` | Constants flipped per endpoint group against the routes that actually exist, and the drifted response types corrected. See the two-sided-flip note below |
 | ~~§24 email had no client or screen~~ ✅ **fixed 2026-08-02** | `lib/api/email.ts`, `/dashboard/settings/email` | The route and its five actions shipped 2026-08-02 with nothing calling them, while `lib/email/` told merchants to go to a page that did not exist |
@@ -1255,7 +1281,7 @@ that one is settled rather than assumed. **It is cookie-only** (2026-09-06): an 
 `/api/me` is `401`. Identity for the dashboard comes from the session cookie; tokens authenticate
 `/api/mcp` and `/api/*` writes, not this boot call.
 
-**Themes are done end-to-end** — four defined in `lib/storefront/themes.ts`, wired through the
+**Themes are done end-to-end** — four defined in `packages/renderer/src/themes.ts`, wired through the
 create wizard, site controls, `PATCH /api/sites`, and the generators. They depend on the
 `sites.themeId` column, so if every websites screen 500s against a database provisioned before
 2026-07-30, that migration is the reason (`docs/BACKEND.md` §0), not your code.
@@ -1298,7 +1324,7 @@ if something refuses, it is a *deliberate* refusal that is documented, not unfin
 generated pages. The plumbing is done and works.
 
 **What does not:** `ThemeTokens` is **colours, fonts, radius, and spacing only**
-(`lib/storefront/themes.ts`). All four render the *same layout*. That is one theme with four
+(`packages/renderer/src/themes.ts`). All four render the *same layout*. That is one theme with four
 palettes, not the "3–4 polished themes" the launch scope means — a merchant switching from `studio`
 to `noir` gets different colours and an identical store.
 
@@ -1462,7 +1488,7 @@ islands** — each must be justified. These pages are read by AI shopping agents
 JSON-LD are the product, and a client-rendered storefront would break the thing that differentiates
 Markii. Dashboards can be as client-rich as you like.
 
-**Money:** integer minor units, explicit currency, no float maths. Use `lib/api/money.ts` and
+**Money:** integer minor units, explicit currency, no float maths. Use `packages/renderer/src/money.ts` and
 `components/ui/money-text.tsx`. New fields use a `Minor` suffix; older `Cents` fields in §1–8 stay.
 
 **Never call Supabase Auth from the browser.** Sessions are httpOnly cookies, never `localStorage`,
@@ -1474,7 +1500,7 @@ storefront customer accounts in Phase C.
 
 **Money formatting derives its exponent from the currency.** Never hardcode `/100` or
 `minimumFractionDigits: 2` — `Organization.currency` is merchant-set, and JPY/KRW have no minor
-digits, so a fixed divisor renders them 100× wrong (D31). `formatCents` in `lib/api/money.ts` is
+digits, so a fixed divisor renders them 100× wrong (D31). `formatCents` in `packages/renderer/src/money.ts` is
 currency-aware too since 2026-10-29 (D50) — the legacy §1–8 `Cents` fields are the currency's own
 minor unit, like everything with a `Minor` suffix.
 

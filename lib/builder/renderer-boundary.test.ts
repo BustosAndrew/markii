@@ -1,45 +1,35 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
  * The renderer's boundary (D53). The drawing code — what turns a node tree
- * into HTML, Markdown and JSON-LD — is what a store's Next.js export ships,
- * under Apache 2.0 once it is its own package, while the rest of Markii stays
- * FSL. **An Apache release cannot be withdrawn**, so anything that drifts
- * across this line before the split would be permissively licensed for good.
+ * into HTML, Markdown and JSON-LD — lives in `packages/renderer/`, which is
+ * **Apache 2.0** (its own `LICENSE` and `NOTICE`) while the rest of Markii
+ * stays FSL, because a store's Next.js export ships it. **An Apache release
+ * cannot be withdrawn**, so anything that drifts across this line would be
+ * permissively licensed for good.
  *
- * This walks every module reachable from the renderer's entry points and
- * refuses an import of anything outside the drawing code: the database, the
- * actions, storage, auth, Markii's components. What the drawing code needs from
- * outside arrives through its context instead (`./catalog`, `membersOf`,
- * `ProductPurchase.buy`).
+ * So every file in the package may import only other files in the package and
+ * the third-party packages below. Not the database, the actions, storage,
+ * auth, `server-only`, or Markii's components — what the drawing code needs
+ * from outside arrives through its render context (`catalog.ts`, `membersOf`,
+ * `ProductPurchase.buy`). This test sits outside the package on purpose: the
+ * guard of the line is FSL, like everything else that is not drawing code.
  */
 
 const ROOT = resolve(__dirname, "../..");
+const PKG = "packages/renderer";
+const SRC = `${PKG}/src`;
 
-/** What the package exports — the renderer, its Markdown and JSON-LD, the theme format. */
-const ENTRY_POINTS = [
-  "lib/builder/render.tsx",
-  "lib/builder/to-markdown.ts",
-  "lib/builder/views.ts",
-  "lib/builder/block-css.ts",
-  "lib/builder/tokens.ts",
-  "lib/builder/theme-package.ts",
-  "lib/builder/product-card.tsx",
-  "lib/builder/catalog.ts",
-  "lib/builder/format.ts",
-];
-
-/** Third-party code the drawing code may use. */
+/** Third-party code the drawing code may use — the package's peer dependencies, and Node's crypto for content hashes. */
 const PACKAGES = new Set(["react", "zod", "cheerio", "node:crypto"]);
-
-/**
- * Pure modules outside `lib/builder/` that belong to the drawing code and move
- * into the package with it: theme definitions and currency formatting. They
- * are walked like any other, so they may not reach further out either.
- */
-const ADOPTED = new Set(["lib/api/money.ts", "lib/storefront/themes.ts", "lib/api/types.ts"]);
+/** What may sit beside `src/` — nothing that is code. */
+const PACKAGE_FILES = new Set(["LICENSE", "NOTICE", "README.md", "package.json", "src", "next-app"]);
+/** The exported app's scaffold — Apache too, shipped in every Next.js export. */
+const APP = `${PKG}/next-app`;
+/** What the scaffold may import besides itself and the renderer. */
+const APP_PACKAGES = new Set(["next", "next/headers", "next/navigation", "next/server", "react", "server-only"]);
 
 function specifiers(source: string): string[] {
   const out: string[] = [];
@@ -51,12 +41,12 @@ function specifiers(source: string): string[] {
 function resolveModule(from: string, spec: string): string | null {
   let base: string;
   if (spec.startsWith("@/")) base = join(ROOT, spec.slice(2));
+  else if (spec.startsWith("@markii/renderer/")) base = join(ROOT, SRC, spec.slice("@markii/renderer/".length));
   else if (spec.startsWith(".")) base = resolve(dirname(join(ROOT, from)), spec);
   else return null;
   for (const ext of [".ts", ".tsx", "/index.ts", "/index.tsx", ""]) {
     try {
-      readFileSync(base + ext);
-      return relative(ROOT, base + ext).replace(/\\/g, "/");
+      if (statSync(base + ext).isFile()) return relative(ROOT, base + ext).replace(/\\/g, "/");
     } catch {
       // try the next extension
     }
@@ -64,51 +54,105 @@ function resolveModule(from: string, spec: string): string | null {
   throw new Error(`${from}: cannot resolve "${spec}"`);
 }
 
-function walk(): { modules: Set<string>; violations: string[] } {
-  const modules = new Set<string>();
-  const violations: string[] = [];
-  const queue = [...ENTRY_POINTS];
-  while (queue.length) {
-    const file = queue.shift()!;
-    if (modules.has(file)) continue;
-    modules.add(file);
+function packageFiles(): string[] {
+  return readdirSync(join(ROOT, SRC))
+    .filter((f) => /\.tsx?$/.test(f))
+    .map((f) => `${SRC}/${f}`);
+}
+
+function violations(): string[] {
+  const out: string[] = [];
+  for (const file of packageFiles()) {
     const source = readFileSync(join(ROOT, file), "utf8");
-    if (/^\s*["']use client["']/m.test(source)) violations.push(`${file} is a client module`);
+    const isTest = file.endsWith(".test.ts");
+    if (/^\s*["']use client["']/m.test(source)) out.push(`${file} is a client module`);
     for (const spec of specifiers(source)) {
       if (spec === "server-only") {
-        violations.push(`${file} imports server-only`);
+        out.push(`${file} imports server-only`);
+        continue;
+      }
+      // A spec file may use the test runner; nothing else may.
+      if (isTest && spec === "vitest") continue;
+      if (spec.startsWith("@/") || spec.startsWith("@markii/")) {
+        out.push(`${file} imports ${spec} by an alias — inside the package, imports are relative so it stands alone`);
         continue;
       }
       const target = resolveModule(file, spec);
       if (target === null) {
-        if (!PACKAGES.has(spec)) violations.push(`${file} imports the package "${spec}"`);
+        if (!PACKAGES.has(spec)) out.push(`${file} imports the package "${spec}"`);
         continue;
       }
-      if (!target.startsWith("lib/builder/") && !ADOPTED.has(target)) {
-        violations.push(`${file} imports ${target}`);
-        continue;
-      }
-      queue.push(target);
+      if (!target.startsWith(`${SRC}/`)) out.push(`${file} imports ${target}`);
     }
   }
-  return { modules, violations };
+  return out;
+}
+
+function appFiles(): string[] {
+  const out: string[] = [];
+  const visit = (dir: string) => {
+    for (const name of readdirSync(join(ROOT, dir))) {
+      const rel = `${dir}/${name}`;
+      if (statSync(join(ROOT, rel)).isDirectory()) visit(rel);
+      else if (/\.tsx?$/.test(name)) out.push(rel);
+    }
+  };
+  visit(APP);
+  return out;
+}
+
+/** The scaffold imports only itself, the renderer by its package name, and Next and React — never Markii's own code. */
+function appViolations(): string[] {
+  const out: string[] = [];
+  for (const file of appFiles()) {
+    for (const spec of specifiers(readFileSync(join(ROOT, file), "utf8"))) {
+      if (spec.startsWith("@markii/renderer/")) {
+        resolveModule(file, spec);
+        continue;
+      }
+      if (spec.startsWith("@/")) {
+        out.push(`${file} imports ${spec} — Markii's own code does not ship in an export`);
+        continue;
+      }
+      const target = resolveModule(file, spec);
+      if (target === null) {
+        if (!APP_PACKAGES.has(spec)) out.push(`${file} imports the package "${spec}"`);
+      } else if (!target.startsWith(`${APP}/`)) {
+        out.push(`${file} imports ${target} by a relative path — use @markii/renderer/*`);
+      }
+    }
+  }
+  return out;
 }
 
 describe("the renderer's boundary (D53)", () => {
-  const { modules, violations } = walk();
-
-  it("imports nothing outside the drawing code", () => {
-    expect(violations).toEqual([]);
+  it("the exported app's scaffold reaches nothing of Markii's but the renderer", () => {
+    expect(appFiles().length).toBeGreaterThan(5);
+    expect(appViolations()).toEqual([]);
   });
 
-  it("does not reach Markii's server-side builder modules", () => {
+  it("imports nothing outside the package", () => {
+    expect(violations()).toEqual([]);
+  });
+
+  it("holds the drawing code and nothing beside it but its licence and manifest", () => {
+    const files = packageFiles();
+    for (const entry of ["render.tsx", "to-markdown.ts", "views.ts", "block-css.ts", "tokens.ts", "theme-package.ts", "catalog.ts"]) {
+      expect(files, entry).toContain(`${SRC}/${entry}`);
+    }
+    expect(readdirSync(join(ROOT, PKG)).filter((f) => !PACKAGE_FILES.has(f))).toEqual([]);
+    expect(readFileSync(join(ROOT, PKG, "LICENSE"), "utf8")).toContain("Apache License");
+    expect(JSON.parse(readFileSync(join(ROOT, PKG, "package.json"), "utf8")).license).toBe("Apache-2.0");
+  });
+
+  it("never holds Markii's server-side builder modules", () => {
     for (const forbidden of ["store", "queries", "lease", "preview", "theme-assets", "theme-import"]) {
-      expect(modules.has(`lib/builder/${forbidden}.ts`), forbidden).toBe(false);
+      expect(packageFiles(), forbidden).not.toContain(`${SRC}/${forbidden}.ts`);
     }
   });
 
   it("the walker would catch a crossing — it is not passing vacuously", () => {
     expect(specifiers('import type { Product } from "@/lib/db";\nimport x from "./y";')).toEqual(["@/lib/db", "./y"]);
-    expect(modules.size).toBeGreaterThan(ENTRY_POINTS.length);
+    expect(packageFiles().length).toBeGreaterThan(10);
   });
 });

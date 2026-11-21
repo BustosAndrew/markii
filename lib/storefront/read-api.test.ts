@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Category, Collection, Product } from "@/lib/db";
 import type { SiteData } from "@/lib/storefront";
-import type { ThemePackage } from "@/lib/builder/theme-package";
+import type { ThemePackage } from "@markii/renderer/theme-package";
 import { pageParams, PRODUCT_PAGE_MAX, productJson, READ_API_HEADERS, storeJson } from "./read-api";
 
 const product = (over: Partial<Product>): Product =>
@@ -14,7 +14,7 @@ const product = (over: Partial<Product>): Product =>
 const prods = [product({ suggestedProductIds: [2, 3] }), product({ id: 2, slug: "mug" }), product({ id: 3, slug: "old", enabled: false })];
 
 const data = {
-  site: { name: "Leaf", slug: "leaf", purchasesEnabled: true, paymentProviders: { stripe: true, x402: false } },
+  site: { name: "Leaf", slug: "leaf", themeId: "atlas", agentDiscovery: true, purchasesEnabled: true, paymentProviders: { stripe: true, x402: false } },
   baseUrl: "https://leaf.test",
   prods,
   cats: [{ id: 7, parentId: null, name: "Teas", slug: "teas", description: null, enabled: true }, { id: 8, name: "Hidden", slug: "h", enabled: false }] as Category[],
@@ -37,7 +37,7 @@ describe("the storefront read API's shapes (D53)", () => {
   it("the store lists enabled categories and the design without saved blocks", () => {
     const design = { format: "markii.theme", version: 1, theme: { themeId: "atlas", tokens: {}, customCss: "" }, documents: [], savedBlocks: [{ name: "x", node: { type: "text" } }] } as unknown as ThemePackage;
     const json = storeJson(data, design);
-    expect(json.store).toEqual({ name: "Leaf", slug: "leaf", url: "https://leaf.test", purchasesEnabled: true, rails: { stripe: true, x402: false } });
+    expect(json.store).toEqual({ name: "Leaf", slug: "leaf", url: "https://leaf.test", themeId: "atlas", agentDiscovery: true, purchasesEnabled: true, rails: { stripe: true, x402: false } });
     expect(json.categories.map((c) => c.slug)).toEqual(["teas"]);
     expect(json.collections[0].url).toBe("https://leaf.test/collections/new");
     expect(json.design?.savedBlocks).toEqual([]);

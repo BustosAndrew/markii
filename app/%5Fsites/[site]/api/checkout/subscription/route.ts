@@ -138,8 +138,12 @@ export const POST = handler(async (req, { params }) => {
    * `customers` row, and a renewal arriving months later has no browser session
    * to attach itself to — a guest subscription would be a recurring charge with
    * nobody to give the access to.
+   *
+   * The account is the shopper signed in here, or else the customer the cart
+   * was claimed for as its lines were added — a member sent from an exported
+   * storefront (D53), whose server named them with the store's key.
    */
-  const customerId = await currentCustomerId(site.id);
+  const customerId = (await currentCustomerId(site.id)) ?? cart.customerId;
   if (customerId === null) {
     return NextResponse.json(
       {

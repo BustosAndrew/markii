@@ -5,8 +5,8 @@ import { notFound } from "@/lib/api";
 import { collections, db, products, siteDesignVersions, siteDesigns, siteDocuments, siteSavedBlocks, type SiteDesign } from "@/lib/db";
 import { blockingErrors, checkCssBudget, checkHeadCode, checkPage, checkTheme, type CheckResult } from "./checks";
 import { catalogFacts, leaseActive } from "./store";
-import { resolveTheme, type DesignTokens } from "./tokens";
-import { REGION_HANDLES, SHARED_DOCUMENT_TITLES, type RegionHandle, type TemplateHandle } from "./types";
+import { resolveTheme, type DesignTokens } from "@markii/renderer/tokens";
+import { REGION_HANDLES, SHARED_DOCUMENT_TITLES, type RegionHandle, type TemplateHandle } from "@markii/renderer/types";
 
 /**
  * Reads behind the builder's REST surface (`docs/API.md` §19) and the brand
