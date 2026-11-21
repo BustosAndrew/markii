@@ -66,6 +66,11 @@ export function canWriteScripts(role: StaffRole | null | undefined): boolean {
   return role === "owner" || role === "administrator" || role === "developer";
 }
 
+/** `tokens.manage` — owner, administrator, and developer. Gates API tokens and storefront keys (D53). */
+export function canManageTokens(role: StaffRole | null | undefined): boolean {
+  return role === "owner" || role === "administrator" || role === "developer";
+}
+
 /** `catalog.write` — owner, administrator, and catalog manager. */
 export function canWriteCatalog(role: StaffRole | null | undefined): boolean {
   return role === "owner" || role === "administrator" || role === "catalog_manager";

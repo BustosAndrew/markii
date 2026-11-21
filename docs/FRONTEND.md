@@ -81,7 +81,7 @@ API-independent work so you don't outrun the backend") no longer applies to A, B
 | **Catalog agent** | §27 | ✅ **LIVE, screen built** (beta) | Opened from **Agents** in the dashboard header (`AgentsNavMenu`). Propose-only; the merchant approves. MCP (§22) is a different surface — do not confuse them |
 | **Assistant** | §27 | ✅ **LIVE, screen built** (beta, 2026-10-17) | Opened from **Agents** in the dashboard header. Read-only — answers questions, checks setup, routes to pages/agents. Reuses `AgentPanel` with `agent="assistant"` |
 | **Setup checklist** | §28 | ✅ **LIVE, screen built** (2026-10-17) | Overview card via `getSetupStatus()`. `firstRun` leads the page; `next` is the headline. No local ticks — refetch by revisiting |
-| Site builder | §19 | ✅ **LIVE, screens built** (D51 M1–M7) | `/dashboard/websites/[slug]/design` — editor, live preview, brand agent, templates/regions/bindings (M4), page SEO + agent documents (M5), custom CSS/HTML/classes and Theme-tab custom scripts (M6); breakpoint switcher, multi-select, copy/paste, saved blocks (M7) |
+| Site builder | §19 | ✅ **LIVE, screens built** (D51 M1–M7 · D53) | `/dashboard/websites/[slug]/design` — editor, live preview, brand agent, templates/regions/bindings (M4), page SEO + agent documents (M5), custom CSS/HTML/classes and Theme-tab custom scripts (M6); breakpoint switcher, multi-select, copy/paste, saved blocks (M7); **theme copy/export/import and Next.js export** on the Theme tab (D53). Storefront keys: website settings, Exported storefront |
 | **Brand agent** | §27 | ✅ **LIVE, screen built** (beta, 2026-11-02) | Lives in the site editor, not a drawer: directory `surface: "editor"`, and the Agents menu navigates to `href`. Edits the draft directly; Stop is `stopBrandAgent` |
 | Channels, Test Lab | §10 · §12 · §20 | ⛔ Deferred | Out of launch scope — do not start |
 | Platform admin | §26 | ✅ LIVE, screens built | `/admin` when `me.operator`. Suspend/reinstate and **Reset MFA** (`resetPlatformMfa`). Never on merchant nav for anyone else |
@@ -531,10 +531,10 @@ permissions problem, so neither should show the step-up modal or "your role cann
   shell can hide org-wide writes without a second call. `lib/api/org.ts`: `reachesAllStores()`,
   `grantableRoles()`, `storesWithinReach()`.
 
-### 🟢 New 2026-11-20 — export the storefront as a Next.js app (D53) — needs a button
+### 🟢 New 2026-11-20 — export the storefront as a Next.js app (D53) — screen built
 
 `exportNextApp(site)` in `lib/api/builder.ts` → `{ url, expiresAt, files, bytes, storeUrl, storeLive }`.
-Suggested home: the design editor's export menu beside the theme export. Open `url` (a five-minute
+The button is on the design editor's Theme tab, beside theme export. Open `url` (a five-minute
 zip link — don't store it). **When `storeLive` is false, say so beside the download**: the app reads
 the live store, so a draft or paused store exports fine and shows nothing. Copy worth showing:
 *"Your store as a Next.js app you host yourself. It reads your catalogue and design live from
@@ -557,10 +557,10 @@ Unchanged: `@/lib/api/types` (still re-exports `ThemeId`), and everything server
 `lib/builder/` (`store`, `queries`, `lease`, `preview`, …). **Never import an `@/` path from inside
 the package** — `lib/builder/renderer-boundary.test.ts` fails `pnpm test` on anything that does.
 
-### 🟢 New 2026-11-20 — storefront secret keys (D53) — needs a screen
+### 🟢 New 2026-11-20 — storefront secret keys (D53) — screen built
 
-**Backend and typed client are live (`lib/api/storefront-keys.ts`); needs migration 0050; no screen
-yet.** A per-store secret an exported storefront's server uses so its signed-in shoppers can buy
+**Backend, typed client, and screen are live (`lib/api/storefront-keys.ts`, website settings →
+Exported storefront); needs migration 0050.** A per-store secret an exported storefront's server uses so its signed-in shoppers can buy
 members-only products. Suggested home: the store's settings, beside the domain card, under
 "Exported storefront".
 
@@ -584,9 +584,9 @@ here changes a dashboard response. Worth knowing if you build "view as a develop
 `GET /api/store` answers the **published** design as a theme package (no head code), `null` before
 anything is published.
 
-### 🟢 New 2026-11-19 — copy a design between stores, export and import theme files (D53) — needs screens
+### 🟢 New 2026-11-19 — copy a design between stores, export and import theme files (D53) — screens built
 
-**Backend and typed client are live; there is no screen yet.** All in `lib/api/builder.ts`; contract in
+**Backend, typed client, and screens are live** (`lib/api/builder.ts`, design editor Theme tab). Contract in
 `docs/API.md` §19 "Theme packages". The natural home is the design editor's Theme tab (or a "Design"
 menu): *Copy from another store…*, *Export theme*, *Import theme…*.
 

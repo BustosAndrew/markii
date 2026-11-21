@@ -60,6 +60,7 @@ import { Button, ButtonLink } from "@/components/ui/button";
 import { ErrorState } from "@/components/ui/error-state";
 import { BrandChat } from "./brand-chat";
 import { HistoryDialog, PublishDialog } from "./dialogs";
+import { ThemePackagePanel } from "./theme-package";
 import { BREAKPOINT_LABEL, Inspector, MultiInspector, type PickerData } from "./inspector";
 import { LayerTree, type SelectMode } from "./layer-tree";
 import { AddPanel, PagesPanel, SharedLayoutsPanel, ThemePanel } from "./panels";
@@ -945,6 +946,7 @@ export function DesignEditor({
               </>
             ) : null}
             {tab === "theme" ? (
+              <>
               <ThemePanel
                 themeId={started.themeId}
                 tokens={started.tokens}
@@ -971,6 +973,21 @@ export function DesignEditor({
                   return out ? (out.result?.removed ?? []) : null;
                 }}
               />
+              <ThemePackagePanel
+                siteId={sid}
+                canEdit={canEdit}
+                disabled={readOnly || busy}
+                onReplaced={async () => {
+                  setUndoStack([]);
+                  setRedoStack([]);
+                  await refresh();
+                  reloadFrame();
+                }}
+                onCopyScripts={async (html) =>
+                  Boolean(await run(() => setHeadCode(sid, html), "builder.setHeadCode"))
+                }
+              />
+              </>
             ) : null}
           </div>
         </aside>

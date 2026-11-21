@@ -50,6 +50,7 @@ import { GET as sitesGET } from "@/app/api/sites/route";
 import { GET as siteGET } from "@/app/api/sites/[idOrSlug]/route";
 import { GET as siteSummaryGET } from "@/app/api/sites/[idOrSlug]/summary/route";
 import { GET as siteDomainGET } from "@/app/api/sites/[idOrSlug]/domain/route";
+import { GET as storefrontKeysGET } from "@/app/api/sites/[idOrSlug]/storefront-keys/route";
 import { GET as orgDomainsGET } from "@/app/api/settings/domains/route";
 import { buildQuery, type QueryValue } from "./client";
 import type {
@@ -87,6 +88,7 @@ import type { CategoriesQuery } from "./categories";
 import type { ProductsQuery } from "./products";
 import type { SiteSummary, SitesQuery } from "./sites";
 import type { OrgDomains, SiteDomain } from "./domains";
+import type { StorefrontKey } from "./storefront-keys";
 import type {
   PlatformOrgList,
   PlatformOrgListQuery,
@@ -168,6 +170,15 @@ export const getSiteSummary = (idOrSlug: string) =>
  */
 export const getSiteDomain = (idOrSlug: string) =>
   call<SiteDomain>(siteDomainGET, `/api/sites/${idOrSlug}/domain`, undefined, { idOrSlug });
+
+/** Per-store secret keys for an exported storefront (D53). `tokens.manage`. */
+export const listStorefrontKeys = (idOrSlug: string) =>
+  call<{ siteId: number; keys: StorefrontKey[] }>(
+    storefrontKeysGET,
+    `/api/sites/${idOrSlug}/storefront-keys`,
+    undefined,
+    { idOrSlug },
+  );
 
 /**
  * Org-wide domain overview. **Reads no DNS** — unlike `getSiteDomain`, which
