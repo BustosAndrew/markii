@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { BlockDescription } from "@/lib/api/builder";
 import { inheritedStyle, outermost, planBulkMove, planDuplicate, planGroupStep, planPaste, toInput } from "@/components/builder/tree";
-import { describeBlocks } from "./blocks";
+import { describeBlocks } from "@markii/renderer/blocks";
 import { normalizeSavedBlock } from "./saved-blocks";
-import { TreeError, emptyRoot, insertNodes, moveNodes, nodeToInput, type IdGenerator } from "./tree";
-import type { PageNode } from "./types";
+import { TreeError, emptyRoot, insertNodes, moveNodes, nodeToInput, type IdGenerator } from "@markii/renderer/tree";
+import type { PageNode } from "@markii/renderer/types";
 
 /**
  * M7 — the editor's bulk edits. The editor plans them on its own copy of the

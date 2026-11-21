@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { Order } from "@/lib/api/types";
-import { formatCents } from "@/lib/api/money";
+import { formatCents } from "@markii/renderer/money";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 

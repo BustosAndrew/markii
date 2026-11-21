@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { orgHandler } from "@/lib/auth/handler";
-import { describeBindings } from "@/lib/builder/bindings";
-import { describeBlocks } from "@/lib/builder/blocks";
-import { PRESETS } from "@/lib/builder/presets";
-import { FONTS, MAX_WIDTH_SCALE, RADIUS_SCALE } from "@/lib/builder/tokens";
+import { describeBindings } from "@markii/renderer/bindings";
+import { describeBlocks } from "@markii/renderer/blocks";
+import { PRESETS } from "@markii/renderer/presets";
+import { FONTS, MAX_WIDTH_SCALE, RADIUS_SCALE } from "@markii/renderer/tokens";
 
 /**
  * The block registry as data (`docs/API.md` §19, `docs/BUILDER.md` §5): every

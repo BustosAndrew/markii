@@ -11,7 +11,7 @@ import { membershipGateFor } from "@/lib/commerce/memberships";
 import { db, productOptions, variants } from "@/lib/db";
 import { formatPrice, productJsonLd } from "@/lib/generators";
 import { x402SettlesCurrency } from "@/lib/x402";
-import { productView } from "@/lib/builder/views";
+import { productView } from "@markii/renderer/views";
 import { documentFor, loadSite, storefrontHalted } from "@/lib/storefront";
 import { StorefrontBuilderPage } from "@/components/storefront/builder-page";
 

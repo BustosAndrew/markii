@@ -8,7 +8,7 @@ import { ListFilters } from "@/components/ui/list-filters";
 import { PageHeader } from "@/components/ui/page-header";
 import { Pagination } from "@/components/ui/pagination";
 import { firstParam, loadOrError, parseLimit, parsePage } from "@/lib/api/load";
-import { formatMinor } from "@/lib/api/money";
+import { formatMinor } from "@markii/renderer/money";
 import { ordersExportUrl, type OrderListItem, type OrderTotals } from "@/lib/api/orders";
 import { listOrders, listSites } from "@/lib/api/server";
 import type { Order } from "@/lib/api/types";

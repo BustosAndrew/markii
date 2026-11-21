@@ -11,7 +11,7 @@ import {
   updateProduct,
 } from "@/lib/api/products";
 import type { TaxProvider } from "@/lib/api/tax-shipping";
-import { currencyExponent, decimalMinor, parseDecimalToMinor } from "@/lib/api/money";
+import { currencyExponent, decimalMinor, parseDecimalToMinor } from "@markii/renderer/money";
 import { uploadProductImage } from "@/lib/api/uploads";
 import { ApiClientError, type Category, type Product, type Site } from "@/lib/api/types";
 import { Button } from "@/components/ui/button";

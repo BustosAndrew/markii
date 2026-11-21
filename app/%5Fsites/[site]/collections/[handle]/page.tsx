@@ -7,7 +7,8 @@ import { StoreFooter, StoreTop } from "@/components/storefront/store-chrome";
 import { ThemeRoot } from "@/components/storefront/theme-root";
 import { logTraffic } from "@/lib/agents";
 import { StorefrontBuilderPage } from "@/components/storefront/builder-page";
-import { collectionView } from "@/lib/builder/views";
+import { collectionStructuredData } from "@markii/renderer/structured-data";
+import { collectionView } from "@markii/renderer/views";
 import { documentFor, loadSite, storefrontHalted } from "@/lib/storefront";
 import { publishedCollectionByHandle, storefrontMembersOf } from "@/lib/storefront/collections";
 
@@ -60,23 +61,8 @@ export default async function CollectionPage({ params }: Props) {
   const themeId = site.themeId ?? "studio";
   const description = strip(collection.description);
 
-  const jsonLd: WithContext<SchemaCollectionPage> = {
-    "@context": "https://schema.org",
-    "@type": "CollectionPage",
-    name: collection.title,
-    description: description || undefined,
-    url: `${baseUrl}/collections/${collection.handle}`,
-    mainEntity: {
-      "@type": "ItemList",
-      numberOfItems: items.length,
-      itemListElement: items.map((p, i) => ({
-        "@type": "ListItem",
-        position: i + 1,
-        url: `${baseUrl}/p/${p.slug}`,
-        name: p.name,
-      })),
-    },
-  };
+  // The renderer's, so an exported store emits the same structured data (D53).
+  const jsonLd = collectionStructuredData(collection, items, baseUrl) as WithContext<SchemaCollectionPage>;
 
   const collectionLd = (
     <script

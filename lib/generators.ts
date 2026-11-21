@@ -1,9 +1,9 @@
 import type { Product as SchemaProduct, WithContext } from "schema-dts";
 import { slugify, tenantBaseUrl } from "@/lib/api";
-import { decimalMinor } from "@/lib/api/money";
-import { formatPrice } from "./builder/format";
+import { productStructuredData } from "@markii/renderer/structured-data";
+import { formatPrice } from "@markii/renderer/format";
 import type { Category, Collection, Product, Site } from "@/lib/db";
-import { getTheme, themeDocumentStylesheet } from "@/lib/storefront/themes";
+import { getTheme, themeDocumentStylesheet } from "@markii/renderer/themes";
 
 /**
  * A site + catalog snapshot every generator works from. Built either from the DB
@@ -277,25 +277,8 @@ export function productJsonLd(
   product: Bundle["products"][number],
   baseUrl: string,
 ): WithContext<SchemaProduct> {
-  return {
-    "@context": "https://schema.org",
-    "@type": "Product",
-    name: product.name,
-    description: strip(product.description) || undefined,
-    image: product.images.length ? product.images : undefined,
-    sku: product.sku ?? undefined,
-    url: `${baseUrl}/p/${product.slug}`,
-    offers: {
-      "@type": "Offer",
-      // The currency's own decimals, as the price is charged (see formatPrice).
-      price: decimalMinor(product.priceCents, product.currency),
-      priceCurrency: product.currency,
-      availability:
-        product.stock > 0 ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
-      url: `${baseUrl}/p/${product.slug}`,
-      seller: { "@type": "Organization", name: bundle.site.name },
-    },
-  };
+  // The renderer's, so an exported store emits the same structured data (D53).
+  return productStructuredData(product, bundle.site.name, baseUrl) as WithContext<SchemaProduct>;
 }
 
 // ---------- sitemap ----------
@@ -328,7 +311,7 @@ export function sitemapTree(bundle: Bundle): { pages: SitemapNode[] } {
 /**
  * The store's own document for `llms-full.txt` (M5, the llms.txt convention's
  * full-text companion): every published page's Markdown under its title and
- * address. Rendered by the caller (`lib/builder/to-markdown.ts`).
+ * address. Rendered by the caller (`packages/renderer/src/to-markdown.ts`).
  */
 export function generateLlmsFullTxt(
   bundle: Bundle,

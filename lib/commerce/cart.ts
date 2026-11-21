@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { badRequest, conflict, notFound } from "../api";
 import { currentCustomerId } from "../auth/shopper";
 import { storefrontHeld } from "../billing/standing";
@@ -114,7 +114,25 @@ export async function addLine(
    * The page is a view; this is the write, and a shopper who knows a product id
    * can post straight to the cart without ever loading it.
    */
-  await assertAccess(product, await currentCustomerId(site.id));
+  const customerId = await currentCustomerId(site.id);
+  await assertAccess(product, customerId);
+
+  /**
+   * Claim the cart for the shopper the request names, the moment one does
+   * (never overwriting a claim — the rule `attachShopper` keeps). It matters
+   * for an **exported** storefront (D53): its server adds lines with a
+   * storefront key naming a member, then sends the shopper to this store's
+   * hosted cart, where they are not signed in. The claim is how checkout
+   * knows whose membership the cart was filled under.
+   */
+  if (customerId !== null && cart.customerId === null) {
+    const [claimed] = await db
+      .update(carts)
+      .set({ customerId, updatedAt: new Date() })
+      .where(and(eq(carts.id, cart.id), isNull(carts.customerId)))
+      .returning();
+    if (claimed) cart = claimed;
+  }
 
   let variant = null;
   if (input.variantId != null) {

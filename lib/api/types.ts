@@ -1,6 +1,9 @@
 export type SiteStatus = "draft" | "live" | "paused";
 
-export type ThemeId = "studio" | "atlas" | "noir" | "bloom";
+import type { ThemeId } from "@markii/renderer/themes";
+
+/** Defined by the renderer (D53), which draws the themes. */
+export type { ThemeId };
 
 export const THEME_IDS: ThemeId[] = ["studio", "atlas", "noir", "bloom"];
 

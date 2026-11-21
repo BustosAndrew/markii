@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { ensureCart } from "@/lib/api/storefront-cart";
-import { formatMinor } from "@/lib/api/money";
+import { formatMinor } from "@markii/renderer/money";
 import "./cart-island.css";
 
 export type StorefrontVariantOption = {

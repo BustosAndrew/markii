@@ -1,4 +1,4 @@
-import { decimalMinor } from "@/lib/api/money";
+import { decimalMinor } from "./money";
 
 /**
  * A price for display — the one definition every storefront surface shares

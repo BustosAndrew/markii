@@ -8,10 +8,10 @@ import {
   websiteJsonLd,
   type Bundle,
 } from "@/lib/generators";
-import { documentJsonLd, type RenderContext } from "./render";
-import { pageToMarkdown, type MarkdownContext } from "./to-markdown";
-import { emptyRoot, insertNodes, type IdGenerator, type NodeInput } from "./tree";
-import type { PageNode } from "./types";
+import { documentJsonLd, type RenderContext } from "@markii/renderer/render";
+import { pageToMarkdown, type MarkdownContext } from "@markii/renderer/to-markdown";
+import { emptyRoot, insertNodes, type IdGenerator, type NodeInput } from "@markii/renderer/tree";
+import type { PageNode } from "@markii/renderer/types";
 
 /**
  * M5 — the agent-facing documents read the published design. A page that

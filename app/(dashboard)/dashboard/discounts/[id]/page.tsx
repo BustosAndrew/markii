@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { loadOrError } from "@/lib/api/load";
-import { formatMinor } from "@/lib/api/money";
+import { formatMinor } from "@markii/renderer/money";
 import { getDiscount, getMe, listSites } from "@/lib/api/server";
 import { FetchError } from "@/components/dashboard/fetch-error";
 import { DiscountForm } from "@/components/dashboard/discount-form";

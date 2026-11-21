@@ -402,16 +402,16 @@ Phase F with the chat UI.
   code — everything reachable from `render.tsx`, `to-markdown.ts`, `views.ts`, `block-css.ts`,
   `tokens.ts`, `theme-package.ts`, `product-card.tsx`, `catalog.ts` and `format.ts` — imports only
   itself, `react`, `zod`, `cheerio`, `node:crypto`, and three pure modules that move with it
-  (`lib/api/money.ts`, `lib/storefront/themes.ts`, `lib/api/types.ts`);
+  (`packages/renderer/src/money.ts`, `packages/renderer/src/themes.ts`, `lib/api/types.ts`);
   `lib/builder/renderer-boundary.test.ts` walks the imports and refuses anything else (falsified: a
   type-only `@/lib/db` import in `views.ts` fails it). What used to cross the line now arrives
-  through the render context: **the catalogue as the renderer's own shapes** (`lib/builder/catalog.ts`
+  through the render context: **the catalogue as the renderer's own shapes** (`packages/renderer/src/catalog.ts`
   — database rows fit them as they are), **collection lookups as `membersOf(handle, limit)`** (Markii's
   side is `membersByHandle` in `lib/storefront/collections.ts`), and **the cart as a rendered element**
   (`ProductPurchase.buy` — the product route renders `AddToCart`, the renderer only places it).
-  `formatPrice` and `ProductCard` moved in, and their old homes re-export them. **Stage 2, the move
-  into its own Apache-licensed package, waits on the repo's `LICENSE` and the copyright holder's legal
-  name** (D26, G9). Never add a `@/lib/db` read, a server-only module or a client island to the drawing
+  `formatPrice` and `ProductCard` moved in, and their old homes re-export them. **Stage 2 is built
+  (2026-11-20): the drawing code is `packages/renderer/` (`@markii/renderer/*`), Apache 2.0 with
+  `Copyright 2026 Markii`**, and the boundary test now walks every file in it. Never add a `@/lib/db` read, a server-only module or a client island to the drawing
   code — the test will say so. **The package is Apache 2.0; the rest of
   Markii stays FSL** (D53) — so nothing outside the drawing code may move into it, since anything
   that does is permissively licensed for good from its first release. **The storefront API is not yet enough
@@ -419,7 +419,10 @@ Phase F with the chat UI.
   but no product, collection, category or published-design reads, and shopper sessions are host-only
   cookies — an app on another origin meets the cross-origin write guard in `proxy.ts` by design. A
   headless export needs those reads plus a non-cookie shopper credential, decided with the same care
-  as D30.
+  as D30. **Both answered 2026-11-20**: the read API is built (`docs/API.md` §23), and there is no
+  shopper credential — the export's sign-in is its owner's, and its server vouches for a shopper with
+  a per-store storefront secret key (migration 0050). **The Next.js export is built (2026-11-20)** —
+  `packages/renderer/next-app/` is the scaffold it ships, Apache like the renderer.
 - Do merchants get raw template-language access, or only the four custom-code levels?
 - ~~Theme marketplace; theme export/import between stores~~ — **decided 2026-11-19 (D53): yes to
   both, on one format.** The **theme package** (node documents for pages, templates and regions;
@@ -430,7 +433,7 @@ Phase F with the chat UI.
     id means nothing in another store. Today's blocks already comply (`productGrid`, `productCard`
     use `categorySlug`, `collectionHandle`, `productSlug`); a handle the importing store lacks must
     render empty, not fail.
-  - **Images travel inside the package** (built 2026-11-19, `lib/builder/theme-package.ts`
+  - **Images travel inside the package** (built 2026-11-19, `packages/renderer/src/theme-package.ts`
     `mapImages`). An image can sit in four places — a block prop whose editor field is `kind:
     "image"` (found from the registry, so a new image prop joins on its own), a page's
     `seo.ogImage`, custom HTML `<img src>`, theme CSS `url()` — and one walker covers all four. A

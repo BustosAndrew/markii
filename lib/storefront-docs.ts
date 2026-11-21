@@ -1,7 +1,7 @@
 import "server-only";
 
-import { pageToMarkdown } from "./builder/to-markdown";
-import { storeView } from "./builder/views";
+import { pageToMarkdown } from "@markii/renderer/to-markdown";
+import { storeView } from "@markii/renderer/views";
 import {
   generateAgentMd,
   generateLlmsFullTxt,

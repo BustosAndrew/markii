@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { previewTax, type TaxPreview } from "@/lib/api/tax-shipping";
-import { currencyExponent, formatMinor } from "@/lib/api/money";
+import { currencyExponent, formatMinor } from "@markii/renderer/money";
 import { publicErrorMessage } from "@/lib/api/public-copy";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

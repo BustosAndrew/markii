@@ -8,7 +8,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { Timeline } from "@/components/ui/timeline";
 import { loadOrError } from "@/lib/api/load";
-import { formatMinor } from "@/lib/api/money";
+import { formatMinor } from "@markii/renderer/money";
 import type {
   OrderDetail,
   OrderEvent,

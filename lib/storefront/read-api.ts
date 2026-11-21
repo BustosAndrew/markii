@@ -1,5 +1,5 @@
 import type { Category, Collection, Product } from "@/lib/db";
-import type { ThemePackage } from "@/lib/builder/theme-package";
+import type { ThemePackage } from "@markii/renderer/theme-package";
 import type { SiteData } from "@/lib/storefront";
 
 /**
@@ -95,6 +95,13 @@ export type StorefrontStoreJson = {
     name: string;
     slug: string;
     url: string;
+    /**
+     * The published theme (`sites.themeId`). With a published design this is
+     * `design.theme.themeId` too; without one it is the only theme there is.
+     */
+    themeId: string;
+    /** Whether the store publishes `llms.txt` / `agent.md` — the merchant's switch, already visible as those documents existing or not. */
+    agentDiscovery: boolean;
     /** Whether the store takes orders at all right now — the merchant's switch. */
     purchasesEnabled: boolean;
     /** The rails checkout accepts (`POST /api/checkout/session` `rail`). */
@@ -157,6 +164,8 @@ export function storeJson(data: SiteData, design: ThemePackage | null): Storefro
       name: site.name,
       slug: site.slug,
       url: data.baseUrl,
+      themeId: site.themeId,
+      agentDiscovery: site.agentDiscovery,
       purchasesEnabled: site.purchasesEnabled,
       rails: { stripe: Boolean(site.paymentProviders?.stripe), x402: Boolean(site.paymentProviders?.x402) },
     },

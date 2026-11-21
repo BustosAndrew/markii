@@ -1,9 +1,9 @@
 import type { ReactNode } from "react";
 import { StoreFooter, StoreTop, builderContext } from "@/components/storefront/store-chrome";
 import { ThemeRoot } from "@/components/storefront/theme-root";
-import type { DataValues } from "@/lib/builder/bindings";
-import { BuilderPage, type RenderContext } from "@/lib/builder/render";
-import type { PageNode } from "@/lib/builder/types";
+import type { DataValues } from "@markii/renderer/bindings";
+import { BuilderPage, type RenderContext } from "@markii/renderer/render";
+import type { PageNode } from "@markii/renderer/types";
 import type { SiteData } from "@/lib/storefront";
 
 /**

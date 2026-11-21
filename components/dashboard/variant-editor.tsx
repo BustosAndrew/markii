@@ -13,7 +13,7 @@ import {
   type Variant,
   type VariantMatrix,
 } from "@/lib/api/commerce";
-import { currencyExponent, decimalMinor, formatMinor } from "@/lib/api/money";
+import { currencyExponent, decimalMinor, formatMinor } from "@markii/renderer/money";
 import { ApiClientError } from "@/lib/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

@@ -4,8 +4,8 @@ import { ApiError } from "@/lib/api";
 import { orgHandler } from "@/lib/auth/handler";
 import { packageSourceRows } from "@/lib/builder/queries";
 import { bundleImages } from "@/lib/builder/theme-assets";
-import { packageFromDesign } from "@/lib/builder/theme-package";
-import type { NodeInput } from "@/lib/builder/tree";
+import { packageFromDesign } from "@markii/renderer/theme-package";
+import type { NodeInput } from "@markii/renderer/tree";
 import { PRIVATE_BUCKET, signedDownloadUrl, uploadFile } from "@/lib/storage";
 import { resolveSite } from "@/lib/queries";
 
@@ -22,7 +22,7 @@ import { resolveSite } from "@/lib/queries";
  * **A route, not an action**: it changes nothing anyone sees, and its result
  * is a download link, which does not belong in the audit log. `cms.read`,
  * because the file holds nothing `GET /api/builder/sites/:id` does not already
- * show that role. Head code is left out (`lib/builder/theme-package.ts`).
+ * show that role. Head code is left out (`packages/renderer/src/theme-package.ts`).
  */
 const body = z.object({ source: z.enum(["draft", "published"]).default("draft") }).strict();
 

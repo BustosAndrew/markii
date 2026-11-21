@@ -3,9 +3,9 @@ import { z } from "zod";
 import { ApiError, conflict, notFound } from "../../api";
 import { blockingErrors, checkCssBudget, checkHeadCode, checkPage, checkTheme, type CheckResult } from "../../builder/checks";
 import { cleanHeadCode } from "../../builder/head-code";
-import { conditionSchema } from "../../builder/bindings";
-import { cssProblems } from "../../builder/sanitize";
-import { DEFAULT_REGION_TREES, DEFAULT_TEMPLATE_TREES, PRESETS, blankPageTree, defaultHomeTree } from "../../builder/presets";
+import { conditionSchema } from "@markii/renderer/bindings";
+import { cssProblems } from "@markii/renderer/sanitize";
+import { DEFAULT_REGION_TREES, DEFAULT_TEMPLATE_TREES, PRESETS, blankPageTree, defaultHomeTree } from "@markii/renderer/presets";
 import {
   bumpRevision,
   catalogFacts,
@@ -15,7 +15,7 @@ import {
   ownedSite,
   saveTree,
 } from "../../builder/store";
-import { applyTokenPatch, designTokensPatchSchema, resolveTheme, type DesignTokens } from "../../builder/tokens";
+import { applyTokenPatch, designTokensPatchSchema, resolveTheme, type DesignTokens } from "@markii/renderer/tokens";
 import {
   TreeError,
   duplicateNode,
@@ -33,10 +33,10 @@ import {
   setVisibility as setNodeVisibility,
   type Moved,
   type Removed,
-} from "../../builder/tree";
+} from "@markii/renderer/tree";
 import { SAVED_BLOCKS_PER_SITE, normalizeSavedBlock } from "../../builder/saved-blocks";
-import { pageSeoSchema } from "../../builder/theme-package";
-import { styleSchema } from "../../builder/styles";
+import { pageSeoSchema } from "@markii/renderer/theme-package";
+import { styleSchema } from "@markii/renderer/styles";
 import {
   BREAKPOINTS,
   CUSTOM_CSS_MAX,
@@ -50,7 +50,7 @@ import {
   type PageSeo,
   type RegionHandle,
   type TemplateHandle,
-} from "../../builder/types";
+} from "@markii/renderer/types";
 import { siteDesignVersions, siteDesigns, siteDocuments, siteSavedBlocks, sites } from "../../db";
 import { defineAction } from "../registry";
 import type { ActionContext } from "../types";
@@ -64,7 +64,7 @@ import type { ActionContext } from "../types";
  * 1. takes the site's design row `FOR UPDATE` and checks the edit lease
  *    (`lockDesign`) — one writer at a time, and the agent holds the pen while
  *    a turn runs;
- * 2. applies one pure tree operation (`lib/builder/tree.ts`) and validates the
+ * 2. applies one pure tree operation (`packages/renderer/src/tree.ts`) and validates the
  *    whole tree;
  * 3. saves the draft and bumps `draftRevision`, which the live preview polls.
  *

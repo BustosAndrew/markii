@@ -8,7 +8,7 @@ import {
   deleteShippingZone,
   type ShippingZone,
 } from "@/lib/api/tax-shipping";
-import { currencyExponent, formatMinor } from "@/lib/api/money";
+import { currencyExponent, formatMinor } from "@markii/renderer/money";
 import { ApiClientError } from "@/lib/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

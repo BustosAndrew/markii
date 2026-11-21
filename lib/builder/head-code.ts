@@ -1,5 +1,5 @@
 import { load } from "cheerio";
-import { HEAD_CODE_MAX } from "./types";
+import { HEAD_CODE_MAX } from "@markii/renderer/types";
 
 /**
  * Custom scripts — the merchant's head code (D51 M6, `docs/BUILDER.md` §8

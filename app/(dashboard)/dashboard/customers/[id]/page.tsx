@@ -7,7 +7,7 @@ import {
   getMe,
 } from "@/lib/api/server";
 import { loadOrError } from "@/lib/api/load";
-import { formatCents, formatMinor } from "@/lib/api/money";
+import { formatCents, formatMinor } from "@markii/renderer/money";
 import type { MembershipStatus } from "@/lib/api/memberships";
 import { FetchError } from "@/components/dashboard/fetch-error";
 import { Badge } from "@/components/ui/badge";

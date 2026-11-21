@@ -59,7 +59,7 @@ export default defineConfig({
         ...shared,
         test: {
           name: "unit",
-          include: ["lib/**/*.test.ts"],
+          include: ["lib/**/*.test.ts", "packages/**/*.test.ts"],
           environment: "node",
         },
       },

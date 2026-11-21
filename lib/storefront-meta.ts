@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import type { PageSeo } from "@/lib/builder/types";
+import type { PageSeo } from "@markii/renderer/types";
 import type { SiteData } from "@/lib/storefront";
 
 /**

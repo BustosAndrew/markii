@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getBillingInvoice } from "@/lib/api/server";
-import { formatMinor } from "@/lib/api/money";
+import { formatMinor } from "@markii/renderer/money";
 import { isConfigurationRequired } from "@/lib/api/planned";
 import { ApiClientError } from "@/lib/api/types";
 import { PageHeader } from "@/components/ui/page-header";

@@ -1,8 +1,8 @@
 import { StoreHeadCode } from "@/components/storefront/head-code";
 import { SiteHeader } from "@/components/storefront/site-header";
-import { BuilderRegion, type RenderContext } from "@/lib/builder/render";
-import { cssProblems } from "@/lib/builder/sanitize";
-import { storeView } from "@/lib/builder/views";
+import { BuilderRegion, type RenderContext } from "@markii/renderer/render";
+import { cssProblems } from "@markii/renderer/sanitize";
+import { storeView } from "@markii/renderer/views";
 import { regionsFor, type SiteData } from "@/lib/storefront";
 import { membersByHandle } from "@/lib/storefront/collections";
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import "../../actions/index";
 import { allActions, getAction } from "../../actions/registry";
-import type { PageNode } from "../../builder/types";
+import type { PageNode } from "@markii/renderer/types";
 import { AGENT_KINDS } from "../../db";
 import { draftToolName, draftTools } from "../draft-tools";
 import { BRAND_DRAFT_ACTIONS } from "./allowlist";
