@@ -94,13 +94,29 @@ export function ThemePackagePanel({
   onCopyScripts: (html: string) => Promise<boolean>;
 }) {
   const [stores, setStores] = useState<{ id: number; name: string }[]>([]);
+  const [storesError, setStoresError] = useState<string | null>(null);
   const [fromSiteId, setFromSiteId] = useState<string>("");
   const [copySource, setCopySource] = useState<"published" | "draft">("published");
   const [themeSource, setThemeSource] = useState<"draft" | "published">("draft");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<ReactNode>(null);
-  const [pendingScripts, setPendingScripts] = useState<string | null>(null);
+  /**
+   * The source store's custom scripts, offered after a copy. The API exposes a
+   * store's **draft** scripts only, so `draftDiffersFromLive` says when that is
+   * not what its shoppers run — the merchant may have chosen "published".
+   */
+  const [pendingScripts, setPendingScripts] = useState<null | {
+    html: string;
+    fromName: string;
+    draftDiffersFromLive: boolean;
+    askedForPublished: boolean;
+  }>(null);
+  /**
+   * The scripts under review before `setHeadCode` replaces this store's own.
+   * `current` is read fresh when the review opens: saving replaces them whole.
+   */
+  const [scriptsReview, setScriptsReview] = useState<null | { current: string }>(null);
   const [discard, setDiscard] = useState<null | { kind: "copy" | "import"; run: () => Promise<void> }>(null);
   const [importPreview, setImportPreview] = useState<null | {
     uploadId: string;
@@ -114,10 +130,14 @@ export function ThemePackagePanel({
     listSites({ limit: 100, sort: "name" }).then(
       (r) => {
         if (cancelled) return;
+        setStoresError(null);
         setStores(r.items.filter((s) => s.id !== siteId).map((s) => ({ id: s.id, name: s.name })));
       },
-      () => {
-        if (!cancelled) setStores([]);
+      (err) => {
+        if (cancelled) return;
+        setStores([]);
+        // Not "no other stores" — that would state a fact the failed read never established.
+        setStoresError(publicErrorMessage(err, "Your other stores could not be loaded."));
       },
     );
     return () => {
@@ -158,10 +178,18 @@ export function ThemePackagePanel({
       await onReplaced();
       setCopySource(opts.source);
       setPendingScripts(null);
+      setScriptsReview(null);
       if (result.sourceHasHeadCode) {
         try {
           const source = await getDesign(from);
-          if (source.started && source.headHtml) setPendingScripts(source.headHtml);
+          if (source.started && source.headHtml) {
+            setPendingScripts({
+              html: source.headHtml,
+              fromName: stores.find((s) => s.id === from)?.name ?? "the other store",
+              draftDiffersFromLive: source.headHtmlChanged,
+              askedForPublished: opts.source === "published",
+            });
+          }
         } catch {
           // The copy already landed; scripts can still be pasted by hand.
         }
@@ -342,7 +370,9 @@ export function ThemePackagePanel({
         {canEdit ? (
           <div className="space-y-2">
             <Label htmlFor="th-copy-from">Copy from another store</Label>
-            {stores.length === 0 ? (
+            {storesError ? (
+              <FieldError>{storesError}</FieldError>
+            ) : stores.length === 0 ? (
               <p className="text-xs text-muted">No other stores in reach to copy from.</p>
             ) : (
               <>
@@ -378,19 +408,78 @@ export function ThemePackagePanel({
                 </Button>
               </>
             )}
-            {pendingScripts ? (
+            {pendingScripts && !scriptsReview ? (
               <Button
                 variant="secondary"
                 disabled={locked}
                 onClick={() =>
-                  void withBusy("scripts", async () => {
-                    const ok = await onCopyScripts(pendingScripts);
-                    if (ok) setPendingScripts(null);
+                  void withBusy("scripts-review", async () => {
+                    // Read this store's scripts now, not at copy time: saving replaces them whole.
+                    const here = await getDesign(siteId);
+                    setScriptsReview({ current: here.started ? here.headHtml : "" });
                   })
                 }
               >
-                {busy === "scripts" ? "Copying scripts…" : "Copy scripts too"}
+                {busy === "scripts-review" ? "Loading scripts…" : "Review scripts to copy…"}
               </Button>
+            ) : null}
+            {pendingScripts && scriptsReview ? (
+              <div
+                className="space-y-3 rounded-[var(--radius-control)] border border-border p-3"
+                role="region"
+                aria-label="Review custom scripts"
+              >
+                <p className="text-sm text-foreground">
+                  Custom scripts from {pendingScripts.fromName}. They run on every storefront page
+                  except the cart and account once you publish.
+                </p>
+                {pendingScripts.askedForPublished && pendingScripts.draftDiffersFromLive ? (
+                  <p className="text-xs text-warning-text">
+                    These are that store&rsquo;s draft scripts, which differ from what its shoppers
+                    run now. Its live scripts cannot be copied from here.
+                  </p>
+                ) : pendingScripts.draftDiffersFromLive ? null : (
+                  <p className="text-xs text-muted">These are the scripts that store runs live.</p>
+                )}
+                <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded bg-surface-elevated p-2 font-mono text-xs text-foreground">
+                  {pendingScripts.html}
+                </pre>
+                {scriptsReview.current ? (
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-warning-text">
+                      This replaces this store&rsquo;s own custom scripts, which are removed:
+                    </p>
+                    <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-all rounded border border-warning-border bg-warning-bg p-2 font-mono text-xs text-warning-text">
+                      {scriptsReview.current}
+                    </pre>
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted">This store has no custom scripts of its own.</p>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    disabled={locked}
+                    onClick={() =>
+                      void withBusy("scripts", async () => {
+                        const ok = await onCopyScripts(pendingScripts.html);
+                        if (ok) {
+                          setPendingScripts(null);
+                          setScriptsReview(null);
+                        }
+                      })
+                    }
+                  >
+                    {busy === "scripts"
+                      ? "Copying scripts…"
+                      : scriptsReview.current
+                        ? "Replace this store’s scripts"
+                        : "Copy scripts"}
+                  </Button>
+                  <Button variant="ghost" disabled={locked} onClick={() => setScriptsReview(null)}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
             ) : null}
           </div>
         ) : (
@@ -417,7 +506,7 @@ export function ThemePackagePanel({
                 <input
                   type="file"
                   accept="application/json,.json"
-                  className="sr-only"
+                  className="peer sr-only"
                   disabled={locked}
                   onChange={(e) => {
                     const file = e.target.files?.[0];
@@ -425,7 +514,8 @@ export function ThemePackagePanel({
                     if (file) void uploadThemeFile(file);
                   }}
                 />
-                <span className={`inline-flex items-center justify-center rounded-[var(--radius-control)] border border-border bg-surface px-4 py-2.5 text-sm font-medium text-foreground hover:bg-hover ${locked ? "pointer-events-none opacity-50" : ""}`}>
+                {/* The focused element is the hidden input, so its focus ring is drawn on this span. */}
+                <span className={`inline-flex items-center justify-center rounded-[var(--radius-control)] border border-border bg-surface px-4 py-2.5 text-sm font-medium text-foreground hover:bg-hover peer-focus-visible:ring-4 peer-focus-visible:ring-brand/10 peer-focus-visible:border-brand ${locked ? "pointer-events-none opacity-50" : ""}`}>
                   {busy === "theme-upload" ? "Reading file…" : "Import theme…"}
                 </span>
               </label>
