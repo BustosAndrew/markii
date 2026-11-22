@@ -396,7 +396,10 @@ and a keyboard-complete layer tree (one tab stop, arrow-key navigation, every ac
 9. Templates, data binding, repeaters, conditional visibility
 10. Custom code levels 1–4, sanitization, CSP, publish-time checks
 11. Publish pipeline, version history, pre-publish checks, cache invalidation
-12. Content surfaces: blog, menus, SEO fields, redirects, forms
+12. Content surfaces: blog, menus, SEO fields, redirects, forms — **menus (M4), SEO fields (M5) and
+    redirects (2026-11-21, migration 0051, `docs/API.md` §19) are built; blog and forms are not.**
+    Redirects fire only where the storefront would 404 and are live when saved, outside the draft:
+    they cannot hide a page that exists, so publish has nothing to protect there.
 
 Steps 1 and 7 are what make this agent-native rather than agent-compatible. Do not defer them into
 Phase F with the chat UI.

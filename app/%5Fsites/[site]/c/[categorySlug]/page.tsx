@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
+import { redirectOrNotFound } from "@/lib/storefront/redirects";
 import { StoreFooter, StoreTop } from "@/components/storefront/store-chrome";
 import { ThemeRoot } from "@/components/storefront/theme-root";
 import { logTraffic } from "@/lib/agents";
@@ -26,7 +27,8 @@ export default async function CategoryPage({ params }: Props) {
   if (!data) notFound();
   const { site, cats, prods, baseUrl } = data;
   const category = cats.find((c) => c.slug === categorySlug && c.enabled);
-  if (!category || storefrontHalted(data)) notFound();
+  if (storefrontHalted(data)) notFound();
+  if (!category) return redirectOrNotFound(data, `/c/${categorySlug}`);
 
   await logTraffic({
     siteId: site.id,

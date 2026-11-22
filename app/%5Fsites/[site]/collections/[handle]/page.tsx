@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
+import { redirectOrNotFound } from "@/lib/storefront/redirects";
 import type { CollectionPage as SchemaCollectionPage, WithContext } from "schema-dts";
 import { ProductCard } from "@/components/storefront/product-card";
 import { StoreFooter, StoreTop } from "@/components/storefront/store-chrome";
@@ -49,7 +50,7 @@ export default async function CollectionPage({ params }: Props) {
   const { site, baseUrl } = data;
 
   const collection = await publishedCollectionByHandle(site.id, handle);
-  if (!collection) notFound();
+  if (!collection) return redirectOrNotFound(data, `/collections/${handle}`);
 
   await logTraffic({
     siteId: site.id,

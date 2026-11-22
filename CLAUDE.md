@@ -697,8 +697,13 @@ unit test fails on a new table that is neither, so **classify any table you add*
 `scrub` (run at export). The marketplace is not built. **Version diff is built (2026-11-21)** — `GET
 /api/builder/sites/:idOrSlug/diff`, any two of draft, live and a stored version, over a pure
 `lib/builder/design-diff.ts`; nodes are followed by id. **A page's lead image loads eagerly** at high
-priority (`leadImageId`, §13) — every image had been lazy, hero included. Blog, redirects and forms
-(§15 step 12) are not built; each needs a migration.
+priority (`leadImageId`, §13) — every image had been lazy, hero included. **Storefront redirects are built
+(2026-11-21)** — **migration 0051** (`site_redirects`) must be applied before this code deploys;
+`redirects.*` actions, `GET /api/sites/:idOrSlug/redirects`. **A redirect fires only where the
+storefront would 404** — every route that 404s a missing product, category, collection or page calls
+`redirectOrNotFound` (`lib/storefront/redirects.ts`) instead of `notFound()`, and the catch-all
+`[...path]` route catches paths no route claims; **a new storefront route that 404s a missing thing
+should do the same**. Blog and forms (§15 step 12) are not built.
 
 **Stripe Tax on Markii's own subscription is built as of 2026-09-13** (G3). `automatic_tax` on every
 platform-account subscription create, change and preview — **no `Stripe-Account` header**, the

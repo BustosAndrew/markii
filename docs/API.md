@@ -3211,6 +3211,39 @@ a store moving house takes its unpublished work and its history with it.
   creates. Stripe ids are kept — they are on the merchant's own account — so recurring memberships
   keep renewing wherever that account's Connect webhook points.
 
+**Storefront redirects — ✅ LIVE (2026-11-21, `docs/BUILDER.md` §15 step 12).** **Migration 0051**
+adds `site_redirects` (RLS on) — apply it before deploying. An old link — usually from the platform the
+merchant moved from — sent on to where that thing lives now. Typed client: `lib/api/redirects.ts`.
+
+- **Fires only where the storefront would answer 404**: a path no route claims (the catch-all
+  `app/%5Fsites/[site]/[...path]`, e.g. Shopify's `/products/…`), or a product, category, collection or
+  page that is gone (`/p/…`, `/c/…`, `/collections/…`, `/pages/…`). So a redirect **never hides
+  something that exists**, and costs one indexed read on a miss only. Never in the builder preview;
+  never from a paused or billing-halted store.
+- **Live when saved** — not part of the draft design or publish, because it changes nothing a shopper
+  could already reach. 308 when `permanent` (default), 307 otherwise. The target is used as stored; the
+  request's query string is not carried over.
+- **Old links are matched normalised**: a full URL from the old store is accepted and its host dropped;
+  query and fragment dropped, decoded, slashes collapsed, no trailing slash, **lower case**. Refused as a
+  source (`400`, `details.field: "from"`), because a rule there could never fire: `/`, `/collections`,
+  and anything under `/api`, `/_next`, `/cart`, `/account`, `/download`, `/search`, `/llms.txt`,
+  `/llms-full.txt`, `/agent.md`, `/sitemap.xml`, `/robots.txt`.
+- **Targets** are a path on this store (`/p/green-tea`, query allowed) or an absolute `https://` URL.
+  Refused (`details.field: "to"`): `http:`, any other scheme, protocol-relative `//host`, credentials.
+- `GET /api/sites/:idOrSlug/redirects` — `{ siteId, total, items: [{ id, from, to, permanent,
+  createdBy, createdAt }] }` by old link; `?q=` matches either side, `?limit=` (200, max 1000),
+  `?offset=`. `cms.read`.
+
+| Action | Risk | What |
+|---|---|---|
+| `redirects.create` | low | `{ siteId, from, to, permanent? }` → `{ redirectId, from, to, permanent }`. `409` `from_taken`, `loop` (it would close a cycle with existing rules), `limit` (10,000 per store). Undoable |
+| `redirects.update` | low | `{ siteId, redirectId, to?, permanent? }` — the old link stays. `409` `loop`. Undoable |
+| `redirects.delete` | low | `{ siteId, redirectId }`. Undoable — undo recreates the rule under a new id |
+| `redirects.import` | medium | `{ siteId, redirects: [{ from, to, permanent? }] (≤ 1,000), replace? }` → `{ created, replaced, skipped: [{ row, from, reason }], total }`. Each row checked on its own; bad rows (invalid, duplicate in the list, existing without `replace`, loop) are reported and skipped, the rest land together. **Dry-run first** to show the report. Not undoable |
+
+All `cms.write`, per store (D52 scoping), on no agent's allowlist. The table travels in the store
+export (D53).
+
 **Agent documents from the published design (M5, 2026-11-12).** The merchant's own published pages
 now reach every document an agent or crawler reads, all from **one list** (`lib/storefront-docs.ts`):
 published pages only, and **never a page whose SEO says `noindex`** — hiding a page from search

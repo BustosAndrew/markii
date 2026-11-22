@@ -3170,6 +3170,35 @@ export const siteSavedBlocks = pgTable(
 );
 
 /**
+ * A storefront URL redirect (`docs/BUILDER.md` §15 step 12): an old path —
+ * usually a link from the platform the merchant moved from — sent on to where
+ * that thing lives now. **Fires only when nothing else answers the path**, so
+ * a redirect can never hide a live page, product or collection; the storefront
+ * consults it at the point it would otherwise answer 404
+ * (`lib/storefront/redirects.ts`). Live the moment it is saved — not part of the
+ * draft design, because it changes nothing a shopper could already reach.
+ */
+export const siteRedirects = pgTable(
+  "site_redirects",
+  {
+    id: serial("id").primaryKey(),
+    siteId: integer("site_id")
+      .notNull()
+      .references(() => sites.id, { onDelete: "cascade" }),
+    /** Normalised by `normalizeRedirectPath`: leading slash, no query, no trailing slash, lower case. */
+    fromPath: text("from_path").notNull(),
+    /** A path on this store (`/p/green-tea`) or an absolute `https://` URL. */
+    toUrl: text("to_url").notNull(),
+    /** 308 when true (search engines move the old URL's standing across), 307 when false. */
+    permanent: boolean("permanent").notNull().default(true),
+    /** `user:…` or `token:…`. */
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("site_redirects_site_from_uq").on(t.siteId, t.fromPath)],
+);
+
+/**
  * A live-preview session: the opaque token the editor's preview frame trades
  * for a cookie on the preview host (M2). Stored hashed; short-lived.
  */

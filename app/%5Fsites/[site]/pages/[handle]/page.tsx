@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
+import { redirectOrNotFound } from "@/lib/storefront/redirects";
 import { StorefrontBuilderPage } from "@/components/storefront/builder-page";
 import { logTraffic } from "@/lib/agents";
 import { loadSite, pageFor, storefrontHalted } from "@/lib/storefront";
@@ -38,7 +39,7 @@ export default async function BuilderPageRoute({ params }: Props) {
   // The home page is served at /, not twice.
   if (handle === "home") notFound();
   const page = await pageFor(data, handle);
-  if (!page) notFound();
+  if (!page) return redirectOrNotFound(data, `/pages/${handle}`);
 
   await logTraffic({
     siteId: data.site.id,

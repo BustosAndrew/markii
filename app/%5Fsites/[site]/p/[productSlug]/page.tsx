@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { asc, eq } from "drizzle-orm";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
+import { redirectOrNotFound } from "@/lib/storefront/redirects";
 import { AddToCart } from "@/components/storefront/add-to-cart";
 import { StoreFooter, StoreTop } from "@/components/storefront/store-chrome";
 import { ThemeRoot } from "@/components/storefront/theme-root";
@@ -43,7 +44,9 @@ export default async function ProductPage({ params }: Props) {
   const { site, bundle, cats, prods, baseUrl } = data;
   const dbProduct = prods.find((p) => p.slug === productSlug && p.enabled);
   const product = bundle.products.find((p) => p.slug === productSlug);
-  if (!dbProduct || !product || storefrontHalted(data)) notFound();
+  if (storefrontHalted(data)) notFound();
+  // A product that is gone (or renamed) may have a redirect waiting — only now, never ahead of a live one.
+  if (!dbProduct || !product) return redirectOrNotFound(data, `/p/${productSlug}`);
 
   await logTraffic({
     siteId: site.id,

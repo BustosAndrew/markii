@@ -531,6 +531,29 @@ permissions problem, so neither should show the step-up modal or "your role cann
   shell can hide org-wide writes without a second call. `lib/api/org.ts`: `reachesAllStores()`,
   `grantableRoles()`, `storesWithinReach()`.
 
+### 🟢 New 2026-11-21 — storefront redirects — needs a screen
+
+`lib/api/redirects.ts` → `listRedirects`, `createRedirect`, `updateRedirect`, `deleteRedirect`,
+`previewRedirectImport`, `importRedirects`; contract in `docs/API.md` §19 "Storefront redirects".
+**Migration 0051 — applied to the shared database 2026-11-21.** `cms.read` to see, `cms.write` to change.
+
+- **Suggested home:** website settings, a *Redirects* section — or its own tab beside *Design* if the
+  list gets long. A moved store can have thousands: page with `limit`/`offset`, search with `q`.
+- **Say what it does, because it is not obvious:** *"Sends an old link to its new place. Only used when
+  nothing on your store answers that link — it never hides a live page."* And: *"Takes effect as soon
+  as you save — no publish needed."*
+- **Form:** *Old link* (a full URL pasted from the old store is fine — show the stored `from` after
+  save, it is normalised and lower-cased), *Goes to* (path or https URL), *Permanent* (on by default;
+  explain off as "temporary — search engines keep the old link").
+- **Errors:** `400` → put `error.message` under the field named by `error.details.field` (`from`/`to`);
+  `409` `from_taken` → "There's already a redirect from that link" with a way to edit it; `loop`;
+  `limit`.
+- **Bulk import (CSV paste or upload, two columns):** parse client-side, ≤ 1,000 rows per call. Call
+  `previewRedirectImport` first and show `skipped[]` (`row` is the index you sent, `reason` is a
+  sentence) beside the counts; then `importRedirects` with the same body. Offer *Replace existing* →
+  `replace: true`. Import is not undoable; single create/update/delete are (the usual undo toast).
+- When the screen ships, add a line to `lib/ops-agents/assistant/help.ts` saying where it is.
+
 ### 🟢 New 2026-11-21 — compare design versions (§12) — needs a screen
 
 `getDesignDiff(site, { from?, to? })` in `lib/api/builder.ts` → `DesignDiff`; contract in
