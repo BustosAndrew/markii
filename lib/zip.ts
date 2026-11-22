@@ -1,4 +1,4 @@
-import { crc32, deflateRawSync } from "node:zlib";
+import { crc32, deflateRawSync, inflateRawSync } from "node:zlib";
 
 /**
  * A minimal zip writer — enough for a code export (D53): files, folders by
@@ -78,4 +78,55 @@ export function zip(entries: ZipEntry[]): Buffer {
   end.writeUInt32LE(centralSize, 12);
   end.writeUInt32LE(offset, 16);
   return Buffer.concat([...locals, ...centrals, end]);
+}
+
+/**
+ * Reads a zip — the store importer's half (D53). Enough for archives this
+ * module writes and for ordinary ones re-zipped by hand: stored and deflate
+ * entries, no zip64, no encryption. Walks the **central directory**, not the
+ * local headers, because that is the archive's own index of what it holds.
+ * Every entry's CRC is checked, and an unsafe path (`..`, absolute) is refused
+ * rather than returned for a caller to join onto a directory.
+ */
+export function unzip(archive: Uint8Array): Map<string, Buffer> {
+  const buf = Buffer.from(archive.buffer, archive.byteOffset, archive.byteLength);
+  // The end record is 22 bytes plus a comment of up to 65,535.
+  let end = -1;
+  for (let i = buf.length - 22; i >= Math.max(0, buf.length - 22 - 0xffff); i--) {
+    if (buf.readUInt32LE(i) === 0x06054b50) {
+      end = i;
+      break;
+    }
+  }
+  if (end < 0) throw new Error("Not a zip file");
+  const count = buf.readUInt16LE(end + 10);
+  let at = buf.readUInt32LE(end + 16);
+  const out = new Map<string, Buffer>();
+
+  for (let n = 0; n < count; n++) {
+    if (buf.readUInt32LE(at) !== 0x02014b50) throw new Error("Damaged zip: bad central directory");
+    const method = buf.readUInt16LE(at + 10);
+    const crc = buf.readUInt32LE(at + 16);
+    const compressed = buf.readUInt32LE(at + 20);
+    const size = buf.readUInt32LE(at + 24);
+    const nameLen = buf.readUInt16LE(at + 28);
+    const extraLen = buf.readUInt16LE(at + 30);
+    const commentLen = buf.readUInt16LE(at + 32);
+    const localAt = buf.readUInt32LE(at + 42);
+    const name = buf.subarray(at + 46, at + 46 + nameLen).toString("utf8");
+    at += 46 + nameLen + extraLen + commentLen;
+
+    if (name.endsWith("/")) continue; // a folder entry
+    if (name.startsWith("/") || name.includes("\\") || name.split("/").some((s) => s === ".." || s === "")) {
+      throw new Error(`Unsafe zip path: ${name}`);
+    }
+    if (buf.readUInt32LE(localAt) !== 0x04034b50) throw new Error(`Damaged zip: ${name}`);
+    const dataAt = localAt + 30 + buf.readUInt16LE(localAt + 26) + buf.readUInt16LE(localAt + 28);
+    const body = buf.subarray(dataAt, dataAt + compressed);
+    const raw = method === 0 ? Buffer.from(body) : method === 8 ? inflateRawSync(body) : null;
+    if (!raw) throw new Error(`Unsupported zip compression (${method}): ${name}`);
+    if (raw.length !== size || crc32(raw) >>> 0 !== crc) throw new Error(`Damaged zip: ${name} fails its checksum`);
+    out.set(name, raw);
+  }
+  return out;
 }

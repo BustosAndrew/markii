@@ -531,6 +531,30 @@ permissions problem, so neither should show the step-up modal or "your role cann
   shell can hide org-wide writes without a second call. `lib/api/org.ts`: `reachesAllStores()`,
   `grantableRoles()`, `storesWithinReach()`.
 
+### 🟢 New 2026-11-21 — export the whole store (D53) — needs a screen
+
+`lib/api/store-export.ts` → `exportStore(siteId)` and `previewStoreExport(siteId)`; contract in
+`docs/API.md` §19 "Store export". **No migration.** One store whole — products, inventory, customers,
+orders, refunds, discounts, shipping, tax, sold files, design — as a zip a self-hosted Markii imports
+(`pnpm store:import`). Not the Next.js export: that one is code and holds no data; this one is the data.
+
+- **Who sees the button:** `canExportStore(role)` in `lib/api/org.ts` — owner and administrator only
+  (new `store.export` permission). Hide it for everyone else; don't show it disabled with a reason
+  about customer data to a role that can't act on it.
+- **Suggested home:** website settings, below *Exported storefront*, under a heading like *Move this
+  store*. It is a rare, serious act — not a toolbar button.
+- **Flow:** call `previewStoreExport` first and show what it will hold from `result.counts` (customers,
+  orders, products, digitalAssets) — *"This file will contain 1,204 customers' names, emails and
+  addresses."* Then `exportStore`, which asks for a fresh authenticator code (`403 MFA_REQUIRED` →
+  `MfaStepUpProvider`, as with storefront keys). Open `result.url` — a **five-minute** link; never store it.
+- **Say both clocks beside the download:** the zip link lasts five minutes; the links to sold files
+  *inside* it expire at `result.files.linksExpireAt` (24 hours) — import before then or export again.
+- **`headCodeLeftOut: true`** → "Your custom scripts are not included; add them again on the new store."
+- Copy worth keeping: *"Everything in this store, in one file, to move it to your own Markii. It holds
+  your customers' personal data — keep it like a database backup and delete it once it is imported."*
+- When the screen ships, add one line to `lib/ops-agents/assistant/help.ts` saying where it is (the
+  assistant's help is a contract — don't describe a button that isn't there yet).
+
 ### 🟢 New 2026-11-20 — export the storefront as a Next.js app (D53) — screen built
 
 `exportNextApp(site)` in `lib/api/builder.ts` → `{ url, expiresAt, files, bytes, storeUrl, storeLive }`.

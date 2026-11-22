@@ -310,6 +310,8 @@ describe("billing action registration", () => {
       "platform.resetMfa",
       "platform.suspendOrg",
       "platform.unsuspendOrg",
+      // Every customer's personal data in one file (D53): access, all at once.
+      "store.export",
       // A storefront key acts as any customer of its store (D53): granting access.
       "storefront.createKey",
     ]);

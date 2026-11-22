@@ -61,6 +61,17 @@ export const PERMISSIONS = [
    * inherit script access by holding `cms.write`.
    */
   "cms.scripts",
+  /**
+   * Export a whole store — catalogue, **every customer's personal data**,
+   * every order, and links to the files it sells (D53, 2026-11-21).
+   *
+   * Admin-only by the same mechanism as `org.audit`: it is in this array and
+   * no explicit role list, so only `owner` and `administrator` hold it. Every
+   * other role can *read* customers one screen at a time; this is the whole
+   * table in a file that leaves the deployment, which is a different act —
+   * and what a stolen session would reach for first.
+   */
+  "store.export",
 ] as const;
 
 /**

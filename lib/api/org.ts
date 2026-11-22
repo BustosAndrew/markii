@@ -71,6 +71,14 @@ export function canManageTokens(role: StaffRole | null | undefined): boolean {
   return role === "owner" || role === "administrator" || role === "developer";
 }
 
+/**
+ * `store.export` — owner and administrator only (D53). The whole store,
+ * customers' personal data included, in one file; hide the button for anyone else.
+ */
+export function canExportStore(role: StaffRole | null | undefined): boolean {
+  return role === "owner" || role === "administrator";
+}
+
 /** `catalog.write` — owner, administrator, and catalog manager. */
 export function canWriteCatalog(role: StaffRole | null | undefined): boolean {
   return role === "owner" || role === "administrator" || role === "catalog_manager";

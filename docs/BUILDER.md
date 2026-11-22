@@ -427,7 +427,8 @@ Phase F with the chat UI.
 - ~~Theme marketplace; theme export/import between stores~~ — **decided 2026-11-19 (D53): yes to
   both, on one format.** The **theme package** (node documents for pages, templates and regions;
   tokens; theme CSS; saved blocks; versioned JSON) is the unit for store-to-store copy, the
-  marketplace and the design half of a store export. Rules every new block and binding must keep
+  marketplace. (**The store export carries the design as rows instead** — draft, published and history —
+  built 2026-11-21; a package drops the unpublished work and history a store moving house needs.) Rules every new block and binding must keep
   from now on, so packages stay portable:
   - **Store data only through bindings or slugs/handles, never by row id.** A product or collection
     id means nothing in another store. Today's blocks already comply (`productGrid`, `productCard`

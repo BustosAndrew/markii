@@ -1,6 +1,6 @@
 import { inflateRawSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
-import { zip } from "./zip";
+import { unzip as readZip, zip } from "./zip";
 
 /** Reads a zip back through its central directory — the way an unzip tool finds files. */
 function unzip(buf: Buffer): Record<string, string> {
@@ -43,3 +43,34 @@ describe("zip", () => {
     expect(() => zip([{ path: "a", data: "" }, { path: "a", data: "" }])).toThrow(/Duplicate/);
   });
 });
+
+describe("unzip", () => {
+  it("reads back what zip writes, text and binary, stored and deflated", () => {
+    const bin = new Uint8Array([0, 255, 1, 2, 3]);
+    const text = "line\n".repeat(500);
+    const files = readZip(zip([{ path: "store.json", data: text }, { path: "files/a.bin", data: bin }]));
+    expect(files.get("store.json")?.toString("utf8")).toBe(text);
+    expect([...(files.get("files/a.bin") ?? [])]).toEqual([...bin]);
+  });
+
+  it("refuses a damaged entry rather than returning wrong bytes", () => {
+    const archive = zip([{ path: "a.txt", data: "abcdefgh" }]);
+    // The stored body sits right after the 30-byte local header and the 5-byte name.
+    archive[30 + 5] ^= 0xff;
+    expect(() => readZip(archive)).toThrow(/checksum/);
+  });
+
+  it("refuses a path that climbs out of the folder it unpacks into", () => {
+    const archive = zip([{ path: "aa/b.txt", data: "x" }]);
+    // Rewrite "aa" to ".." in both the local and central names.
+    for (let i = 0; i < archive.length - 1; i++) {
+      if (archive[i] === 0x61 && archive[i + 1] === 0x61 && archive[i + 2] === 0x2f) archive.write("..", i, "latin1");
+    }
+    expect(() => readZip(archive)).toThrow(/Unsafe/);
+  });
+
+  it("refuses something that is not a zip", () => {
+    expect(() => readZip(Buffer.from("not a zip at all, just text"))).toThrow(/Not a zip/);
+  });
+});
+

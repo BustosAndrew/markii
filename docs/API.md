@@ -3173,6 +3173,43 @@ design half of a store export.
   reused slot could import the file a person had just replaced. A refused import can leave stored
   images behind, at content-addressed paths a retry reuses.
 
+**Store export — ✅ LIVE (2026-11-21, D53).** One store **whole**, for a self-hosted Markii to import:
+catalogue (categories, products, options, variants, inventory ledger, locations, collections),
+customers with addresses and memberships, orders with lines, refunds, fulfillments, events and
+download grants, discounts and redemptions, shipping, tax settings, sold files with their licence
+keys, and the design — draft, published and version history as rows, **not** a theme package, because
+a store moving house takes its unpublished work and its history with it.
+
+- **`store.export` `{ siteId }`** — a registry action through `POST /api/actions/store.export`.
+  → `{ url, expiresAt, bytes, counts: { [table]: n }, files: { digitalAssets, publicMedia,
+  linksExpireAt }, headCodeLeftOut }`. `url` is a five-minute link to `{slug}-store.zip`
+  (`store.json` + `README.md`), stored at one path per store in the private bucket. **A read made an
+  action on purpose**: it hands over every customer's personal data, so it takes a new **`store.export`**
+  permission (owner and administrator only), is `high` (no token or agent may run it) and asks for
+  **step-up**; the audit row stores the result with `url` redacted. `?dryRun=1` returns `counts`
+  without making a file or a link. Store-scoped members may export their own stores.
+- **Sold files travel as signed links** valid 24 hours (`files.linksExpireAt`), never as bytes in the
+  zip — a 2 GB course would not fit in a function. Product and design images are public links and are
+  listed in `files.publicMedia` (found by scanning every string in every row, so a new image field is
+  carried without being listed). A file that cannot be signed refuses the export (`502`).
+- **What stays behind** is declared, not forgotten (`lib/store-export/spec.ts`): staff, tokens,
+  storefront keys, integrations, the audit log, analytics, carts and Markii's billing records as whole
+  tables; and as columns, the shopper's login (`customers.authUserId` — they sign up again with the
+  same email and are linked to their record), the payout address and payment rails, the custom domain
+  and its proof, the store's live status (it arrives as a draft), audit pointers, and **custom scripts,
+  including those in past versions' snapshots** — scrubbed at export, so the file never holds them.
+  A unit test fails when a table is added to the schema without being classified.
+- **Import is a shell command on the receiving deployment**: `pnpm store:import <zip> --org <orgId>
+  [--slug] [--keep-image-links]`. It refuses before writing anything — unknown org, taken address, a
+  schema older than the export's, expired file links, a download link or Stripe subscription that
+  already exists there (the source store is in the same database) — then copies sold files and
+  images into its own storage and writes every row in **one transaction**. Ids are allocated up front
+  and every foreign key is remapped from Drizzle's metadata; ids inside JSON (suggested products,
+  add-ons, discount targets and eligible customers, version snapshots' document ids) are remapped by
+  hooks beside the table. It writes directly, like `db:seed`, because it restores history no action
+  creates. Stripe ids are kept — they are on the merchant's own account — so recurring memberships
+  keep renewing wherever that account's Connect webhook points.
+
 **Agent documents from the published design (M5, 2026-11-12).** The merchant's own published pages
 now reach every document an agent or crawler reads, all from **one list** (`lib/storefront-docs.ts`):
 published pages only, and **never a page whose SEO says `noindex`** — hiding a page from search

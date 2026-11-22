@@ -36,6 +36,7 @@ import "./definitions/platform";
 import "./definitions/builder";
 import "./definitions/builder-package";
 import "./definitions/storefront";
+import "./definitions/store-export";
 
 export { defineAction, getAction, allActions, describeAction } from "./registry";
 export {
