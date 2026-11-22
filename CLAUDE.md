@@ -703,7 +703,15 @@ priority (`leadImageId`, §13) — every image had been lazy, hero included. **S
 storefront would 404** — every route that 404s a missing product, category, collection or page calls
 `redirectOrNotFound` (`lib/storefront/redirects.ts`) instead of `notFound()`, and the catch-all
 `[...path]` route catches paths no route claims; **a new storefront route that 404s a missing thing
-should do the same**. Blog and forms (§15 step 12) are not built.
+should do the same**. **Renames leave one behind** (2026-11-22): a product slug, a collection handle
+and a builder page handle at publish each call `redirectMovedPath`, which keeps the merchant's own rule
+from the old address, re-points rules at it, and drops one from the new address back. Category slugs
+are not followed (their route predates the registry). **The blog is built (2026-11-22)** —
+**migration 0052** (`blog_posts`, applied); `blog.*` actions, `/blog`, `/blog/{handle}`,
+`/blog/feed.xml`, and posts in the sitemap, `llms.txt` and `llms-full.txt`. **Posts are not builder
+documents and must not become them**: the design publishes site-wide and restores from snapshots, and
+a post must do neither. Status is derived from `publishedAt` per request (scheduling needs no job).
+The body is long-form Markdown parsed to a tree (`@markii/renderer/article`). Forms are not built.
 
 **Stripe Tax on Markii's own subscription is built as of 2026-09-13** (G3). `automatic_tax` on every
 platform-account subscription create, change and preview — **no `Stripe-Account` header**, the

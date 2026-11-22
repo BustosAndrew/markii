@@ -36,6 +36,7 @@ import {
 } from "@markii/renderer/tree";
 import { SAVED_BLOCKS_PER_SITE, normalizeSavedBlock } from "../../builder/saved-blocks";
 import { pageSeoSchema } from "@markii/renderer/theme-package";
+import { movedPathDiffs, redirectMovedPath } from "../../storefront/redirect-moves";
 import { styleSchema } from "@markii/renderer/styles";
 import {
   BREAKPOINTS,
@@ -1155,6 +1156,19 @@ export const publish = defineAction({
     }
     for (const doc of docs.filter((d) => d.draftDeleted)) {
       await ctx.db.delete(siteDocuments).where(eq(siteDocuments.id, doc.id));
+    }
+    // A page whose address changed goes live at its new one now — links to the
+    // old address keep working. Only here: a draft rename moves nothing a
+    // shopper can reach until it is published.
+    for (const doc of live) {
+      if (doc.kind !== "page" || doc.publishedHandle === null || doc.publishedHandle === doc.handle) continue;
+      const moved = await redirectMovedPath(ctx.db, {
+        siteId: input.siteId,
+        fromPath: `/pages/${doc.publishedHandle}`,
+        toPath: `/pages/${doc.handle}`,
+        createdBy: `${ctx.actor.type}:${ctx.actor.id}`,
+      });
+      for (const d of movedPathDiffs(moved)) ctx.recordDiff(d);
     }
     await ctx.db.update(sites).set({ themeId: design.draftThemeId, updatedAt: new Date() }).where(eq(sites.id, input.siteId));
     await ctx.db

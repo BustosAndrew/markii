@@ -38,6 +38,7 @@ import "./definitions/builder-package";
 import "./definitions/storefront";
 import "./definitions/store-export";
 import "./definitions/redirects";
+import "./definitions/blog";
 
 export { defineAction, getAction, allActions, describeAction } from "./registry";
 export {

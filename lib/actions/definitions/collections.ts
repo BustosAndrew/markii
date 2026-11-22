@@ -16,6 +16,7 @@ import {
 import { patchInverse } from "../inverse";
 import { defineAction } from "../registry";
 import type { ActionContext } from "../types";
+import { movedPathDiffs, redirectMovedPath } from "../../storefront/redirect-moves";
 
 /** Collection actions (§18.2) — merchandising, distinct from §3 categories. */
 
@@ -143,9 +144,13 @@ export const createCollection = defineAction({
 
 export const updateCollection = defineAction({
   id: "catalog.updateCollection",
-  description: "Update a collection's title, handle, rules, sort order, or published state.",
+  description:
+    "Update a collection's title, handle, rules, sort order, or published state. A handle change " +
+    "leaves a redirect from the old /collections/ address unless redirectOldLink is false.",
   input: z.object({
     collectionId: z.number().int().positive(),
+    /** A handle change leaves a redirect from the old `/collections/` address (default). */
+    redirectOldLink: z.boolean().optional(),
     title: z.string().min(1).max(200).optional(),
     handle: z.string().min(1).max(120).regex(/^[a-z0-9-]+$/).optional(),
     description: z.string().max(5000).nullish(),
@@ -164,6 +169,8 @@ export const updateCollection = defineAction({
   inverse: patchInverse({
     actionId: "catalog.updateCollection",
     idField: "collectionId",
+    /** `redirect` diffs record the old link's redirect; they are not collection fields to replay. */
+    ignore: ["redirect"],
     map: {
       /**
        * The action takes `published: boolean` but writes — and records — the
@@ -176,7 +183,7 @@ export const updateCollection = defineAction({
     },
   }),
   async run(input, ctx) {
-    const { collectionId, published, ...patch } = input;
+    const { collectionId, published, redirectOldLink, ...patch } = input;
     const existing = await ownedCollection(ctx, collectionId);
 
     const nextType = patch.type ?? existing.type;
@@ -207,6 +214,18 @@ export const updateCollection = defineAction({
       .set({ ...changes, updatedAt: new Date() })
       .where(eq(collections.id, collectionId))
       .returning();
+
+    // Links to the old address keep working — whether or not it is published
+    // now, the old one may have been, and a redirect from a 404 costs nothing.
+    if (patch.handle !== undefined && patch.handle !== existing.handle && redirectOldLink !== false) {
+      const moved = await redirectMovedPath(ctx.db, {
+        siteId: existing.siteId,
+        fromPath: `/collections/${existing.handle}`,
+        toPath: `/collections/${patch.handle}`,
+        createdBy: `${ctx.actor.type}:${ctx.actor.id}`,
+      });
+      for (const d of movedPathDiffs(moved)) ctx.recordDiff(d);
+    }
     return row;
   },
 });

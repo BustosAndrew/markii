@@ -531,6 +531,34 @@ permissions problem, so neither should show the step-up modal or "your role cann
   shell can hide org-wide writes without a second call. `lib/api/org.ts`: `reachesAllStores()`,
   `grantableRoles()`, `storesWithinReach()`.
 
+### 🟢 New 2026-11-22 — the blog — needs a screen
+
+`lib/api/blog.ts` → `listBlogPosts`, `getBlogPost`, `createBlogPost`, `updateBlogPost`,
+`publishBlogPost`, `unpublishBlogPost`, `deleteBlogPost`; contract in `docs/API.md` §19 "Blog".
+**Migration 0052 — applied 2026-11-22.** `cms.read` / `cms.write`.
+
+- **Suggested home:** a *Blog* tab in the website area beside *Design* — list (status chips `Draft` /
+  `Scheduled` / `Published`, filter with `status`, search with `q`) and a post editor.
+- **The editor is a Markdown textarea**, not the block builder. Show the syntax card from the
+  `lib/api/blog.ts` header. For a preview, load the builder preview iframe at
+  `{previewUrl}/blog/{handle}` (drafts show there, labelled). **Don't** reimplement the parser in the
+  browser; it would drift from what shoppers get.
+- **Say the publishing model plainly**, because it differs from Design: *"Posts publish on their own.
+  Once a post is live, saving changes updates it straight away."*
+- **Publish** → `publishBlogPost({ postId })`; a *Schedule…* option sends `at` (ISO, from a date-time
+  picker in the merchant's timezone, converted to UTC). `409 checks_failed` → show `error.message`.
+  Show `result.warnings` (cover without alt) as a note. *Unpublish* → `unpublishBlogPost`. Both
+  undoable (the usual undo toast).
+- **Delete** is drafts only and not undoable — hide it on live and scheduled posts (or disable with
+  "Unpublish it first"), and confirm before sending.
+- **Cover image:** the usual image upload (`url` is opaque) sent as `coverImage`; require alt text in
+  the form even though the API only warns.
+- **Handle:** prefilled from the title on create; on a live post, show *"Send the old link here"*
+  (checked) when it changes → `redirectOldLink`.
+- **SEO** is replaced whole — send all four fields, as with builder pages.
+- A builder block listing recent posts is **not** built yet; link to `/blog` from a navMenu meanwhile.
+- When the screen ships, add a line to `lib/ops-agents/assistant/help.ts` saying where it is.
+
 ### 🟢 New 2026-11-21 — storefront redirects — needs a screen
 
 `lib/api/redirects.ts` → `listRedirects`, `createRedirect`, `updateRedirect`, `deleteRedirect`,
@@ -553,6 +581,11 @@ permissions problem, so neither should show the step-up modal or "your role cann
   sentence) beside the counts; then `importRedirects` with the same body. Offer *Replace existing* →
   `replace: true`. Import is not undoable; single create/update/delete are (the usual undo toast).
 - When the screen ships, add a line to `lib/ops-agents/assistant/help.ts` saying where it is.
+- **Renames make redirects on their own (2026-11-22):** changing a product's slug or a collection's
+  handle, and publishing a page whose handle changed, leaves a redirect from the old address. On the
+  product and collection forms, show a checkbox beside the slug/handle field when it changes —
+  *"Send the old link here"*, checked — and send `redirectOldLink: false` when unchecked. Those
+  redirects appear in the list like any other; nothing else to build.
 
 ### 🟢 New 2026-11-21 — compare design versions (§12) — needs a screen
 

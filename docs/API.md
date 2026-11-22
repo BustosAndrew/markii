@@ -3244,6 +3244,55 @@ merchant moved from — sent on to where that thing lives now. Typed client: `li
 All `cms.write`, per store (D52 scoping), on no agent's allowlist. The table travels in the store
 export (D53).
 
+**Renames leave a redirect behind (2026-11-22).** A product slug change (`catalog.updateProduct`), a
+collection handle change (`catalog.updateCollection`) and a builder page's handle going live
+(`builder.publish` — a draft rename moves nothing until then) each write a permanent redirect from the
+old address to the new, in the same transaction (`lib/storefront/redirect-moves.ts`). The first two take
+**`redirectOldLink: false`** to opt out; a move to another store is never followed. Rules the merchant
+wrote win: an existing redirect *from* the old address is kept; redirects *pointing at* it are re-pointed
+to the new address (one hop, not a chain); a redirect from the new address back to the old is removed,
+since the new address answers now. That is how an **undo** of a rename comes out: the old address
+works again, and the renamed one redirects back to it. Each redirect written shows in the action's
+audit diff under path `redirect`. Category slugs (`PATCH /api/categories/:id`) are not followed — that
+route predates the registry and mutates outside it.
+
+**Blog — ✅ LIVE (2026-11-22, `docs/BUILDER.md` §15 step 12).** **Migration 0052** adds `blog_posts`
+(RLS on) — applied to the shared database 2026-11-22. Typed client: `lib/api/blog.ts`.
+
+- **Not part of the design.** A post publishes on its own (`blog.publishPost`) and edits to a live post
+  are live when saved, as on Shopify's blog. Its own table, so a design publish never pushes a post and a
+  design restore never takes one down.
+- **Status is derived per request** from `publishedAt`: null `draft`, future `scheduled`, past
+  `published`. A scheduled post goes live because the clock passed — nothing runs.
+- **Body is Markdown, parsed to a tree** (`@markii/renderer/article`, Apache): paragraphs, `#`/`##` → h2,
+  `###`+ → h3 (the title is the only h1), lists, `**bold**`, `*italic*`, inline code, `[links](/path)`
+  (safe hrefs only), `![alt](https://…)` alone on a line (https only), `> ` quotes, fenced code, `---`.
+  Raw HTML renders as text; no `dangerouslySetInnerHTML`. 50,000 characters.
+- **Storefront:** `/blog` (live posts, newest first, 20 a page, `?page=`; `Blog` JSON-LD; RSS
+  `<link rel=alternate>`), `/blog/{handle}` (`BlogPosting` JSON-LD, Open Graph `article`; the cover or the
+  body's first image loads eagerly), `/blog/feed.xml` (RSS 2.0, latest 20). A post shoppers cannot see
+  answers through the store's redirects, then 404. **The builder preview shows drafts and scheduled posts**,
+  labelled, with no JSON-LD; the feed never does. Paused stores answer 404.
+- **Agents and crawlers:** the sitemap lists `/blog` and every live post; `llms.txt` gains a `## Blog`
+  section (latest 20) and the feed's address; `llms-full.txt` carries the latest 50 posts in full,
+  re-serialised from the tree. `noindex` posts are left out of all three.
+- `GET /api/sites/:idOrSlug/blog/posts` — `{ siteId, total, items: [{ id, handle, title, excerpt,
+  coverImage, coverAlt, author, status, publishedAt, path, createdAt, updatedAt }] }`, drafts first then
+  newest; `?q=`, `?status=draft|scheduled|published`, `?limit=` (50, max 200), `?offset=`.
+  `GET …/blog/posts/:postId` adds `body`, `seo`, `autoExcerpt` and `description`. `cms.read`.
+
+| Action | Risk | What |
+|---|---|---|
+| `blog.createPost` | low | `{ siteId, title, handle?, excerpt?, body?, coverImage?, coverAlt?, author?, seo? }` → a draft. Handle from the title (`-2`, `-3`… when taken) unless given (`409 handle_taken`). 5,000 per store. Undoable |
+| `blog.updatePost` | low | Only the fields given; `seo` replaced whole. A **live** post's handle change leaves a redirect from the old `/blog/` address (`redirectOldLink: false` to skip). Undoable |
+| `blog.publishPost` | medium | `{ postId, at? }` — now, or schedule with an ISO time. A live post keeps its date unless `at` is given. `409 checks_failed` with no text; `warnings` (cover without alt). Undoable |
+| `blog.unpublishPost` | medium | Back to draft, or cancel a schedule. Undoable |
+| `blog.deletePost` | medium | Drafts only — a live or scheduled post is `409`. Not undoable |
+
+All `cms.write`, per store (D52), on no agent's allowlist. `blog_posts` travels in the store export
+(D53); theme packages never carry posts. `/blog` is reserved from redirects (it always answers);
+`/blog/{handle}` is not.
+
 **Agent documents from the published design (M5, 2026-11-12).** The merchant's own published pages
 now reach every document an agent or crawler reads, all from **one list** (`lib/storefront-docs.ts`):
 published pages only, and **never a page whose SEO says `noindex`** — hiding a page from search

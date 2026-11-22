@@ -397,7 +397,10 @@ and a keyboard-complete layer tree (one tab stop, arrow-key navigation, every ac
 10. Custom code levels 1–4, sanitization, CSP, publish-time checks
 11. Publish pipeline, version history, pre-publish checks, cache invalidation
 12. Content surfaces: blog, menus, SEO fields, redirects, forms — **menus (M4), SEO fields (M5) and
-    redirects (2026-11-21, migration 0051, `docs/API.md` §19) are built; blog and forms are not.**
+    redirects (2026-11-21, migration 0051, `docs/API.md` §19) and the blog (2026-11-22, migration 0052)
+    are built; forms are not.** Posts are their own table with a Markdown body, outside the
+    design's site-wide publish and its snapshots, so a post goes live alone and a design restore leaves
+    posts where they are.
     Redirects fire only where the storefront would 404 and are live when saved, outside the draft:
     they cannot hide a page that exists, so publish has nothing to protect there.
 

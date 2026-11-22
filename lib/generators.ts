@@ -128,6 +128,11 @@ export type AgentDiscoveryOpts = {
    * Pages marked noindex are left out by the caller.
    */
   pages?: DiscoveryPage[];
+  /**
+   * The store's latest live blog posts, newest first (noindex ones left out by
+   * the caller) — `llms.txt` lists them under "Blog" beside the feed's address.
+   */
+  posts?: DiscoveryPage[];
 };
 
 export type DiscoveryPage = { title: string; path: string; description?: string };
@@ -161,13 +166,23 @@ export function generateLlmsTxt(
   if (opts.purchasesEnabled !== false && opts.rails?.x402) {
     lines.push(`- Checkout API: POST ${baseUrl}/api/checkout`);
   }
-  if (opts.pages?.length) {
-    lines.push(`- Full text of the store's pages: ${baseUrl}/llms-full.txt`);
+  if (opts.pages?.length || opts.posts?.length) {
+    lines.push(`- Full text of the store's pages${opts.posts?.length ? " and latest posts" : ""}: ${baseUrl}/llms-full.txt`);
+  }
+  if (opts.posts?.length) {
+    lines.push(`- Blog: ${baseUrl}/blog (RSS: ${baseUrl}/blog/feed.xml)`);
   }
   lines.push("");
   if (opts.pages?.length) {
     lines.push("## Pages", "");
     for (const p of opts.pages) {
+      lines.push(`- [${p.title}](${baseUrl}${p.path})${p.description ? `: ${strip(p.description)}` : ""}`);
+    }
+    lines.push("");
+  }
+  if (opts.posts?.length) {
+    lines.push("## Blog", "");
+    for (const p of opts.posts) {
       lines.push(`- [${p.title}](${baseUrl}${p.path})${p.description ? `: ${strip(p.description)}` : ""}`);
     }
     lines.push("");
@@ -317,16 +332,28 @@ export function generateLlmsFullTxt(
   bundle: Bundle,
   baseUrl: string,
   pages: (DiscoveryPage & { markdown: string })[],
+  posts: (DiscoveryPage & { markdown: string; publishedAt: string })[] = [],
 ): string {
   const out = [
     `# ${bundle.site.name} — pages`,
     "",
     `The full text of ${bundle.site.name}'s own pages, as published. Products are listed in ${baseUrl}/llms.txt and searchable at ${baseUrl}/api/search?q={query}.`,
   ];
-  for (const p of pages) {
+  const section = (p: DiscoveryPage & { markdown: string }, dated?: string) => {
     out.push("", `## ${p.title}`, "", `URL: ${baseUrl}${p.path}`);
+    if (dated) out.push(`Published: ${dated.slice(0, 10)}`);
     if (p.description) out.push(`Summary: ${strip(p.description)}`);
     if (p.markdown.trim()) out.push("", p.markdown.trim());
+  };
+  for (const p of pages) section(p);
+  if (posts.length > 0) {
+    out.push(
+      "",
+      `# ${bundle.site.name} — blog`,
+      "",
+      `The latest ${posts.length} post(s), newest first. Every post: ${baseUrl}/blog · RSS: ${baseUrl}/blog/feed.xml`,
+    );
+    for (const p of posts) section(p, p.publishedAt);
   }
   return out.join("\n") + "\n";
 }

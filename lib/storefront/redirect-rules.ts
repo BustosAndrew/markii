@@ -31,6 +31,7 @@ export const RESERVED_REDIRECT_PATHS = [
   "/agent.md",
   "/sitemap.xml",
   "/robots.txt",
+  "/blog/feed.xml",
 ] as const;
 
 /**
@@ -38,7 +39,7 @@ export const RESERVED_REDIRECT_PATHS = [
  * index, while `/collections/old-handle` 404s and is exactly what an old
  * Shopify link looks like.
  */
-export const ALWAYS_ANSWERED_PATHS = ["/", "/collections"] as const;
+export const ALWAYS_ANSWERED_PATHS = ["/", "/collections", "/blog"] as const;
 
 export class RedirectRuleError extends Error {
   constructor(

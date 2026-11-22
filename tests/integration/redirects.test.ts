@@ -134,6 +134,62 @@ describe("storefront redirects", () => {
     expect((await visit("/products/green-tea")).location).toMatch(/\/collections$/);
   });
 
+  it("keeps a renamed product's old link working, re-points rules at it, and undo reverses the pair", async () => {
+    const old = "test-product-two";
+    const renamed = "test-product-two-renamed";
+    const [{ id: productId }] = await sql`select id from products where site_id = ${siteId} and slug = ${old}`;
+    await ok("redirects.create", { siteId, from: "/products/two-old", to: `/p/${old}` });
+
+    const rename = await ok("catalog.updateProduct", { productId, slug: renamed });
+    const hit = await visit(`/p/${old}`);
+    expect(hit.status).toBe(308);
+    expect(hit.location).toMatch(new RegExp(`/p/${renamed}$`));
+    expect((await visit(`/p/${renamed}`)).status).toBe(200);
+    // One hop, not a chain: the rule that pointed at the old address now points at the new one.
+    expect((await list("?q=two-old")).items[0].to).toBe(`/p/${renamed}`);
+
+    const undo = await merchant.post(`/api/actions/catalog.updateProduct/undo`, { invocationId: rename.invocationId });
+    expect(undo.status, JSON.stringify(undo.json)).toBe(200);
+    expect((await visit(`/p/${old}`)).status).toBe(200);
+    const back = await visit(`/p/${renamed}`);
+    expect(back.status).toBe(308);
+    expect(back.location).toMatch(new RegExp(`/p/${old}$`));
+    // The rule from the old address back to the new one is gone — it would have closed a loop.
+    expect((await list(`?q=/p/${old}`)).items.map((r: { from: string }) => r.from)).not.toContain(`/p/${old}`);
+    expect((await list("?q=two-old")).items[0].to).toBe(`/p/${old}`);
+
+    await ok("catalog.updateProduct", { productId, slug: "test-product-two-quiet", redirectOldLink: false });
+    expect((await visit(`/p/${old}`)).status).toBe(404);
+    await ok("catalog.updateProduct", { productId, slug: old, redirectOldLink: false });
+  });
+
+  it("keeps a renamed collection's old link working", async () => {
+    const created = await ok("catalog.createCollection", { siteId, title: "Rename me", handle: "rename-me", published: true });
+    expect((await visit("/collections/rename-me")).status).toBe(200);
+    await ok("catalog.updateCollection", { collectionId: created.result.id, handle: "renamed" });
+    const hit = await visit("/collections/rename-me");
+    expect(hit.status).toBe(308);
+    expect(hit.location).toMatch(/\/collections\/renamed$/);
+  });
+
+  it("moves a builder page's old link only when the new address is published", async () => {
+    await ok("builder.startDesign", { siteId });
+    const page = await ok("builder.createPage", { siteId, handle: "team", title: "Team" });
+    await ok("builder.publish", { siteId });
+    expect((await visit("/pages/team")).status).toBe(200);
+
+    await ok("builder.updatePage", { siteId, pageId: page.result.pageId, handle: "our-team" });
+    // A draft rename moves nothing a shopper can reach yet.
+    expect((await visit("/pages/team")).status).toBe(200);
+    expect((await list("?q=/pages/team")).total).toBe(0);
+
+    await ok("builder.publish", { siteId });
+    const hit = await visit("/pages/team");
+    expect(hit.status).toBe(308);
+    expect(hit.location).toMatch(/\/pages\/our-team$/);
+    expect((await visit("/pages/our-team")).status).toBe(200);
+  });
+
   it("sends no one anywhere from a paused store", async () => {
     await sql`update sites set status = 'paused' where id = ${siteId}`;
     try {

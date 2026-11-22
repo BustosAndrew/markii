@@ -3170,6 +3170,53 @@ export const siteSavedBlocks = pgTable(
 );
 
 /**
+ * A blog post (`docs/BUILDER.md` §15 step 12) at `/blog/{handle}`. Its own
+ * table rather than a builder document on purpose: the design publishes
+ * site-wide and restores from snapshots, and a post must do neither — publishing
+ * a post must not push half-finished design work live, and restoring last
+ * month's design must not take this week's posts down.
+ *
+ * **Visibility is derived per request** from `publishedAt`: null is a draft, a
+ * time in the future is scheduled, the past is live. Nothing flips a flag on a
+ * clock, for the same reason membership status is derived (D34). Edits to a
+ * live post are live when saved, as on Shopify's blog.
+ *
+ * The body is Markdown — the long-form subset in `@markii/renderer/article`,
+ * parsed to a tree and rendered through React, never as HTML.
+ */
+export const blogPosts = pgTable(
+  "blog_posts",
+  {
+    id: serial("id").primaryKey(),
+    siteId: integer("site_id")
+      .notNull()
+      .references(() => sites.id, { onDelete: "cascade" }),
+    handle: text("handle").notNull(),
+    title: text("title").notNull(),
+    /** Shown on the blog index, in the feed and as the default description. */
+    excerpt: text("excerpt").notNull().default(""),
+    body: text("body").notNull().default(""),
+    /** https only. */
+    coverImage: text("cover_image"),
+    coverAlt: text("cover_alt").notNull().default(""),
+    /** A display name — not a staff link: the byline is the merchant's to write. */
+    author: text("author").notNull().default(""),
+    seo: jsonb("seo").$type<PageSeo>().notNull().default({}),
+    /** Null: draft. Future: scheduled. Past: live. */
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    /** `user:…` or `token:…`. */
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("blog_posts_site_handle_uq").on(t.siteId, t.handle),
+    index("blog_posts_site_published_idx").on(t.siteId, t.publishedAt),
+  ],
+);
+export type BlogPost = typeof blogPosts.$inferSelect;
+
+/**
  * A storefront URL redirect (`docs/BUILDER.md` §15 step 12): an old path —
  * usually a link from the platform the merchant moved from — sent on to where
  * that thing lives now. **Fires only when nothing else answers the path**, so

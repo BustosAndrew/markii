@@ -1,5 +1,6 @@
 import "server-only";
 
+import { articleToMarkdown } from "@markii/renderer/article";
 import { pageToMarkdown } from "@markii/renderer/to-markdown";
 import { storeView } from "@markii/renderer/views";
 import {
@@ -12,6 +13,8 @@ import {
 import { defaultWallet } from "./integrations";
 import { publishedPages, type SiteData } from "./storefront";
 import { membersByHandle } from "./storefront/collections";
+import { livePostsForDocs } from "./blog/queries";
+import { descriptionOf } from "./blog/rules";
 
 /**
  * The agent-facing documents a storefront publishes, rendered from one
@@ -46,6 +49,22 @@ function discovery(p: { title: string; path: string; seo: { description?: string
   return { title: p.title, path: p.path, description: p.seo.description || undefined };
 }
 
+/**
+ * Live blog posts the documents may name — never a noindex one, for the same
+ * reason as pages. Newest first.
+ */
+async function listedPosts(data: SiteData) {
+  return (await livePostsForDocs(data.site.id)).filter((p) => !p.seo.noindex);
+}
+
+/** How many posts `llms.txt` lists and `llms-full.txt` carries in full; the rest are one link away. */
+const POSTS_IN_DOCS = 20;
+const POSTS_IN_FULL_TEXT = 50;
+
+function postDiscovery(p: Awaited<ReturnType<typeof listedPosts>>[number]): DiscoveryPage {
+  return { title: p.title, path: `/blog/${p.handle}`, description: descriptionOf(p) || undefined };
+}
+
 /** The pages `llms.txt` and `agent.md` advertise — the home page is the store link itself. */
 async function advertisedPages(data: SiteData): Promise<DiscoveryPage[]> {
   return (await listedPages(data)).filter((p) => p.path !== "/").map(discovery);
@@ -56,6 +75,7 @@ export async function renderLlmsTxt(data: SiteData): Promise<string> {
     rails: data.site.paymentProviders,
     purchasesEnabled: data.site.purchasesEnabled,
     pages: await advertisedPages(data),
+    posts: (await listedPosts(data)).slice(0, POSTS_IN_DOCS).map(postDiscovery),
   });
 }
 
@@ -79,8 +99,8 @@ export async function renderAgentMd(data: SiteData): Promise<string> {
  * empty document would claim otherwise.
  */
 export async function renderLlmsFullTxt(data: SiteData): Promise<string | null> {
-  const pages = await listedPages(data);
-  if (pages.length === 0) return null;
+  const [pages, posts] = await Promise.all([listedPages(data), listedPosts(data)]);
+  if (pages.length === 0 && posts.length === 0) return null;
   const { baseUrl, prods, cats, colls, site } = data;
   const ctx = {
     baseUrl,
@@ -95,10 +115,16 @@ export async function renderLlmsFullTxt(data: SiteData): Promise<string | null> 
   const rendered = await Promise.all(
     pages.map(async (p) => ({ ...discovery(p), markdown: await pageToMarkdown(p.tree, ctx) })),
   );
-  return generateLlmsFullTxt(data.bundle, baseUrl, rendered);
+  const postSections = posts.slice(0, POSTS_IN_FULL_TEXT).map((p) => ({
+    ...postDiscovery(p),
+    publishedAt: p.publishedAt!.toISOString(),
+    markdown: articleToMarkdown(p.body, baseUrl),
+  }));
+  return generateLlmsFullTxt(data.bundle, baseUrl, rendered, postSections);
 }
 
 export async function renderSitemapXml(data: SiteData): Promise<string> {
-  const pages = await listedPages(data);
-  return generateSitemapXml(data.bundle, data.baseUrl, pages.map((p) => p.path));
+  const [pages, posts] = await Promise.all([listedPages(data), listedPosts(data)]);
+  const blog = posts.length > 0 ? ["/blog", ...posts.map((p) => `/blog/${p.handle}`)] : [];
+  return generateSitemapXml(data.bundle, data.baseUrl, [...pages.map((p) => p.path), ...blog]);
 }

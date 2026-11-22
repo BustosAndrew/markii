@@ -308,6 +308,24 @@ export function themeStylesheet(theme: ThemeTokens): string {
 .sf-list li{border-bottom:1px solid var(--sf-border);padding:.85rem 0;display:flex;flex-wrap:wrap;gap:.5rem 1rem;justify-content:space-between;align-items:baseline}
 .sf-gate{margin:1rem 0;padding:.75rem 1rem;border:1px solid var(--sf-border);border-radius:var(--sf-radius);font-size:.9375rem}
 .sf-gate-locked{border-style:dashed}
+.sf-posts{list-style:none;padding:0;margin:0;display:grid;gap:2rem}
+.sf-post-card a{text-decoration:none;color:inherit;display:grid;gap:.5rem}
+.sf-post-card img{width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:var(--sf-radius);background:var(--sf-border)}
+.sf-post-card h2{font-family:var(--sf-font-display);font-size:1.35rem;font-weight:600;letter-spacing:-0.02em;margin:0}
+.sf-post-card p{margin:0}
+.sf-pager{display:flex;justify-content:space-between;gap:1rem;margin:2.5rem 0 0;font-size:.95rem}
+.sf-article{max-width:42rem;margin:0 auto}
+.sf-article-cover{margin:0 0 2rem}
+.sf-article-cover img{width:100%;border-radius:var(--sf-radius)}
+.mk-article-body{font-size:1.05rem;line-height:1.7}
+.mk-article-body h2{font-family:var(--sf-font-display);font-size:1.5rem;letter-spacing:-0.02em;margin:2.25rem 0 .75rem;line-height:1.25}
+.mk-article-body h3{font-family:var(--sf-font-display);font-size:1.2rem;margin:1.75rem 0 .5rem}
+.mk-article-body figure{margin:1.75rem 0}
+.mk-article-body img{display:block;max-width:100%;height:auto;border-radius:var(--sf-radius)}
+.mk-article-body blockquote{margin:1.5rem 0;padding:.25rem 0 .25rem 1.25rem;border-left:3px solid var(--sf-accent);color:var(--sf-muted)}
+.mk-article-body pre{overflow-x:auto;padding:1rem;background:var(--sf-surface);border:1px solid var(--sf-border);border-radius:var(--sf-radius);font-size:.9rem}
+.mk-article-body hr{border:0;border-top:1px solid var(--sf-border);margin:2.5rem 0}
+.mk-article-body a{text-decoration:underline;text-underline-offset:2px}
 .sf-form{display:grid;gap:.75rem;max-width:22rem;margin:1rem 0 2rem}
 .sf-form input{padding:.625rem .75rem;border:1px solid var(--sf-border);border-radius:var(--sf-radius);font:inherit;background:var(--sf-surface);color:var(--sf-fg)}
 .sf-form button{padding:.625rem 1rem;border:0;border-radius:var(--sf-radius);font:inherit;font-weight:600;cursor:pointer;background:var(--sf-accent);color:var(--sf-accent-text)}

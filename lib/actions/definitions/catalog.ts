@@ -6,6 +6,7 @@ import { assertTiersOnSite, uniqueProductSlug } from "../../queries";
 import { ownSites, siteScope } from "../../tenancy";
 import { productUpdateSchema } from "../../validation";
 import { optionKey, planMatrix, type OptionSpec } from "../../commerce/variants";
+import { movedPathDiffs, redirectMovedPath } from "../../storefront/redirect-moves";
 import { patchInverse } from "../inverse";
 import { defineAction } from "../registry";
 import type { ActionContext } from "../types";
@@ -253,8 +254,13 @@ export const updateProduct = defineAction({
     "currency), SKU, stock, images, category, slug, enabled, suggested products, add-ons, and " +
     "membership tiers. Only the fields supplied change. Passing siteId moves the product to " +
     "another of the organization's stores, which clears its category unless one on the target " +
-    "store is given. Use catalog.updateVariant for a variant's own price or SKU.",
-  input: productUpdateSchema.extend({ productId: z.number().int().positive() }),
+    "store is given. A slug change leaves a redirect from the old /p/ address unless " +
+    "redirectOldLink is false. Use catalog.updateVariant for a variant's own price or SKU.",
+  input: productUpdateSchema.extend({
+    productId: z.number().int().positive(),
+    /** A slug change within the store leaves a redirect from the old `/p/` address (default). */
+    redirectOldLink: z.boolean().optional(),
+  }),
   permission: "catalog.write",
   /**
    * `medium`, not `high`, although price is among the fields. `high` would make
@@ -271,8 +277,9 @@ export const updateProduct = defineAction({
    * records `siteId`, `categoryId` and `slug` together, so the replay moves it
    * back with all three.
    */
-  inverse: patchInverse({ actionId: "catalog.updateProduct", idField: "productId" }),
-  async run({ productId, ...input }, ctx) {
+  /** `redirect` diffs record the old link's redirect; they are not product fields to replay. */
+  inverse: patchInverse({ actionId: "catalog.updateProduct", idField: "productId", ignore: ["redirect"] }),
+  async run({ productId, redirectOldLink, ...input }, ctx) {
     const product = await ownedProduct(ctx, productId);
     const orgId = ctx.actor.orgId!;
 
@@ -361,6 +368,18 @@ export const updateProduct = defineAction({
       .set({ ...Object.fromEntries(changed), updatedAt: new Date() })
       .where(eq(products.id, product.id))
       .returning();
+
+    // Renamed within its store: links to the old address keep working. A move
+    // to another store is not followed — the old store no longer sells it.
+    if (!siteChanged && slug !== product.slug && redirectOldLink !== false) {
+      const moved = await redirectMovedPath(ctx.db, {
+        siteId: product.siteId,
+        fromPath: `/p/${product.slug}`,
+        toPath: `/p/${slug}`,
+        createdBy: `${ctx.actor.type}:${ctx.actor.id}`,
+      });
+      for (const d of movedPathDiffs(moved)) ctx.recordDiff(d);
+    }
     return row;
   },
 });

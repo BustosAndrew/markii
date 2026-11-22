@@ -222,6 +222,7 @@ export const STORE_TABLES: StoreTable[] = [
   },
   { key: "siteSavedBlocks", table: schema.siteSavedBlocks, scope: { kind: "site", column: "siteId" } },
   { key: "siteRedirects", table: schema.siteRedirects, scope: { kind: "site", column: "siteId" } },
+  { key: "blogPosts", table: schema.blogPosts, scope: { kind: "site", column: "siteId" } },
 ];
 
 /**
