@@ -398,9 +398,10 @@ and a keyboard-complete layer tree (one tab stop, arrow-key navigation, every ac
 11. Publish pipeline, version history, pre-publish checks, cache invalidation
 12. Content surfaces: blog, menus, SEO fields, redirects, forms — **menus (M4), SEO fields (M5) and
     redirects (2026-11-21, migration 0051, `docs/API.md` §19) and the blog (2026-11-22, migration 0052)
-    are built; forms are not.** Posts are their own table with a Markdown body, outside the
+    are built, and so are forms (2026-11-22, migration 0053).** Posts are their own table with a Markdown body, outside the
     design's site-wide publish and its snapshots, so a post goes live alone and a design restore leaves
-    posts where they are.
+    posts where they are. A form is a definition (`site_forms`) placed by a `form` block that names
+    it by handle — so a theme package carries the block and never the form or what shoppers sent.
     Redirects fire only where the storefront would 404 and are live when saved, outside the draft:
     they cannot hide a page that exists, so publish has nothing to protect there.
 

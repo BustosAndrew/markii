@@ -326,6 +326,14 @@ export function themeStylesheet(theme: ThemeTokens): string {
 .mk-article-body pre{overflow-x:auto;padding:1rem;background:var(--sf-surface);border:1px solid var(--sf-border);border-radius:var(--sf-radius);font-size:.9rem}
 .mk-article-body hr{border:0;border-top:1px solid var(--sf-border);margin:2.5rem 0}
 .mk-article-body a{text-decoration:underline;text-underline-offset:2px}
+.mk-form{display:grid;gap:1rem;max-width:36rem}
+.mk-form-field{display:grid;gap:.35rem}
+.mk-form-field label{font-weight:600;font-size:.95rem}
+.mk-form input:not([type=checkbox]),.mk-form textarea,.mk-form select{width:100%;padding:.6rem .75rem;border:1px solid var(--sf-border);border-radius:var(--sf-radius);font:inherit;background:var(--sf-surface);color:var(--sf-fg)}
+.mk-form textarea{resize:vertical}
+.mk-form-check{display:flex;gap:.5rem;align-items:flex-start}
+.mk-form button{justify-self:start;padding:.65rem 1.2rem;border:0;border-radius:var(--sf-radius);font:inherit;font-weight:600;cursor:pointer;background:var(--sf-accent);color:var(--sf-accent-text)}
+.sf-form-notice{padding:.75rem 1rem;border:1px solid var(--sf-accent);border-radius:var(--sf-radius);margin:0 0 1.25rem;max-width:36rem}
 .sf-form{display:grid;gap:.75rem;max-width:22rem;margin:1rem 0 2rem}
 .sf-form input{padding:.625rem .75rem;border:1px solid var(--sf-border);border-radius:var(--sf-radius);font:inherit;background:var(--sf-surface);color:var(--sf-fg)}
 .sf-form button{padding:.625rem 1rem;border:0;border-radius:var(--sf-radius);font:inherit;font-weight:600;cursor:pointer;background:var(--sf-accent);color:var(--sf-accent-text)}

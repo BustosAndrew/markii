@@ -3293,6 +3293,51 @@ All `cms.write`, per store (D52), on no agent's allowlist. `blog_posts` travels 
 (D53); theme packages never carry posts. `/blog` is reserved from redirects (it always answers);
 `/blog/{handle}` is not.
 
+**Storefront forms — ✅ LIVE (2026-11-22, `docs/BUILDER.md` §15 step 12).** **Migration 0053** adds
+`site_forms`, `form_submissions` and `form_blocklist` (RLS on) — applied 2026-11-22. Typed client:
+`lib/api/forms.ts`. Owner decisions, 2026-11-22: **rate limits and a blocklist** for spam, **an email
+per submission**, and **submissions kept permanently**.
+
+- **A form is a definition, not design.** Fields (`text`, `email`, `tel`, `textarea`, `select`,
+  `checkbox`; up to 20), button label, thank-you message and `notifyEmail`, in `site_forms`. Live at
+  `/forms/{handle}` as soon as it exists; the **`form` builder block** (`formHandle`) places it on any
+  page or region. The handle is fixed after creation — pages name the form by it.
+- **Shoppers post a plain HTML form** to `POST /api/forms/{handle}` on the store host — no script.
+  Urlencoded posts get `303` to `/forms/{handle}?status=sent|invalid|limited|refused` (with `from`, the
+  page the form sat on); JSON gets `201 { ok: true }`, `400 VALIDATION_ERROR` (`details.fields`),
+  `403 SUBMISSION_REFUSED`, `429 RATE_LIMITED` + `Retry-After`. Bodies over 64 KB are `413`. Unknown keys
+  are dropped; every answer is re-checked against the field (required, length, one line, email shape,
+  select choice).
+- **Protection, in order:** per client address per store **5 / 10 min**, per store **100 / hour**
+  (counted before parsing), then per sender email **3 / hour**, then the **blocklist** — an address or a
+  domain (`@example.com`, subdomains included) — checked against the first email field before anything
+  is stored or mailed. A blocked sender is told only "This message could not be sent." Limits override
+  with `FORM_RATE_LIMIT_IP` / `_EMAIL` / `_STORE`; counter keys hold hashes.
+- **Stored, then emailed.** The row is written first; then, if the form has `notifyEmail`, Markii's
+  platform mail sends every answer, labelled, **Reply-To the sender**. The outcome is on the row:
+  `sent`, `failed` + `notifyError`, `off`, or `pending` mid-send. A mail outage costs an email, never a
+  submission.
+- **Kept permanently.** Nothing expires a submission. Each row keeps the form's handle, name and every
+  field's label as sent, so it reads correctly after the form changes or is deleted (`formId` goes
+  null). `forms.deleteSubmission` erases one — the erasure path.
+- **Agents:** `llms-full.txt` shows a form block as a link to `/forms/{handle}`, never the endpoint.
+  `/forms/*` pages are `noindex`.
+- Reads: `GET /api/sites/:idOrSlug/forms` (with submission counts) and `…/forms/:formId` (`cms.read`);
+  `GET …/form-submissions` (`?form={handle}` — finds a deleted form's too — `?q=`, `?limit=` 50/200,
+  `?offset=`) and `GET …/form-blocklist` (**`commerce.read`** — customer data).
+
+| Action | Risk | Permission | What |
+|---|---|---|---|
+| `forms.createForm` | low | `cms.write` | `{ siteId, name, handle?, fields, submitLabel?, successMessage?, notifyEmail? }`. `409 handle_taken` / `limit` (50). Undoable |
+| `forms.updateForm` | low | `cms.write` | Name, fields, labels, message, `notifyEmail` — live at once. Undoable |
+| `forms.deleteForm` | medium | `cms.write` | `409 in_use` (`details.pages`) while any draft or live page shows it. Submissions kept. Not undoable |
+| `forms.deleteSubmission` | medium | `commerce.write` | Erase one submission. Not undoable |
+| `forms.blockSender` · `unblockSender` | low | `commerce.write` | Blocklist entry by address or `@domain`. `409 already_blocked`. Undoable |
+
+Checks: `FORM_NOT_CHOSEN` and `UNKNOWN_FORM` (errors) for a form block. All three tables travel in the
+store export (D53). On no agent's allowlist. **Not covered:** the Next.js export draws no form (its
+render context has no form lookup) — a form block renders nothing there.
+
 **Agent documents from the published design (M5, 2026-11-12).** The merchant's own published pages
 now reach every document an agent or crawler reads, all from **one list** (`lib/storefront-docs.ts`):
 published pages only, and **never a page whose SEO says `noindex`** — hiding a page from search

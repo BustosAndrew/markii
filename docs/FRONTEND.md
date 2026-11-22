@@ -531,6 +531,30 @@ permissions problem, so neither should show the step-up modal or "your role cann
   shell can hide org-wide writes without a second call. `lib/api/org.ts`: `reachesAllStores()`,
   `grantableRoles()`, `storesWithinReach()`.
 
+### 🟢 New 2026-11-22 — storefront forms — needs screens
+
+`lib/api/forms.ts`; contract in `docs/API.md` §19 "Storefront forms". **Migration 0053 — applied
+2026-11-22.** Three screens, two permissions: the **form editor** is `cms.write`; **submissions** and
+the **blocklist** are customer data — gate them on `commerce.read` / `commerce.write`, not on cms.
+
+- **Forms list + editor** (website area, beside Blog): name, fields (type, label, required, choices for
+  `select`, optional placeholder and max length), button label, thank-you message, *Email each
+  submission to* (`notifyEmail`, empty = store only). Show the form's address `/forms/{handle}` and say
+  it is live at once. **The handle is fixed after creation** — show it read-only on edit.
+- **Delete** answers `409 in_use` with `details.pages` while a page shows the form — list those pages.
+  Say plainly that submissions are kept.
+- **Submissions inbox** (`listFormSubmissions`): newest first, filter by form handle, search. Render
+  `values` as label → answer in order (booleans as Yes/No). Show `notify.status` honestly — *Emailed*,
+  *Email failed: {error}*, *Not emailed* (`off`). A submission whose `form.exists` is false belongs to a
+  deleted form — still show it. **Reply** is a `mailto:` to `email`.
+- **Delete a submission** is for erasure requests: confirm, say it cannot be undone. Submissions never
+  expire on their own — don't add any "auto-delete" setting.
+- **Block sender** from a submission → `blockFormSender({ pattern: email })`, or the domain
+  (`@domain`). A blocklist screen lists entries with *Unblock*. Both undoable.
+- **Builder:** the `form` block's inspector has a text field for `formHandle`; better, offer a select
+  filled from `listForms`. Publishing refuses `UNKNOWN_FORM` / `FORM_NOT_CHOSEN`.
+- When the screens ship, add a line to `lib/ops-agents/assistant/help.ts` saying where they are.
+
 ### 🟢 New 2026-11-22 — the blog — needs a screen
 
 `lib/api/blog.ts` → `listBlogPosts`, `getBlogPost`, `createBlogPost`, `updateBlogPost`,

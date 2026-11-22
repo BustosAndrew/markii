@@ -1,5 +1,6 @@
 import { sql, type SQL } from "drizzle-orm";
 import type { DesignTokens } from "@markii/renderer/tokens";
+import type { FormField } from "@markii/renderer/forms";
 import type { PageNode, PageSeo } from "@markii/renderer/types";
 import {
   boolean,
@@ -3215,6 +3216,92 @@ export const blogPosts = pgTable(
   ],
 );
 export type BlogPost = typeof blogPosts.$inferSelect;
+
+/**
+ * A storefront form (`docs/BUILDER.md` §15 step 12) — a contact form, a
+ * wholesale enquiry. The definition lives here, not in the design: a `form`
+ * block names it by handle (portable across theme packages, D53), and
+ * submissions stay tied to fields that a design publish cannot reshape.
+ */
+export const siteForms = pgTable(
+  "site_forms",
+  {
+    id: serial("id").primaryKey(),
+    siteId: integer("site_id")
+      .notNull()
+      .references(() => sites.id, { onDelete: "cascade" }),
+    handle: text("handle").notNull(),
+    name: text("name").notNull(),
+    /** `FormField[]` from `@markii/renderer/forms`, validated on write. */
+    fields: jsonb("fields").$type<FormField[]>().notNull(),
+    submitLabel: text("submit_label").notNull().default("Send"),
+    successMessage: text("success_message").notNull().default(""),
+    /** Where each submission is emailed. Null: stored only. */
+    notifyEmail: text("notify_email"),
+    /** `user:…` or `token:…`. */
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("site_forms_site_handle_uq").on(t.siteId, t.handle)],
+);
+export type SiteForm = typeof siteForms.$inferSelect;
+
+/**
+ * What a shopper sent through a form. **Kept permanently** (owner,
+ * 2026-11-22): nothing expires a submission, and deleting its form keeps it —
+ * `formId` goes null while the handle, name and each field's label are kept on
+ * the row, so an old enquiry still reads correctly after the form changes.
+ * A merchant may delete one by hand (`forms.deleteSubmission`), which is how an
+ * erasure request is honoured.
+ */
+export const formSubmissions = pgTable(
+  "form_submissions",
+  {
+    id: serial("id").primaryKey(),
+    siteId: integer("site_id")
+      .notNull()
+      .references(() => sites.id, { onDelete: "cascade" }),
+    formId: integer("form_id").references(() => siteForms.id, { onDelete: "set null" }),
+    formHandle: text("form_handle").notNull(),
+    formName: text("form_name").notNull(),
+    /** Each answer with the label it had when sent. */
+    values: jsonb("values").$type<{ name: string; label: string; value: string | boolean }[]>().notNull(),
+    /** The first email field's answer, lower-cased — what the blocklist and reply-to read. */
+    email: text("email"),
+    /** `sent`, `failed` or `off` (the form emails no one); `pending` only while the send is under way. */
+    notifyStatus: text("notify_status").notNull(),
+    notifyError: text("notify_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("form_submissions_site_created_idx").on(t.siteId, t.createdAt),
+    index("form_submissions_form_created_idx").on(t.formId, t.createdAt),
+  ],
+);
+export type FormSubmission = typeof formSubmissions.$inferSelect;
+
+/**
+ * Senders a store refuses form submissions from (owner, 2026-11-22): an exact
+ * address (`someone@example.com`) or a whole domain (`@example.com`), checked
+ * against the submitter's email before anything is stored or sent.
+ */
+export const formBlocklist = pgTable(
+  "form_blocklist",
+  {
+    id: serial("id").primaryKey(),
+    siteId: integer("site_id")
+      .notNull()
+      .references(() => sites.id, { onDelete: "cascade" }),
+    /** Normalised: lower case; a domain entry starts with `@`. */
+    pattern: text("pattern").notNull(),
+    note: text("note").notNull().default(""),
+    /** `user:…` or `token:…`. */
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("form_blocklist_site_pattern_uq").on(t.siteId, t.pattern)],
+);
 
 /**
  * A storefront URL redirect (`docs/BUILDER.md` §15 step 12): an old path —

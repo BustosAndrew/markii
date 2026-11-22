@@ -372,6 +372,13 @@
       "when": 1795337828921,
       "tag": "0052_blog_posts",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1795342075225,
+      "tag": "0053_storefront_forms",
+      "breakpoints": true
     }
   ]
 }

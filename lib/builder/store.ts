@@ -9,6 +9,7 @@ import {
   products,
   siteDesigns,
   siteDocuments,
+  siteForms,
   sites,
   type DbHandle,
   type SiteDesign,
@@ -129,7 +130,7 @@ export async function saveTree(ctx: ActionContext, pageId: number, tree: PageNod
 
 /** What the catalogue holds, for the pre-publish checks: enabled products, categories, published collections. */
 export async function catalogFacts(db: DbHandle, siteId: number): Promise<CatalogFacts> {
-  const [prods, cats, colls] = await Promise.all([
+  const [prods, cats, colls, forms] = await Promise.all([
     db
       .select({ slug: products.slug })
       .from(products)
@@ -139,10 +140,12 @@ export async function catalogFacts(db: DbHandle, siteId: number): Promise<Catalo
       .select({ handle: collections.handle })
       .from(collections)
       .where(and(eq(collections.siteId, siteId), isNotNull(collections.publishedAt))),
+    db.select({ handle: siteForms.handle }).from(siteForms).where(eq(siteForms.siteId, siteId)),
   ]);
   return {
     productSlugs: new Set(prods.map((p) => p.slug)),
     categorySlugs: new Set(cats.map((c) => c.slug)),
     collectionHandles: new Set(colls.map((c) => c.handle)),
+    formHandles: new Set(forms.map((f) => f.handle)),
   };
 }

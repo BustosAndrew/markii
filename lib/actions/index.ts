@@ -39,6 +39,7 @@ import "./definitions/storefront";
 import "./definitions/store-export";
 import "./definitions/redirects";
 import "./definitions/blog";
+import "./definitions/forms";
 
 export { defineAction, getAction, allActions, describeAction } from "./registry";
 export {

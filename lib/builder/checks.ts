@@ -33,6 +33,8 @@ export type CatalogFacts = {
   productSlugs: Set<string>;
   categorySlugs: Set<string>;
   collectionHandles: Set<string>;
+  /** The store's form handles. Absent: the form check is skipped (callers that never read forms). */
+  formHandles?: Set<string>;
 };
 
 const PLACEHOLDER_TYPES = new Set(["heading", "text", "testimonial", "faq", "accordion", "list"]);
@@ -114,6 +116,12 @@ export function checkPage(
         break;
       case "video":
         if (!p.url) push("error", "MISSING_VIDEO_URL", "A video block has no YouTube or Vimeo link.", node.id);
+        break;
+      case "form":
+        if (!p.formHandle) push("error", "FORM_NOT_CHOSEN", "A form block has no form chosen.", node.id);
+        else if (catalog.formHandles && !catalog.formHandles.has(String(p.formHandle))) {
+          push("error", "UNKNOWN_FORM", `No form "${p.formHandle}" in this store.`, node.id);
+        }
         break;
       case "productCard":
         if (bound("productSlug")) break;

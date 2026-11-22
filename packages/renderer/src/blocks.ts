@@ -796,6 +796,29 @@ const DEFINITIONS: BlockDefinition[] = [
   // ---------- M6: custom code ----------
 
   block({
+    type: "form",
+    label: "Form",
+    category: "content",
+    description:
+      "One of the store's forms — a contact form, an enquiry — drawn from its definition and posting " +
+      "to the store. The fields are edited on the form itself (Forms), not here.",
+    usageHints: [
+      "Name an existing form by its handle. Never invent one: a handle the store lacks blocks publishing.",
+      "Put a heading above it saying what it is for.",
+    ],
+    schema: z
+      .object({
+        // Optional so a freshly added block is valid; publishing refuses one with no form.
+        formHandle: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).max(80).optional(),
+      })
+      .strict(),
+    defaults: { props: {} },
+    children: "none",
+    insertable: true,
+    editorPanel: [{ name: "formHandle", label: "Form (its handle)", kind: "text", maxLength: 80 }],
+    semantics: { element: "form" },
+  }),
+  block({
     type: "html",
     label: "Custom HTML",
     category: "advanced",

@@ -223,6 +223,9 @@ export const STORE_TABLES: StoreTable[] = [
   { key: "siteSavedBlocks", table: schema.siteSavedBlocks, scope: { kind: "site", column: "siteId" } },
   { key: "siteRedirects", table: schema.siteRedirects, scope: { kind: "site", column: "siteId" } },
   { key: "blogPosts", table: schema.blogPosts, scope: { kind: "site", column: "siteId" } },
+  { key: "siteForms", table: schema.siteForms, scope: { kind: "site", column: "siteId" } },
+  { key: "formSubmissions", table: schema.formSubmissions, scope: { kind: "site", column: "siteId" } },
+  { key: "formBlocklist", table: schema.formBlocklist, scope: { kind: "site", column: "siteId" } },
 ];
 
 /**

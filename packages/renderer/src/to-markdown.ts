@@ -166,6 +166,9 @@ async function block(node: PageNode, ctx: MarkdownContext): Promise<string[]> {
           .join("\n"),
       ];
     }
+    case "form":
+      // A link to the form's own page, never its endpoint: agents read a store, they do not fill its inbox.
+      return typeof p.formHandle === "string" && p.formHandle ? [`[Form: ${p.formHandle}](${base(ctx)}/forms/${p.formHandle})`] : [];
     case "root":
     case "section":
     case "columns":

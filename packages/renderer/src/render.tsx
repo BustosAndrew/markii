@@ -1,4 +1,6 @@
 import type { ReactNode } from "react";
+import type { RenderForm } from "./forms";
+import { FormView } from "./forms-view";
 import type { MembersOf, RenderCategory as Category, RenderCollection as Collection, RenderProduct as Product } from "./catalog";
 import { REPEATER_SOURCES, boundProps, evaluateCondition, type DataValues, type RepeaterSource } from "./bindings";
 import { markdownText, parseMarkdown, safeHref, type Inline } from "./markdown";
@@ -86,6 +88,12 @@ export type RenderContext = {
    * is small and on every page.
    */
   leadImageId?: string;
+  /**
+   * A store form by handle, for the `form` block — looked up only when a page
+   * has one, like `membersOf`. Absent (an export with no form API), the block
+   * draws nothing outside the preview.
+   */
+  formOf?: (handle: string) => Promise<RenderForm | null>;
 };
 
 const LEAD_IMAGE_TYPES = new Set(["image", "productGallery"]);
@@ -170,6 +178,17 @@ function Markdown({ src, ctx }: { src: string; ctx: RenderContext }) {
       <ol key={i}>{b.items.map((item, j) => <li key={j}><InlineNodes nodes={item} ctx={ctx} /></li>)}</ol>
     ),
   );
+}
+
+async function FormBlock({ node, ctx, p }: { node: PageNode; ctx: RenderContext; p: Record<string, unknown> }) {
+  const handle = typeof p.formHandle === "string" ? p.formHandle : "";
+  const form = handle && ctx.formOf ? await ctx.formOf(handle) : null;
+  if (!form) return <Empty node={node} ctx={ctx} what={handle ? `form "${handle}" — not found in this store` : "form — choose one"} />;
+  const root = base(ctx);
+  const here = ctx.page?.url?.startsWith(root) ? ctx.page.url.slice(root.length) || "/" : undefined;
+  const a = attrs(node, ctx);
+  const marker = "data-mk-node" in a && a["data-mk-node"] ? { "data-mk-node": a["data-mk-node"] } : undefined;
+  return <FormView form={form} action={`${root}/api/forms/${form.handle}`} className={a.className} attrs={marker} returnPath={here} />;
 }
 
 function videoEmbed(url: string): string | null {
@@ -492,6 +511,8 @@ function Node({ node, ctx }: { node: PageNode; ctx: RenderContext }): ReactNode 
           {p.showName !== false || !p.logoSrc ? ctx.values.store.name : null}
         </a>
       );
+    case "form":
+      return <FormBlock node={node} ctx={ctx} p={p} />;
     case "html": {
       if (ctx.sensitive) return ctx.preview ? <div {...attrs(node, ctx)} data-mk-empty="custom HTML — hidden on cart and account pages" /> : null;
       // Cleaned again on the way out: a stricter rule made later also covers HTML saved before it.
@@ -640,7 +661,7 @@ export async function documentJsonLd(tree: PageNode, ctx: RenderContext): Promis
 export const RENDERED_TYPES = [
   "root", "section", "columns", "column", "grid", "row", "repeater", "spacer", "divider", "heading", "text",
   "image", "button", "list", "accordion", "faq", "testimonial", "video", "productGrid", "productCard",
-  "collectionList", "productBuy", "productGallery", "navMenu", "storeBrand", "storeLinks", "html",
+  "collectionList", "productBuy", "productGallery", "navMenu", "storeBrand", "storeLinks", "html", "form",
 ] as const;
 
 function docAttr(ctx: RenderContext) {

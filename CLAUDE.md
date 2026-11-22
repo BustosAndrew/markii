@@ -711,7 +711,14 @@ are not followed (their route predates the registry). **The blog is built (2026-
 `/blog/feed.xml`, and posts in the sitemap, `llms.txt` and `llms-full.txt`. **Posts are not builder
 documents and must not become them**: the design publishes site-wide and restores from snapshots, and
 a post must do neither. Status is derived from `publishedAt` per request (scheduling needs no job).
-The body is long-form Markdown parsed to a tree (`@markii/renderer/article`). Forms are not built.
+The body is long-form Markdown parsed to a tree (`@markii/renderer/article`). **Storefront forms are
+built (2026-11-22)** — **migration 0053** (`site_forms`, `form_submissions`, `form_blocklist`,
+applied). Owner decisions: spam is stopped by **rate limits** (address, sender email, store) and a
+**per-store blocklist** checked against the sender's email before anything is stored; **an email per
+submission** (platform mail, Reply-To the sender, outcome recorded on the row); **submissions are
+kept permanently** — nothing may expire them; `forms.deleteSubmission` is the erasure path.
+Submissions and the blocklist are customer data (`commerce.*`), the form is content (`cms.*`). Plain
+HTML post, no island. §15 step 12 is complete.
 
 **Stripe Tax on Markii's own subscription is built as of 2026-09-13** (G3). `automatic_tax` on every
 platform-account subscription create, change and preview — **no `Stripe-Account` header**, the

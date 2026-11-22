@@ -5,6 +5,7 @@ import { cssProblems } from "@markii/renderer/sanitize";
 import { storeView } from "@markii/renderer/views";
 import { regionsFor, type SiteData } from "@/lib/storefront";
 import { membersByHandle } from "@/lib/storefront/collections";
+import { renderFormByHandle } from "@/lib/forms/submit";
 
 /**
  * What surrounds every storefront page (M4): the announcement bar and the
@@ -26,6 +27,8 @@ export function builderContext(data: SiteData, extra: Partial<RenderContext> = {
     categories: cats,
     collections: colls,
     membersOf: membersByHandle(colls),
+    // Looked up only when a page holds a form block.
+    formOf: (handle) => renderFormByHandle(site.id, handle),
     preview,
     values: { store: storeView(site, { baseUrl, products: prods, collections: colls }) },
     ...extra,
