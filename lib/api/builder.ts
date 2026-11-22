@@ -1,6 +1,7 @@
 import type { describeBindings, ValueType } from "@markii/renderer/bindings";
 import type { FieldSpec } from "@markii/renderer/blocks";
 import type { CheckResult } from "@/lib/builder/checks";
+import type { DesignDiff as DesignDiffBody } from "@/lib/builder/design-diff";
 import type { DesignTokens } from "@markii/renderer/tokens";
 import type { Breakpoint, Condition, PageNode, PageSeo, RegionHandle, StyleProps, TemplateHandle } from "@markii/renderer/types";
 import { invokeAction } from "./actions";
@@ -134,6 +135,28 @@ export type DesignRevision = { started: boolean; revision: number; publishedRevi
 
 export type DesignVersion = { version: number; note: string | null; publishedBy: string; createdAt: string };
 
+/** One side of a design diff: `"draft"`, `"live"`, or a published version number. */
+export type DesignStateRef = "draft" | "live" | number;
+
+export type DesignDiffSide = {
+  ref: "draft" | "version";
+  /** Null for the draft. */
+  version: number | null;
+  /** True when this side is what the storefront serves now. */
+  live: boolean;
+  note: string | null;
+  publishedBy: string | null;
+  publishedAt: string | null;
+};
+
+/**
+ * What changed between two design states (§12). Unchanged documents and
+ * nodes are left out; `identical` says there is nothing to show. Long values
+ * arrive cut to 160 characters with a trailing `…`. Theme CSS is reported as
+ * lengths and scripts as `headCode.changed` only — the text is on the design.
+ */
+export type DesignDiff = DesignDiffBody & { from: DesignDiffSide; to: DesignDiffSide };
+
 // ---------- reads ----------
 
 export const getBlockRegistry = (init?: RequestInit) =>
@@ -188,6 +211,21 @@ export const listSavedBlocks = (site: string | number, init?: RequestInit) =>
 
 export const listDesignVersions = (site: string | number, init?: RequestInit) =>
   callWhenLive(BUILDER_API_LIVE, SECTION, () => apiGet<{ items: DesignVersion[] }>(`/api/builder/sites/${site}/versions`, undefined, init));
+
+/**
+ * Compare two design states. The default — live to draft — is "what would
+ * publishing change". `409 CONFLICT` with `details.reason: "nothing_published"`
+ * when `"live"` is asked for before the first publish; `404` for a version that
+ * does not exist.
+ */
+export const getDesignDiff = (
+  site: string | number,
+  sides: { from?: DesignStateRef; to?: DesignStateRef } = {},
+  init?: RequestInit,
+) =>
+  callWhenLive(BUILDER_API_LIVE, SECTION, () =>
+    apiGet<DesignDiff>(`/api/builder/sites/${site}/diff`, { from: sides.from, to: sides.to }, init),
+  );
 
 /**
  * A two-hour live-preview URL for the editor's iframe (M2). Not a registry

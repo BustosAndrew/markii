@@ -302,7 +302,10 @@ Draft and published versions are separate rows; the storefront only reads `publi
 Publishing is atomic across the page tree, compiled CSS, and referenced assets, and runs a
 pre-publish check (broken links, missing alt text, heading order, JSON-LD validity, unbound
 bindings, performance budget) — warnings inform, structural errors block. Version history offers
-restore and diff, with agent-made versions labeled as such.
+restore and diff, with agent-made versions labeled as such. **The diff is built (2026-11-21)** —
+`GET /api/builder/sites/:idOrSlug/diff` over a pure `lib/builder/design-diff.ts`, comparing any two of
+the draft, the live design and a stored version. Nodes are followed by id, which publish and restore
+keep. "Agent-made versions" never arise: agents cannot publish (D51), so every version names a person.
 
 Publishing invalidates storefront caches by tag and must not break `sitemap.xml`, `llms.txt`, or
 `agent.md` generation — those regenerate from the published tree.
@@ -316,6 +319,14 @@ Storefront pages: no editor runtime, no builder JS, compiled CSS under ~50 KB, i
 Next image pipeline with explicit dimensions, LCP block server-rendered and never inside an island,
 total client JS on a content page ideally zero. Cart and variant islands are the only sanctioned
 interactivity.
+
+**Built:** the CSS budget is the `CSS_BUDGET` pre-publish warning (M6), and **the lead image loads
+eagerly as of 2026-11-21** — the first `image` or `productGallery` inside a page's first top-level block
+gets `loading="eager"` and `fetchpriority="high"` (`leadImageId` in `packages/renderer/src/render.tsx`),
+as does the fixed product page's first photo. Every image had been `loading="lazy"`, so the hero — the
+page's LCP — waited for layout. Only the first block is looked in: a high-priority fetch below the fold
+competes with what the shopper sees first. **Explicit image dimensions are not done**: no upload records
+an image's size, so there is nothing to write into `width`/`height` yet.
 
 The editor is dashboard-side and may be heavy, but lazy-loads the block library and virtualizes the
 layer tree for large pages.

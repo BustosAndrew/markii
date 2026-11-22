@@ -156,9 +156,10 @@ export default async function ProductPage({ params }: Props) {
         </p>
         <div className="sf-product">
           <div className="sf-product-media">
-            {product.images.map((src) => (
+            {product.images.map((src, i) => (
+              // The first photo is this page's LCP: fetched at once, not after layout (`docs/BUILDER.md` §13).
               // eslint-disable-next-line @next/next/no-img-element
-              <img key={src} src={src} alt={product.name} loading="lazy" />
+              <img key={src} src={src} alt={product.name} {...(i === 0 ? { loading: "eager", fetchPriority: "high" } : { loading: "lazy" })} />
             ))}
           </div>
           <div className="sf-product-body">

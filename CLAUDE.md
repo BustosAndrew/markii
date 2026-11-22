@@ -694,7 +694,11 @@ audit row) zips one store whole for `pnpm store:import` on a self-hosted deploym
 table is either in `STORE_TABLES` or in `LEFT_OUT` with a reason** (`lib/store-export/spec.ts`) — a
 unit test fails on a new table that is neither, so **classify any table you add**; ids inside JSON need a
 `remap` hook there, and anything that must not leave this deployment from inside a column needs a
-`scrub` (run at export). The marketplace is not built.
+`scrub` (run at export). The marketplace is not built. **Version diff is built (2026-11-21)** — `GET
+/api/builder/sites/:idOrSlug/diff`, any two of draft, live and a stored version, over a pure
+`lib/builder/design-diff.ts`; nodes are followed by id. **A page's lead image loads eagerly** at high
+priority (`leadImageId`, §13) — every image had been lazy, hero included. Blog, redirects and forms
+(§15 step 12) are not built; each needs a migration.
 
 **Stripe Tax on Markii's own subscription is built as of 2026-09-13** (G3). `automatic_tax` on every
 platform-account subscription create, change and preview — **no `Stripe-Account` header**, the

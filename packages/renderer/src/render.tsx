@@ -79,7 +79,42 @@ export type RenderContext = {
    * the editor to the header.
    */
   documentId?: number;
+  /**
+   * The page's likely largest above-the-fold image (`docs/BUILDER.md` §13,
+   * LCP): loaded eagerly at high priority, while every other image stays lazy.
+   * Set by `BuilderPage` from `leadImageId`; never inside a region, whose logo
+   * is small and on every page.
+   */
+  leadImageId?: string;
 };
+
+const LEAD_IMAGE_TYPES = new Set(["image", "productGallery"]);
+
+/**
+ * The image a page leads with: the first `image` or `productGallery` block, in
+ * document order, inside the page's first top-level block — roughly what is
+ * above the fold. A lazy-loaded hero is the page's LCP waiting for layout, so
+ * this one loads at once; an image further down is not promoted, because a
+ * high-priority fetch below the fold competes with what the shopper sees first.
+ */
+export function leadImageId(tree: PageNode): string | undefined {
+  const first = tree.children?.[0];
+  if (!first) return undefined;
+  const walk = (node: PageNode): string | undefined => {
+    if (LEAD_IMAGE_TYPES.has(node.type)) return node.id;
+    for (const child of node.children ?? []) {
+      const found = walk(child);
+      if (found) return found;
+    }
+    return undefined;
+  };
+  return walk(first);
+}
+
+/** Loading hints for an image: eager and high priority for the page's lead image, lazy for the rest. */
+function imageLoading(lead: boolean) {
+  return lead ? ({ loading: "eager", fetchPriority: "high" } as const) : ({ loading: "lazy" } as const);
+}
 
 /** A site-relative link resolved against the storefront; absolute and fragment links pass through. */
 export function resolveHref(href: string | undefined, baseUrl: string): string | null {
@@ -335,8 +370,15 @@ function Node({ node, ctx }: { node: PageNode; ctx: RenderContext }): ReactNode 
     case "image": {
       if (!p.src) return <Empty node={node} ctx={ctx} what="image" />;
       const aspect = p.aspect && p.aspect !== "auto" ? `mk-aspect-${String(p.aspect).replace("/", "-")}` : undefined;
-      // eslint-disable-next-line @next/next/no-img-element
-      const img = <img src={String(p.src)} alt={p.decorative ? "" : String(p.alt ?? "")} loading="lazy" decoding="async" />;
+      const img = (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={String(p.src)}
+          alt={p.decorative ? "" : String(p.alt ?? "")}
+          {...imageLoading(node.id === ctx.leadImageId)}
+          decoding="async"
+        />
+      );
       const href = resolveHref(p.href as string | undefined, ctx.baseUrl);
       return (
         <figure {...attrs(node, ctx, aspect)}>
@@ -431,9 +473,9 @@ function Node({ node, ctx }: { node: PageNode; ctx: RenderContext }): ReactNode 
       if (record.images.length === 0) return <Empty node={node} ctx={ctx} what="product images — this product has none" />;
       return (
         <figure {...attrs(node, ctx, p.layout === "grid" && "mk-gallery-grid")}>
-          {record.images.map((src) => (
+          {record.images.map((src, i) => (
             // eslint-disable-next-line @next/next/no-img-element
-            <img key={src} src={src} alt={record.name} loading="lazy" decoding="async" />
+            <img key={src} src={src} alt={record.name} {...imageLoading(i === 0 && node.id === ctx.leadImageId)} decoding="async" />
           ))}
         </figure>
       );
@@ -610,7 +652,8 @@ function docAttr(ctx: RenderContext) {
  * The JSON-LD string is built by `JSON.stringify` and only ever contains data
  * — `<` is escaped so a merchant's FAQ text cannot close the script tag.
  */
-export async function BuilderPage({ tree, ctx }: { tree: PageNode; ctx: RenderContext }) {
+export async function BuilderPage({ tree, ctx: outer }: { tree: PageNode; ctx: RenderContext }) {
+  const ctx: RenderContext = { ...outer, leadImageId: leadImageId(tree) };
   const jsonLd = await documentJsonLd(tree, ctx);
   return (
     <>

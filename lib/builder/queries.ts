@@ -1,9 +1,10 @@
 import "server-only";
 
 import { and, asc, desc, eq, isNotNull } from "drizzle-orm";
-import { notFound } from "@/lib/api";
+import { ApiError, notFound } from "@/lib/api";
 import { collections, db, products, siteDesignVersions, siteDesigns, siteDocuments, siteSavedBlocks, type SiteDesign } from "@/lib/db";
 import { blockingErrors, checkCssBudget, checkHeadCode, checkPage, checkTheme, type CheckResult } from "./checks";
+import type { DesignSnapshot } from "./design-diff";
 import { catalogFacts, leaseActive } from "./store";
 import { resolveTheme, type DesignTokens } from "@markii/renderer/tokens";
 import { REGION_HANDLES, SHARED_DOCUMENT_TITLES, type RegionHandle, type TemplateHandle } from "@markii/renderer/types";
@@ -185,6 +186,77 @@ export async function designVersions(siteId: number) {
     .orderBy(desc(siteDesignVersions.version))
     .limit(100);
   return rows.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() }));
+}
+
+/** One side of a design diff: the draft, what is live, or a published version by number. */
+export type DesignStateRef = "draft" | "live" | number;
+
+export type ResolvedDesignState = {
+  ref: "draft" | "version";
+  /** The version number, or null for the draft. */
+  version: number | null;
+  /** True when this side is what the storefront serves now. */
+  live: boolean;
+  note: string | null;
+  publishedBy: string | null;
+  publishedAt: string | null;
+  snapshot: DesignSnapshot;
+};
+
+/**
+ * A design state in the snapshot shape `builder.publish` stores, so the draft,
+ * the live design and any past version compare with `diffDesigns`. "Live" is
+ * the version `publishedVersion` names — publish writes it and the published
+ * columns in one transaction, so they are the same design.
+ */
+export async function designState(siteId: number, which: DesignStateRef): Promise<ResolvedDesignState> {
+  const design = await designRow(siteId);
+  if (!design) throw new ApiError("CONFLICT", 409, "This store's design has not been started.", { reason: "design_not_started" });
+
+  if (which === "draft") {
+    const docs = await db
+      .select()
+      .from(siteDocuments)
+      .where(and(eq(siteDocuments.siteId, siteId), eq(siteDocuments.draftDeleted, false)))
+      .orderBy(asc(siteDocuments.id));
+    return {
+      ref: "draft",
+      version: null,
+      live: false,
+      note: null,
+      publishedBy: null,
+      publishedAt: null,
+      snapshot: {
+        themeId: design.draftThemeId,
+        tokens: design.draftTokens as DesignTokens,
+        customCss: design.draftCustomCss,
+        headHtml: design.draftHeadHtml,
+        documents: docs.map((d) => ({ id: d.id, kind: d.kind, handle: d.handle, title: d.title, seo: d.seo, tree: d.draftTree })),
+      },
+    };
+  }
+
+  const version = which === "live" ? design.publishedVersion : which;
+  if (version < 1) {
+    throw new ApiError("CONFLICT", 409, "Nothing has been published yet, so there is no live design to compare with.", {
+      reason: "nothing_published",
+    });
+  }
+  const [row] = await db
+    .select()
+    .from(siteDesignVersions)
+    .where(and(eq(siteDesignVersions.siteId, siteId), eq(siteDesignVersions.version, version)))
+    .limit(1);
+  if (!row) throw notFound(`Version ${version}`);
+  return {
+    ref: "version",
+    version: row.version,
+    live: row.version === design.publishedVersion,
+    note: row.note,
+    publishedBy: row.publishedBy,
+    publishedAt: row.createdAt.toISOString(),
+    snapshot: row.snapshot,
+  };
 }
 
 /**

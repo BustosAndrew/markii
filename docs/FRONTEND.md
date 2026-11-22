@@ -531,6 +531,29 @@ permissions problem, so neither should show the step-up modal or "your role cann
   shell can hide org-wide writes without a second call. `lib/api/org.ts`: `reachesAllStores()`,
   `grantableRoles()`, `storesWithinReach()`.
 
+### 🟢 New 2026-11-21 — compare design versions (§12) — needs a screen
+
+`getDesignDiff(site, { from?, to? })` in `lib/api/builder.ts` → `DesignDiff`; contract in
+`docs/API.md` §19 (`GET /api/builder/sites/:idOrSlug/diff`). **No migration, no action** — a read,
+`cms.read`. Each side is `"draft"`, `"live"` or a version number; the default (live → draft) is
+*"what will publishing change"*.
+
+- **Two places it belongs:** the **publish dialog** (default sides — list what goes live beside the
+  checks) and **version history** (each row's *Compare with current draft*, i.e. `{ from: n }`, before
+  *Restore*, which is not undoable).
+- **`identical: true`** → say *"No changes since the last publish"* and nothing else.
+- **Per document** (`documents[]`): `change` is `added` / `removed` / `changed`; show `title` and
+  `fields[]` (title, handle, `seo.*`). Nodes come as `{ id, type, label }` — use `label` ("Heading"),
+  never the raw `type`; `changed[].changes[]` names the field (`props.text`, `styles.md`, `moved`, …)
+  with `before`/`after`. Clicking a node in the draft side can select it in the editor — the ids match.
+- **`headCode.changed`** → *"Custom scripts changed"*; the text is not in the diff on purpose.
+  **`customCss`** is two lengths — *"Theme CSS changed"*.
+- **Refusals:** `409` `nothing_published` (store never published — hide *compare with live*), `404`
+  for a version that is gone.
+
+**Also shipped, nothing to build:** builder pages' lead image and the fixed product page's first photo
+now load eagerly at high priority (`docs/BUILDER.md` §13). No API change.
+
 ### 🟢 New 2026-11-21 — export the whole store (D53) — needs a screen
 
 `lib/api/store-export.ts` → `exportStore(siteId)` and `previewStoreExport(siteId)`; contract in
