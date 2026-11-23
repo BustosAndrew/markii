@@ -94,6 +94,13 @@ export type RenderContext = {
    * draws nothing outside the preview.
    */
   formOf?: (handle: string) => Promise<RenderForm | null>;
+  /**
+   * Where a form posts. Absent, `{baseUrl}/api/forms/{handle}` — the store's
+   * own endpoint on Markii, or an export's forwarding route at the same path.
+   * An export with no storefront key points it at the store directly, because
+   * forwarding without one would count every shopper as the export's server.
+   */
+  formAction?: (handle: string) => string;
 };
 
 const LEAD_IMAGE_TYPES = new Set(["image", "productGallery"]);
@@ -188,7 +195,7 @@ async function FormBlock({ node, ctx, p }: { node: PageNode; ctx: RenderContext;
   const here = ctx.page?.url?.startsWith(root) ? ctx.page.url.slice(root.length) || "/" : undefined;
   const a = attrs(node, ctx);
   const marker = "data-mk-node" in a && a["data-mk-node"] ? { "data-mk-node": a["data-mk-node"] } : undefined;
-  return <FormView form={form} action={`${root}/api/forms/${form.handle}`} className={a.className} attrs={marker} returnPath={here} />;
+  return <FormView form={form} action={ctx.formAction?.(form.handle) ?? `${root}/api/forms/${form.handle}`} className={a.className} attrs={marker} returnPath={here} />;
 }
 
 function videoEmbed(url: string): string | null {

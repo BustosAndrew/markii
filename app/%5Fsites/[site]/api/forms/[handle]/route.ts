@@ -1,8 +1,14 @@
 import { NextResponse } from "next/server";
+import { handler, notFound } from "@/lib/api";
 import { requestContextFrom } from "@/lib/auth/request-context";
+import { storefrontKeyFrom } from "@/lib/auth/storefront-key-format";
+import { storefrontDelegation } from "@/lib/auth/storefront-keys";
+import { CLIENT_ADDRESS_HEADER, clientAddressFrom } from "@/lib/forms/rules";
 import { formByHandle, submitForm } from "@/lib/forms/submit";
 import { rateLimitHeaders } from "@/lib/rate-limit";
 import { loadSite, storefrontHalted } from "@/lib/storefront";
+import { formJson, READ_API_HEADERS } from "@/lib/storefront/read-api";
+import { loadReadableSite } from "@/lib/storefront/read-api-server";
 
 /**
  * `POST /api/forms/{handle}` on a storefront host — a shopper sending a form.
@@ -17,6 +23,13 @@ import { loadSite, storefrontHalted } from "@/lib/storefront";
  *
  * A refused sender is told only that the message could not be sent — never
  * that a blocklist exists, which would tell them to change address.
+ *
+ * **Whose address is limited.** Normally the request's own. An exported
+ * storefront's server forwards its shoppers' posts, so every one would arrive
+ * from that server and share one shopper's budget; with the store's secret key
+ * it may name the shopper's address in `Markii-Client-Address`, and that is
+ * counted instead. Without a valid key the header is ignored — anyone could
+ * otherwise reset their own limit by sending a new address each time.
  */
 
 const BODY_MAX = 64 * 1024;
@@ -44,17 +57,35 @@ function json(status: number, body: unknown, headers?: HeadersInit) {
   return NextResponse.json(body, { status, headers: { "cache-control": "no-store", ...headers } });
 }
 
-export async function POST(req: Request, { params }: { params: Promise<{ site: string; handle: string }> }) {
-  const { site: slug, handle } = await params;
+/**
+ * `GET /api/forms/{handle}` — the form as a shopper sees it, for an exported
+ * storefront to draw (`docs/API.md` §23). Public like the rest of the read
+ * API: fields, labels and the thank-you message, never where submissions are
+ * emailed.
+ */
+export const GET = handler(async (_req, { params }) => {
+  const { site: slug, handle } = (await params) as { site: string; handle: string };
+  const data = await loadReadableSite(slug);
+  const form = await formByHandle(data.site.id, handle);
+  if (!form) throw notFound("Form");
+  return NextResponse.json(formJson(data, form), { headers: READ_API_HEADERS });
+});
+
+export const POST = handler(async (req, { params }) => {
+  const { site: slug, handle } = (await params) as { site: string; handle: string };
   const data = await loadSite(slug);
   if (!data || storefrontHalted(data)) return json(404, { error: { code: "NOT_FOUND", message: "Store not found" } });
   const form = await formByHandle(data.site.id, handle);
   if (!form) return json(404, { error: { code: "NOT_FOUND", message: "Form not found" } });
 
+  // A key that is wrong, or sent from a browser, is refused here rather than ignored.
+  const delegated = storefrontKeyFrom(req.headers) ? (await storefrontDelegation(data.site.id)).kind === "server" : false;
+  const forwarded = delegated ? clientAddressFrom(req.headers.get(CLIENT_ADDRESS_HEADER)) : null;
+
   const body = await readBody(req);
   if (!body) return json(413, { error: { code: "VALIDATION_ERROR", message: "That message is too long to send." } });
 
-  const outcome = await submitForm({ site: data.site, form, input: body.input, ip: requestContextFrom(req).ip });
+  const outcome = await submitForm({ site: data.site, form, input: body.input, ip: forwarded ?? requestContextFrom(req).ip });
   const base = data.baseUrl.replace(/\/$/, "");
   const back = safeReturn(body.input._return);
   const page = (status: string, extra: Record<string, string> = {}) => {
@@ -80,4 +111,4 @@ export async function POST(req: Request, { params }: { params: Promise<{ site: s
     case "refused":
       return body.json ? json(403, { error: { code: "SUBMISSION_REFUSED", message: "This message could not be sent." } }) : page("refused");
   }
-}
+});

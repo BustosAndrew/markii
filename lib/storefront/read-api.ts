@@ -1,4 +1,5 @@
-import type { Category, Collection, Product } from "@/lib/db";
+import type { Category, Collection, Product, SiteForm } from "@/lib/db";
+import type { FormField } from "@markii/renderer/forms";
 import type { ThemePackage } from "@markii/renderer/theme-package";
 import type { SiteData } from "@/lib/storefront";
 
@@ -6,7 +7,7 @@ import type { SiteData } from "@/lib/storefront";
  * The storefront read API (D53) — what a headless storefront, an exported
  * Next.js app above all, reads a store's catalogue and published design from.
  * `GET /api/store`, `/api/products`, `/api/products/{slug}` and
- * `/api/collections/{handle}` on the store's own host.
+ * `/api/collections/{handle}` and `/api/forms/{handle}` on the store's own host.
  *
  * **Nothing here is new information.** Every field is already public on the
  * store's own pages — the product page, the collection pages, the JSON-LD,
@@ -172,6 +173,36 @@ export function storeJson(data: SiteData, design: ThemePackage | null): Storefro
     categories: data.cats.filter((c) => c.enabled).map(categoryJson),
     collections: data.colls.map((c) => collectionJson(data, c)),
     design: design ? { ...design, savedBlocks: [] } : null,
+  };
+}
+
+/**
+ * A form as its page shows it — the fields, the button and the thank-you
+ * message, all on `/forms/{handle}` already. **`notifyEmail` is not here**: where
+ * a merchant's submissions are mailed is theirs, not a shopper's.
+ */
+export type StorefrontFormJson = {
+  handle: string;
+  name: string;
+  fields: FormField[];
+  submitLabel: string;
+  successMessage: string;
+  /** The form's own page on the store. */
+  url: string;
+  /** Where a submission is posted — `application/x-www-form-urlencoded` or JSON. */
+  submitUrl: string;
+};
+
+export function formJson(data: Pick<SiteData, "baseUrl">, f: SiteForm): StorefrontFormJson {
+  const base = data.baseUrl.replace(/\/$/, "");
+  return {
+    handle: f.handle,
+    name: f.name,
+    fields: f.fields,
+    submitLabel: f.submitLabel,
+    successMessage: f.successMessage,
+    url: `${base}/forms/${f.handle}`,
+    submitUrl: `${base}/api/forms/${f.handle}`,
   };
 }
 

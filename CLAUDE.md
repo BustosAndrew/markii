@@ -675,7 +675,7 @@ the server half (store, queries, lease, preview, assets). `lib/builder/renderer-
 refuses any import from the package to anything outside it but `react`, `zod`, `cheerio` and
 `node:crypto` — **never add a `@/lib/db` read, a server-only module, an `@/` import or a client island
 there**; data arrives through the render context. **Code that moves into it becomes Apache for good.** **The storefront read API is built (2026-11-20)** —
-`/api/store`, `/api/products[/{slug}]`, `/api/collections/{handle}` on the store host, public and
+`/api/store`, `/api/products[/{slug}]`, `/api/collections/{handle}`, `/api/forms/{handle}` on the store host, public and
 credential-free, nothing a shopper cannot already see (`docs/API.md` §23). **An export's shopper
 sign-in, database and hosting are its owner's** (owner, 2026-11-20): Markii issues no cross-origin
 shopper credential. **Members-only products still sell from an export** through a per-store

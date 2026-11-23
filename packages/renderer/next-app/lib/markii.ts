@@ -1,6 +1,7 @@
 import "server-only";
 import { cache } from "react";
 import type { RenderCategory, RenderCollection, RenderProduct } from "@markii/renderer/catalog";
+import type { FormField } from "@markii/renderer/forms";
 import type { ThemePackage } from "@markii/renderer/theme-package";
 import { currentShopperEmail } from "./shopper";
 
@@ -115,6 +116,19 @@ export const getCollectionProducts = cache(async (handle: string, limit: number)
   const res = await read<{ products: ProductJson[] }>(`/api/collections/${encodeURIComponent(handle)}?limit=${limit}`);
   return res ? res.products.map(toRenderProduct) : [];
 });
+
+/** A store form as Markii serves it (`GET /api/forms/{handle}`) — what a `form` block and `/forms/{handle}` draw. */
+export type FormJson = {
+  handle: string;
+  name: string;
+  fields: FormField[];
+  submitLabel: string;
+  successMessage: string;
+  url: string;
+  submitUrl: string;
+};
+
+export const getForm = cache((handle: string) => read<FormJson>(`/api/forms/${encodeURIComponent(handle)}`));
 
 /**
  * A call to the store **as the signed-in shopper**: your storefront key plus

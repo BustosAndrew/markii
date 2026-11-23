@@ -7,7 +7,7 @@ import { ThemeShell } from "@markii/renderer/theme-shell";
 import { resolveTheme } from "@markii/renderer/tokens";
 import type { DocumentKind, PageNode } from "@markii/renderer/types";
 import { storeView } from "@markii/renderer/views";
-import { getCollectionProducts, getProducts, siteUrl, type StoreJson } from "./markii";
+import { getCollectionProducts, getForm, getProducts, siteUrl, storeUrl, type StoreJson } from "./markii";
 
 /**
  * A page of this store, drawn exactly as Markii draws it: the same renderer,
@@ -25,6 +25,18 @@ export function seoOf(store: StoreJson, kind: DocumentKind, handle: string) {
   return store.design?.documents.find((d) => d.kind === kind && d.handle === handle)?.seo ?? {};
 }
 
+/**
+ * Where a form on this site posts. With your storefront key, to this app's own
+ * `/api/forms/{handle}`, which forwards it from this server and keeps the
+ * shopper here. Without one, straight to your store on Markii — forwarding
+ * unkeyed would make every shopper look like this server to Markii's spam
+ * limits, so one busy minute would lock everyone out. The shopper then lands
+ * on the form's page on your Markii store afterwards.
+ */
+export function formAction(handle: string): string {
+  return process.env.MARKII_STOREFRONT_KEY ? `${siteUrl()}/api/forms/${handle}` : `${storeUrl()}/api/forms/${handle}`;
+}
+
 export async function renderContext(store: StoreJson, extra: Partial<RenderContext> = {}): Promise<RenderContext> {
   const products = await getProducts();
   const baseUrl = siteUrl();
@@ -34,6 +46,11 @@ export async function renderContext(store: StoreJson, extra: Partial<RenderConte
     categories: store.categories,
     collections: store.collections,
     membersOf: (handle, limit) => getCollectionProducts(handle, limit),
+    formOf: async (handle) => {
+      const f = await getForm(handle);
+      return f ? { handle: f.handle, name: f.name, fields: f.fields, submitLabel: f.submitLabel } : null;
+    },
+    formAction,
     values: { store: storeView(store.store, { baseUrl, products, collections: store.collections }) },
     ...extra,
   };

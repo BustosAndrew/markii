@@ -3335,8 +3335,14 @@ per submission**, and **submissions kept permanently**.
 | `forms.blockSender` · `unblockSender` | low | `commerce.write` | Blocklist entry by address or `@domain`. `409 already_blocked`. Undoable |
 
 Checks: `FORM_NOT_CHOSEN` and `UNKNOWN_FORM` (errors) for a form block. All three tables travel in the
-store export (D53). On no agent's allowlist. **Not covered:** the Next.js export draws no form (its
-render context has no form lookup) — a form block renders nothing there.
+store export (D53). On no agent's allowlist. **The Next.js export draws forms too** (2026-11-22): it
+reads `GET /api/forms/{handle}` (§23) and has its own `/forms/{handle}` page. With
+`MARKII_STOREFRONT_KEY` set, a form posts to the export's own `/api/forms/{handle}`, which forwards
+from its server with the shopper's address in **`Markii-Client-Address`** — honoured **only with a
+valid key**, ignored otherwise, so nobody resets their own limit by naming a new address — and brings
+the shopper back to the export. Without a key the form posts straight to the store, and the shopper
+lands on the store's own `/forms/{handle}` page: forwarding without a key would count every shopper
+as the export's server and share one address's limit.
 
 **Agent documents from the published design (M5, 2026-11-12).** The merchant's own published pages
 now reach every document an agent or crawler reads, all from **one list** (`lib/storefront-docs.ts`):
@@ -3804,6 +3810,7 @@ Not traffic-logged: an export reads it on revalidation, not per visitor. Money i
 | `GET /api/products?limit=&offset=` | `{ total, limit, offset, next, products[] }` — enabled, oldest first; `limit` default 50, max 250, a bad value clamps rather than 400s |
 | `GET /api/products/{slug}` | the product plus `options[]` and `variants[] { id, title, optionValues, priceMinor, available }` — the product page's own reads; `404` for unknown or disabled |
 | `GET /api/collections/{handle}?limit=` | `{ collection, products[] }` in the merchant's order, rules evaluated, enabled only; `404` unless published |
+| `GET /api/forms/{handle}` | `{ handle, name, fields[], submitLabel, successMessage, url, submitUrl }` — what the form's page shows; **never `notifyEmail`**. `404` for an unknown form. Post to `submitUrl` (§19 "Storefront forms") |
 
 A product is `{ id, slug, name, url, description, summary, sku, priceMinor, currency, stock,
 inStock, images, categoryId, suggestedProductIds, membersOnly, requiresTierId }`; the single-product

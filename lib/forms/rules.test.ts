@@ -3,7 +3,9 @@ import { prerender } from "react-dom/static";
 import { describe, expect, it } from "vitest";
 import { formFieldsSchema, type FormField } from "@markii/renderer/forms";
 import { FormView } from "@markii/renderer/forms-view";
-import { blockedBy, candidatePatterns, formLimitKeys, normalizeBlockPattern, notificationText, parseSubmission } from "./rules";
+import { formJson } from "@/lib/storefront/read-api";
+import type { SiteForm } from "@/lib/db";
+import { blockedBy, candidatePatterns, clientAddressFrom, formLimitKeys, normalizeBlockPattern, notificationText, parseSubmission } from "./rules";
 
 const fields: FormField[] = formFieldsSchema.parse([
   { name: "name", label: "Your name", type: "text", required: true },
@@ -70,6 +72,35 @@ describe("rate limit keys", () => {
     expect(formLimitKeys.email(1, "Mei@Example.com")).toBe(formLimitKeys.email(1, "mei@example.com"));
     expect(formLimitKeys.email(1, "mei@example.com")).not.toContain("mei");
     expect(formLimitKeys.store(1)).not.toBe(formLimitKeys.store(2));
+  });
+});
+
+describe("a forwarded shopper address", () => {
+  it("is an address or nothing — never a list, never free text", () => {
+    expect(clientAddressFrom(" 192.0.2.7 ")).toBe("192.0.2.7");
+    expect(clientAddressFrom("2001:DB8::1")).toBe("2001:db8::1");
+    expect(clientAddressFrom("192.0.2.7, 10.0.0.1")).toBeNull();
+    expect(clientAddressFrom("999.0.0.1")).toBeNull();
+    expect(clientAddressFrom("localhost")).toBeNull();
+    expect(clientAddressFrom("")).toBeNull();
+    expect(clientAddressFrom(null)).toBeNull();
+  });
+});
+
+describe("the public form read", () => {
+  it("carries what the form's page shows, never where submissions are emailed", () => {
+    const form = { id: 1, siteId: 1, handle: "contact", name: "Contact", fields, submitLabel: "Send", successMessage: "Thanks", notifyEmail: "owner@example.com" } as unknown as SiteForm;
+    const out = formJson({ baseUrl: "https://tea.markii.shop/" }, form);
+    expect(out).toEqual({
+      handle: "contact",
+      name: "Contact",
+      fields,
+      submitLabel: "Send",
+      successMessage: "Thanks",
+      url: "https://tea.markii.shop/forms/contact",
+      submitUrl: "https://tea.markii.shop/api/forms/contact",
+    });
+    expect(JSON.stringify(out)).not.toContain("owner@example.com");
   });
 });
 

@@ -28,13 +28,14 @@ describe("storefront forms", () => {
   };
   /** A fresh client address per call unless one is given, so the per-address limit only fires where a test means it to. */
   const freshIp = () => `198.51.100.${(ipCounter++ % 250) + 1}`;
-  const post = async (handle: string, body: Record<string, string>, opts: { json?: boolean; ip?: string } = {}) => {
+  const post = async (handle: string, body: Record<string, string>, opts: { json?: boolean; ip?: string; headers?: Record<string, string> } = {}) => {
     const res = await fetch(`${BASE_URL}/_sites/${slug}/api/forms/${handle}`, {
       method: "POST",
       redirect: "manual",
       headers: {
         "x-forwarded-for": opts.ip ?? freshIp(),
         "content-type": opts.json ? "application/json" : "application/x-www-form-urlencoded",
+        ...opts.headers,
       },
       body: opts.json ? JSON.stringify(body) : new URLSearchParams(body).toString(),
     });
@@ -144,6 +145,51 @@ describe("storefront forms", () => {
     const sender = [] as number[];
     for (let i = 0; i < 4; i++) sender.push((await post("contact-us", valid("repeat@example.com"), { json: true })).status);
     expect(sender).toEqual([201, 201, 201, 429]);
+  });
+
+  it("serves the form to an exported storefront, without where submissions go", async () => {
+    const res = await fetch(`${BASE_URL}/_sites/${slug}/api/forms/contact-us`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("access-control-allow-origin")).toBe("*");
+    const form = await res.json();
+    expect(form).toMatchObject({ handle: "contact-us", name: "Contact us", submitLabel: expect.any(String), successMessage: "Thanks — we answer within a day." });
+    expect(form.fields.map((f: { name: string }) => f.name)).toEqual(["name", "email", "message"]);
+    expect(form.submitUrl).toMatch(/\/api\/forms\/contact-us$/);
+    expect(JSON.stringify(form)).not.toContain("resend.dev");
+    expect((await fetch(`${BASE_URL}/_sites/${slug}/api/forms/no-such-form`)).status).toBe(404);
+  });
+
+  it("limits a forwarded shopper by their own address — but only when the store's key vouches for it", async () => {
+    const created = await ok("storefront.createKey", { siteId, label: "Export" });
+    const key: string = created.result.key;
+    const server = "203.0.113.50"; // the export's own server, the same on every forward
+    const n = Date.now();
+
+    // Keyed: six shoppers through one server are six addresses, not one.
+    const keyed: number[] = [];
+    for (let i = 0; i < 6; i++) {
+      keyed.push((await post("contact-us", valid(`fwd${n}-${i}@example.com`), { json: true, ip: server, headers: { authorization: `Bearer ${key}`, "markii-client-address": `192.0.2.${i + 10}` } })).status);
+    }
+    expect(keyed).toEqual([201, 201, 201, 201, 201, 201]);
+    // …and one shopper is still one shopper, however many times the server forwards them.
+    const same: number[] = [];
+    for (let i = 0; i < 6; i++) {
+      same.push((await post("contact-us", valid(`one${n}-${i}@example.com`), { json: true, ip: freshIp(), headers: { authorization: `Bearer ${key}`, "markii-client-address": "192.0.2.99" } })).status);
+    }
+    expect(same).toEqual([201, 201, 201, 201, 201, 429]);
+
+    // Unkeyed, the header is ignored: the request's own address is what counts.
+    const unkeyed: number[] = [];
+    const ip = "203.0.113.60";
+    for (let i = 0; i < 6; i++) {
+      unkeyed.push((await post("contact-us", valid(`nokey${n}-${i}@example.com`), { json: true, ip, headers: { "markii-client-address": `192.0.2.${i + 120}` } })).status);
+    }
+    expect(unkeyed).toEqual([201, 201, 201, 201, 201, 429]);
+
+    // A wrong key is refused, not quietly treated as no key.
+    const wrong = await post("contact-us", valid(`wrong${n}@example.com`), { json: true, headers: { authorization: "Bearer mksk_live_nope" } });
+    expect(wrong.status).toBe(401);
+    await ok("storefront.revokeKey", { siteId, keyId: created.result.id });
   });
 
   it("places a form on a designed page, and refuses to publish one that names no form", async () => {

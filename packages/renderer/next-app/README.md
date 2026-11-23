@@ -28,7 +28,7 @@ npm run dev
 |---|---|
 | `MARKII_STORE_URL` | Your store on Markii, e.g. `https://leaf.markii.shop`. Required. |
 | `SITE_URL` | Where this app is served, e.g. `https://shop.example.com`. Links, structured data and the agent documents use it. |
-| `MARKII_STOREFRONT_KEY` | Only for **members-only products**. Create one in the Markii dashboard (your store's settings → exported storefront). **Server-only: never expose it to the browser** — Markii refuses a key sent from one. |
+| `MARKII_STOREFRONT_KEY` | For **members-only products**, and so **forms** post through this app (see Forms). Create one in the Markii dashboard (your store's settings → exported storefront). **Server-only: never expose it to the browser** — Markii refuses a key sent from one. |
 | `ACCOUNT_URL` | Where the header's "Account" link goes — your sign-in page. |
 
 ## Shopper accounts and memberships
@@ -40,6 +40,20 @@ shopper's email **once your sign-in has verified it**, and set `MARKII_STOREFRON
 then tells Markii which of your customers is shopping, and their memberships unlock what they are
 entitled to — including at checkout. **Markii trusts that address**: whoever holds your key can act as
 any customer of your store, so keep the key secret and only ever return verified addresses.
+
+## Forms
+
+Forms you build on Markii (contact, wholesale enquiries…) work here too, on any page and at
+`/forms/{handle}`. Markii keeps every submission, emails it if the form says to, and applies its spam
+limits and your blocklist — see them in the Markii dashboard.
+
+- **With `MARKII_STOREFRONT_KEY` set**, a form posts to this app's `/api/forms/{handle}`, which sends
+  it on to Markii from this server along with the shopper's address, and the shopper stays on this
+  site. The address is read from `x-forwarded-for`, which your host must set and overwrite (Vercel and
+  most platforms do).
+- **Without a key**, forms post straight to your store on Markii, and the shopper sees the thank-you
+  page there. Markii only accepts the shopper's address from a server that holds your key, so without
+  one this app cannot forward posts for its shoppers.
 
 ## For AI agents
 

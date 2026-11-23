@@ -48,6 +48,22 @@ export const formLimitKeys = {
 };
 
 /**
+ * The shopper's address as an exported storefront's server names it when it
+ * forwards their post. Honoured only alongside the store's secret key (the
+ * route checks); this only decides whether the value is an address at all.
+ * IPv4 or IPv6 characters, nothing else, so a header cannot smuggle a list or
+ * a key-shaped string into the counter.
+ */
+export const CLIENT_ADDRESS_HEADER = "markii-client-address";
+
+export function clientAddressFrom(raw: string | null): string | null {
+  const v = raw?.trim().toLowerCase() ?? "";
+  if (!v || v.length > 45) return null;
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(v)) return v.split(".").every((n) => Number(n) <= 255) ? v : null;
+  return /^[0-9a-f:.]+$/.test(v) && v.includes(":") ? v : null;
+}
+
+/**
  * A blocklist entry as stored: an address, or a domain written `@example.com`
  * (a bare `example.com` is read as the domain). Lower case. Null when it is
  * neither — a typo must not become a rule that blocks nothing.
