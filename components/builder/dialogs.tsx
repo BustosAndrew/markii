@@ -4,17 +4,33 @@ import { useEffect, useId, useState } from "react";
 import { X } from "lucide-react";
 import {
   getDesignChecks,
+  getDesignDiff,
   listDesignVersions,
   type CheckResult,
+  type DesignDiff,
   type DesignVersion,
 } from "@/lib/api/builder";
+import { ApiClientError } from "@/lib/api/types";
 import { publicErrorMessage } from "@/lib/api/public-copy";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input, Label } from "@/components/ui/field";
 import { LocalDateTime } from "@/components/ui/local-date";
+import { DesignDiffView } from "./design-diff";
 
-export function Modal({ open, title, onClose, children }: { open: boolean; title: string; onClose: () => void; children: React.ReactNode }) {
+export function Modal({
+  open,
+  title,
+  onClose,
+  children,
+  size = "md",
+}: {
+  open: boolean;
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+  size?: "md" | "lg";
+}) {
   const titleId = useId();
   useEffect(() => {
     if (!open) return;
@@ -29,7 +45,7 @@ export function Modal({ open, title, onClose, children }: { open: boolean; title
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-[var(--radius-card)] border border-border bg-surface p-5 shadow-[var(--shadow-md)]"
+        className={`max-h-[85vh] w-full overflow-y-auto rounded-[var(--radius-card)] border border-border bg-surface p-5 shadow-[var(--shadow-md)] ${size === "lg" ? "max-w-2xl" : "max-w-lg"}`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between gap-3">
@@ -72,6 +88,7 @@ type PublishProps = {
   onPublish: (note: string) => Promise<boolean>;
   onDiscard: () => Promise<boolean>;
   hasUnpublishedChanges: boolean;
+  onSelectNode?: (documentId: number, nodeId: string) => void;
 };
 
 /** Mounted only while open, so every opening starts from fresh checks. */
@@ -79,8 +96,9 @@ export function PublishDialog(props: PublishProps) {
   return props.open ? <OpenPublishDialog {...props} /> : null;
 }
 
-function OpenPublishDialog({ open, site, onClose, onPublish, onDiscard, hasUnpublishedChanges }: PublishProps) {
+function OpenPublishDialog({ open, site, onClose, onPublish, onDiscard, hasUnpublishedChanges, onSelectNode }: PublishProps) {
   const [checks, setChecks] = useState<CheckResult[] | null>(null);
+  const [diff, setDiff] = useState<DesignDiff | "none" | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -90,17 +108,43 @@ function OpenPublishDialog({ open, site, onClose, onPublish, onDiscard, hasUnpub
     getDesignChecks(site)
       .then((r) => setChecks(r.results))
       .catch((e) => setLoadError(publicErrorMessage(e, "Could not run the pre-publish checks.")));
+    getDesignDiff(site)
+      .then(setDiff)
+      .catch((e) => {
+        const reason =
+          e instanceof ApiClientError && e.details && typeof e.details === "object"
+            ? (e.details as { reason?: string }).reason
+            : null;
+        if (reason === "nothing_published") setDiff("none");
+        else setLoadError(publicErrorMessage(e, "Could not compare with the live design."));
+      });
   }, [site]);
 
   const errors = checks?.filter((c) => c.severity === "error") ?? [];
   const warnings = checks?.filter((c) => c.severity === "warning") ?? [];
 
   return (
-    <Modal open={open} title="Publish your design" onClose={onClose}>
+    <Modal open={open} title="Publish your design" onClose={onClose} size="lg">
       <div className="space-y-4">
         <p className="text-sm text-muted">
           Publishing makes every page, the theme and its colours live on your storefront at once. You can restore an earlier version from History.
         </p>
+        {diff && diff !== "none" ? (
+          <div>
+            <h3 className="mb-2 text-sm font-medium text-foreground">What publishing will change</h3>
+            <DesignDiffView
+              diff={diff}
+              onSelectNode={
+                onSelectNode
+                  ? (documentId, nodeId) => {
+                      onSelectNode(documentId, nodeId);
+                      onClose();
+                    }
+                  : undefined
+              }
+            />
+          </div>
+        ) : null}
         {loadError ? <p className="text-sm text-error-text">{loadError}</p> : null}
         {checks === null && !loadError ? <p className="text-sm text-muted">Checking the draft…</p> : null}
         <CheckList items={errors} tone="error" />
@@ -160,6 +204,7 @@ type HistoryProps = {
   site: number;
   onClose: () => void;
   onRestore: (version: number) => Promise<boolean>;
+  onSelectNode?: (documentId: number, nodeId: string) => void;
 };
 
 /** Mounted only while open, so the list is fetched fresh each time. */
@@ -167,11 +212,12 @@ export function HistoryDialog(props: HistoryProps) {
   return props.open ? <OpenHistoryDialog {...props} /> : null;
 }
 
-function OpenHistoryDialog({ open, site, onClose, onRestore }: HistoryProps) {
+function OpenHistoryDialog({ open, site, onClose, onRestore, onSelectNode }: HistoryProps) {
   const [items, setItems] = useState<DesignVersion[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  const [compare, setCompare] = useState<{ version: number; diff: DesignDiff } | "loading" | null>(null);
 
   useEffect(() => {
     listDesignVersions(site)
@@ -180,10 +226,31 @@ function OpenHistoryDialog({ open, site, onClose, onRestore }: HistoryProps) {
   }, [site]);
 
   return (
-    <Modal open={open} title="Published versions" onClose={onClose}>
+    <Modal open={open} title="Published versions" onClose={onClose} size="lg">
       {error ? <p className="text-sm text-error-text">{error}</p> : null}
       {items === null && !error ? <p className="text-sm text-muted">Loading…</p> : null}
       {items?.length === 0 ? <p className="text-sm text-muted">Nothing has been published yet.</p> : null}
+      {compare && compare !== "loading" ? (
+        <div className="mb-4 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-sm font-medium text-foreground">Version {compare.version} compared with current draft</h3>
+            <Button variant="ghost" onClick={() => setCompare(null)}>
+              Back to list
+            </Button>
+          </div>
+          <DesignDiffView
+            diff={compare.diff}
+            onSelectNode={
+              onSelectNode
+                ? (documentId, nodeId) => {
+                    onSelectNode(documentId, nodeId);
+                    onClose();
+                  }
+                : undefined
+            }
+          />
+        </div>
+      ) : (
       <ul className="divide-y divide-border">
         {items?.map((v) => (
           <li key={v.version} className="flex items-center justify-between gap-3 py-2.5">
@@ -196,12 +263,32 @@ function OpenHistoryDialog({ open, site, onClose, onRestore }: HistoryProps) {
                 <LocalDateTime value={v.createdAt} />
               </p>
             </div>
-            <Button variant="secondary" onClick={() => setPending(v.version)}>
-              Restore to draft
-            </Button>
+            <div className="flex shrink-0 gap-2">
+              <Button
+                variant="secondary"
+                disabled={compare === "loading"}
+                onClick={async () => {
+                  setCompare("loading");
+                  setError(null);
+                  try {
+                    const d = await getDesignDiff(site, { from: v.version });
+                    setCompare({ version: v.version, diff: d });
+                  } catch (e) {
+                    setCompare(null);
+                    setError(publicErrorMessage(e, "Could not compare that version."));
+                  }
+                }}
+              >
+                Compare with current draft
+              </Button>
+              <Button variant="secondary" onClick={() => setPending(v.version)}>
+                Restore to draft
+              </Button>
+            </div>
           </li>
         ))}
       </ul>
+      )}
       <ConfirmDialog
         open={pending !== null}
         title={`Restore version ${pending}?`}

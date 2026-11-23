@@ -3,6 +3,7 @@ import { loadOrError } from "@/lib/api/load";
 import { canWriteCms, canWriteScripts } from "@/lib/api/org";
 import { FetchError } from "@/components/dashboard/fetch-error";
 import { DesignEditor } from "@/components/builder/design-editor";
+import { WebsiteNav } from "@/components/dashboard/website-nav";
 import { PageHeader } from "@/components/ui/page-header";
 
 /**
@@ -25,10 +26,13 @@ export default async function DesignEditorPage({ params }: { params: Promise<{ s
   const site = siteResult.data;
 
   return (
-    <DesignEditor
-      site={{ id: site.id, slug: site.slug, name: site.name, storefrontUrl: site.storefrontUrl || null }}
-      canEdit={canWriteCms(meResult.data?.role)}
-      canWriteScripts={canWriteScripts(meResult.data?.role)}
-    />
+    <div>
+      <WebsiteNav slug={site.slug} />
+      <DesignEditor
+        site={{ id: site.id, slug: site.slug, name: site.name, storefrontUrl: site.storefrontUrl || null }}
+        canEdit={canWriteCms(meResult.data?.role)}
+        canWriteScripts={canWriteScripts(meResult.data?.role)}
+      />
+    </div>
   );
 }

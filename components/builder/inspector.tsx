@@ -28,6 +28,8 @@ export type PickerData = {
   products: { slug: string; name: string; images: string[] }[];
   categories: { slug: string; name: string }[];
   collections: { handle: string; title: string }[];
+  /** Storefront forms, for the Form block. Optional so older inspector tests still type-check. */
+  forms?: { handle: string; name: string }[];
 };
 
 type Commit = (props: Record<string, unknown>, unset?: string[]) => void;
@@ -129,6 +131,25 @@ function Field({ spec, props, commit, disabled, data }: { spec: FieldSpec; props
   const id = `f-${spec.name}`;
   // An emptied optional field is removed rather than saved as "".
   const setText = (v: string) => (v.trim() === "" ? commit({}, [spec.name]) : commit({ [spec.name]: v }));
+
+  if (spec.name === "formHandle" && data.forms) {
+    return (
+      <div>
+        <Label htmlFor={id}>{spec.label}</Label>
+        <Select id={id} value={String(value ?? "")} disabled={disabled} onChange={(e) => (e.target.value ? commit({ [spec.name]: e.target.value }) : commit({}, [spec.name]))}>
+          <option value="">— Choose a form —</option>
+          {data.forms.map((f) => (
+            <option key={f.handle} value={f.handle}>
+              {f.name}
+            </option>
+          ))}
+        </Select>
+        {data.forms.length === 0 ? (
+          <p className="mt-1 text-xs text-muted">This store has no forms yet. Create one under Forms, then choose it here.</p>
+        ) : null}
+      </div>
+    );
+  }
 
   switch (spec.kind) {
     case "text":

@@ -72,6 +72,8 @@ export function ProductForm({
   const [grantsRenewalInterval, setGrantsRenewalInterval] = useState<
     Product["grantsRenewalInterval"]
   >(product?.grantsRenewalInterval ?? "none");
+  const [redirectOldLink, setRedirectOldLink] = useState(true);
+  const slugChanged = mode === "edit" && Boolean(product) && slug.trim() !== (product?.slug ?? "");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -159,9 +161,13 @@ export function ProductForm({
           `/dashboard/products/${created.slug}?siteId=${created.siteId}`,
         );
       } else if (product) {
-        const updated = await updateProduct(product.slug, body, {
+        const updated = await updateProduct(
+          product.slug,
+          { ...body, redirectOldLink: slugChanged ? redirectOldLink : undefined },
+          {
           siteId: product.siteId,
-        });
+        },
+        );
         if (updated.slug !== product.slug) {
           router.replace(
             `/dashboard/products/${updated.slug}?siteId=${updated.siteId}`,
@@ -219,6 +225,16 @@ export function ProductForm({
             onChange={(e) => setSlug(e.target.value)}
             placeholder="auto from name"
           />
+          {slugChanged ? (
+            <label className="mt-2 flex items-center gap-2 text-sm text-foreground">
+              <input
+                type="checkbox"
+                checked={redirectOldLink}
+                onChange={(e) => setRedirectOldLink(e.target.checked)}
+              />
+              Send the old link here
+            </label>
+          ) : null}
         </div>
       </div>
 

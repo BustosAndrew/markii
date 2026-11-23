@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { getMe, getSite, getSiteDomain, getSiteSummary, listStorefrontKeys } from "@/lib/api/server";
 import { loadOrError } from "@/lib/api/load";
-import { canManageTokens } from "@/lib/api/org";
+import { canExportStore, canManageTokens } from "@/lib/api/org";
 import { storefrontAddress } from "@/lib/api/sites";
 import { Badge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
@@ -11,7 +11,9 @@ import { PageHeader } from "@/components/ui/page-header";
 import { FetchError } from "@/components/dashboard/fetch-error";
 import { SiteControls } from "@/components/dashboard/site-controls";
 import { SiteDomainCard } from "@/components/dashboard/site-domain";
+import { StoreExportPanel } from "@/components/dashboard/store-export-panel";
 import { StorefrontKeysPanel } from "@/components/dashboard/storefront-keys-panel";
+import { WebsiteNav } from "@/components/dashboard/website-nav";
 
 export default async function WebsiteDetailPage({
   params,
@@ -47,9 +49,11 @@ export default async function WebsiteDetailPage({
   const keysResult = canKeys
     ? await loadOrError(() => listStorefrontKeys(site.slug))
     : { data: null, error: null };
+  const showExport = canExportStore(me.data?.role);
 
   return (
     <div className="space-y-8">
+      <WebsiteNav slug={site.slug} />
       <PageHeader
         title={site.name}
         description={storefrontAddress(site.storefrontUrl)}
@@ -140,6 +144,8 @@ export default async function WebsiteDetailPage({
         canManage={canKeys}
         loadError={keysResult.error}
       />
+
+      {showExport ? <StoreExportPanel siteId={site.id} /> : null}
 
       <SiteControls site={site} />
     </div>

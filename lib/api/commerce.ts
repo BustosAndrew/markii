@@ -301,6 +301,8 @@ export type CollectionInput = {
   rulesMatch?: NonNullable<Collection["rulesMatch"]>;
   sortOrder?: Collection["sortOrder"];
   published?: boolean;
+  /** A handle change leaves a redirect from the old `/collections/` address unless this is false. */
+  redirectOldLink?: boolean;
 };
 
 export function createCollection(

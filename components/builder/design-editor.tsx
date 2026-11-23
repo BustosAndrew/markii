@@ -53,6 +53,7 @@ import {
 } from "@/lib/api/builder";
 import { listCategories } from "@/lib/api/categories";
 import { listCollections } from "@/lib/api/commerce";
+import { listForms } from "@/lib/api/forms";
 import { listProducts } from "@/lib/api/products";
 import { publicErrorMessage } from "@/lib/api/public-copy";
 import { ApiClientError } from "@/lib/api/types";
@@ -178,7 +179,7 @@ export function DesignEditor({
   const [undoStack, setUndoStack] = useState<Step[]>([]);
   const [redoStack, setRedoStack] = useState<Step[]>([]);
   const [dialog, setDialog] = useState<"publish" | "history" | null>(null);
-  const [pickers, setPickers] = useState<PickerData>({ products: [], categories: [], collections: [] });
+  const [pickers, setPickers] = useState<PickerData>({ products: [], categories: [], collections: [], forms: [] });
   /** This tab's chat is mid-turn. The lease says the same a poll later; this closes that gap. */
   const [agentBusy, setAgentBusy] = useState(false);
   const [stopSignal, setStopSignal] = useState(0);
@@ -304,12 +305,14 @@ export function DesignEditor({
       listProducts({ siteId: site.id, limit: 100 }).catch(() => null),
       listCategories({ siteId: site.id, limit: 100 }).catch(() => null),
       listCollections({ siteId: site.id, limit: 100 }).catch(() => null),
-    ]).then(([p, c, k]) => {
+      listForms(site.id).catch(() => null),
+    ]).then(([p, c, k, f]) => {
       if (cancelled) return;
       setPickers({
         products: (p?.items ?? []).filter((x) => x.enabled).map((x) => ({ slug: x.slug, name: x.name, images: x.images })),
         categories: (c?.items ?? []).map((x) => ({ slug: x.slug, name: x.name })),
         collections: (k?.items ?? []).map((x) => ({ handle: x.handle, title: x.title })),
+        forms: (f?.items ?? []).map((x) => ({ handle: x.handle, name: x.name })),
       });
     });
     return () => {
@@ -1075,6 +1078,14 @@ export function DesignEditor({
         open={dialog === "publish"}
         site={sid}
         hasUnpublishedChanges={started.hasUnpublishedChanges}
+        onSelectNode={(documentId, nodeId) => {
+          const path =
+            started.pages.find((p) => p.id === documentId)?.path ??
+            started.templates.find((t) => t.id === documentId)?.previewPath ??
+            started.regions.find((r) => r.id === documentId)?.previewPath ??
+            null;
+          void openDocument(documentId, path, nodeId);
+        }}
         onClose={() => setDialog(null)}
         onPublish={async (note) => Boolean(await run(() => publishDesign(sid, note || undefined), "builder.publish", { record: false }))}
         onDiscard={async () => {
@@ -1089,6 +1100,14 @@ export function DesignEditor({
       <HistoryDialog
         open={dialog === "history"}
         site={sid}
+        onSelectNode={(documentId, nodeId) => {
+          const path =
+            started.pages.find((p) => p.id === documentId)?.path ??
+            started.templates.find((t) => t.id === documentId)?.previewPath ??
+            started.regions.find((r) => r.id === documentId)?.previewPath ??
+            null;
+          void openDocument(documentId, path, nodeId);
+        }}
         onClose={() => setDialog(null)}
         onRestore={async (version) => {
           const ok = Boolean(await run(() => restoreDesignVersion(sid, version), "builder.restoreVersion", { record: false }));

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { updateCollection, type Collection } from "@/lib/api/commerce";
@@ -59,7 +60,9 @@ export function CollectionsTable({
               return (
                 <tr key={c.id} className="border-b border-border last:border-0">
                   <td className="px-4 py-3">
-                    <div className="font-medium text-foreground">{c.title}</div>
+                    <Link href={`/dashboard/collections/${c.id}`} className="font-medium text-foreground hover:text-brand">
+                      {c.title}
+                    </Link>
                     <div className="text-xs text-muted">{c.handle}</div>
                   </td>
                   <td className="px-4 py-3">

@@ -84,6 +84,11 @@ export function canWriteCatalog(role: StaffRole | null | undefined): boolean {
   return role === "owner" || role === "administrator" || role === "catalog_manager";
 }
 
+/** `commerce.write` — owner, administrator, and commerce manager. Form submissions and the blocklist. */
+export function canWriteCommerce(role: StaffRole | null | undefined): boolean {
+  return role === "owner" || role === "administrator" || role === "commerce_manager";
+}
+
 /**
  * Org-wide writes (D52): billing, payouts, integrations, sending domains, the
  * org profile, a new store. `storeIds === "all"` is the only reach that may.

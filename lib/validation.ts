@@ -190,7 +190,10 @@ export const productCreateSchema = z.object({
   grantsRenewalInterval: z.enum(["none", "month", "year"]).optional(),
 });
 
-export const productUpdateSchema = productCreateSchema.partial();
+export const productUpdateSchema = productCreateSchema.partial().extend({
+  /** A slug change leaves a redirect from the old `/p/` address unless this is false. */
+  redirectOldLink: z.boolean().optional(),
+});
 
 // ---------- preview / template bundle ----------
 

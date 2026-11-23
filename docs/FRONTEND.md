@@ -531,7 +531,7 @@ permissions problem, so neither should show the step-up modal or "your role cann
   shell can hide org-wide writes without a second call. `lib/api/org.ts`: `reachesAllStores()`,
   `grantableRoles()`, `storesWithinReach()`.
 
-### 🟢 New 2026-11-22 — storefront forms — needs screens
+### 🟢 New 2026-11-22 — storefront forms — screens built
 
 `lib/api/forms.ts`; contract in `docs/API.md` §19 "Storefront forms". **Migration 0053 — applied
 2026-11-22.** Three screens, two permissions: the **form editor** is `cms.write`; **submissions** and
@@ -553,9 +553,9 @@ the **blocklist** are customer data — gate them on `commerce.read` / `commerce
   (`@domain`). A blocklist screen lists entries with *Unblock*. Both undoable.
 - **Builder:** the `form` block's inspector has a text field for `formHandle`; better, offer a select
   filled from `listForms`. Publishing refuses `UNKNOWN_FORM` / `FORM_NOT_CHOSEN`.
-- When the screens ship, add a line to `lib/ops-agents/assistant/help.ts` saying where they are.
+- Help: `lib/ops-agents/assistant/help.ts` (`site_design`) names the Forms tab.
 
-### 🟢 New 2026-11-22 — the blog — needs a screen
+### 🟢 New 2026-11-22 — the blog — screens built
 
 `lib/api/blog.ts` → `listBlogPosts`, `getBlogPost`, `createBlogPost`, `updateBlogPost`,
 `publishBlogPost`, `unpublishBlogPost`, `deleteBlogPost`; contract in `docs/API.md` §19 "Blog".
@@ -581,9 +581,9 @@ the **blocklist** are customer data — gate them on `commerce.read` / `commerce
   (checked) when it changes → `redirectOldLink`.
 - **SEO** is replaced whole — send all four fields, as with builder pages.
 - A builder block listing recent posts is **not** built yet; link to `/blog` from a navMenu meanwhile.
-- When the screen ships, add a line to `lib/ops-agents/assistant/help.ts` saying where it is.
+- Help: `lib/ops-agents/assistant/help.ts` (`site_design`) names the Blog tab.
 
-### 🟢 New 2026-11-21 — storefront redirects — needs a screen
+### 🟢 New 2026-11-21 — storefront redirects — screens built
 
 `lib/api/redirects.ts` → `listRedirects`, `createRedirect`, `updateRedirect`, `deleteRedirect`,
 `previewRedirectImport`, `importRedirects`; contract in `docs/API.md` §19 "Storefront redirects".
@@ -604,14 +604,14 @@ the **blocklist** are customer data — gate them on `commerce.read` / `commerce
   `previewRedirectImport` first and show `skipped[]` (`row` is the index you sent, `reason` is a
   sentence) beside the counts; then `importRedirects` with the same body. Offer *Replace existing* →
   `replace: true`. Import is not undoable; single create/update/delete are (the usual undo toast).
-- When the screen ships, add a line to `lib/ops-agents/assistant/help.ts` saying where it is.
+- Help: `lib/ops-agents/assistant/help.ts` (`site_design`) names the Redirects tab.
 - **Renames make redirects on their own (2026-11-22):** changing a product's slug or a collection's
   handle, and publishing a page whose handle changed, leaves a redirect from the old address. On the
-  product and collection forms, show a checkbox beside the slug/handle field when it changes —
-  *"Send the old link here"*, checked — and send `redirectOldLink: false` when unchecked. Those
-  redirects appear in the list like any other; nothing else to build.
+  product and collection forms, a checkbox beside the slug/handle field when it changes —
+  *"Send the old link here"*, checked — sends `redirectOldLink: false` when unchecked. Those
+  redirects appear in the list like any other.
 
-### 🟢 New 2026-11-21 — compare design versions (§12) — needs a screen
+### 🟢 New 2026-11-21 — compare design versions (§12) — screens built
 
 `getDesignDiff(site, { from?, to? })` in `lib/api/builder.ts` → `DesignDiff`; contract in
 `docs/API.md` §19 (`GET /api/builder/sites/:idOrSlug/diff`). **No migration, no action** — a read,
@@ -634,7 +634,7 @@ the **blocklist** are customer data — gate them on `commerce.read` / `commerce
 **Also shipped, nothing to build:** builder pages' lead image and the fixed product page's first photo
 now load eagerly at high priority (`docs/BUILDER.md` §13). No API change.
 
-### 🟢 New 2026-11-21 — export the whole store (D53) — needs a screen
+### 🟢 New 2026-11-21 — export the whole store (D53) — screens built
 
 `lib/api/store-export.ts` → `exportStore(siteId)` and `previewStoreExport(siteId)`; contract in
 `docs/API.md` §19 "Store export". **No migration.** One store whole — products, inventory, customers,
@@ -655,8 +655,7 @@ orders, refunds, discounts, shipping, tax, sold files, design — as a zip a sel
 - **`headCodeLeftOut: true`** → "Your custom scripts are not included; add them again on the new store."
 - Copy worth keeping: *"Everything in this store, in one file, to move it to your own Markii. It holds
   your customers' personal data — keep it like a database backup and delete it once it is imported."*
-- When the screen ships, add one line to `lib/ops-agents/assistant/help.ts` saying where it is (the
-  assistant's help is a contract — don't describe a button that isn't there yet).
+- Help: `lib/ops-agents/assistant/help.ts` (`site_design`) names Move this store.
 
 ### 🟢 New 2026-11-20 — export the storefront as a Next.js app (D53) — screen built
 

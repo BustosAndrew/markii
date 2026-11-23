@@ -49,7 +49,7 @@ export function createProduct(
 
 export function updateProduct(
   idOrSlug: string,
-  body: Partial<Product>,
+  body: Partial<Product> & { redirectOldLink?: boolean },
   scope?: Scope,
   init?: RequestInit,
 ) {

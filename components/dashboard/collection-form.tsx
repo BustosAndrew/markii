@@ -5,6 +5,7 @@ import { useState } from "react";
 import {
   createCollection,
   setCollectionProducts,
+  updateCollection,
   type Collection,
 } from "@/lib/api/commerce";
 import { ApiClientError, type Site } from "@/lib/api/types";
@@ -12,17 +13,22 @@ import { Button } from "@/components/ui/button";
 import { FieldError, Input, Label, Select, Textarea } from "@/components/ui/field";
 import { Toggle } from "@/components/ui/toggle";
 
-export function CollectionForm({ sites }: { sites: Site[] }) {
+export function CollectionForm({ sites, collection }: { sites: Site[]; collection?: Collection }) {
   const router = useRouter();
-  const [siteId, setSiteId] = useState(String(sites[0]?.id ?? ""));
-  const [title, setTitle] = useState("");
-  const [handle, setHandle] = useState("");
-  const [description, setDescription] = useState("");
-  const [type, setType] = useState<Collection["type"]>("manual");
-  const [published, setPublished] = useState(false);
+  const editing = Boolean(collection);
+  const [siteId, setSiteId] = useState(
+    String(collection?.storeId ?? (collection as Collection & { siteId?: number })?.siteId ?? sites[0]?.id ?? ""),
+  );
+  const [title, setTitle] = useState(collection?.title ?? "");
+  const [handle, setHandle] = useState(collection?.handle ?? "");
+  const [description, setDescription] = useState(collection?.description ?? "");
+  const [type, setType] = useState<Collection["type"]>(collection?.type ?? "manual");
+  const [published, setPublished] = useState(collection?.publishedAt != null);
   const [productIds, setProductIds] = useState("");
+  const [redirectOldLink, setRedirectOldLink] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const handleChanged = editing && collection && handle.trim() !== collection.handle;
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -35,6 +41,23 @@ export function CollectionForm({ sites }: { sites: Site[] }) {
 
     setBusy(true);
     try {
+      if (editing && collection) {
+        const out = await updateCollection({
+          collectionId: collection.id,
+          title: title.trim(),
+          handle: handle.trim() || undefined,
+          description: description.trim() || null,
+          published,
+          redirectOldLink: handleChanged ? redirectOldLink : undefined,
+        });
+        if (!out.ok) {
+          setError("Collection could not be saved.");
+          return;
+        }
+        router.push("/dashboard/catalog?tab=collections");
+        router.refresh();
+        return;
+      }
       const created = await createCollection({
         siteId: Number(siteId),
         title: title.trim(),
@@ -49,7 +72,7 @@ export function CollectionForm({ sites }: { sites: Site[] }) {
         return;
       }
 
-      const collection = created.result;
+      const createdCollection = created.result;
 
       if (type === "manual" && productIds.trim()) {
         const ids = productIds
@@ -59,7 +82,7 @@ export function CollectionForm({ sites }: { sites: Site[] }) {
 
         if (ids.length > 0) {
           const outcome = await setCollectionProducts({
-            collectionId: collection.id,
+            collectionId: createdCollection.id,
             productIds: ids,
           });
           if (!outcome.ok) {
@@ -89,6 +112,7 @@ export function CollectionForm({ sites }: { sites: Site[] }) {
           value={siteId}
           onChange={(e) => setSiteId(e.target.value)}
           required
+          disabled={editing}
         >
           <option value="" disabled>
             Select a site
@@ -120,6 +144,16 @@ export function CollectionForm({ sites }: { sites: Site[] }) {
             placeholder="auto from title"
             className="font-mono"
           />
+          {handleChanged ? (
+            <label className="mt-2 flex items-center gap-2 text-sm text-foreground">
+              <input
+                type="checkbox"
+                checked={redirectOldLink}
+                onChange={(e) => setRedirectOldLink(e.target.checked)}
+              />
+              Send the old link here
+            </label>
+          ) : null}
         </div>
       </div>
 
@@ -139,6 +173,7 @@ export function CollectionForm({ sites }: { sites: Site[] }) {
           id="type"
           value={type}
           onChange={(e) => setType(e.target.value as Collection["type"])}
+          disabled={editing}
         >
           <option value="manual">Manual — you choose products</option>
           <option value="automated">Automated — rule-based</option>
@@ -151,7 +186,7 @@ export function CollectionForm({ sites }: { sites: Site[] }) {
         ) : null}
       </div>
 
-      {type === "manual" ? (
+      {type === "manual" && !editing ? (
         <div>
           <Label htmlFor="product-ids">Product IDs (optional)</Label>
           <Input
@@ -180,7 +215,7 @@ export function CollectionForm({ sites }: { sites: Site[] }) {
       <FieldError>{error}</FieldError>
 
       <Button type="submit" disabled={busy}>
-        {busy ? "Creating…" : "Create collection"}
+        {busy ? "Saving…" : editing ? "Save" : "Create collection"}
       </Button>
     </form>
   );

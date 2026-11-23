@@ -228,6 +228,8 @@ The readiness score on the Health page checks your store and catalog against fix
 - The size buttons at the top of the editor (All, 640+, 768+, 1024+) choose both what the preview shows and which screen size your style changes apply to. Styles start from All screens and each larger size can override them; the inspector shows what an unset style inherits.
 - In the Layers tab you can select several blocks (Shift or Ctrl/Cmd), move them together (drag, or Alt + arrow keys), and copy, cut, paste or duplicate with the usual shortcuts — including pasting onto another page. To reuse a block, select it and use "Save as a reusable block" in the inspector; it then appears under Add → Saved blocks for every page of that store.
 - The Theme tab can copy another of your stores' design into this draft, export or import a theme file, and download the storefront as a Next.js app you host yourself. Copies and imports replace the draft only — shoppers see nothing until you publish — and custom scripts never travel with them. An exported app reads your live catalogue and design from Markii and checks out here; members-only products need a storefront key from that website's settings (Exported storefront).
+- Each website has Blog, Forms and Redirects tabs beside Design. Blog posts are Markdown and publish on their own (a live post updates as soon as you save). Forms are live at /forms/{handle} as soon as they exist; submissions and the sender blocklist are under Forms. Redirects send an old link to its new place and take effect as soon as you save — they never hide a live page. Changing a product slug or collection handle can leave a redirect from the old address.
+- Owners and administrators can export the whole store (customers, orders, catalogue and design) from website settings under Move this store, to import into a self-hosted Markii. That file holds customers' personal data.
 
 Editing a design needs the owner, administrator or developer role; other roles can view it.`,
       links: [{ label: "Websites", href: "/dashboard/websites" }],
@@ -275,8 +277,6 @@ Owners and administrators can see the audit log: every change, who made it, from
 - Gift cards.
 - Email marketing campaigns and newsletters.
 - PayPal.
-- The drag-and-drop site builder is not available yet; stores use one of the built-in themes.
-
 When something is not available, say so plainly rather than suggesting a workaround that does not exist.`,
       links: [],
     },

@@ -51,6 +51,14 @@ import { GET as siteGET } from "@/app/api/sites/[idOrSlug]/route";
 import { GET as siteSummaryGET } from "@/app/api/sites/[idOrSlug]/summary/route";
 import { GET as siteDomainGET } from "@/app/api/sites/[idOrSlug]/domain/route";
 import { GET as storefrontKeysGET } from "@/app/api/sites/[idOrSlug]/storefront-keys/route";
+import { GET as siteFormsGET } from "@/app/api/sites/[idOrSlug]/forms/route";
+import { GET as siteFormGET } from "@/app/api/sites/[idOrSlug]/forms/[formId]/route";
+import { GET as formSubmissionsGET } from "@/app/api/sites/[idOrSlug]/form-submissions/route";
+import { GET as formBlocklistGET } from "@/app/api/sites/[idOrSlug]/form-blocklist/route";
+import { GET as blogPostsGET } from "@/app/api/sites/[idOrSlug]/blog/posts/route";
+import { GET as blogPostGET } from "@/app/api/sites/[idOrSlug]/blog/posts/[postId]/route";
+import { GET as redirectsGET } from "@/app/api/sites/[idOrSlug]/redirects/route";
+import { GET as collectionGET } from "@/app/api/collections/[idOrHandle]/route";
 import { GET as orgDomainsGET } from "@/app/api/settings/domains/route";
 import { buildQuery, type QueryValue } from "./client";
 import type {
@@ -69,6 +77,9 @@ import type { InventoryLevelRow, VariantMatrix } from "./commerce";
 import type { EmailSettings } from "./email";
 import type { CustomerMembership, MembershipTier } from "./memberships";
 import type { Collection, Customer, Discount, DiscountDetail } from "./commerce";
+import type { BlogPost, BlogPostSummary, PostStatus } from "./blog";
+import type { BlocklistEntry, FormSubmissionItem, StoreForm } from "./forms";
+import type { Redirect } from "./redirects";
 import type {
   MeResponse,
   OrgAuditEntry,
@@ -420,6 +431,67 @@ export const listCollections = (query?: {
     collectionsGET,
     "/api/collections",
     query as Record<string, QueryValue>,
+  );
+
+export const getCollection = (idOrHandle: string) =>
+  call<Collection>(collectionGET, `/api/collections/${idOrHandle}`, undefined, { idOrHandle });
+
+export const listSiteForms = (idOrSlug: string) =>
+  call<{ siteId: number; items: StoreForm[] }>(siteFormsGET, `/api/sites/${idOrSlug}/forms`, undefined, {
+    idOrSlug,
+  });
+
+export const getSiteForm = (idOrSlug: string, formId: number) =>
+  call<StoreForm>(siteFormGET, `/api/sites/${idOrSlug}/forms/${formId}`, undefined, {
+    idOrSlug,
+    formId: String(formId),
+  });
+
+export const listSiteFormSubmissions = (
+  idOrSlug: string,
+  query: { form?: string; q?: string; limit?: number; offset?: number } = {},
+) =>
+  call<{ siteId: number; total: number; items: FormSubmissionItem[] }>(
+    formSubmissionsGET,
+    `/api/sites/${idOrSlug}/form-submissions`,
+    query as Record<string, QueryValue>,
+    { idOrSlug },
+  );
+
+export const listSiteFormBlocklist = (idOrSlug: string) =>
+  call<{ siteId: number; items: BlocklistEntry[] }>(
+    formBlocklistGET,
+    `/api/sites/${idOrSlug}/form-blocklist`,
+    undefined,
+    { idOrSlug },
+  );
+
+export const listSiteBlogPosts = (
+  idOrSlug: string,
+  query: { q?: string; status?: PostStatus; limit?: number; offset?: number } = {},
+) =>
+  call<{ siteId: number; total: number; items: BlogPostSummary[] }>(
+    blogPostsGET,
+    `/api/sites/${idOrSlug}/blog/posts`,
+    query as Record<string, QueryValue>,
+    { idOrSlug },
+  );
+
+export const getSiteBlogPost = (idOrSlug: string, postId: number) =>
+  call<BlogPost>(blogPostGET, `/api/sites/${idOrSlug}/blog/posts/${postId}`, undefined, {
+    idOrSlug,
+    postId: String(postId),
+  });
+
+export const listSiteRedirects = (
+  idOrSlug: string,
+  query: { q?: string; limit?: number; offset?: number } = {},
+) =>
+  call<{ siteId: number; total: number; items: Redirect[] }>(
+    redirectsGET,
+    `/api/sites/${idOrSlug}/redirects`,
+    query as Record<string, QueryValue>,
+    { idOrSlug },
   );
 
 export const listDiscounts = (query?: {
