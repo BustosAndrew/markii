@@ -240,6 +240,7 @@ function OpenHistoryDialog({ open, site, onClose, onRestore, onSelectNode }: His
           </div>
           <DesignDiffView
             diff={compare.diff}
+            identicalMessage={`The current draft matches version ${compare.version}.`}
             onSelectNode={
               onSelectNode
                 ? (documentId, nodeId) => {

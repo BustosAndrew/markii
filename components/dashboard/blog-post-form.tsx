@@ -53,7 +53,7 @@ export function BlogPostForm({
   const editing = Boolean(post);
   const [title, setTitle] = useState(post?.title ?? "");
   const [handle, setHandle] = useState(post?.handle ?? "");
-  const [excerpt, setExcerpt] = useState(post?.autoExcerpt ?? "");
+  const [excerpt, setExcerpt] = useState(post?.excerpt ?? "");
   const [body, setBody] = useState(post?.body ?? "");
   const [coverImage, setCoverImage] = useState(post?.coverImage ?? "");
   const [coverAlt, setCoverAlt] = useState(post?.coverAlt ?? "");
@@ -72,8 +72,10 @@ export function BlogPostForm({
   const status = post?.status ?? "draft";
   const handleChanged = editing && post && handle.trim() !== post.handle && status !== "draft";
 
+  // The saved handle only: a handle being typed has no page yet, and each keystroke would mint a new link.
+  const savedHandle = post?.handle ?? "";
   useEffect(() => {
-    const h = (post?.handle || handle).trim();
+    const h = savedHandle;
     if (!h) return;
     let cancelled = false;
     createPreviewSession(siteId)
@@ -86,17 +88,18 @@ export function BlogPostForm({
     return () => {
       cancelled = true;
     };
-  }, [siteId, post?.handle, handle]);
+  }, [siteId, savedHandle]);
 
   function fields() {
     return {
       title: title.trim(),
       handle: handle.trim() || undefined,
-      excerpt: excerpt.trim() || undefined,
+      // "" is a real value: it clears the excerpt (back to the body's opening words) or the byline.
+      excerpt: excerpt.trim(),
       body,
       coverImage: coverImage.trim() || null,
       coverAlt: coverAlt.trim(),
-      author: author.trim() || undefined,
+      author: author.trim(),
       seo: seoPayload(seo),
     };
   }

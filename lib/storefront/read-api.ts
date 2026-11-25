@@ -1,4 +1,5 @@
-import type { Category, Collection, Product, SiteForm } from "@/lib/db";
+import type { BlogPost, Category, Collection, Product, SiteForm } from "@/lib/db";
+import { descriptionOf, excerptOf } from "@/lib/blog/rules";
 import type { FormField } from "@markii/renderer/forms";
 import type { ThemePackage } from "@markii/renderer/theme-package";
 import type { SiteData } from "@/lib/storefront";
@@ -7,7 +8,8 @@ import type { SiteData } from "@/lib/storefront";
  * The storefront read API (D53) — what a headless storefront, an exported
  * Next.js app above all, reads a store's catalogue and published design from.
  * `GET /api/store`, `/api/products`, `/api/products/{slug}` and
- * `/api/collections/{handle}` and `/api/forms/{handle}` on the store's own host.
+ * `/api/collections/{handle}`, `/api/forms/{handle}` and `/api/blog/posts[/{handle}]` on the
+ * store's own host.
  *
  * **Nothing here is new information.** Every field is already public on the
  * store's own pages — the product page, the collection pages, the JSON-LD,
@@ -203,6 +205,56 @@ export function formJson(data: Pick<SiteData, "baseUrl">, f: SiteForm): Storefro
     successMessage: f.successMessage,
     url: `${base}/forms/${f.handle}`,
     submitUrl: `${base}/api/forms/${f.handle}`,
+  };
+}
+
+/**
+ * A live post as `/blog` lists it. Live only — the read API never serves the
+ * preview, so a draft or a scheduled post is not here until its time comes.
+ */
+export type StorefrontPostSummaryJson = {
+  handle: string;
+  title: string;
+  excerpt: string;
+  coverImage: string | null;
+  coverAlt: string;
+  author: string;
+  publishedAt: string;
+  updatedAt: string;
+  url: string;
+};
+
+/** One post as `/blog/{handle}` shows it. `body` is the Markdown subset `@markii/renderer/article` parses. */
+export type StorefrontPostJson = StorefrontPostSummaryJson & {
+  body: string;
+  /** The meta description: the post's SEO description, else its excerpt. */
+  description: string;
+  seo: { title?: string; description?: string; ogImage?: string; noindex?: boolean };
+};
+
+export function postSummaryJson(data: Pick<SiteData, "baseUrl">, p: BlogPost): StorefrontPostSummaryJson {
+  const base = data.baseUrl.replace(/\/$/, "");
+  return {
+    handle: p.handle,
+    title: p.title,
+    excerpt: excerptOf(p),
+    coverImage: p.coverImage,
+    coverAlt: p.coverAlt,
+    author: p.author,
+    // Live posts only reach here, so the date is always set.
+    publishedAt: (p.publishedAt ?? p.createdAt).toISOString(),
+    updatedAt: p.updatedAt.toISOString(),
+    url: `${base}/blog/${p.handle}`,
+  };
+}
+
+export function postJson(data: Pick<SiteData, "baseUrl">, p: BlogPost): StorefrontPostJson {
+  const { title, description, ogImage, noindex } = p.seo;
+  return {
+    ...postSummaryJson(data, p),
+    body: p.body,
+    description: descriptionOf(p),
+    seo: { ...(title ? { title } : {}), ...(description ? { description } : {}), ...(ogImage ? { ogImage } : {}), ...(noindex ? { noindex } : {}) },
   };
 }
 

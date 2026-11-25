@@ -3279,7 +3279,9 @@ route predates the registry and mutates outside it.
 - `GET /api/sites/:idOrSlug/blog/posts` — `{ siteId, total, items: [{ id, handle, title, excerpt,
   coverImage, coverAlt, author, status, publishedAt, path, createdAt, updatedAt }] }`, drafts first then
   newest; `?q=`, `?status=draft|scheduled|published`, `?limit=` (50, max 200), `?offset=`.
-  `GET …/blog/posts/:postId` adds `body`, `seo`, `autoExcerpt` and `description`. `cms.read`.
+  `GET …/blog/posts/:postId` adds `body`, `seo`, `autoExcerpt` and `description` — and there
+  **`excerpt` is what the merchant typed** (`""` when none), while `autoExcerpt` is what shoppers see
+  (theirs, or the body's opening words). An editor fills its field from `excerpt`. `cms.read`.
 
 | Action | Risk | What |
 |---|---|---|

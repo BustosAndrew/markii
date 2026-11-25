@@ -52,6 +52,7 @@ export function StoreExportPanel({ siteId }: { siteId: number }) {
       </Button>
       {result ? (
         <div className="space-y-2 text-sm leading-6 text-muted">
+          <p className="font-medium text-foreground">Your export is ready.</p>
           <p>
             The zip link lasts five minutes. Links to sold files inside it expire at{" "}
             <LocalDateTime value={result.files.linksExpireAt} /> — import before then, or export again.
@@ -70,7 +71,7 @@ export function StoreExportPanel({ siteId }: { siteId: number }) {
             ? `This file will contain ${count(preview, "customers").toLocaleString()} customers' names, emails and addresses, ${count(preview, "orders").toLocaleString()} orders, and ${count(preview, "products").toLocaleString()} products.`
             : "This file holds every customer's personal data."
         }
-        confirmLabel="Download zip"
+        confirmLabel="Create export"
         busy={busy}
         onClose={() => setConfirm(false)}
         onConfirm={async () => {
@@ -82,8 +83,8 @@ export function StoreExportPanel({ siteId }: { siteId: number }) {
               setError("The export could not be created.");
               return;
             }
+            // Offered as a link, not opened: after an await a browser may block the popup silently.
             setResult(out.result);
-            window.open(out.result.url, "_blank", "noopener,noreferrer");
             setConfirm(false);
           } catch (err) {
             setError(publicErrorMessage(err, "The export could not be created."));
@@ -104,7 +105,7 @@ function ButtonLinkSafe({ href }: { href: string }) {
       rel="noopener noreferrer"
       className="inline-flex items-center justify-center rounded-[var(--radius-control)] bg-brand px-4 py-2.5 text-sm font-medium text-on-brand hover:bg-brand-hover"
     >
-      Open zip
+      Download zip
     </a>
   );
 }

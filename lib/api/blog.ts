@@ -39,9 +39,15 @@ export type BlogPostSummary = {
   updatedAt: string;
 };
 
-export type BlogPost = BlogPostSummary & {
+export type BlogPost = Omit<BlogPostSummary, "excerpt"> & {
   body: string;
-  /** What the merchant typed — `""` when they wrote none (then `excerpt` is the automatic one). */
+  /**
+   * **On a single post this is what the merchant typed** — `""` when they wrote
+   * none. Unlike the list's `excerpt`, it never holds the automatic one, so an
+   * editor can fill its field from it and an empty field stays empty.
+   */
+  excerpt: string;
+  /** The excerpt shoppers see: the merchant's, or the body's opening words when they wrote none. */
   autoExcerpt: string;
   seo: PageSeo;
   /** What search engines and link previews get: SEO description, else the excerpt. */

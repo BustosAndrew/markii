@@ -86,7 +86,7 @@ export function FormSubmissionsList({
               </dl>
               <div className="mt-4 flex flex-wrap gap-2">
                 {item.email ? (
-                  <ButtonLink variant="secondary" href={`mailto:${item.email}`}>
+                  <ButtonLink variant="secondary" href={`mailto:${encodeURIComponent(item.email)}`}>
                     Reply
                   </ButtonLink>
                 ) : null}

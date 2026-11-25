@@ -20,19 +20,28 @@ import { FieldError, Input, Label } from "@/components/ui/field";
 import { Toggle } from "@/components/ui/toggle";
 import { LocalDateTime } from "@/components/ui/local-date";
 
-function parseCsv(text: string): { from: string; to: string; permanent?: boolean }[] {
-  const lines = text.trim().split(/\r?\n/);
-  const out: { from: string; to: string; permanent?: boolean }[] = [];
-  for (let i = 0; i < lines.length && out.length < 1000; i++) {
-    const cols = lines[i].split(",").map((s) => s.trim().replace(/^"|"$/g, ""));
+type CsvRow = { from: string; to: string; permanent?: boolean };
+
+/**
+ * `lines[i]` is the 1-based line of the file `rows[i]` came from. The server
+ * reports a skipped row by its index in what was sent, which stops matching the
+ * file the moment a header or a blank line is skipped here.
+ */
+function parseCsv(text: string): { rows: CsvRow[]; lines: number[] } {
+  const all = text.trim().split(/\r?\n/);
+  const rows: CsvRow[] = [];
+  const lines: number[] = [];
+  for (let i = 0; i < all.length && rows.length < 1000; i++) {
+    const cols = all[i].split(",").map((s) => s.trim().replace(/^"|"$/g, ""));
     if (i === 0 && /^(from|old)/i.test(cols[0] ?? "")) continue;
     if (cols.length < 2 || !cols[0] || !cols[1]) continue;
     const third = cols[2]?.toLowerCase();
-    const row: { from: string; to: string; permanent?: boolean } = { from: cols[0], to: cols[1] };
+    const row: CsvRow = { from: cols[0], to: cols[1] };
     if (third) row.permanent = !/^(0|false|no|temp|temporary|307)$/.test(third);
-    out.push(row);
+    rows.push(row);
+    lines.push(i + 1);
   }
-  return out;
+  return { rows, lines };
 }
 
 function detailsOf(err: unknown): Record<string, unknown> | null {
@@ -64,7 +73,7 @@ export function RedirectsPanel({
   const [removing, setRemoving] = useState<Redirect | null>(null);
   const [csv, setCsv] = useState("");
   const [replace, setReplace] = useState(false);
-  const [preview, setPreview] = useState<RedirectImportResult | null>(null);
+  const [preview, setPreview] = useState<{ result: RedirectImportResult; lines: number[] } | null>(null);
   const [undo, setUndo] = useState<{ actionId: string; invocationId: string; message: string } | null>(null);
 
   return (
@@ -220,8 +229,23 @@ export function RedirectsPanel({
             <h2 className="text-base font-medium text-foreground">Import from CSV</h2>
             <p className="mt-1 text-sm text-muted">Two columns: old link, new address. At most 1,000 rows. Preview first — import cannot be undone.</p>
           </div>
-          <TextCsv value={csv} onChange={setCsv} />
-          <Toggle checked={replace} label="Replace existing" description="Overwrite a redirect that already uses the same old link." onChange={setReplace} />
+          <TextCsv
+            value={csv}
+            onChange={(v) => {
+              // A preview describes the text it was made from; Import must not apply other text.
+              setCsv(v);
+              setPreview(null);
+            }}
+          />
+          <Toggle
+            checked={replace}
+            label="Replace existing"
+            description="Overwrite a redirect that already uses the same old link."
+            onChange={(v) => {
+              setReplace(v);
+              setPreview(null);
+            }}
+          />
           <div className="flex flex-wrap gap-2">
             <Button
               variant="secondary"
@@ -230,13 +254,13 @@ export function RedirectsPanel({
                 setBusy(true);
                 setError(null);
                 try {
-                  const redirects = parseCsv(csv);
+                  const { rows: redirects, lines } = parseCsv(csv);
                   const out = await previewRedirectImport({ siteId, redirects, replace });
                   if (!out.ok || !out.result) {
                     setError("Preview failed.");
                     return;
                   }
-                  setPreview(out.result);
+                  setPreview({ result: out.result, lines });
                 } catch (err) {
                   setError(publicErrorMessage(err, "Preview failed."));
                 } finally {
@@ -247,15 +271,15 @@ export function RedirectsPanel({
               Preview
             </Button>
             <Button
-              disabled={busy || !preview}
+              disabled={busy || !preview || !csv.trim()}
               onClick={async () => {
                 if (!preview) return;
                 setBusy(true);
                 setError(null);
                 try {
-                  const redirects = parseCsv(csv);
+                  const { rows: redirects, lines } = parseCsv(csv);
                   const out = await importRedirects({ siteId, redirects, replace });
-                  setPreview(out.result ?? preview);
+                  setPreview(out.result ? { result: out.result, lines } : preview);
                   setCsv("");
                   router.refresh();
                 } catch (err) {
@@ -271,13 +295,14 @@ export function RedirectsPanel({
           {preview ? (
             <div className="space-y-2 text-sm">
               <p className="text-foreground">
-                {preview.created} created, {preview.replaced} replaced, {preview.skipped.length} skipped, of {preview.total}.
+                {preview.result.created} created, {preview.result.replaced} replaced, {preview.result.skipped.length} skipped, of{" "}
+                {preview.result.total}.
               </p>
-              {preview.skipped.length > 0 ? (
+              {preview.result.skipped.length > 0 ? (
                 <ul className="list-disc space-y-1 pl-5 text-muted">
-                  {preview.skipped.map((s) => (
+                  {preview.result.skipped.map((s) => (
                     <li key={`${s.row}-${s.from}`}>
-                      Row {s.row + 1} ({s.from}): {s.reason}
+                      Line {preview.lines[s.row] ?? s.row + 1} ({s.from}): {s.reason}
                     </li>
                   ))}
                 </ul>

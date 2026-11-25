@@ -14,7 +14,7 @@ import {
 import { publicErrorMessage } from "@/lib/api/public-copy";
 import { listSites } from "@/lib/api/sites";
 import { ApiClientError } from "@/lib/api/types";
-import { Button } from "@/components/ui/button";
+import { Button, ButtonLink } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { FieldError, Label, Select } from "@/components/ui/field";
 
@@ -27,8 +27,17 @@ function conflictReason(error: unknown): string | undefined {
   return typeof reason === "string" ? reason : undefined;
 }
 
-function openDownload(url: string) {
-  window.open(url, "_blank", "noopener,noreferrer");
+/**
+ * The file is offered as a link, never opened for the merchant: the URL arrives
+ * after an await, so a browser treats `window.open` there as a popup and may
+ * block it — and with `noopener` the page cannot even tell. A link always works.
+ */
+function DownloadLink({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <ButtonLink href={href} target="_blank" rel="noopener noreferrer">
+      {children}
+    </ButtonLink>
+  );
 }
 
 function ImageWarnings({ images }: { images: ImageReport }) {
@@ -226,16 +235,16 @@ export function ThemePackagePanel({
     await withBusy("theme-export", async () => {
       try {
         const exported = await exportTheme(siteId, themeSource);
-        openDownload(exported.url);
         setNotice(
           <div className="space-y-2 text-sm text-foreground">
             <p>
-              Theme file is downloading. The link lasts five minutes — do not save it.
+              Your theme file is ready. The link lasts five minutes — do not save it.
               {exported.headCodeLeftOut
                 ? " Custom scripts are not in the file; they stay on this store."
                 : ""}
             </p>
             <ImageWarnings images={exported.images} />
+            <DownloadLink href={exported.url}>Download theme file</DownloadLink>
           </div>,
         );
       } catch (err) {
@@ -252,7 +261,6 @@ export function ThemePackagePanel({
   async function doExportNext() {
     await withBusy("next-export", async () => {
       const exported = await exportNextApp(siteId);
-      openDownload(exported.url);
       setNotice(
         <div className="space-y-2 text-sm text-foreground">
           <p>
@@ -266,6 +274,8 @@ export function ThemePackagePanel({
               unpause it. The download is still valid.
             </p>
           )}
+          <p className="text-muted">The link lasts five minutes.</p>
+          <DownloadLink href={exported.url}>Download Next.js app</DownloadLink>
         </div>,
       );
     });

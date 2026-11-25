@@ -92,7 +92,11 @@ function DocumentBlock({
   doc: DocumentDiff;
   onSelectNode?: (documentId: number, nodeId: string) => void;
 }) {
-  const select = onSelectNode ? (nodeId: string) => onSelectNode(doc.id, nodeId) : undefined;
+  // Only what exists in the draft can be selected: a removed node, or anything in
+  // a removed document, has nowhere to open. Both sides of every diff the editor
+  // asks for end at the draft (live → draft, version → draft).
+  const select =
+    onSelectNode && doc.change !== "removed" ? (nodeId: string) => onSelectNode(doc.id, nodeId) : undefined;
   return (
     <div className="rounded-[var(--radius-control)] border border-border p-3">
       <p className="text-sm font-medium text-foreground">
@@ -103,7 +107,7 @@ function DocumentBlock({
       </p>
       <FieldList fields={doc.fields} />
       <NodeList title="Added" nodes={doc.nodes.added} onSelect={select} />
-      <NodeList title="Removed" nodes={doc.nodes.removed} onSelect={select} />
+      <NodeList title="Removed" nodes={doc.nodes.removed} />
       <ChangedNodes nodes={doc.nodes.changed} onSelect={select} />
     </div>
   );
@@ -112,12 +116,15 @@ function DocumentBlock({
 export function DesignDiffView({
   diff,
   onSelectNode,
+  identicalMessage = "No changes since the last publish.",
 }: {
   diff: DesignDiff;
   onSelectNode?: (documentId: number, nodeId: string) => void;
+  /** What to say when the two sides match — the default fits live → draft only. */
+  identicalMessage?: string;
 }) {
   if (diff.identical) {
-    return <p className="text-sm text-muted">No changes since the last publish.</p>;
+    return <p className="text-sm text-muted">{identicalMessage}</p>;
   }
   return (
     <div className="space-y-3">
