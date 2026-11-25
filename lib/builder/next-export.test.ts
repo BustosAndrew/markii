@@ -16,7 +16,7 @@ describe("the Next.js export's files", () => {
   };
 
   it("is a whole Next.js project around the renderer", () => {
-    for (const p of ["package.json", "tsconfig.json", "next.config.ts", "README.md", ".env.example", "app/layout.tsx", "app/page.tsx", "app/p/[slug]/page.tsx", "app/cart/add/route.ts", "app/api/forms/[handle]/route.ts", "app/forms/[handle]/page.tsx", "lib/shopper.ts", "renderer/src/render.tsx"]) {
+    for (const p of ["package.json", "tsconfig.json", "next.config.ts", "README.md", ".env.example", "app/layout.tsx", "app/page.tsx", "app/p/[slug]/page.tsx", "app/cart/add/route.ts", "app/api/forms/[handle]/route.ts", "app/forms/[handle]/page.tsx", "app/blog/page.tsx", "app/blog/[handle]/page.tsx", "app/blog/feed.xml/route.ts", "renderer/src/post-list.tsx", "lib/shopper.ts", "renderer/src/render.tsx"]) {
       expect(paths, p).toContain(p);
     }
     expect(JSON.parse(text("tsconfig.json")).compilerOptions.paths).toEqual({ "@markii/renderer/*": ["./renderer/src/*"] });

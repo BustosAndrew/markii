@@ -7,7 +7,7 @@ import { ThemeShell } from "@markii/renderer/theme-shell";
 import { resolveTheme } from "@markii/renderer/tokens";
 import type { DocumentKind, PageNode } from "@markii/renderer/types";
 import { storeView } from "@markii/renderer/views";
-import { getCollectionProducts, getForm, getProducts, siteUrl, storeUrl, type StoreJson } from "./markii";
+import { getCollectionProducts, getForm, getPosts, getProducts, siteUrl, storeUrl, toRenderPost, type StoreJson } from "./markii";
 
 /**
  * A page of this store, drawn exactly as Markii draws it: the same renderer,
@@ -51,6 +51,8 @@ export async function renderContext(store: StoreJson, extra: Partial<RenderConte
       return f ? { handle: f.handle, name: f.name, fields: f.fields, submitLabel: f.submitLabel } : null;
     },
     formAction,
+    // Only fetched when a page holds a latest-posts block; a store with no blog lists nothing.
+    postsOf: async (limit) => (await getPosts(1, limit))?.posts.map(toRenderPost) ?? [],
     values: { store: storeView(store.store, { baseUrl, products, collections: store.collections }) },
     ...extra,
   };

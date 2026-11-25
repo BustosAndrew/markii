@@ -580,7 +580,9 @@ the **blocklist** are customer data — gate them on `commerce.read` / `commerce
 - **Handle:** prefilled from the title on create; on a live post, show *"Send the old link here"*
   (checked) when it changes → `redirectOldLink`.
 - **SEO** is replaced whole — send all four fields, as with builder pages.
-- A builder block listing recent posts is **not** built yet; link to `/blog` from a navMenu meanwhile.
+- **A "Latest posts" builder block exists (2026-11-25)** — `blogPosts`, in the block library under
+  Content. The inspector is generated from the registry like every block (how many, grid or list,
+  excerpts, cover images); nothing to build. It shows live posts only, in the preview too.
 - Help: `lib/ops-agents/assistant/help.ts` (`site_design`) names the Blog tab.
 
 ### 🟢 New 2026-11-21 — storefront redirects — screens built

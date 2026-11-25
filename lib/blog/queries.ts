@@ -2,6 +2,7 @@ import "server-only";
 
 import { and, count, desc, eq, gt, ilike, isNotNull, lte, or, sql, type SQL } from "drizzle-orm";
 import { blogPosts, db, type BlogPost } from "@/lib/db";
+import type { PostsOf, RenderPost } from "@markii/renderer/catalog";
 import { notFound } from "@/lib/api";
 import { BLOG_PAGE_SIZE, descriptionOf, excerptOf, postStatus } from "./rules";
 
@@ -43,6 +44,32 @@ export async function storefrontPost(siteId: number, handle: string, withDrafts 
     .where(and(withDrafts ? eq(blogPosts.siteId, siteId) : live(siteId, new Date()), eq(blogPosts.handle, handle)))
     .limit(1);
   return row ?? null;
+}
+
+/** A row as the renderer lists it — `/blog` and the `blogPosts` block. */
+export function renderPost(row: BlogPost): RenderPost {
+  return {
+    handle: row.handle,
+    title: row.title,
+    excerpt: excerptOf(row),
+    coverImage: row.coverImage,
+    coverAlt: row.coverAlt,
+    author: row.author,
+    publishedAt: row.publishedAt?.toISOString() ?? null,
+    status: postStatus(row.publishedAt),
+  };
+}
+
+/** The block's ceiling (`blogPosts.limit`), so a render context cannot be asked for a whole archive. */
+const POSTS_BLOCK_MAX = 12;
+
+/**
+ * `postsOf` for a render context: the store's newest live posts. Live only in
+ * the preview too — a block on a page shows what shoppers will see there.
+ */
+export function postsOfSite(siteId: number): PostsOf {
+  return async (limit) =>
+    (await storefrontPosts(siteId, { limit: Math.max(1, Math.min(limit, POSTS_BLOCK_MAX)) })).posts.map(renderPost);
 }
 
 /** Every live post, for the sitemap and the agent documents. */

@@ -42,6 +42,7 @@ export const BLOCK_CSS = [
   ".mk-b-video{position:relative;aspect-ratio:16/9}.mk-b-video iframe{position:absolute;inset:0;width:100%;height:100%;border:0}",
   ".mk-b-divider{border:0;border-top:1px solid var(--sf-border);margin:1.5rem 0}",
   ".mk-b-collections{list-style:none;padding:0;margin:0;display:grid;gap:1rem}",
+  ".mk-posts-grid{grid-template-columns:repeat(auto-fill,minmax(15rem,1fr));gap:1.5rem}",
   ".mk-space-0{height:0}.mk-space-xs{height:.25rem}.mk-space-sm{height:.5rem}.mk-space-md{height:1rem}",
   ".mk-space-lg{height:1.5rem}.mk-space-xl{height:2.5rem}.mk-space-2xl{height:4rem}.mk-space-3xl{height:6rem}",
   ".mk-b-productGallery{display:grid;gap:.5rem;margin:0}.mk-gallery-grid{grid-template-columns:repeat(2,minmax(0,1fr))}",

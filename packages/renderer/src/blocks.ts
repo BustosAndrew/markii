@@ -561,6 +561,44 @@ const DEFINITIONS: BlockDefinition[] = [
     semantics: { element: "ul" },
     requiresData: "catalog",
   }),
+  block({
+    type: "blogPosts",
+    label: "Latest posts",
+    category: "content",
+    description:
+      "The store's newest published blog posts, as cards linking to each post — a news strip on the " +
+      "home page, recent articles beside a guide. The posts themselves are written in Blog, not here.",
+    usageHints: [
+      "Put a heading above it, and a button to /blog if the store has more posts than it shows.",
+      "Shows nothing until the store has published a post; scheduled posts appear when their time comes.",
+    ],
+    schema: z
+      .object({
+        limit: z.number().int().min(1).max(12).default(3),
+        layout: z.enum(["grid", "list"]).default("grid"),
+        showExcerpts: z.boolean().default(true),
+        showImages: z.boolean().default(true),
+      })
+      .strict(),
+    defaults: { props: { limit: 3, layout: "grid", showExcerpts: true, showImages: true } },
+    children: "none",
+    insertable: true,
+    editorPanel: [
+      { name: "limit", label: "How many", kind: "number", min: 1, max: 12 },
+      {
+        name: "layout",
+        label: "Layout",
+        kind: "select",
+        options: [
+          { value: "grid", label: "Cards side by side" },
+          { value: "list", label: "One under another" },
+        ],
+      },
+      { name: "showExcerpts", label: "Show excerpts", kind: "boolean" },
+      { name: "showImages", label: "Show cover images", kind: "boolean" },
+    ],
+    semantics: { element: "ol" },
+  }),
 
   // ---------- M4: layout for templates and regions ----------
 

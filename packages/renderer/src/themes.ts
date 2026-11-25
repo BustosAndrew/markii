@@ -311,7 +311,7 @@ export function themeStylesheet(theme: ThemeTokens): string {
 .sf-posts{list-style:none;padding:0;margin:0;display:grid;gap:2rem}
 .sf-post-card a{text-decoration:none;color:inherit;display:grid;gap:.5rem}
 .sf-post-card img{width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:var(--sf-radius);background:var(--sf-border)}
-.sf-post-card h2{font-family:var(--sf-font-display);font-size:1.35rem;font-weight:600;letter-spacing:-0.02em;margin:0}
+.sf-post-card h2,.sf-post-card h3{font-family:var(--sf-font-display);font-size:1.35rem;font-weight:600;letter-spacing:-0.02em;margin:0}
 .sf-post-card p{margin:0}
 .sf-pager{display:flex;justify-content:space-between;gap:1rem;margin:2.5rem 0 0;font-size:.95rem}
 .sf-article{max-width:42rem;margin:0 auto}

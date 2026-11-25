@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 import type { RenderForm } from "./forms";
 import { FormView } from "./forms-view";
-import type { MembersOf, RenderCategory as Category, RenderCollection as Collection, RenderProduct as Product } from "./catalog";
+import { PostList } from "./post-list";
+import type { MembersOf, PostsOf, RenderCategory as Category, RenderCollection as Collection, RenderProduct as Product } from "./catalog";
 import { REPEATER_SOURCES, boundProps, evaluateCondition, type DataValues, type RepeaterSource } from "./bindings";
 import { markdownText, parseMarkdown, safeHref, type Inline } from "./markdown";
 import { ProductCard } from "./product-card";
@@ -101,6 +102,12 @@ export type RenderContext = {
    * forwarding without one would count every shopper as the export's server.
    */
   formAction?: (handle: string) => string;
+  /**
+   * The store's newest live posts, for the `blogPosts` block — looked up only
+   * when a page has one. Absent (an export built before the blog read API),
+   * the block draws nothing outside the preview.
+   */
+  postsOf?: PostsOf;
 };
 
 const LEAD_IMAGE_TYPES = new Set(["image", "productGallery"]);
@@ -184,6 +191,23 @@ function Markdown({ src, ctx }: { src: string; ctx: RenderContext }) {
     ) : (
       <ol key={i}>{b.items.map((item, j) => <li key={j}><InlineNodes nodes={item} ctx={ctx} /></li>)}</ol>
     ),
+  );
+}
+
+async function BlogPostsBlock({ node, ctx, p }: { node: PageNode; ctx: RenderContext; p: Record<string, unknown> }) {
+  const posts = ctx.postsOf ? await ctx.postsOf(Number(p.limit ?? 3)) : [];
+  if (posts.length === 0) return <Empty node={node} ctx={ctx} what="latest posts — none published yet" />;
+  const { className, ...marker } = attrs(node, ctx, p.layout !== "list" && "mk-posts-grid");
+  return (
+    <PostList
+      posts={posts}
+      baseUrl={base(ctx)}
+      headingLevel={3}
+      showExcerpts={p.showExcerpts !== false}
+      showImages={p.showImages !== false}
+      className={className}
+      attrs={marker}
+    />
   );
 }
 
@@ -520,6 +544,8 @@ function Node({ node, ctx }: { node: PageNode; ctx: RenderContext }): ReactNode 
       );
     case "form":
       return <FormBlock node={node} ctx={ctx} p={p} />;
+    case "blogPosts":
+      return <BlogPostsBlock node={node} ctx={ctx} p={p} />;
     case "html": {
       if (ctx.sensitive) return ctx.preview ? <div {...attrs(node, ctx)} data-mk-empty="custom HTML — hidden on cart and account pages" /> : null;
       // Cleaned again on the way out: a stricter rule made later also covers HTML saved before it.
@@ -669,6 +695,7 @@ export const RENDERED_TYPES = [
   "root", "section", "columns", "column", "grid", "row", "repeater", "spacer", "divider", "heading", "text",
   "image", "button", "list", "accordion", "faq", "testimonial", "video", "productGrid", "productCard",
   "collectionList", "productBuy", "productGallery", "navMenu", "storeBrand", "storeLinks", "html", "form",
+  "blogPosts",
 ] as const;
 
 function docAttr(ctx: RenderContext) {

@@ -151,4 +151,53 @@ describe("blog", () => {
     expect(detail).toMatchObject({ handle: "first-flush", status: "published", author: "Mei" });
     expect(detail.body).toContain("# The leaves");
   });
+
+  it("serves live posts on the read API — never a draft or a scheduled one — and lists them in a block", async () => {
+    const draft = await ok("blog.createPost", { siteId, title: "Unwritten", body: "Draft text." });
+    const soon = await ok("blog.createPost", { siteId, title: "Next week", body: "Not yet." });
+    await ok("blog.publishPost", { postId: soon.result.postId, at: new Date(Date.now() + 86_400_000).toISOString() });
+
+    const list = await page("/api/blog/posts");
+    expect(list.status).toBe(200);
+    expect(list.headers.get("access-control-allow-origin")).toBe("*");
+    const body = JSON.parse(list.text);
+    const handles = body.posts.map((p: { handle: string }) => p.handle);
+    expect(handles).toEqual(expect.arrayContaining(["first-flush", "coming-soon"]));
+    expect(handles).not.toContain("unwritten");
+    expect(handles).not.toContain("next-week");
+    expect(body).toMatchObject({ page: 1, pages: 1, total: 2 });
+    expect(body.posts[0]).not.toHaveProperty("id");
+
+    const one = JSON.parse((await page("/api/blog/posts?limit=1")).text);
+    expect(one.posts).toHaveLength(1);
+    expect(one).toMatchObject({ pages: 2, total: 2 });
+    expect(JSON.parse((await page("/api/blog/posts?page=9")).text)).toMatchObject({ posts: [], page: 9, pages: 1 });
+
+    const detail = await page("/api/blog/posts/first-flush");
+    expect(detail.status).toBe(200);
+    const post = JSON.parse(detail.text);
+    expect(post).toMatchObject({ handle: "first-flush", author: "Mei" });
+    expect(post.url).toMatch(/\/blog\/first-flush$/);
+    expect(post.body).toContain("# The leaves");
+    expect(typeof post.description).toBe("string");
+    // A draft and a scheduled post are the same 404 as a handle that never existed.
+    for (const handle of ["unwritten", "next-week", "never-was"]) {
+      expect((await page(`/api/blog/posts/${handle}`)).status, handle).toBe(404);
+    }
+
+    // The latest-posts block draws the same live list on a published page.
+    await ok("builder.startDesign", { siteId });
+    const homeId = (await merchant.get(`/api/builder/sites/${siteId}`)).json.pages[0].id;
+    const section = (await merchant.get(`/api/builder/sites/${siteId}/pages/${homeId}`)).json.tree.children[0];
+    await ok("builder.addBlock", { siteId, pageId: homeId, parentId: section.id, type: "blogPosts", props: { limit: 5 } });
+    await ok("builder.publish", { siteId });
+    const home = (await page("/")).text;
+    expect(home).toContain("/blog/first-flush");
+    expect(home).toContain("/blog/coming-soon");
+    expect(home).not.toContain("/blog/next-week");
+
+    await ok("blog.deletePost", { postId: draft.result.postId });
+    await ok("blog.unpublishPost", { postId: soon.result.postId });
+    await ok("blog.deletePost", { postId: soon.result.postId });
+  });
 });

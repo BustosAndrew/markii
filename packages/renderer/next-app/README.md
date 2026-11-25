@@ -55,6 +55,13 @@ limits and your blocklist — see them in the Markii dashboard.
   page there. Markii only accepts the shopper's address from a server that holds your key, so without
   one this app cannot forward posts for its shoppers.
 
+## Blog
+
+Posts you publish on Markii appear at `/blog` and `/blog/{handle}`, drawn as Markii draws them, with the
+same `BlogPosting` structured data. `/blog/feed.xml` is your store's RSS feed with its links pointed at
+this site. A scheduled post appears when its time comes; drafts are never served. A "Latest posts" block
+in your design works here too.
+
 ## For AI agents
 
 `/llms.txt`, `/llms-full.txt`, `/agent.md` and `/sitemap.xml` are your store's own documents, served

@@ -6,6 +6,7 @@ import { storeView } from "@markii/renderer/views";
 import { regionsFor, type SiteData } from "@/lib/storefront";
 import { membersByHandle } from "@/lib/storefront/collections";
 import { renderFormByHandle } from "@/lib/forms/submit";
+import { postsOfSite } from "@/lib/blog/queries";
 
 /**
  * What surrounds every storefront page (M4): the announcement bar and the
@@ -29,6 +30,8 @@ export function builderContext(data: SiteData, extra: Partial<RenderContext> = {
     membersOf: membersByHandle(colls),
     // Looked up only when a page holds a form block.
     formOf: (handle) => renderFormByHandle(site.id, handle),
+    // Likewise only when a page holds a latest-posts block.
+    postsOf: postsOfSite(site.id),
     preview,
     values: { store: storeView(site, { baseUrl, products: prods, collections: colls }) },
     ...extra,

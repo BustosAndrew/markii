@@ -711,7 +711,10 @@ are not followed (their route predates the registry). **The blog is built (2026-
 `/blog/feed.xml`, and posts in the sitemap, `llms.txt` and `llms-full.txt`. **Posts are not builder
 documents and must not become them**: the design publishes site-wide and restores from snapshots, and
 a post must do neither. Status is derived from `publishedAt` per request (scheduling needs no job).
-The body is long-form Markdown parsed to a tree (`@markii/renderer/article`). **Storefront forms are
+The body is long-form Markdown parsed to a tree (`@markii/renderer/article`). **Posts reach the
+export and the builder (2026-11-25)**: `GET /api/blog/posts[/{handle}]` (live only), the export's own
+`/blog` pages and feed, and a `blogPosts` "Latest posts" block fed by `ctx.postsOf` — one `PostList`
+(`@markii/renderer/post-list`) draws every listing. **Storefront forms are
 built (2026-11-22)** — **migration 0053** (`site_forms`, `form_submissions`, `form_blocklist`,
 applied). Owner decisions: spam is stopped by **rate limits** (address, sender email, store) and a
 **per-store blocklist** checked against the sender's email before anything is stored; **an email per

@@ -4,10 +4,11 @@ import { notFound } from "next/navigation";
 import { StoreFooter, StoreTop } from "@/components/storefront/store-chrome";
 import { ThemeRoot } from "@/components/storefront/theme-root";
 import { logTraffic } from "@/lib/agents";
-import { postSummary, storefrontPosts } from "@/lib/blog/queries";
+import { renderPost, storefrontPosts } from "@/lib/blog/queries";
 import { loadSite, storefrontHalted } from "@/lib/storefront";
 import { pageSocialMetadata } from "@/lib/storefront-meta";
 import { blogStructuredData } from "@markii/renderer/article-view";
+import { PostList } from "@markii/renderer/post-list";
 
 type Props = { params: Promise<{ site: string }>; searchParams: Promise<{ page?: string }> };
 
@@ -20,10 +21,6 @@ type Props = { params: Promise<{ site: string }>; searchParams: Promise<{ page?:
 function pageNumber(raw: string | undefined) {
   const n = Number(raw);
   return Number.isInteger(n) && n > 1 ? n : 1;
-}
-
-function dateLabel(iso: string | null) {
-  return iso ? new Date(iso).toLocaleDateString("en", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" }) : null;
 }
 
 export async function generateMetadata({ params, searchParams }: Props): Promise<Metadata> {
@@ -50,11 +47,11 @@ export default async function BlogIndex({ params, searchParams }: Props) {
 
   await logTraffic({ siteId: site.id, path: "/blog", userAgent: (await headers()).get("user-agent") });
 
-  const items = posts.map(postSummary);
+  const items = posts.map(renderPost);
   const jsonLd = blogStructuredData({
     name: `${site.name} blog`,
     url: `${baseUrl}/blog`,
-    posts: items.filter((p) => p.status === "published").map((p) => ({ title: p.title, url: `${baseUrl}${p.path}`, publishedAt: p.publishedAt! })),
+    posts: items.filter((p) => p.status === "published").map((p) => ({ title: p.title, url: `${baseUrl}/blog/${p.handle}`, publishedAt: p.publishedAt! })),
   });
 
   return (
@@ -68,28 +65,7 @@ export default async function BlogIndex({ params, searchParams }: Props) {
           <h1 className="sf-title">Blog</h1>
           {items.length === 0 ? <p className="sf-lede">No posts yet.</p> : null}
         </header>
-        {items.length > 0 ? (
-          <ol className="sf-posts" aria-label="Posts">
-            {items.map((p) => (
-              <li key={p.id} className="sf-post-card">
-                <a href={`${baseUrl}${p.path}`}>
-                  {p.coverImage ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={p.coverImage} alt={p.coverAlt} loading="lazy" decoding="async" />
-                  ) : null}
-                  <h2>{p.title}</h2>
-                  <span className="sf-muted">
-                    {p.status === "draft" ? "Draft — not published" : p.status === "scheduled" ? `Scheduled for ${dateLabel(p.publishedAt)}` : (
-                      <time dateTime={p.publishedAt!}>{dateLabel(p.publishedAt)}</time>
-                    )}
-                    {p.author ? ` · ${p.author}` : null}
-                  </span>
-                  {p.excerpt ? <p>{p.excerpt}</p> : null}
-                </a>
-              </li>
-            ))}
-          </ol>
-        ) : null}
+        {items.length > 0 ? <PostList posts={items} baseUrl={baseUrl} /> : null}
         {pages > 1 ? (
           <nav className="sf-pager" aria-label="Blog pages">
             {page > 1 ? <a href={`${baseUrl}/blog${page === 2 ? "" : `?page=${page - 1}`}`} rel="prev">← Newer posts</a> : <span />}

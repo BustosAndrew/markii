@@ -1,6 +1,6 @@
 import "server-only";
 import { cache } from "react";
-import type { RenderCategory, RenderCollection, RenderProduct } from "@markii/renderer/catalog";
+import type { RenderCategory, RenderCollection, RenderPost, RenderProduct } from "@markii/renderer/catalog";
 import type { FormField } from "@markii/renderer/forms";
 import type { ThemePackage } from "@markii/renderer/theme-package";
 import { currentShopperEmail } from "./shopper";
@@ -129,6 +129,46 @@ export type FormJson = {
 };
 
 export const getForm = cache((handle: string) => read<FormJson>(`/api/forms/${encodeURIComponent(handle)}`));
+
+/** A live post as Markii lists it (`GET /api/blog/posts`). Drafts and scheduled posts are never served. */
+export type PostSummaryJson = {
+  handle: string;
+  title: string;
+  excerpt: string;
+  coverImage: string | null;
+  coverAlt: string;
+  author: string;
+  publishedAt: string;
+  updatedAt: string;
+  url: string;
+};
+
+/** One post (`GET /api/blog/posts/{handle}`). `body` is the Markdown subset `@markii/renderer/article` draws. */
+export type PostJson = PostSummaryJson & {
+  body: string;
+  description: string;
+  seo: { title?: string; description?: string; ogImage?: string; noindex?: boolean };
+};
+
+export type PostPage = { posts: PostSummaryJson[]; page: number; pages: number; total: number };
+
+/** A page of the store's live posts, newest first. Null when the store is unavailable. */
+export const getPosts = cache((page: number, limit = 20) => read<PostPage>(`/api/blog/posts?page=${page}&limit=${limit}`));
+
+export const getPost = cache((handle: string) => read<PostJson>(`/api/blog/posts/${encodeURIComponent(handle)}`));
+
+/** The API's post as the renderer lists it. */
+export function toRenderPost(p: PostSummaryJson): RenderPost {
+  return {
+    handle: p.handle,
+    title: p.title,
+    excerpt: p.excerpt,
+    coverImage: p.coverImage,
+    coverAlt: p.coverAlt,
+    author: p.author,
+    publishedAt: p.publishedAt,
+  };
+}
 
 /**
  * A call to the store **as the signed-in shopper**: your storefront key plus

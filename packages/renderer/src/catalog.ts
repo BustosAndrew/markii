@@ -51,3 +51,29 @@ export type RenderCollection = {
  * asks for a collection it found in the `collections` list it was given.
  */
 export type MembersOf = (handle: string, limit: number) => Promise<RenderProduct[]>;
+
+/**
+ * A blog post as a listing draws it — `/blog` and the `blogPosts` block. Markii
+ * passes its rows' fields, an export passes what `GET /api/blog/posts` returns.
+ * `status` labels a draft or scheduled post, which only the preview lists;
+ * omitted, a post is drawn as published.
+ */
+export type RenderPost = {
+  handle: string;
+  title: string;
+  /** What shoppers see: the merchant's excerpt, else one taken from the body. */
+  excerpt: string;
+  coverImage: string | null;
+  coverAlt: string;
+  author: string;
+  /** ISO; null only for a draft, which only the preview lists. */
+  publishedAt: string | null;
+  status?: "draft" | "scheduled" | "published";
+};
+
+/**
+ * The store's newest live posts, for the `blogPosts` block — looked up only
+ * when a page holds one, like `MembersOf`. Live only, in the preview too: a
+ * block on a page shows what shoppers will see there.
+ */
+export type PostsOf = (limit: number) => Promise<RenderPost[]>;

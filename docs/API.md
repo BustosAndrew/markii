@@ -3282,6 +3282,15 @@ route predates the registry and mutates outside it.
   `GET …/blog/posts/:postId` adds `body`, `seo`, `autoExcerpt` and `description` — and there
   **`excerpt` is what the merchant typed** (`""` when none), while `autoExcerpt` is what shoppers see
   (theirs, or the body's opening words). An editor fills its field from `excerpt`. `cms.read`.
+- **Builder block `blogPosts` ("Latest posts", 2026-11-25):** `{ limit: 1–12 (3), layout: "grid" | "list",
+  showExcerpts, showImages }` — the store's newest **live** posts as cards linking to each post, drawn
+  with the same list as `/blog` (`@markii/renderer/post-list`). Live only in the preview too; with no
+  posts it draws nothing for shoppers and a placeholder in the preview. In `llms-full.txt` it is a list of
+  links. Insertable by the brand agent like any content block. No publish check — an empty blog is not an error.
+- **Read API and the Next.js export (2026-11-25):** `GET /api/blog/posts` and `GET /api/blog/posts/{handle}`
+  on the store host (§23) serve live posts only. The export has its own `/blog`, `/blog/{handle}` and
+  `/blog/feed.xml` (the store's feed with its links pointed at the export), and the `blogPosts` block
+  works there — so the sitemap's and `llms.txt`'s `/blog` links, which an export rewrites to itself, now resolve.
 
 | Action | Risk | What |
 |---|---|---|
@@ -3789,7 +3798,7 @@ preview tabs):
 | `/cart` | the human cart page (§18.4) — the sanctioned island; checkout continues from it | ✅ LIVE (this row said PLANNED for weeks after `app/%5Fsites/[site]/cart/page.tsx` shipped) |
 | `/collections` · `/collections/{handle}` | published collections — index, and one collection as product cards with a Schema.org `CollectionPage` + `ItemList` of the product URLs. Manual order or rules evaluated per request; enabled products only; an unpublished handle is a 404 like one that never existed. Also in `llms.txt` (`## Collections`), the sitemap, and the header nav once any is published | ✅ LIVE (2026-09-14, §18.2) |
 | `/pages/{handle}` | a builder page, once published — `WebPage` / `FAQPage` / `ItemList` JSON-LD, Open Graph, canonical | ✅ LIVE (2026-10-31, §19 — this row said PLANNED until 2026-11-12) |
-| `/blog` | builder-authored posts | 🟡 PLANNED (§19) |
+| `/blog` · `/blog/{handle}` · `/blog/feed.xml` | the store's live posts, one post, and its RSS feed (§19 "Blog") | ✅ LIVE (2026-11-22 — this row said PLANNED until 2026-11-25) |
 | `/account` | shopper account — sign in/up, memberships, cancel a renewal (§18.3, §18.9) | ✅ LIVE (row corrected 2026-09-14) |
 
 In local dev, storefronts are reachable at `http://localhost:3000/_sites/{siteSlug}/…`.
@@ -3813,10 +3822,14 @@ Not traffic-logged: an export reads it on revalidation, not per visitor. Money i
 | `GET /api/products/{slug}` | the product plus `options[]` and `variants[] { id, title, optionValues, priceMinor, available }` — the product page's own reads; `404` for unknown or disabled |
 | `GET /api/collections/{handle}?limit=` | `{ collection, products[] }` in the merchant's order, rules evaluated, enabled only; `404` unless published |
 | `GET /api/forms/{handle}` | `{ handle, name, fields[], submitLabel, successMessage, url, submitUrl }` — what the form's page shows; **never `notifyEmail`**. `404` for an unknown form. Post to `submitUrl` (§19 "Storefront forms") |
+| `GET /api/blog/posts?page=&limit=` | `{ posts[], page, pages, total }` — **live** posts, newest first, as `/blog` lists them; `limit` default 20, max 50, a bad value clamps; a `page` past the last is an empty list with the real `pages`. Added 2026-11-25 |
+| `GET /api/blog/posts/{handle}` | the post plus `body` (the Markdown subset `@markii/renderer/article` draws), `description` and `seo { title?, description?, ogImage?, noindex? }`. A draft, a scheduled post and an unknown handle are the same `404` |
 
 A product is `{ id, slug, name, url, description, summary, sku, priceMinor, currency, stock,
 inStock, images, categoryId, suggestedProductIds, membersOnly, requiresTierId }`; the single-product
-route adds `requiresTier: { id, name } | null`. Cart and checkout for an export are the existing
+route adds `requiresTier: { id, name } | null`. A post is `{ handle, title, excerpt, coverImage, coverAlt,
+author, publishedAt, updatedAt, url }` — `excerpt` is what shoppers see (the merchant's, else the body's
+opening words), never the editor's raw field. Cart and checkout for an export are the existing
 `/api/cart*` and `/api/checkout/session*` — token-addressed and cookie-free for a guest, which is why
 they already work headless.
 

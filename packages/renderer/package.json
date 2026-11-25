@@ -9,7 +9,11 @@
   "exports": {
     "./*": "./src/*.ts",
     "./render": "./src/render.tsx",
-    "./product-card": "./src/product-card.tsx"
+    "./product-card": "./src/product-card.tsx",
+    "./article-view": "./src/article-view.tsx",
+    "./forms-view": "./src/forms-view.tsx",
+    "./post-list": "./src/post-list.tsx",
+    "./theme-shell": "./src/theme-shell.tsx"
   },
   "files": ["src", "!src/**/*.test.ts", "LICENSE", "NOTICE", "README.md"],
   "peerDependencies": {

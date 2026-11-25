@@ -2,7 +2,7 @@ import { siteUrl, storeUrl } from "./markii";
 
 /**
  * The store's agent documents — `llms.txt`, `llms-full.txt`, `agent.md`,
- * `sitemap.xml` — served from this site, as Markii writes them, with the
+ * `sitemap.xml`, and the blog's `feed.xml` — served from this site, as Markii writes them, with the
  * store's pages pointed here. **Its APIs stay pointed at Markii**: search,
  * cart and the x402 checkout an agent reads about in `agent.md` are served by
  * the store on Markii, not by this app, so rewriting them would send agents

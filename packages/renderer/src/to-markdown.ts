@@ -1,4 +1,4 @@
-import type { MembersOf, RenderCategory as Category, RenderCollection as Collection, RenderProduct as Product } from "./catalog";
+import type { MembersOf, PostsOf, RenderCategory as Category, RenderCollection as Collection, RenderProduct as Product } from "./catalog";
 import { formatPrice } from "./format";
 import { REPEATER_SOURCES, boundProps, evaluateCondition, type DataValues, type RepeaterSource } from "./bindings";
 import { parseMarkdown, safeHref, type Inline } from "./markdown";
@@ -32,6 +32,8 @@ export type MarkdownContext = {
   values: DataValues;
   /** A collection's storefront members, for a grid showing one. */
   membersOf: MembersOf;
+  /** The store's newest live posts, for a `blogPosts` block. Absent, the block is left out. */
+  postsOf?: PostsOf;
   headingOffset?: number;
 };
 
@@ -163,6 +165,15 @@ async function block(node: PageNode, ctx: MarkdownContext): Promise<string[]> {
       return [
         items
           .map((c) => `- [${line(c.title)}](${base(ctx)}/collections/${c.handle})${p.showDescriptions && c.description ? `: ${line(c.description)}` : ""}`)
+          .join("\n"),
+      ];
+    }
+    case "blogPosts": {
+      const posts = ctx.postsOf ? await ctx.postsOf(Number(p.limit ?? 3)) : [];
+      if (!posts.length) return [];
+      return [
+        posts
+          .map((x) => `- [${line(x.title)}](${base(ctx)}/blog/${x.handle})${p.showExcerpts !== false && x.excerpt ? `: ${line(x.excerpt)}` : ""}`)
           .join("\n"),
       ];
     }

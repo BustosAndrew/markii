@@ -13,7 +13,7 @@ import {
 import { defaultWallet } from "./integrations";
 import { publishedPages, type SiteData } from "./storefront";
 import { membersByHandle } from "./storefront/collections";
-import { livePostsForDocs } from "./blog/queries";
+import { livePostsForDocs, postsOfSite } from "./blog/queries";
 import { descriptionOf } from "./blog/rules";
 
 /**
@@ -109,6 +109,7 @@ export async function renderLlmsFullTxt(data: SiteData): Promise<string | null> 
     collections: colls,
     values: { store: storeView(site, { baseUrl, products: prods, collections: colls }) },
     membersOf: membersByHandle(colls),
+    postsOf: postsOfSite(site.id),
     // The document's title is the h1; each page's own h1 sits under its ## section.
     headingOffset: 2,
   };
