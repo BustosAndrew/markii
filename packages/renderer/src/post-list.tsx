@@ -53,6 +53,7 @@ export function PostList({
             <span className="sf-muted">
               <When post={p} />
               {p.author ? ` · ${p.author}` : null}
+              {p.membersOnly ? " · Members only" : null}
             </span>
             {showExcerpts && p.excerpt ? <p>{p.excerpt}</p> : null}
           </a>

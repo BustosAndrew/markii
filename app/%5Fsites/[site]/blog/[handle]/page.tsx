@@ -10,6 +10,8 @@ import { loadSite, storefrontHalted } from "@/lib/storefront";
 import { pageSocialMetadata } from "@/lib/storefront-meta";
 import { redirectOrNotFound } from "@/lib/storefront/redirects";
 import { ArticleBody, articleStructuredData } from "@markii/renderer/article-view";
+import { MembersGate, MembersPreviewNote } from "@markii/renderer/members-gate";
+import { contentGateFor } from "@/lib/commerce/memberships";
 
 type Props = { params: Promise<{ site: string; handle: string }> };
 
@@ -66,6 +68,9 @@ export default async function BlogPostPage({ params }: Props) {
   const baseUrl = data.baseUrl.replace(/\/$/, "");
   const url = `${baseUrl}/blog/${post.handle}`;
   const status = postStatus(post.publishedAt);
+  // Members-only (§18.9): the body never reaches the HTML of a visitor without the tier.
+  const gate = post.requiresTierId != null ? await contentGateFor(site.id, post.requiresTierId, { preview: data.preview }) : null;
+  const locked = gate !== null && !gate.unlocked;
   const jsonLd =
     status === "published"
       ? articleStructuredData({
@@ -77,6 +82,7 @@ export default async function BlogPostPage({ params }: Props) {
           publishedAt: post.publishedAt!.toISOString(),
           modifiedAt: post.updatedAt.toISOString(),
           store: { name: site.name, url: `${baseUrl}/` },
+          ...(gate ? { membersOnly: { bodyShown: !locked } } : {}),
         })
       : null;
 
@@ -104,7 +110,20 @@ export default async function BlogPostPage({ params }: Props) {
               <img src={post.coverImage} alt={post.coverAlt} loading="eager" fetchPriority="high" decoding="async" />
             </figure>
           ) : null}
-          <ArticleBody src={post.body} baseUrl={baseUrl} hasCover={Boolean(post.coverImage)} />
+          {gate && data.preview ? <MembersPreviewNote what="post" tierName={gate.tierName} /> : null}
+          {locked ? (
+            <>
+              {post.excerpt.trim() ? <p className="sf-lede">{post.excerpt.trim()}</p> : null}
+              <MembersGate
+                what="post"
+                tierName={gate.tierName}
+                signInHref={`${baseUrl}/account`}
+                join={gate.join.map((j) => ({ name: j.name, href: `${baseUrl}/p/${j.slug}` }))}
+              />
+            </>
+          ) : (
+            <ArticleBody src={post.body} baseUrl={baseUrl} hasCover={Boolean(post.coverImage)} />
+          )}
           <p className="sf-pager">
             <a href={`${baseUrl}/blog`}>← All posts</a>
           </p>

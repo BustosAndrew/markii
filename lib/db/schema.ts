@@ -3103,12 +3103,28 @@ export const siteDocuments = pgTable(
     publishedTitle: text("published_title"),
     publishedSeo: jsonb("published_seo").$type<PageSeo>(),
     publishedTree: jsonb("published_tree").$type<PageNode>(),
+    /**
+     * Members-only pages (§18.9, migration 0054): only holders of this tier read
+     * the page; everyone else gets its title and a way to join. Pages only —
+     * never home, a template or a region. Draft and published like every other
+     * page field, so a gate goes live with the design.
+     *
+     * **No `on delete` clause, on purpose** — unlike `products.requires_tier_id`,
+     * which is `set null` and so ungates a product when its tier goes. A deleted
+     * tier must not publish paid content to everyone, so `memberships.deleteTier`
+     * refuses while anything still names the tier, and the database holds the
+     * line if anything else tries.
+     */
+    requiresTierId: integer("requires_tier_id").references(() => membershipTiers.id),
+    publishedRequiresTierId: integer("published_requires_tier_id").references(() => membershipTiers.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     uniqueIndex("site_documents_site_kind_handle_uq").on(t.siteId, t.kind, t.handle),
     index("site_documents_published_idx").on(t.siteId, t.kind, t.publishedHandle),
+    index("site_documents_requires_tier_idx").on(t.requiresTierId),
+    index("site_documents_published_requires_tier_idx").on(t.publishedRequiresTierId),
   ],
 );
 
@@ -3132,7 +3148,8 @@ export const siteDesignVersions = pgTable(
         customCss?: string;
         /** M6 head code. Absent in snapshots taken before it existed — read as "". */
         headHtml?: string;
-        documents: { id: number; kind: string; handle: string; title: string; seo: PageSeo; tree: PageNode }[];
+        /** `requiresTierId` from migration 0054; absent in older snapshots — read as public. */
+        documents: { id: number; kind: string; handle: string; title: string; seo: PageSeo; tree: PageNode; requiresTierId?: number | null }[];
       }>()
       .notNull(),
     note: text("note"),
@@ -3205,6 +3222,12 @@ export const blogPosts = pgTable(
     seo: jsonb("seo").$type<PageSeo>().notNull().default({}),
     /** Null: draft. Future: scheduled. Past: live. */
     publishedAt: timestamp("published_at", { withTimezone: true }),
+    /**
+     * Members-only posts (§18.9, migration 0054): the body reaches holders of
+     * this tier only. No `on delete` clause, for the reason on
+     * `site_documents.requires_tier_id`: losing a tier must not publish the post.
+     */
+    requiresTierId: integer("requires_tier_id").references(() => membershipTiers.id),
     /** `user:…` or `token:…`. */
     createdBy: text("created_by").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -3213,6 +3236,7 @@ export const blogPosts = pgTable(
   (t) => [
     uniqueIndex("blog_posts_site_handle_uq").on(t.siteId, t.handle),
     index("blog_posts_site_published_idx").on(t.siteId, t.publishedAt),
+    index("blog_posts_requires_tier_idx").on(t.requiresTierId),
   ],
 );
 export type BlogPost = typeof blogPosts.$inferSelect;

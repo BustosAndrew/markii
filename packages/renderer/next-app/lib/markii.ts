@@ -45,6 +45,11 @@ export type StoreJson = {
   collections: (RenderCollection & { url: string })[];
   /** The published design, or null when the store has never published one. */
   design: ThemePackage | null;
+  /**
+   * Members-only pages. Their tree in `design` is empty — the content is the
+   * members' — and `getPage` fetches it for a shopper who holds the tier.
+   */
+  membersOnlyPages: { handle: string; requiresTierId: number }[];
 };
 
 type ProductJson = {
@@ -141,10 +146,22 @@ export type PostSummaryJson = {
   publishedAt: string;
   updatedAt: string;
   url: string;
+  /** Members-only: listed with its title and excerpt; the body is for the tier's members. */
+  membersOnly: boolean;
+  requiresTierId: number | null;
 };
 
-/** One post (`GET /api/blog/posts/{handle}`). `body` is the Markdown subset `@markii/renderer/article` draws. */
+/** Who a members-only page or post is for, and the products that grant it. */
+export type GateJson = { tierName: string | null; join: { name: string; slug: string; url: string }[] };
+
+/**
+ * One post (`GET /api/blog/posts/{handle}`). `body` is the Markdown subset
+ * `@markii/renderer/article` draws — empty, with `locked: true`, on a
+ * members-only post this shopper may not read.
+ */
 export type PostJson = PostSummaryJson & {
+  locked: boolean;
+  gate: GateJson | null;
   body: string;
   description: string;
   seo: { title?: string; description?: string; ogImage?: string; noindex?: boolean };
@@ -155,7 +172,41 @@ export type PostPage = { posts: PostSummaryJson[]; page: number; pages: number; 
 /** A page of the store's live posts, newest first. Null when the store is unavailable. */
 export const getPosts = cache((page: number, limit = 20) => read<PostPage>(`/api/blog/posts?page=${page}&limit=${limit}`));
 
-export const getPost = cache((handle: string) => read<PostJson>(`/api/blog/posts/${encodeURIComponent(handle)}`));
+/**
+ * One post. A public post is a cached read like the catalogue. A members-only
+ * one is asked for again **as the shopper** (your storefront key and their
+ * verified email), never cached, because Markii sends its body only to a
+ * member — and what one shopper may read must not be cached for the next.
+ */
+export const getPost = cache(async (handle: string): Promise<PostJson | null> => {
+  const path = `/api/blog/posts/${encodeURIComponent(handle)}`;
+  const post = await read<PostJson>(path);
+  if (!post?.membersOnly) return post;
+  return (await readAsShopper<PostJson>(path)) ?? post;
+});
+
+/** A published page (`GET /api/pages/{handle}`): its tree, or `locked` with none for a members-only page this shopper may not read. */
+export type PageJson = {
+  handle: string;
+  title: string;
+  seo: { title?: string; description?: string; ogImage?: string; noindex?: boolean };
+  url: string;
+  membersOnly: boolean;
+  requiresTierId: number | null;
+  locked: boolean;
+  gate: GateJson | null;
+  tree: unknown | null;
+};
+
+/** A members-only page, asked for as the shopper — never cached, for the reason on `getPost`. */
+export const getPage = cache((handle: string) => readAsShopper<PageJson>(`/api/pages/${encodeURIComponent(handle)}`));
+
+async function readAsShopper<T>(path: string): Promise<T | null> {
+  const res = await asShopper(path);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`Markii answered ${res.status} for ${path}`);
+  return (await res.json()) as T;
+}
 
 /** The API's post as the renderer lists it. */
 export function toRenderPost(p: PostSummaryJson): RenderPost {
@@ -167,6 +218,7 @@ export function toRenderPost(p: PostSummaryJson): RenderPost {
     coverAlt: p.coverAlt,
     author: p.author,
     publishedAt: p.publishedAt,
+    membersOnly: p.membersOnly,
   };
 }
 

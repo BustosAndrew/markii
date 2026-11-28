@@ -379,6 +379,13 @@
       "when": 1795342075225,
       "tag": "0053_storefront_forms",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1795684881111,
+      "tag": "0054_members_only_content",
+      "breakpoints": true
     }
   ]
 }

@@ -595,7 +595,8 @@ export function pageJsonLd(tree: PageNode): object[] {
 }
 
 /** What a page's `WebPage` JSON-LD says about it (M5). Set for pages, not templates — their routes describe them. */
-export type PageLd = { name: string; description?: string; url: string };
+/** `membersOnly` (§18.9) marks the page `isAccessibleForFree: false`, the signal search engines read for gated content. */
+export type PageLd = { name: string; description?: string; url: string; membersOnly?: boolean };
 
 /** A block hidden from shoppers here contributes no structured data either — the same rule as rendering, live. */
 function visibleTo(node: PageNode, ctx: RenderContext): boolean {
@@ -631,6 +632,7 @@ export async function documentJsonLd(tree: PageNode, ctx: RenderContext): Promis
       ...(ctx.page.description ? { description: ctx.page.description } : {}),
       url: ctx.page.url,
       isPartOf: { "@type": "WebSite", name: ctx.values.store.name, url: ctx.values.store.url },
+      ...(ctx.page.membersOnly ? { isAccessibleForFree: false } : {}),
     });
   }
   const faqs: { question: string; answer: string }[] = [];

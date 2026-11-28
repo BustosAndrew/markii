@@ -235,7 +235,7 @@ describe("the publish dialog", () => {
 
 describe("the page SEO form (M5)", () => {
   // builder.updatePage replaces seo whole: a save that sends one field wipes the rest.
-  const page = { id: 5, handle: "shipping", title: "Shipping", deleted: false, published: true, path: "/pages/shipping", updatedAt: "2026-11-12T00:00:00Z" };
+  const page = { id: 5, handle: "shipping", title: "Shipping", deleted: false, published: true, path: "/pages/shipping", requiresTierId: null, updatedAt: "2026-11-12T00:00:00Z" };
   const seo = { description: "Delivery times", ogImage: "https://cdn.test/share.jpg", noindex: true };
 
   it("sends every field with each save, so editing one keeps the others", () => {

@@ -33,10 +33,10 @@ carry an explicit status — **never call a `PLANNED` endpoint and never fake it
 | 13 | Orders (promoted) | ✅ LIVE — list, export, `GET /api/orders/:id` (lines, refunds, fulfillments, timeline), and the §18.7 order actions. The extended entity's speculative fields are not built | C |
 | 14 | Analytics v2 (funnel, channels, failures) | 🟡 PLANNED | E |
 | 15 | Automations, activity, notifications, team | 🟡 PLANNED | E |
-| 16 | Accounts, organizations, staff | partial — `/api/auth/*`, `/api/me`, `/api/org`, `/api/org/staff*`, `/api/org/tokens*`, `/api/org/switch`, **org scoping of §1–8**, and **MFA** (`/api/auth/mfa*`, enrol · challenge · recover, D40) are ✅ LIVE; the **audit log** (`/api/org/audit`, 2026-09-06) and **sessions** (`/api/org/sessions*`, 2026-09-07) are ✅ LIVE. **§16 is complete** — every `*_API_LIVE` constant in `lib/api/org.ts` is now `true`. (Tokens and org switching were listed as planned until 2026-08-03, and **MFA until 2026-08-18** — all three were already routed.) Frontend: `/dashboard/settings/account`, `/dashboard/settings/team`, `/dashboard/settings/audit`, the sidebar org switcher, `/mfa/*` | **A** |
+| 16 | Accounts, organizations, staff | ✅ LIVE, complete (this cell said "partial" until 2026-11-26 while its own text said complete) — `/api/auth/*`, `/api/me`, `/api/org`, `/api/org/staff*`, `/api/org/tokens*`, `/api/org/switch`, **org scoping of §1–8**, and **MFA** (`/api/auth/mfa*`, enrol · challenge · recover, D40) are ✅ LIVE; the **audit log** (`/api/org/audit`, 2026-09-06) and **sessions** (`/api/org/sessions*`, 2026-09-07) are ✅ LIVE. **§16 is complete** — every `*_API_LIVE` constant in `lib/api/org.ts` is now `true`. (Tokens and org switching were listed as planned until 2026-08-03, and **MFA until 2026-08-18** — all three were already routed.) Frontend: `/dashboard/settings/account`, `/dashboard/settings/team`, `/dashboard/settings/audit`, the sidebar org switcher, `/mfa/*` | **A** |
 | 17 | Billing, plans, metering, threshold fees | ✅ **LIVE, and merchants are charged** (corrected 2026-08-18 — this row claimed "nothing is charged" long after it did). Usage ledger, threshold fee engine, meter, plan catalog, entitlements, period-close assessments, the **Stripe webhook** (verified + idempotent, platform **and** Connect handlers), subscriptions, plan changes with a Stripe-computed proration preview, cancellation at period end, payment methods, invoice history, and **threshold-fee invoicing onto the same invoice**. Scheduled monthly (§25). Add-on *purchase* alone refuses `409` — Agent Ops and Chargeback Assist are Phase F and do not exist | B |
-| 18 | Commerce core (variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping, **memberships**) | partial — §18.1–18.6 ✅ LIVE, including the §18.4 card rail (Stripe Connect direct charges) and **§18.6 Stripe Tax** (2026-08-17); §18.5 gift cards are ⛔ **deferred** (D33). §18.7 order operations (incl. **processor-executed card refunds**), §18.8 digital delivery, and §18.9 membership gating + shopper login ✅ LIVE — **including recurring/auto-renewing membership billing** (Stripe Subscriptions on the merchant's own Connect account; this row claimed otherwise until 2026-08-18). `STRIPE_CONNECT_WEBHOOK_SECRET` is **set and verified in production** (2026-09-07) — this row called it outstanding for weeks after it was configured. `pnpm stripe:webhooks` confirms the Connect endpoint subscribes to all nine required events including `invoice.created`. Genuine Stripe-generated Connect delivery was proven 2026-09-08 through the CLI (`stripe trigger … --stripe-account`), which this row called unproven for five days after | C |
-| 19 | Site builder & content | partial ✅ (M1 foundation · M2 editor + preview · M3 brand agent · M4 templates, regions, bindings · M5 agent documents · M6 custom code, scripts, storefront CSP · M7 editor polish, saved blocks) ✅ | D |
+| 18 | Commerce core (variants, inventory, collections, customers, cart, checkout, discounts, tax, shipping, **memberships**) | ✅ LIVE except §18.5 **gift cards, ⛔ deferred** (D33) — the one reason this row is not marked complete. **Members-only posts and pages** ✅ LIVE 2026-11-26 (§18.9, migration 0054). Still open in §18.1: `PATCH`/`DELETE /api/variants/:id` REST aliases (writes are actions) and per-location stock allocation (holds sit on the default location; levels sum all). §18.1–18.6 ✅ LIVE, including the §18.4 card rail (Stripe Connect direct charges) and **§18.6 Stripe Tax** (2026-08-17); §18.5 gift cards are ⛔ **deferred** (D33). §18.7 order operations (incl. **processor-executed card refunds**), §18.8 digital delivery, and §18.9 membership gating + shopper login ✅ LIVE — **including recurring/auto-renewing membership billing** (Stripe Subscriptions on the merchant's own Connect account; this row claimed otherwise until 2026-08-18). `STRIPE_CONNECT_WEBHOOK_SECRET` is **set and verified in production** (2026-09-07) — this row called it outstanding for weeks after it was configured. `pnpm stripe:webhooks` confirms the Connect endpoint subscribes to all nine required events including `invoice.created`. Genuine Stripe-generated Connect delivery was proven 2026-09-08 through the CLI (`stripe trigger … --stripe-account`), which this row called unproven for five days after | C |
+| 19 | Site builder & content | ✅ LIVE (M1 foundation · M2 editor + preview · M3 brand agent · M4 templates, regions, bindings · M5 agent documents · M6 custom code, scripts, storefront CSP · M7 editor polish, saved blocks · theme packages and exports · content surfaces: redirects, blog, forms, members-only pages). **Not built:** the theme marketplace and `/api/themes` (D53 says yes, nothing scheduled); multi-language content (deferred) | D |
 | 20 | Disputes & chargebacks | 🟡 PLANNED | F |
 | 21 | Agent Ops add-on | ⤴ **Superseded by §27** (D47, 2026-10-15) — built as free beta merchant agents rather than a last-phase paid add-on; the add-on billing and the settings/audit endpoints remain unbuilt | F |
 | 22 | **Action registry & MCP** — agent-native architecture | ✅ LIVE (registry, invoke, dry-run, audit, **undo** — 2026-08-18, and the **MCP server** — 2026-09-07: tools, prompts **and resources**). `undoable` is now derived from an `inverse()` and refused if declared without one, which corrected four actions that claimed it falsely | **Registry: C · MCP: D** |
@@ -1609,8 +1609,8 @@ delivered when no mail service is wired.
 > so without them a lost phone means a lost store. Ten per account, salted scrypt, single-use,
 > constant-time comparison, destructive regeneration.
 >
-> ⚠️ **Not yet built:** the enrolment and challenge **screens**. The API is complete and tested; the
-> frontend work is described in `docs/FRONTEND.md`.
+> The enrolment, challenge and recovery **screens** are built (`app/(auth)/mfa/*`, verified 2026-08-10 —
+> this note called them unbuilt until 2026-11-26).
 
 > **Status (2026-07-31).** ✅ **LIVE:** `POST /api/auth/sign-up · sign-in · sign-out ·
 > reset-password · update-password`, `GET /api/auth/callback`, and `GET /api/me`. Sessions are
@@ -2271,7 +2271,7 @@ answered. A cron that stops costs a query, never correctness.
 
 ---
 
-## 18. Commerce core — partial ✅/🟡 Phase C
+## 18. Commerce core — ✅ LIVE except gift cards (⛔ deferred, D33) · Phase C
 
 The gap between "catalog" and "store". Everything here is prerequisite to a real shopper checking
 out. Extends §4's Product.
@@ -2970,7 +2970,7 @@ intended.
 |---|---|---|---|
 | `memberships.createTier` | `commerce.write` | low | `handle` is slugified and **not editable afterwards** — it may already be in storefront copy |
 | `memberships.updateTier` | `commerce.write` | low | Name and description only |
-| `memberships.deleteTier` | `commerce.write` | **high** | `products.requires_tier_id` is `on delete set null`, so this **ungates every product behind it** — paid-for content silently becomes public. The result reports `productsUngated` so a confirmation can say it beforehand |
+| `memberships.deleteTier` | `commerce.write` | **high** | `products.requires_tier_id` is `on delete set null`, so this **ungates every product behind it** — paid-for content silently becomes public. The result reports `productsUngated` so a confirmation can say it beforehand. **Refused with `409 tier_gates_content` `{ posts, pages }`** while a members-only post or page names the tier (2026-11-26) |
 | `memberships.grant` | `commerce.write` | medium | Grants or extends. Refuses a tier from a different store than the customer |
 | `memberships.revoke` | `commerce.write` | medium | Access stops immediately; the record survives so history still shows they held it |
 
@@ -2987,15 +2987,43 @@ revokes the whole thing, including time paid for by an earlier order. Rolling ba
 need the pre-extension expiry stored, which no column holds. Revoking is the merchant-favourable
 direction and `memberships.grant` restores it in one call, so this errs the way §18.8 already does.
 
-### Not built
+### Members-only posts and pages — ✅ LIVE (2026-11-26) · migration 0054, applied
 
-Gating anything other than products: there is still no CMS content model, which remains Phase D.
-(Recurring billing was listed here until 2026-09-14, a month after it shipped — see *Recurring
-memberships* above.)
+Gating reached content once there was content to gate (Phase D's pages, the blog). **Owner decisions:**
+posts and builder pages both; a visitor without the tier gets a **teaser and a way to join**, never a 404.
+
+- **Set it:** a post's `requiresTierId` on `blog.createPost` / `blog.updatePost` (a tier of the post's
+  store, or `null`); a page's with **`builder.setPageAccess`** (§19) — a draft change that goes live with
+  the next publish. Not the home page, templates or regions.
+- **What a non-member sees:** the title, cover and **the merchant's own excerpt** (a post) or SEO
+  description (a page), and a notice — *"Members only. This post is for Tea Club members. Sign in if you are
+  one. Join with …"* — linking to the enabled products that **grant** the tier (`contentGateFor`, at most
+  five, renewals excluded because a non-member cannot buy one). `MembersGate` in `@markii/renderer`, so an
+  export draws the same notice.
+- **The rule: a gated body reaches a member and nobody else.** The body is never rendered into a
+  non-member's HTML. **`excerptOf` returns only the merchant's excerpt on a gated post** — never the body's
+  opening words — and every listing goes through it, so `/blog`, the feed, the read API, link previews and
+  `llms.txt` cannot leak by default. Gated posts and pages stay **listed** (index, feed with
+  `<category>Members only</category>`, sitemap, `llms.txt` with "Members only.") and are **left out of
+  `llms-full.txt`**, whose point is the full text. JSON-LD carries `isAccessibleForFree: false` (plus
+  `hasPart` on a post a member is reading), so the difference between what a member and a crawler see is
+  declared, not cloaking.
+- **The builder preview shows everything**, with a note of what shoppers see instead — the merchant is
+  reading their own draft.
+- **Fails closed.** The three tier columns have **no `on delete`** clause, unlike
+  `products.requires_tier_id`. `memberships.deleteTier` answers `409 tier_gates_content` with `{ posts,
+  pages }` while any post or (draft or live) page names the tier, and `builder.restoreVersion` answers
+  `409 tier_missing` for a version whose members-only pages name a tier deleted since. A store export
+  remaps snapshot tiers and turns an unmappable one into `-1`, never `null`.
+
+Products still work as before: their details are public and only buying is gated, so a deleted tier
+still ungates them (`productsUngated`).
+
+(Recurring billing was listed under "Not built" here until 2026-09-14, a month after it shipped.)
 
 ---
 
-## 19. Site builder & content — partial ✅ LIVE (M1 foundation 2026-10-31 · M2 editor + live preview 2026-11-01 · M3 brand agent 2026-11-02 · M4 templates, regions, bindings 2026-11-03 · M5 agent documents 2026-11-12 · M6 custom CSS/HTML 2026-11-13 · M7 editor polish 2026-11-14) — Phase D, D51
+## 19. Site builder & content — ✅ LIVE (M1 foundation 2026-10-31 · M2 editor + live preview 2026-11-01 · M3 brand agent 2026-11-02 · M4 templates, regions, bindings 2026-11-03 · M5 agent documents 2026-11-12 · M6 custom CSS/HTML 2026-11-13 · M7 editor polish 2026-11-14) — Phase D, D51
 
 Architecture in **`docs/BUILDER.md`**. Pages are versioned JSON node trees, never HTML strings.
 **Reads are REST; every write is a registry action** (`POST /api/actions/builder.*`), so the
@@ -3035,6 +3063,7 @@ All `cms.read`. Writes are `cms.write`:
 | `builder.setProps` · `setStyles` | low | ✅ | Block content (validated by the block's schema) / style **tokens** per breakpoint (`base`, `sm` 640, `md` 768, `lg` 1024; `null` clears) |
 | `builder.setTheme` · `setThemeTokens` | low | ✅ | Base theme / token overrides (hex colours, curated fonts, radius and width scales; `null` resets). Result carries WCAG contrast warnings |
 | `builder.createPage` · `updatePage` | low | ✅ | Pages at `/pages/{handle}`; title, handle, SEO. Home's handle is fixed, and so are templates' and regions' |
+| `builder.setPageAccess` | medium | — | 2026-11-26 (§18.9): `{ siteId, pageId, requiresTierId }` — make a page members-only for a tier of this store, or public (`null`). Draft; live at publish; in the diff as `requiresTierId`; undoable. `409` for home, a template or a region. Its own action so the brand agent can never run it |
 | `builder.customizeTemplate` · `customizeRegion` | low | ✅ | M4: start the product/collection template or the announcement/header/footer region from the built-in layout. `{ pageId, created }`; idempotent |
 | `builder.setBinding` · `setVisibility` | low | ✅ | M4: bind props to data paths (`null` unbinds) / show a block only when a condition holds (`null`: always) |
 | `builder.setCustomClass` | low | ✅ | M6: a block's custom classes (`null` clears) |
@@ -3823,13 +3852,17 @@ Not traffic-logged: an export reads it on revalidation, not per visitor. Money i
 | `GET /api/collections/{handle}?limit=` | `{ collection, products[] }` in the merchant's order, rules evaluated, enabled only; `404` unless published |
 | `GET /api/forms/{handle}` | `{ handle, name, fields[], submitLabel, successMessage, url, submitUrl }` — what the form's page shows; **never `notifyEmail`**. `404` for an unknown form. Post to `submitUrl` (§19 "Storefront forms") |
 | `GET /api/blog/posts?page=&limit=` | `{ posts[], page, pages, total }` — **live** posts, newest first, as `/blog` lists them; `limit` default 20, max 50, a bad value clamps; a `page` past the last is an empty list with the real `pages`. Added 2026-11-25 |
-| `GET /api/blog/posts/{handle}` | the post plus `body` (the Markdown subset `@markii/renderer/article` draws), `description` and `seo { title?, description?, ogImage?, noindex? }`. A draft, a scheduled post and an unknown handle are the same `404` |
+| `GET /api/blog/posts/{handle}` | the post plus `body` (the Markdown subset `@markii/renderer/article` draws), `description` and `seo { title?, description?, ogImage?, noindex? }`. A draft, a scheduled post and an unknown handle are the same `404`. **Members-only (§18.9):** `locked: true`, `body: ""` and `gate { tierName, join[{ name, slug, url }] }` unless the caller holds the tier — a signed-in shopper here, or an export's server with the storefront key and `Markii-Shopper-Email` — and `cache-control: private, no-store` either way |
+| `GET /api/pages/{handle}` | 2026-11-26. One published builder page: `{ handle, title, seo, url, membersOnly, requiresTierId, locked, gate, tree }`. For a members-only page `tree` is `null` and `locked: true` unless the caller holds the tier (as above), `private, no-store`. `404` for no such published page |
 
 A product is `{ id, slug, name, url, description, summary, sku, priceMinor, currency, stock,
 inStock, images, categoryId, suggestedProductIds, membersOnly, requiresTierId }`; the single-product
 route adds `requiresTier: { id, name } | null`. A post is `{ handle, title, excerpt, coverImage, coverAlt,
-author, publishedAt, updatedAt, url }` — `excerpt` is what shoppers see (the merchant's, else the body's
-opening words), never the editor's raw field. Cart and checkout for an export are the existing
+author, publishedAt, updatedAt, url, membersOnly, requiresTierId }` — `excerpt` is what shoppers see (the
+merchant's, else the body's opening words — on a members-only post only the merchant's), never the
+editor's raw field. **`GET /api/store` withholds members-only pages' trees** (each such document's tree is
+an empty root) and lists them in `membersOnlyPages[{ handle, requiresTierId }]`; read one through
+`GET /api/pages/{handle}`. Cart and checkout for an export are the existing
 `/api/cart*` and `/api/checkout/session*` — token-addressed and cookie-free for a guest, which is why
 they already work headless.
 

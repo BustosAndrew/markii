@@ -22,7 +22,8 @@ export type DesignSnapshot = {
   tokens: DesignTokens;
   customCss?: string;
   headHtml?: string;
-  documents: { id: number; kind: string; handle: string; title: string; seo: PageSeo; tree: PageNode }[];
+  /** `requiresTierId`: absent in snapshots from before migration 0054, which is public. */
+  documents: { id: number; kind: string; handle: string; title: string; seo: PageSeo; tree: PageNode; requiresTierId?: number | null }[];
 };
 
 /** Long values are cut here — a diff names a change, it does not reprint a page of copy. */
@@ -43,7 +44,7 @@ export type DocumentDiff = {
   handle: string;
   title: string;
   change: "added" | "removed" | "changed";
-  /** `title`, `handle`, `seo.title`, `seo.description`, `seo.noindex`, `seo.ogImage`. */
+  /** `title`, `handle`, `requiresTierId`, `seo.title`, `seo.description`, `seo.noindex`, `seo.ogImage`. */
   fields: ValueChange[];
   nodes: { added: NodeRef[]; removed: NodeRef[]; changed: NodeChange[] };
 };
@@ -196,6 +197,8 @@ function documentFields(a: DesignSnapshot["documents"][number], b: DesignSnapsho
   const out: ValueChange[] = [];
   if (a.title !== b.title) out.push(change("title", a.title, b.title));
   if (a.handle !== b.handle) out.push(change("handle", a.handle, b.handle));
+  // Who may read the page (§18.9) — the change a publish most needs to show.
+  if ((a.requiresTierId ?? null) !== (b.requiresTierId ?? null)) out.push(change("requiresTierId", a.requiresTierId ?? null, b.requiresTierId ?? null));
   out.push(...keyedChanges("seo.", a.seo as Record<string, unknown>, b.seo as Record<string, unknown>));
   return out;
 }

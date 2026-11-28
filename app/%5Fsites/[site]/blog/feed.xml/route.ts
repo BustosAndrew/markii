@@ -30,6 +30,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ site: st
         `<guid isPermaLink="true">${xml(url)}</guid>`,
         `<pubDate>${p.publishedAt!.toUTCString()}</pubDate>`,
         p.author ? `<dc:creator>${xml(p.author)}</dc:creator>` : "",
+        // A members-only post is announced like any other; `excerptOf` keeps its body out.
+        p.requiresTierId != null ? "<category>Members only</category>" : "",
         `<description>${xml(excerptOf(p))}</description>`,
         "</item>",
       ].join("");

@@ -62,6 +62,12 @@ same `BlogPosting` structured data. `/blog/feed.xml` is your store's RSS feed wi
 this site. A scheduled post appears when its time comes; drafts are never served. A "Latest posts" block
 in your design works here too.
 
+**Members-only posts and pages** work here when `MARKII_STOREFRONT_KEY` is set and `lib/shopper.ts`
+returns the signed-in shopper: this server asks Markii for the content as that shopper, and Markii sends it
+only to a member. Everyone else — and every visitor when there is no key — sees the title and a
+"Members only" notice linking to the products that grant the membership. The content is never cached
+here for the next visitor.
+
 ## For AI agents
 
 `/llms.txt`, `/llms-full.txt`, `/agent.md` and `/sitemap.xml` are your store's own documents, served

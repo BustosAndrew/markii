@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { conflict, notFound, slugify } from "../../api";
+import { ApiError, conflict, notFound, slugify } from "../../api";
 import {
   customerMemberships,
   customers,
@@ -8,7 +8,7 @@ import {
   products,
   sites,
 } from "../../db";
-import { extendedEndsAt, membershipStatus } from "../../commerce/memberships";
+import { contentGatedByTier, extendedEndsAt, membershipStatus } from "../../commerce/memberships";
 import { ownSites, siteScope } from "../../tenancy";
 import { patchInverse } from "../inverse";
 import { defineAction } from "../registry";
@@ -166,7 +166,8 @@ export const deleteTier = defineAction({
   id: "memberships.deleteTier",
   description:
     "Delete a membership tier. Every membership in it is deleted with it, and any product that " +
-    "required it becomes visible to everyone.",
+    "required it becomes visible to everyone. Refused while a blog post or page is members-only " +
+    "for it — make those public or move them to another tier first.",
   input: z.object({ tierId: z.number().int().positive() }).strict(),
   permission: "commerce.write",
   /**
@@ -178,6 +179,22 @@ export const deleteTier = defineAction({
   undoable: false,
   async run(input, ctx) {
     const tier = await ownedTier(ctx, input.tierId);
+
+    /**
+     * Content is refused rather than ungated. A product's details were public
+     * all along and only buying it was gated; a members-only post's body is the
+     * paid thing itself, and publishing it to everyone is not a side effect to
+     * report afterwards. The foreign keys hold the same line in the database.
+     */
+    const content = await contentGatedByTier(tier.id, ctx.db);
+    if (content.posts > 0 || content.pages > 0) {
+      throw new ApiError(
+        "CONFLICT",
+        409,
+        `${tier.name} still gates ${content.posts} post(s) and ${content.pages} page(s). Make them public or give them another tier first.`,
+        { reason: "tier_gates_content", ...content },
+      );
+    }
 
     const gated = await ctx.db
       .select({ id: products.id })

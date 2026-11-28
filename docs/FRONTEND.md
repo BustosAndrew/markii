@@ -555,6 +555,28 @@ the **blocklist** are customer data — gate them on `commerce.read` / `commerce
   filled from `listForms`. Publishing refuses `UNKNOWN_FORM` / `FORM_NOT_CHOSEN`.
 - Help: `lib/ops-agents/assistant/help.ts` (`site_design`) names the Forms tab.
 
+### 🆕 New 2026-11-26 — members-only posts and pages — **screens to build**
+
+Contract: `docs/API.md` §18.9 "Members-only posts and pages". **Migration 0054 is applied** to the shared
+database. Nothing new to flip — `BLOG_API_LIVE` and `BUILDER_API_LIVE` already cover it; the types moved.
+
+- **Blog post form:** a *Who can read this* select — *Everyone* plus the store's tiers from
+  `listMembershipTiers({ siteId })` (`lib/api/memberships.ts`) — sent as `requiresTierId` (`null` for
+  everyone) on `createBlogPost` / `updateBlogPost`. It is undoable like any field. On the list, a
+  *Members only* chip from `BlogPostSummary.requiresTierId`. **Nudge for an excerpt** on a gated post: the
+  list's `excerpt` is `""` unless the merchant typed one, because the body's opening words are the paid
+  content — say "Members see the post; everyone else sees its title, cover and this excerpt."
+- **Builder page settings** (Pages panel): the same select, saved with
+  `setDesignPageAccess(siteId, pageId, tierId | null)` (`lib/api/builder.ts`) — **not** through
+  `updateDesignPage`, which stays the brand agent's. Hide it for home, templates and regions (the action
+  answers `409`). It is a draft change: say "Takes effect when you publish". The publish/history diff
+  already lists it as a document field `requiresTierId` (render it as *Access: Everyone → Tea Club*).
+  `DesignPage.requiresTierId` and `PageDocument.requiresTierId` carry the draft value.
+- **Deleting a tier** now answers `409` with `details.reason: "tier_gates_content"` and `{ posts, pages }`
+  — show "Tea Club still gates 2 posts and 1 page. Make them public or move them first." A **restore**
+  can answer `409 tier_missing` with `details.pages` (titles).
+- Nothing to build on the storefront: the notice, the preview note and the labels are rendered there.
+
 ### 🟢 New 2026-11-22 — the blog — screens built
 
 `lib/api/blog.ts` → `listBlogPosts`, `getBlogPost`, `createBlogPost`, `updateBlogPost`,

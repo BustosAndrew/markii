@@ -198,6 +198,11 @@ export const STORE_TABLES: StoreTable[] = [
      * (`builder.restoreVersion`). A document deleted since that publish has no
      * new id, so it gets a negative one — unique within the snapshot and never
      * a real row, so restoring inserts it afresh exactly as it would have.
+     *
+     * A members-only page's tier (§18.9) is an id too. One the import cannot
+     * map — a tier deleted after that publish — becomes `-1`, never null: null
+     * would restore paid content as public, while an id no tier holds makes
+     * `builder.restoreVersion` refuse that version and say why.
      */
     scrub: (row) => {
       // Head code never travels, and a version's snapshot holds the head code of its day.
@@ -208,14 +213,19 @@ export const STORE_TABLES: StoreTable[] = [
       return { ...row, snapshot: rest };
     },
     remap: (row, ids) => {
-      const snapshot = row.snapshot as { documents?: { id: number }[] } | null;
+      const snapshot = row.snapshot as { documents?: { id: number; requiresTierId?: number | null }[] } | null;
       if (!snapshot) return row;
       const documents = ids.get("siteDocuments");
+      const tiers = ids.get("membershipTiers");
       return {
         ...row,
         snapshot: {
           ...snapshot,
-          documents: (snapshot.documents ?? []).map((d, i) => ({ ...d, id: documents?.get(d.id) ?? -(i + 1) })),
+          documents: (snapshot.documents ?? []).map((d, i) => ({
+            ...d,
+            id: documents?.get(d.id) ?? -(i + 1),
+            ...(d.requiresTierId != null ? { requiresTierId: tiers?.get(d.requiresTierId) ?? -1 } : {}),
+          })),
         },
       };
     },

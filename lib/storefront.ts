@@ -158,7 +158,12 @@ export async function loadSite(siteSlug: string): Promise<SiteData | null> {
   };
 }
 
-export type PublishedPage = { id: number; handle: string; title: string; seo: PageSeo; tree: PageNode };
+/**
+ * `requiresTierId` (§18.9, migration 0054): a members-only page — only holders
+ * of the tier read its tree. Published for the storefront, the draft's in the
+ * preview, like every other field here.
+ */
+export type PublishedPage = { id: number; handle: string; title: string; seo: PageSeo; tree: PageNode; requiresTierId: number | null };
 
 /**
  * A document as **published** — the storefront never reads a draft (D51). Null
@@ -173,12 +178,13 @@ export async function publishedDocument(siteId: number, kind: DocumentKind, hand
       title: siteDocuments.publishedTitle,
       seo: siteDocuments.publishedSeo,
       tree: siteDocuments.publishedTree,
+      requiresTierId: siteDocuments.publishedRequiresTierId,
     })
     .from(siteDocuments)
     .where(and(eq(siteDocuments.siteId, siteId), eq(siteDocuments.kind, kind), eq(siteDocuments.publishedHandle, handle)))
     .limit(1);
   if (!doc?.tree || !doc.handle) return null;
-  return { id: doc.id, handle: doc.handle, title: doc.title ?? doc.handle, seo: doc.seo ?? {}, tree: doc.tree };
+  return { id: doc.id, handle: doc.handle, title: doc.title ?? doc.handle, seo: doc.seo ?? {}, tree: doc.tree, requiresTierId: doc.requiresTierId };
 }
 
 export function publishedPage(siteId: number, handle: string): Promise<PublishedPage | null> {
@@ -198,6 +204,7 @@ export async function publishedPages(siteId: number): Promise<(PublishedPage & {
       title: siteDocuments.publishedTitle,
       seo: siteDocuments.publishedSeo,
       tree: siteDocuments.publishedTree,
+      requiresTierId: siteDocuments.publishedRequiresTierId,
     })
     .from(siteDocuments)
     .where(and(eq(siteDocuments.siteId, siteId), eq(siteDocuments.kind, "page"), isNotNull(siteDocuments.publishedTree)))
@@ -210,6 +217,7 @@ export async function publishedPages(siteId: number): Promise<(PublishedPage & {
       title: r.title ?? r.handle,
       seo: r.seo ?? {},
       tree: r.tree,
+      requiresTierId: r.requiresTierId,
       path: r.handle === "home" ? "/" : `/pages/${r.handle}`,
     }))
     .sort((a, b) => (a.handle === "home" ? -1 : b.handle === "home" ? 1 : 0));
@@ -230,12 +238,13 @@ export async function documentFor(data: SiteData, kind: DocumentKind, handle: st
       seo: siteDocuments.seo,
       tree: siteDocuments.draftTree,
       deleted: siteDocuments.draftDeleted,
+      requiresTierId: siteDocuments.requiresTierId,
     })
     .from(siteDocuments)
     .where(and(eq(siteDocuments.siteId, data.site.id), eq(siteDocuments.kind, kind), eq(siteDocuments.handle, handle)))
     .limit(1);
   if (!doc || doc.deleted) return null;
-  return { id: doc.id, handle: doc.handle, title: doc.title, seo: doc.seo ?? {}, tree: doc.tree };
+  return { id: doc.id, handle: doc.handle, title: doc.title, seo: doc.seo ?? {}, tree: doc.tree, requiresTierId: doc.requiresTierId };
 }
 
 export function pageFor(data: SiteData, handle: string): Promise<PublishedPage | null> {
@@ -267,7 +276,8 @@ const loadRegions = cache(async (siteId: number, preview: boolean): Promise<Regi
     const handle = preview ? r.handle : r.publishedHandle;
     const tree = preview ? (r.deleted ? null : r.draftTree) : r.publishedTree;
     if (!handle || !tree || !(REGION_HANDLES as readonly string[]).includes(handle)) continue;
-    out[handle as RegionHandle] = { id: r.id, handle, title: r.title, seo: {}, tree };
+    // Regions are on every page and are never gated.
+    out[handle as RegionHandle] = { id: r.id, handle, title: r.title, seo: {}, tree, requiresTierId: null };
   }
   return out;
 });

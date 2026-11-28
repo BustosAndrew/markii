@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { ArticleBody, articleStructuredData } from "@markii/renderer/article-view";
+import { MembersGate } from "@markii/renderer/members-gate";
 import { postDateLabel } from "@markii/renderer/post-list";
 import { getPost, getStore, siteUrl } from "../../../lib/markii";
 import { JsonLd, StorePage } from "../../../lib/page";
@@ -12,6 +13,10 @@ type Props = { params: Promise<{ handle: string }> };
  * `h1`, the body's headings start at `h2`, and the `BlogPosting` structured
  * data is the route's own, so no design can remove it. A draft or scheduled
  * post is not served by Markii, so it is a 404 here until its time comes.
+ *
+ * A members-only post is read from Markii as the shopper (`getPost`); a
+ * shopper without the tier gets its title, excerpt and a way to join, and its
+ * body never reaches this server, let alone the page.
  */
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
@@ -52,6 +57,7 @@ export default async function BlogPostRoute({ params }: Props) {
     publishedAt: post.publishedAt,
     modifiedAt: post.updatedAt,
     store: { name: store.store.name, url: `${base}/` },
+    ...(post.membersOnly ? { membersOnly: { bodyShown: !post.locked } } : {}),
   });
 
   return (
@@ -75,7 +81,19 @@ export default async function BlogPostRoute({ params }: Props) {
               <img src={post.coverImage} alt={post.coverAlt} loading="eager" fetchPriority="high" decoding="async" />
             </figure>
           ) : null}
-          <ArticleBody src={post.body} baseUrl={base} hasCover={Boolean(post.coverImage)} />
+          {post.locked ? (
+            <>
+              {post.excerpt ? <p className="sf-lede">{post.excerpt}</p> : null}
+              <MembersGate
+                what="post"
+                tierName={post.gate?.tierName ?? null}
+                signInHref={`${base}/account`}
+                join={(post.gate?.join ?? []).map((j) => ({ name: j.name, href: `${base}/p/${j.slug}` }))}
+              />
+            </>
+          ) : (
+            <ArticleBody src={post.body} baseUrl={base} hasCover={Boolean(post.coverImage)} />
+          )}
           <p className="sf-pager">
             <a href={`${base}/blog`}>← All posts</a>
           </p>

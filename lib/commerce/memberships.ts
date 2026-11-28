@@ -1,13 +1,15 @@
 import "server-only";
 
-import { and, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm";
+import { and, asc, count, eq, inArray, isNotNull, isNull, ne, or } from "drizzle-orm";
 import { conflict } from "../api";
 import {
+  blogPosts,
   customerMemberships,
   customers,
   db,
   membershipTiers,
   products,
+  siteDocuments,
   sites,
   type DbHandle,
 } from "../db";
@@ -626,6 +628,78 @@ export async function membershipGateFor(
   const tiers = customerId === null ? new Set<number>() : await activeTierIds(customerId);
 
   return { tierName: tier.name, tierHandle: tier.handle, unlocked: tiers.has(tier.id) };
+}
+
+/** How a members-only page or post tells a visitor what to buy. */
+export const JOIN_LINKS_MAX = 5;
+
+export type ContentGate = {
+  /** Null only if the tier vanished — which the schema prevents; the gate then stays shut. */
+  tierName: string | null;
+  /** True for a member, and in the builder preview — the merchant reads their own content. */
+  unlocked: boolean;
+  /** Products that confer the tier and that anyone may buy: where "Join" goes. */
+  join: { name: string; slug: string }[];
+};
+
+/**
+ * Resolve the gate on a members-only page or post (§18.9, migration 0054).
+ *
+ * The content counterpart of `membershipGateFor`, with one more answer: **how
+ * to join**. A product page can show its own price; a locked article has
+ * nothing to buy on it, so it names the products that grant the tier. A
+ * product that itself requires a tier is left out — a non-member cannot buy a
+ * renewal, so linking to one is a dead end.
+ *
+ * **Fails closed.** No tier, no customer, or a lapsed membership all read as
+ * locked. The preview is the exception, because it is the merchant reading
+ * their own draft; it is never a shopper (`loadSite` validates the token).
+ */
+export async function contentGateFor(siteId: number, requiresTierId: number, opts: { preview?: boolean } = {}): Promise<ContentGate> {
+  const [[tier], join] = await Promise.all([
+    db
+      .select({ id: membershipTiers.id, name: membershipTiers.name })
+      .from(membershipTiers)
+      .where(and(eq(membershipTiers.id, requiresTierId), eq(membershipTiers.siteId, siteId)))
+      .limit(1),
+    db
+      .select({ name: products.name, slug: products.slug })
+      .from(products)
+      .where(
+        and(
+          eq(products.siteId, siteId),
+          eq(products.grantsTierId, requiresTierId),
+          eq(products.enabled, true),
+          isNull(products.requiresTierId),
+        ),
+      )
+      .orderBy(asc(products.name))
+      .limit(JOIN_LINKS_MAX),
+  ]);
+  if (!tier) return { tierName: null, unlocked: false, join: [] };
+  if (opts.preview) return { tierName: tier.name, unlocked: true, join };
+
+  // Lazily, as in `membershipGateFor`: the auth helper reads request cookies.
+  const { currentCustomerId } = await import("../auth/shopper");
+  const customerId = await currentCustomerId(siteId);
+  const held = customerId === null ? new Set<number>() : await activeTierIds(customerId);
+  return { tierName: tier.name, unlocked: held.has(tier.id), join };
+}
+
+/**
+ * What still names a tier as its gate — posts, and pages in draft or live.
+ * `memberships.deleteTier` refuses while any does: deleting the tier must not
+ * be how paid content becomes public.
+ */
+export async function contentGatedByTier(tierId: number, handle: DbHandle = db): Promise<{ posts: number; pages: number }> {
+  const [[posts], [pages]] = await Promise.all([
+    handle.select({ n: count() }).from(blogPosts).where(eq(blogPosts.requiresTierId, tierId)),
+    handle
+      .select({ n: count() })
+      .from(siteDocuments)
+      .where(or(eq(siteDocuments.requiresTierId, tierId), eq(siteDocuments.publishedRequiresTierId, tierId))),
+  ]);
+  return { posts: Number(posts?.n ?? 0), pages: Number(pages?.n ?? 0) };
 }
 
 /**

@@ -10,5 +10,6 @@ import { loadReadableSite, publishedDesign } from "@/lib/storefront/read-api-ser
  */
 export const GET = handler(async (_req, { params }) => {
   const data = await loadReadableSite((await params).site);
-  return NextResponse.json(storeJson(data, await publishedDesign(data)), { headers: READ_API_HEADERS });
+  const { design, membersOnlyPages } = await publishedDesign(data);
+  return NextResponse.json(storeJson(data, design, membersOnlyPages), { headers: READ_API_HEADERS });
 });

@@ -184,8 +184,10 @@ Files are stored privately and each download link is signed, limited, and thrott
     {
       id: "memberships",
       title: "Memberships",
-      summary: "Gating products behind tiers, and recurring memberships.",
-      body: `Membership tiers gate products. Buying a product that grants a tier gives the shopper that membership; a refund revokes it.
+      summary: "Gating products, blog posts and pages behind tiers, and recurring memberships.",
+      body: `Membership tiers gate products, blog posts and website pages. Buying a product that grants a tier gives the shopper that membership; a refund revokes it.
+
+A members-only post or page shows everyone else its title, cover and your excerpt, with links to the products that grant the tier — never its content. Give a members-only post an excerpt, because it is all non-members see. A page's access is set in the website's Design editor and goes live when you publish; a post's is set on the post and is live when saved. A tier that still gates a post or page cannot be deleted.
 
 A membership product can renew monthly or yearly. Renewals are a subscription on your own Stripe account, so the shopper pays you directly; shoppers must sign in to buy one, and can cancel their own renewal (access runs to the end of what they paid for). Recurring memberships require Stripe Tax on the store.`,
       links: [{ label: "Memberships", href: "/dashboard/memberships" }],

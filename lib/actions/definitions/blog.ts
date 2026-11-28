@@ -14,6 +14,7 @@ import {
   postVisible,
   publishProblems,
 } from "../../blog/rules";
+import { assertTiersOwnedBySite } from "../../commerce/memberships";
 import { movedPathDiffs, redirectMovedPath } from "../../storefront/redirect-moves";
 import { ownSites, siteScope } from "../../tenancy";
 import { ARTICLE_MAX, articleImageUrl } from "@markii/renderer/article";
@@ -47,6 +48,8 @@ const fields = {
   coverAlt: z.string().max(300),
   author: z.string().trim().max(120),
   seo: pageSeoSchema,
+  /** Members-only (§18.9): only holders of this tier read the body. Null: everyone. */
+  requiresTierId: z.number().int().positive().nullable(),
 };
 
 async function ownedSite(ctx: ActionContext, siteId: number) {
@@ -99,6 +102,7 @@ export const createPost = defineAction({
       coverAlt: fields.coverAlt.default(""),
       author: fields.author.default(""),
       seo: fields.seo.default({}),
+      requiresTierId: fields.requiresTierId.optional(),
     })
     .strict(),
   permission: "cms.write",
@@ -118,6 +122,7 @@ export const createPost = defineAction({
     if (input.handle && taken.has(input.handle)) {
       throw new ApiError("CONFLICT", 409, `A post already uses /blog/${input.handle}.`, { reason: "handle_taken" });
     }
+    if (input.requiresTierId) await assertTiersOwnedBySite([input.requiresTierId], input.siteId, ctx.db);
     const postHandle = input.handle ?? freeHandle(handleFromTitle(input.title), taken);
     const [row] = await ctx.db
       .insert(blogPosts)
@@ -131,6 +136,7 @@ export const createPost = defineAction({
         coverAlt: input.coverAlt,
         author: input.author,
         seo: input.seo,
+        requiresTierId: input.requiresTierId ?? null,
         createdBy: `${ctx.actor.type}:${ctx.actor.id}`,
       })
       .returning();
@@ -139,14 +145,15 @@ export const createPost = defineAction({
   },
 });
 
-const editable = ["handle", "title", "excerpt", "body", "coverImage", "coverAlt", "author", "seo"] as const;
+const editable = ["handle", "title", "excerpt", "body", "coverImage", "coverAlt", "author", "seo", "requiresTierId"] as const;
 
 export const updatePost = defineAction({
   id: "blog.updatePost",
   description:
-    "Change a blog post — title, handle, excerpt, Markdown body, cover image, byline or SEO. Only the " +
-    "fields given change. A live post's edits are live when saved. Changing a live post's handle " +
-    "leaves a redirect from the old /blog/ address unless redirectOldLink is false.",
+    "Change a blog post — title, handle, excerpt, Markdown body, cover image, byline, SEO, or who may " +
+    "read it (requiresTierId: a membership tier, or null for everyone). Only the fields given change. " +
+    "A live post's edits are live when saved. Changing a live post's handle leaves a redirect from the " +
+    "old /blog/ address unless redirectOldLink is false.",
   input: z
     .object({
       postId: z.number().int().positive(),
@@ -158,6 +165,7 @@ export const updatePost = defineAction({
       coverAlt: fields.coverAlt.optional(),
       author: fields.author.optional(),
       seo: fields.seo.optional(),
+      requiresTierId: fields.requiresTierId.optional(),
       redirectOldLink: z.boolean().optional(),
     })
     .strict(),
@@ -168,6 +176,7 @@ export const updatePost = defineAction({
   inverse: patchInverse({ actionId: "blog.updatePost", idField: "postId", ignore: ["redirect"] }),
   async run(input, ctx) {
     const post = await ownedPost(ctx, input.postId);
+    if (input.requiresTierId) await assertTiersOwnedBySite([input.requiresTierId], post.siteId, ctx.db);
     if (input.handle !== undefined && input.handle !== post.handle) {
       const [taken] = await ctx.db
         .select({ id: blogPosts.id })

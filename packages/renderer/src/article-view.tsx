@@ -80,6 +80,13 @@ export type ArticleLdInput = {
   publishedAt: string;
   modifiedAt: string;
   store: { name: string; url: string };
+  /**
+   * Members-only (§18.9). Marked `isAccessibleForFree: false`, the Schema.org
+   * signal search engines read for paywalled content, so a page that shows a
+   * member more than it shows a crawler is not mistaken for cloaking. When the
+   * body is on the page (a member is reading), `hasPart` names where it is.
+   */
+  membersOnly?: { bodyShown: boolean };
 };
 
 /**
@@ -100,6 +107,15 @@ export function articleStructuredData(a: ArticleLdInput): object {
     dateModified: a.modifiedAt,
     author: a.author ? { "@type": "Person", name: a.author } : { "@type": "Organization", name: a.store.name, url: a.store.url },
     publisher: { "@type": "Organization", name: a.store.name, url: a.store.url },
+    ...(a.membersOnly ? membersOnlyLd(a.membersOnly.bodyShown) : {}),
+  };
+}
+
+/** `isAccessibleForFree` for a members-only page or post, with `hasPart` when its body is on the page. */
+export function membersOnlyLd(bodyShown: boolean, cssSelector = ".mk-article-body"): object {
+  return {
+    isAccessibleForFree: false,
+    ...(bodyShown ? { hasPart: { "@type": "WebPageElement", isAccessibleForFree: false, cssSelector } } : {}),
   };
 }
 

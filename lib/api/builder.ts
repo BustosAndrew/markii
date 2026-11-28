@@ -40,6 +40,8 @@ export type DesignPage = {
   published: boolean;
   /** `/` for home, `/pages/{handle}` otherwise. */
   path: string;
+  /** Members-only in the draft (§18.9): a membership tier, or null for everyone. Set with `setDesignPageAccess`. */
+  requiresTierId: number | null;
   updatedAt: string;
 };
 
@@ -96,9 +98,11 @@ export type PageDocument = {
   handle: string;
   title: string;
   seo: PageSeo;
+  /** Members-only in the draft (§18.9); null for everyone. */
+  requiresTierId: number | null;
   deleted: boolean;
   tree: PageNode;
-  published: { handle: string | null; title: string | null; seo: PageSeo | null; tree: PageNode } | null;
+  published: { handle: string | null; title: string | null; seo: PageSeo | null; tree: PageNode; requiresTierId: number | null } | null;
   updatedAt: string;
 };
 
@@ -297,6 +301,17 @@ export const updateDesignPage = (input: { siteId: number; pageId: number; title?
   invokeAction<Revisioned>("builder.updatePage", input);
 
 export const deleteDesignPage = (siteId: number, pageId: number) => invokeAction<Revisioned>("builder.deletePage", { siteId, pageId });
+
+/**
+ * Make a page members-only (a tier from `listMembershipTiers({ siteId })`) or
+ * public again (`null`) — §18.9, 2026-11-26. A draft change: it goes live with
+ * the next publish, and the publish diff lists it as `requiresTierId`.
+ * `medium`, undoable, **never the brand agent's** — so it is its own action,
+ * not a field of `updateDesignPage`. `409` for the home page, a template or a
+ * region, or a tier of another store.
+ */
+export const setDesignPageAccess = (siteId: number, pageId: number, requiresTierId: number | null) =>
+  invokeAction<{ pageId: number; requiresTierId: number | null } & Revisioned>("builder.setPageAccess", { siteId, pageId, requiresTierId });
 
 export const restoreDesignPage = (siteId: number, pageId: number) => invokeAction<Revisioned>("builder.restorePage", { siteId, pageId });
 

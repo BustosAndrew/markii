@@ -82,7 +82,8 @@ the merchant's own account** (`lib/payments/stripe-charges.ts`), server-side ver
 `refund_application_fee` — it is never in the funds flow (D4). `orders.paymentReference` is the
 rail-neutral link back to the charge; `txHash` stays x402-only.
 
-**Phase B subscription billing is built; threshold-fee invoicing is not.** The threshold fee engine,
+**Phase B is built — subscription billing and threshold-fee invoicing both** (this heading said
+invoicing was not until 2026-11-26, two paragraphs above the one describing it). The threshold fee engine,
 meter, plan catalog, entitlements, and period-close assessments are live (`lib/billing/`), as is the
 **Stripe webhook receiver** (`/api/webhooks/stripe` — signature-verified, idempotent on Stripe's
 event id, separate secrets for platform and Connect events). **Markii now charges merchants for
@@ -430,7 +431,7 @@ tools forward to the real `GET` handlers carrying the caller's own `Authorizatio
 scoping and permissions are the dashboard's and nothing is reimplemented — registering them as
 actions would write an `action_invocations` row per list call and bury the audit log. A test asserts
 they write none. `read_store` is backed by **`/api/org`, not `/api/me`**, because `/api/me` uses
-`requireSession()` and answers 401 to every API token. **MCP `resources/*` is still unbuilt.**
+`requireSession()` and answers 401 to every API token. MCP `resources/*` came later the same day (below).
 
 **Building it forced §22 rule 3 to become real.** "A `high` action always requires human approval
 and cannot auto-run" had been enforced by nothing — `describeAction` *advertised*
@@ -714,7 +715,17 @@ a post must do neither. Status is derived from `publishedAt` per request (schedu
 The body is long-form Markdown parsed to a tree (`@markii/renderer/article`). **Posts reach the
 export and the builder (2026-11-25)**: `GET /api/blog/posts[/{handle}]` (live only), the export's own
 `/blog` pages and feed, and a `blogPosts` "Latest posts" block fed by `ctx.postsOf` — one `PostList`
-(`@markii/renderer/post-list`) draws every listing. **Storefront forms are
+(`@markii/renderer/post-list`) draws every listing. **Members-only posts and pages are built
+(2026-11-26, §18.9, migration 0054, applied)** — owner decisions: posts *and* pages; non-members get a
+**teaser and a way to join** (title, the merchant's excerpt, links to the products granting the tier).
+The rule is **a gated body reaches a member and nobody else**, on every surface: the page, the index,
+the feed, `llms.txt` (listed, "Members only."), `llms-full.txt` (left out), the read API (`locked`,
+`private, no-store`), and `GET /api/store`, whose design **withholds a gated page's tree** — the export
+asks `GET /api/pages/{handle}` as the shopper. **`excerptOf` never auto-excerpts a gated post**, which is
+what keeps every listing safe. A page's gate is **`builder.setPageAccess`** (draft, goes live at publish,
+`medium`, **not the brand agent's**); a post's is `requiresTierId` on `blog.*`. **Content gates fail
+closed**: the FKs have no `on delete`, `memberships.deleteTier` refuses while content names the tier, and
+a restore whose tier is gone is refused — unlike `products.requires_tier_id`, which is `set null`. **Storefront forms are
 built (2026-11-22)** — **migration 0053** (`site_forms`, `form_submissions`, `form_blocklist`,
 applied). Owner decisions: spam is stopped by **rate limits** (address, sender email, store) and a
 **per-store blocklist** checked against the sender's email before anything is stored; **an email per
@@ -728,8 +739,9 @@ platform-account subscription create, change and preview — **no `Stripe-Accoun
 opposite direction of money from §18.6 — decided from two facts that are reported apart and never
 merged: Tax active on the platform account (Markii's switch) and a billing address on the org (the
 merchant's form, `billing.updateBillingAddress`, written to their Stripe Customer in the same call).
-**No address → created untaxed and said so**, not refused. The frontend's address form is not built
-yet (`docs/FRONTEND.md`), so today every merchant is invoiced untaxed and the API says why.
+**No address → created untaxed and said so**, not refused. The address form is on
+`/dashboard/billing` (`components/dashboard/billing-address-form.tsx`) — this line called it unbuilt
+until 2026-11-26 — so a merchant who has not filled it in is invoiced untaxed and the API says why.
 
 **Collections reach the storefront as of 2026-09-14** — `/collections` and `/collections/{handle}`,
 `llms.txt` and the sitemap. §18.2 had a `publishedAt` "invisible to storefronts until published"
@@ -824,7 +836,8 @@ and `tax-shipping.ts`). **Digital delivery screens have since landed** — verif
 `/dashboard/delivery`, `components/dashboard/digital-assets-panel.tsx`, and the product page's
 attachment editor. That entry said "screens still do not" for a week after they shipped, which is
 the same one-directional staleness this file warns about two paragraphs down. The discount, tax, and
-inventory-level previews are the ones still without a screen. `ACTIONS_UNDO_API_LIVE` **flipped to
+inventory-level previews have screens too (`discount-preview.tsx`, `tax-preview.tsx`, the catalog's levels
+— this line said otherwise until 2026-11-26). `ACTIONS_UNDO_API_LIVE` **flipped to
 `true` on 2026-08-18** in the same change that built the route, and **`ORG_AUDIT_API_LIVE` on
 2026-09-06** in the same change that built `/api/org/audit` — which also corrected that constant's
 `OrgAuditEntry`, a planned type whose flat `entity`/`before`/`after` could not have described the

@@ -13,6 +13,7 @@
     "./article-view": "./src/article-view.tsx",
     "./forms-view": "./src/forms-view.tsx",
     "./post-list": "./src/post-list.tsx",
+    "./members-gate": "./src/members-gate.tsx",
     "./theme-shell": "./src/theme-shell.tsx"
   },
   "files": ["src", "!src/**/*.test.ts", "LICENSE", "NOTICE", "README.md"],

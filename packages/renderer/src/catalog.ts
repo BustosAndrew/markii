@@ -69,6 +69,8 @@ export type RenderPost = {
   /** ISO; null only for a draft, which only the preview lists. */
   publishedAt: string | null;
   status?: "draft" | "scheduled" | "published";
+  /** Members-only (§18.9): listed with its title and excerpt, labelled, its body behind the gate. */
+  membersOnly?: boolean;
 };
 
 /**

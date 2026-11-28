@@ -1,5 +1,6 @@
 import type { BlogPost, Category, Collection, Product, SiteForm } from "@/lib/db";
 import { descriptionOf, excerptOf } from "@/lib/blog/rules";
+import type { ContentGate } from "@/lib/commerce/memberships";
 import type { FormField } from "@markii/renderer/forms";
 import type { ThemePackage } from "@markii/renderer/theme-package";
 import type { SiteData } from "@/lib/storefront";
@@ -117,8 +118,14 @@ export type StorefrontStoreJson = {
    * saved blocks** (those are the editor's, not the store's). `null` when the
    * store has never published one: Markii then draws its fixed layout, and so
    * must the headless store.
+   *
+   * **Members-only pages (§18.9) arrive with an empty tree** — the tree is the
+   * paid content and this answer is public. They are listed in
+   * `membersOnlyPages`; fetch one's tree from `GET /api/pages/{handle}` on a
+   * shopper's behalf.
    */
   design: ThemePackage | null;
+  membersOnlyPages: { handle: string; requiresTierId: number }[];
 };
 
 export function categoryJson(c: Category): StorefrontCategoryJson {
@@ -160,7 +167,11 @@ export function productJson(data: Pick<SiteData, "baseUrl" | "prods">, p: Produc
 }
 
 /** Enabled categories only — the storefront's own navigation hides the rest. */
-export function storeJson(data: SiteData, design: ThemePackage | null): StorefrontStoreJson {
+export function storeJson(
+  data: SiteData,
+  design: ThemePackage | null,
+  membersOnlyPages: { handle: string; requiresTierId: number }[] = [],
+): StorefrontStoreJson {
   const { site } = data;
   return {
     store: {
@@ -175,6 +186,44 @@ export function storeJson(data: SiteData, design: ThemePackage | null): Storefro
     categories: data.cats.filter((c) => c.enabled).map(categoryJson),
     collections: data.colls.map((c) => collectionJson(data, c)),
     design: design ? { ...design, savedBlocks: [] } : null,
+    membersOnlyPages,
+  };
+}
+
+/**
+ * One published builder page (`GET /api/pages/{handle}`) — what its route
+ * draws. `tree` is null and `locked` true on a members-only page the caller
+ * may not read; its title and SEO are public, as on its own page.
+ */
+export type StorefrontPageJson = {
+  handle: string;
+  title: string;
+  seo: { title?: string; description?: string; ogImage?: string; noindex?: boolean };
+  url: string;
+  membersOnly: boolean;
+  requiresTierId: number | null;
+  locked: boolean;
+  gate: StorefrontGateJson | null;
+  tree: unknown | null;
+};
+
+export function pageJson(
+  data: Pick<SiteData, "baseUrl">,
+  page: { handle: string; title: string; seo: StorefrontPageJson["seo"]; tree: unknown; requiresTierId: number | null },
+  gate: ContentGate | null = null,
+): StorefrontPageJson {
+  const base = data.baseUrl.replace(/\/$/, "");
+  const locked = page.requiresTierId != null && !gate?.unlocked;
+  return {
+    handle: page.handle,
+    title: page.title,
+    seo: page.seo,
+    url: page.handle === "home" ? `${base}/` : `${base}/pages/${page.handle}`,
+    membersOnly: page.requiresTierId != null,
+    requiresTierId: page.requiresTierId,
+    locked,
+    gate: page.requiresTierId != null ? (gateJson(data, gate) ?? { tierName: null, join: [] }) : null,
+    tree: locked ? null : page.tree,
   };
 }
 
@@ -222,10 +271,24 @@ export type StorefrontPostSummaryJson = {
   publishedAt: string;
   updatedAt: string;
   url: string;
+  /**
+   * Members-only (§18.9). Listed like any post — title, merchant excerpt,
+   * cover — with the body behind the gate. Compare `requiresTierId` with the
+   * shopper's tiers, as for a members-only product.
+   */
+  membersOnly: boolean;
+  requiresTierId: number | null;
 };
 
-/** One post as `/blog/{handle}` shows it. `body` is the Markdown subset `@markii/renderer/article` parses. */
+/**
+ * One post as `/blog/{handle}` shows it. `body` is the Markdown subset
+ * `@markii/renderer/article` parses — `""` and `locked: true` on a members-only
+ * post the caller may not read.
+ */
 export type StorefrontPostJson = StorefrontPostSummaryJson & {
+  locked: boolean;
+  /** On a members-only post: who it is for and what to buy to join, for the notice in its place. Null on a public one. */
+  gate: StorefrontGateJson | null;
   body: string;
   /** The meta description: the post's SEO description, else its excerpt. */
   description: string;
@@ -245,14 +308,37 @@ export function postSummaryJson(data: Pick<SiteData, "baseUrl">, p: BlogPost): S
     publishedAt: (p.publishedAt ?? p.createdAt).toISOString(),
     updatedAt: p.updatedAt.toISOString(),
     url: `${base}/blog/${p.handle}`,
+    membersOnly: p.requiresTierId != null,
+    requiresTierId: p.requiresTierId ?? null,
   };
 }
 
-export function postJson(data: Pick<SiteData, "baseUrl">, p: BlogPost): StorefrontPostJson {
+/** A members-only page's or post's gate as the read API reports it (§18.9). */
+export type StorefrontGateJson = {
+  tierName: string | null;
+  /** Products that grant the tier — where a "Join" link goes. */
+  join: { name: string; slug: string; url: string }[];
+};
+
+function gateJson(data: Pick<SiteData, "baseUrl">, gate: ContentGate | null): StorefrontGateJson | null {
+  if (!gate) return null;
+  const base = data.baseUrl.replace(/\/$/, "");
+  return { tierName: gate.tierName, join: gate.join.map((j) => ({ ...j, url: `${base}/p/${j.slug}` })) };
+}
+
+/**
+ * `gate` is the caller's view of a members-only post (`contentGateFor`); the
+ * body is sent only when it is unlocked. A members-only post with no gate given
+ * is locked — the safe reading of a caller that forgot to ask.
+ */
+export function postJson(data: Pick<SiteData, "baseUrl">, p: BlogPost, gate: ContentGate | null = null): StorefrontPostJson {
   const { title, description, ogImage, noindex } = p.seo;
+  const locked = p.requiresTierId != null && !gate?.unlocked;
   return {
     ...postSummaryJson(data, p),
-    body: p.body,
+    locked,
+    gate: p.requiresTierId != null ? (gateJson(data, gate) ?? { tierName: null, join: [] }) : null,
+    body: locked ? "" : p.body,
     description: descriptionOf(p),
     seo: { ...(title ? { title } : {}), ...(description ? { description } : {}), ...(ogImage ? { ogImage } : {}), ...(noindex ? { noindex } : {}) },
   };

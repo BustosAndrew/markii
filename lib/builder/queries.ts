@@ -42,6 +42,7 @@ export async function designSummary(siteId: number) {
       title: siteDocuments.title,
       draftDeleted: siteDocuments.draftDeleted,
       publishedHandle: siteDocuments.publishedHandle,
+      requiresTierId: siteDocuments.requiresTierId,
       updatedAt: siteDocuments.updatedAt,
     })
     .from(siteDocuments)
@@ -107,6 +108,8 @@ export async function designSummary(siteId: number) {
         deleted: d.draftDeleted,
         published: d.publishedHandle !== null,
         path: d.handle === "home" ? "/" : `/pages/${d.handle}`,
+        /** Members-only in the draft (§18.9); null for everyone. */
+        requiresTierId: d.requiresTierId,
         updatedAt: d.updatedAt.toISOString(),
       })),
     /** M4. `previewPath` is null when the store has no product (or published collection) to show it with. */
@@ -131,10 +134,12 @@ export async function pageDocument(siteId: number, pageId: number) {
     handle: doc.handle,
     title: doc.title,
     seo: doc.seo,
+    /** Members-only in the draft (§18.9, `builder.setPageAccess`); null for everyone. */
+    requiresTierId: doc.requiresTierId,
     deleted: doc.draftDeleted,
     tree: doc.draftTree,
     published: doc.publishedTree
-      ? { handle: doc.publishedHandle, title: doc.publishedTitle, seo: doc.publishedSeo, tree: doc.publishedTree }
+      ? { handle: doc.publishedHandle, title: doc.publishedTitle, seo: doc.publishedSeo, tree: doc.publishedTree, requiresTierId: doc.publishedRequiresTierId }
       : null,
     updatedAt: doc.updatedAt.toISOString(),
   };
@@ -231,7 +236,7 @@ export async function designState(siteId: number, which: DesignStateRef): Promis
         tokens: design.draftTokens as DesignTokens,
         customCss: design.draftCustomCss,
         headHtml: design.draftHeadHtml,
-        documents: docs.map((d) => ({ id: d.id, kind: d.kind, handle: d.handle, title: d.title, seo: d.seo, tree: d.draftTree })),
+        documents: docs.map((d) => ({ id: d.id, kind: d.kind, handle: d.handle, title: d.title, seo: d.seo, tree: d.draftTree, requiresTierId: d.requiresTierId })),
       },
     };
   }

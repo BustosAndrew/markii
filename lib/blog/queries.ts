@@ -57,6 +57,7 @@ export function renderPost(row: BlogPost): RenderPost {
     author: row.author,
     publishedAt: row.publishedAt?.toISOString() ?? null,
     status: postStatus(row.publishedAt),
+    membersOnly: row.requiresTierId != null,
   };
 }
 
@@ -94,6 +95,8 @@ export function postSummary(row: BlogPost) {
     status: postStatus(row.publishedAt),
     publishedAt: row.publishedAt?.toISOString() ?? null,
     path: `/blog/${row.handle}`,
+    /** Members-only (§18.9): the tier whose holders read the body. Null: everyone. */
+    requiresTierId: row.requiresTierId,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

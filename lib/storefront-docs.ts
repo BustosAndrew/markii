@@ -45,8 +45,19 @@ async function listedPages(data: SiteData) {
   return (await publishedPages(data.site.id)).filter((p) => !p.seo.noindex);
 }
 
-function discovery(p: { title: string; path: string; seo: { description?: string } }): DiscoveryPage {
-  return { title: p.title, path: p.path, description: p.seo.description || undefined };
+/**
+ * Members-only pages and posts (§18.9) are still **listed** — their page is a
+ * real public teaser with a way to join — and said to be members-only, so an
+ * agent does not fetch one expecting the content. Their full text is never in
+ * `llms-full.txt`.
+ */
+function membersNote(description: string | undefined, gated: boolean): string | undefined {
+  if (!gated) return description;
+  return description ? `Members only. ${description}` : "Members only.";
+}
+
+function discovery(p: { title: string; path: string; seo: { description?: string }; requiresTierId: number | null }): DiscoveryPage {
+  return { title: p.title, path: p.path, description: membersNote(p.seo.description || undefined, p.requiresTierId != null) };
 }
 
 /**
@@ -62,7 +73,7 @@ const POSTS_IN_DOCS = 20;
 const POSTS_IN_FULL_TEXT = 50;
 
 function postDiscovery(p: Awaited<ReturnType<typeof listedPosts>>[number]): DiscoveryPage {
-  return { title: p.title, path: `/blog/${p.handle}`, description: descriptionOf(p) || undefined };
+  return { title: p.title, path: `/blog/${p.handle}`, description: membersNote(descriptionOf(p) || undefined, p.requiresTierId != null) };
 }
 
 /** The pages `llms.txt` and `agent.md` advertise — the home page is the store link itself. */
@@ -99,7 +110,10 @@ export async function renderAgentMd(data: SiteData): Promise<string> {
  * empty document would claim otherwise.
  */
 export async function renderLlmsFullTxt(data: SiteData): Promise<string | null> {
-  const [pages, posts] = await Promise.all([listedPages(data), listedPosts(data)]);
+  const [allPages, allPosts] = await Promise.all([listedPages(data), listedPosts(data)]);
+  // Full text is what a members-only page or post withholds, so neither is here (§18.9).
+  const pages = allPages.filter((p) => p.requiresTierId == null);
+  const posts = allPosts.filter((p) => p.requiresTierId == null);
   if (pages.length === 0 && posts.length === 0) return null;
   const { baseUrl, prods, cats, colls, site } = data;
   const ctx = {

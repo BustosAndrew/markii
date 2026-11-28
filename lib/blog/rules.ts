@@ -70,12 +70,21 @@ export function publishProblems(post: { title: string; body: string; coverImage:
   return { errors, warnings };
 }
 
-/** The excerpt a shopper and an agent see: the merchant's, or the post's opening words. */
-export function excerptOf(post: { excerpt: string; body: string }): string {
+type ExcerptSource = { excerpt: string; body: string; requiresTierId?: number | null };
+
+/**
+ * The excerpt a shopper and an agent see: the merchant's, or the post's opening
+ * words — **except on a members-only post**, whose opening words are the paid
+ * content itself. There it is the merchant's excerpt or nothing, and every
+ * public surface (the blog index, the feed, the read API, `llms.txt`, link
+ * previews) goes through here, so none can leak the body by taking the default.
+ */
+export function excerptOf(post: ExcerptSource): string {
+  if (post.requiresTierId != null) return post.excerpt.trim();
   return post.excerpt.trim() || autoExcerpt(post.body);
 }
 
 /** The description search engines and link previews get: SEO first, then the excerpt. */
-export function descriptionOf(post: { excerpt: string; body: string; seo: { description?: string } }): string {
+export function descriptionOf(post: ExcerptSource & { seo: { description?: string } }): string {
   return post.seo.description?.trim() || excerptOf(post);
 }

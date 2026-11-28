@@ -1,4 +1,4 @@
-import { and, count, eq } from "drizzle-orm";
+import { and, count, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { ApiError, conflict, notFound } from "../../api";
 import { blockingErrors, checkCssBudget, checkHeadCode, checkPage, checkTheme, type CheckResult } from "../../builder/checks";
@@ -52,7 +52,8 @@ import {
   type RegionHandle,
   type TemplateHandle,
 } from "@markii/renderer/types";
-import { siteDesignVersions, siteDesigns, siteDocuments, siteSavedBlocks, sites } from "../../db";
+import { membershipTiers, siteDesignVersions, siteDesigns, siteDocuments, siteSavedBlocks, sites } from "../../db";
+import { assertTiersOwnedBySite } from "../../commerce/memberships";
 import { defineAction } from "../registry";
 import type { ActionContext } from "../types";
 
@@ -903,6 +904,50 @@ export const updatePage = defineAction({
   },
 });
 
+/**
+ * Make a page members-only, or public again (§18.9, migration 0054).
+ *
+ * **Its own action, not a field of `builder.updatePage`**, because that one is
+ * `agentExecution: "draft"` — the brand agent runs it for real — and who may
+ * read a page is an access decision, not a design one. Here no agent may
+ * execute (`invokeAction` refuses an agent at every tier without the flag).
+ * It edits the **draft** like every page field and goes live with the next
+ * publish, so the publish diff shows it and history can restore it.
+ *
+ * Pages only, and never home: the front page is the store itself, and a
+ * template or region renders on every product or every page.
+ */
+export const setPageAccess = defineAction({
+  id: "builder.setPageAccess",
+  description:
+    "Make a page members-only — requiresTierId: a membership tier of this store — or public again " +
+    "(null). Members of the tier read the page; everyone else sees its title and links to the " +
+    "products that grant the tier. Takes effect when the design is published. Not for the home " +
+    "page, templates or regions.",
+  input: z.object({ siteId, pageId, requiresTierId: z.number().int().positive().nullable() }).strict(),
+  permission: "cms.write",
+  riskTier: "medium",
+  undoable: true,
+  inverse: (r) => {
+    const input = r.input as { siteId: number; pageId: number };
+    const d = r.diff.find((x) => x.path === "requiresTierId");
+    if (!d) return null;
+    return { actionId: "builder.setPageAccess", input: { siteId: input.siteId, pageId: input.pageId, requiresTierId: d.before ?? null } };
+  },
+  async run(input, ctx) {
+    await lockDesign(ctx, input.siteId);
+    const doc = await loadPage(ctx.db, input.siteId, input.pageId);
+    if (doc.kind !== "page") throw conflict("Only pages can be members-only — not templates or regions.");
+    if (doc.handle === HOME_HANDLE) throw conflict("The home page is the store's front door; it cannot be members-only.");
+    if (input.requiresTierId !== null) await assertTiersOwnedBySite([input.requiresTierId], input.siteId, ctx.db);
+    if ((doc.requiresTierId ?? null) === input.requiresTierId) return { pageId: doc.id, requiresTierId: input.requiresTierId, revision: null };
+
+    await ctx.db.update(siteDocuments).set({ requiresTierId: input.requiresTierId, updatedAt: new Date() }).where(eq(siteDocuments.id, doc.id));
+    ctx.recordDiff({ ...pageEntity(doc.id), path: "requiresTierId", before: doc.requiresTierId ?? null, after: input.requiresTierId });
+    return { pageId: doc.id, requiresTierId: input.requiresTierId, revision: await bumpRevision(ctx, input.siteId) };
+  },
+});
+
 // ---------------------------------------------------------------------------
 // Templates and global regions (M4)
 // ---------------------------------------------------------------------------
@@ -1150,6 +1195,7 @@ export const publish = defineAction({
           publishedTitle: doc.title,
           publishedSeo: doc.seo,
           publishedTree: doc.draftTree,
+          publishedRequiresTierId: doc.requiresTierId,
           updatedAt: new Date(),
         })
         .where(eq(siteDocuments.id, doc.id));
@@ -1191,7 +1237,7 @@ export const publish = defineAction({
         tokens: design.draftTokens,
         customCss: design.draftCustomCss,
         headHtml: design.draftHeadHtml,
-        documents: live.map((d) => ({ id: d.id, kind: d.kind, handle: d.handle, title: d.title, seo: d.seo, tree: d.draftTree })),
+        documents: live.map((d) => ({ id: d.id, kind: d.kind, handle: d.handle, title: d.title, seo: d.seo, tree: d.draftTree, requiresTierId: d.requiresTierId })),
       },
       note: input.note ?? null,
       publishedBy: `${ctx.actor.type}:${ctx.actor.id}`,
@@ -1223,6 +1269,7 @@ export const discardDraft = defineAction({
             handle: doc.publishedHandle ?? doc.handle,
             title: doc.publishedTitle ?? doc.title,
             seo: doc.publishedSeo ?? {},
+            requiresTierId: doc.publishedRequiresTierId,
             draftDeleted: false,
             updatedAt: new Date(),
           })
@@ -1282,6 +1329,31 @@ export const restoreVersion = defineAction({
       );
     }
 
+    /**
+     * A version's members-only pages come back members-only (§18.9). A tier
+     * deleted since cannot be restored to, and falling back to public would
+     * be restoring paid content as free — so the restore is refused instead,
+     * naming the pages. (The tier could not be deleted while a live or draft
+     * page named it; an old version is the one place a stale id can live.)
+     */
+    const tierIds = [...new Set(snap.snapshot.documents.flatMap((d) => (d.requiresTierId ? [d.requiresTierId] : [])))];
+    if (tierIds.length > 0) {
+      const found = await ctx.db
+        .select({ id: membershipTiers.id })
+        .from(membershipTiers)
+        .where(and(eq(membershipTiers.siteId, input.siteId), inArray(membershipTiers.id, tierIds)));
+      const have = new Set(found.map((t) => t.id));
+      const stranded = snap.snapshot.documents.filter((d) => d.requiresTierId && !have.has(d.requiresTierId)).map((d) => d.title);
+      if (stranded.length > 0) {
+        throw new ApiError(
+          "CONFLICT",
+          409,
+          `This version has members-only pages for a membership tier that no longer exists: ${stranded.join(", ")}.`,
+          { reason: "tier_missing", pages: stranded },
+        );
+      }
+    }
+
     const docs = await ctx.db.select().from(siteDocuments).where(eq(siteDocuments.siteId, input.siteId));
     const wanted = new Map(snap.snapshot.documents.map((d) => [d.id, d]));
     // Pages not in the version leave the draft first, so their handles are free to be reused.
@@ -1291,7 +1363,8 @@ export const restoreVersion = defineAction({
     }
     for (const d of snap.snapshot.documents) {
       const existing = docs.find((x) => x.id === d.id);
-      const values = { handle: d.handle, title: d.title, seo: d.seo, draftTree: d.tree, draftDeleted: false, updatedAt: new Date() };
+      // Snapshots from before migration 0054 hold no gate: those pages were public.
+      const values = { handle: d.handle, title: d.title, seo: d.seo, draftTree: d.tree, requiresTierId: d.requiresTierId ?? null, draftDeleted: false, updatedAt: new Date() };
       if (existing) await ctx.db.update(siteDocuments).set(values).where(eq(siteDocuments.id, d.id));
       else await ctx.db.insert(siteDocuments).values({ siteId: input.siteId, kind: d.kind as "page", ...values });
     }

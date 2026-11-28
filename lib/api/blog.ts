@@ -27,7 +27,11 @@ export type BlogPostSummary = {
   id: number;
   handle: string;
   title: string;
-  /** The merchant's excerpt, or the body's opening words when they wrote none. */
+  /**
+   * The merchant's excerpt, or the body's opening words when they wrote none —
+   * **except on a members-only post**, where it is the merchant's excerpt or
+   * `""`: the opening words are the paid content.
+   */
   excerpt: string;
   coverImage: string | null;
   coverAlt: string;
@@ -35,6 +39,12 @@ export type BlogPostSummary = {
   status: PostStatus;
   publishedAt: string | null;
   path: string;
+  /**
+   * Members-only (§18.9, 2026-11-26): only holders of this membership tier read
+   * the body; everyone else sees the title, cover, the merchant's excerpt and
+   * links to the products that grant the tier. Null: everyone.
+   */
+  requiresTierId: number | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -81,6 +91,12 @@ export type BlogPostFields = {
   author?: string;
   /** Replaced whole — send every field you want kept. */
   seo?: PageSeo;
+  /**
+   * A tier from `listMembershipTiers({ siteId })` (`lib/api/memberships.ts`)
+   * to make the post members-only, or `null` for everyone. `409` for a tier of
+   * another store. Undoable like every other field.
+   */
+  requiresTierId?: number | null;
 };
 
 /** A new draft. The handle comes from the title unless given. Undoable (deletes the draft). */
