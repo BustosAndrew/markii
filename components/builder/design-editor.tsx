@@ -31,6 +31,7 @@ import {
   setCustomCss,
   setHeadCode,
   setDesignTokens,
+  setDesignPageAccess,
   setNodeBindings,
   setNodeCustomClass,
   setNodeProps,
@@ -54,6 +55,7 @@ import {
 import { listCategories } from "@/lib/api/categories";
 import { listCollections } from "@/lib/api/commerce";
 import { listForms } from "@/lib/api/forms";
+import { listMembershipTiers } from "@/lib/api/memberships";
 import { listProducts } from "@/lib/api/products";
 import { publicErrorMessage } from "@/lib/api/public-copy";
 import { ApiClientError } from "@/lib/api/types";
@@ -87,6 +89,19 @@ import { BREAKPOINT_ORDER, docOrder, find, insertionPoint, nodeLabel, nodeScopes
  * editor's undo stack like the merchant's own, so "undo what the agent just
  * did" is the same button.
  */
+
+/** Restore of a version whose members-only pages name a deleted tier. */
+function restoreTierMissing(error: unknown): string | null {
+  if (!(error instanceof ApiClientError) || error.status !== 409) return null;
+  const details = error.details;
+  if (!details || typeof details !== "object" || Array.isArray(details)) return null;
+  if ((details as { reason?: string }).reason !== "tier_missing") return null;
+  const pages = (details as { pages?: unknown }).pages;
+  if (Array.isArray(pages) && pages.length > 0 && pages.every((p) => typeof p === "string")) {
+    return `This version has members-only pages for a membership tier that no longer exists: ${pages.join(", ")}.`;
+  }
+  return error.message;
+}
 
 /** `400 VALIDATION_ERROR` with `details.problems` — custom CSS and head code. */
 function validationProblems(error: unknown): string[] | null {
@@ -180,6 +195,7 @@ export function DesignEditor({
   const [redoStack, setRedoStack] = useState<Step[]>([]);
   const [dialog, setDialog] = useState<"publish" | "history" | null>(null);
   const [pickers, setPickers] = useState<PickerData>({ products: [], categories: [], collections: [], forms: [] });
+  const [tiers, setTiers] = useState<{ id: number; name: string }[]>([]);
   /** This tab's chat is mid-turn. The lease says the same a poll later; this closes that gap. */
   const [agentBusy, setAgentBusy] = useState(false);
   const [stopSignal, setStopSignal] = useState(0);
@@ -306,7 +322,8 @@ export function DesignEditor({
       listCategories({ siteId: site.id, limit: 100 }).catch(() => null),
       listCollections({ siteId: site.id, limit: 100 }).catch(() => null),
       listForms(site.id).catch(() => null),
-    ]).then(([p, c, k, f]) => {
+      listMembershipTiers({ siteId: site.id }).catch(() => null),
+    ]).then(([p, c, k, f, t]) => {
       if (cancelled) return;
       setPickers({
         products: (p?.items ?? []).filter((x) => x.enabled).map((x) => ({ slug: x.slug, name: x.name, images: x.images })),
@@ -314,6 +331,7 @@ export function DesignEditor({
         collections: (k?.items ?? []).map((x) => ({ handle: x.handle, title: x.title })),
         forms: (f?.items ?? []).map((x) => ({ handle: x.handle, name: x.name })),
       });
+      setTiers((t?.items ?? []).map((x) => ({ id: x.id, name: x.name })));
     });
     return () => {
       cancelled = true;
@@ -424,8 +442,9 @@ export function DesignEditor({
           setLock((l) => ({ ...l, active: true }));
           setError("The brand agent is editing this design. Your change was not saved.");
         } else {
+          const missing = restoreTierMissing(e);
           const problems = validationProblems(e);
-          setError(problems ? problems.join(" ") : publicErrorMessage(e, "That change could not be saved."));
+          setError(missing ?? (problems ? problems.join(" ") : publicErrorMessage(e, "That change could not be saved.")));
         }
         return null;
       } finally {
@@ -906,6 +925,7 @@ export function DesignEditor({
                 currentId={pageId}
                 currentSeo={page?.seo ?? {}}
                 disabled={readOnly || busy}
+                tiers={tiers}
                 onOpen={(id) => void openDocument(id, started.pages.find((x) => x.id === id)?.path ?? "/")}
                 onCreate={async (handle, title) => {
                   const out = await run(() => createDesignPage(sid, handle, title), "builder.createPage");
@@ -914,6 +934,9 @@ export function DesignEditor({
                   return Boolean(out);
                 }}
                 onRename={(id, patch) => void run(() => updateDesignPage({ siteId: sid, pageId: id, ...patch }), "builder.updatePage")}
+                onSetAccess={(id, requiresTierId) =>
+                  void run(() => setDesignPageAccess(sid, id, requiresTierId), "builder.setPageAccess")
+                }
                 onDelete={(id) => void run(() => deleteDesignPage(sid, id), "builder.deletePage")}
                 onRestore={(id) => void run(() => restoreDesignPage(sid, id), "builder.restorePage")}
               />
@@ -1078,6 +1101,7 @@ export function DesignEditor({
         open={dialog === "publish"}
         site={sid}
         hasUnpublishedChanges={started.hasUnpublishedChanges}
+        tiers={tiers}
         onSelectNode={(documentId, nodeId) => {
           const path =
             started.pages.find((p) => p.id === documentId)?.path ??
@@ -1100,6 +1124,7 @@ export function DesignEditor({
       <HistoryDialog
         open={dialog === "history"}
         site={sid}
+        tiers={tiers}
         onSelectNode={(documentId, nodeId) => {
           const path =
             started.pages.find((p) => p.id === documentId)?.path ??

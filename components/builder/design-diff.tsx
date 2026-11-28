@@ -2,6 +2,8 @@
 
 import type { DesignDiff, DocumentDiff, NodeChange, NodeRef, ValueChange } from "@/lib/builder/design-diff";
 
+export type DiffTierName = { id: number; name: string };
+
 function shown(value: unknown): string {
   if (value === null || value === undefined) return "—";
   if (typeof value === "string") return value;
@@ -13,13 +15,29 @@ function shown(value: unknown): string {
   }
 }
 
-function FieldList({ fields }: { fields: ValueChange[] }) {
+function accessLabel(value: unknown, tiers: DiffTierName[]): string {
+  if (value == null || value === "") return "Everyone";
+  const id = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(id)) return shown(value);
+  return tiers.find((t) => t.id === id)?.name ?? `Tier ${id}`;
+}
+
+function FieldList({ fields, tiers }: { fields: ValueChange[]; tiers: DiffTierName[] }) {
   if (fields.length === 0) return null;
   return (
     <ul className="mt-1 space-y-0.5 text-xs text-muted">
       {fields.map((f) => (
         <li key={f.field}>
-          <span className="font-medium text-foreground">{f.field}</span>: {shown(f.before)} → {shown(f.after)}
+          {f.field === "requiresTierId" ? (
+            <>
+              <span className="font-medium text-foreground">Access</span>: {accessLabel(f.before, tiers)} →{" "}
+              {accessLabel(f.after, tiers)}
+            </>
+          ) : (
+            <>
+              <span className="font-medium text-foreground">{f.field}</span>: {shown(f.before)} → {shown(f.after)}
+            </>
+          )}
         </li>
       ))}
     </ul>
@@ -59,9 +77,11 @@ function NodeList({
 function ChangedNodes({
   nodes,
   onSelect,
+  tiers,
 }: {
   nodes: NodeChange[];
   onSelect?: (nodeId: string) => void;
+  tiers: DiffTierName[];
 }) {
   if (nodes.length === 0) return null;
   return (
@@ -77,7 +97,7 @@ function ChangedNodes({
             ) : (
               <span className="text-xs font-medium text-foreground">{n.label}</span>
             )}
-            <FieldList fields={n.changes} />
+            <FieldList fields={n.changes} tiers={tiers} />
           </li>
         ))}
       </ul>
@@ -88,9 +108,11 @@ function ChangedNodes({
 function DocumentBlock({
   doc,
   onSelectNode,
+  tiers,
 }: {
   doc: DocumentDiff;
   onSelectNode?: (documentId: number, nodeId: string) => void;
+  tiers: DiffTierName[];
 }) {
   // Only what exists in the draft can be selected: a removed node, or anything in
   // a removed document, has nowhere to open. Both sides of every diff the editor
@@ -105,10 +127,10 @@ function DocumentBlock({
           ({doc.change === "added" ? "added" : doc.change === "removed" ? "removed" : "changed"})
         </span>
       </p>
-      <FieldList fields={doc.fields} />
+      <FieldList fields={doc.fields} tiers={tiers} />
       <NodeList title="Added" nodes={doc.nodes.added} onSelect={select} />
       <NodeList title="Removed" nodes={doc.nodes.removed} />
-      <ChangedNodes nodes={doc.nodes.changed} onSelect={select} />
+      <ChangedNodes nodes={doc.nodes.changed} onSelect={select} tiers={tiers} />
     </div>
   );
 }
@@ -117,11 +139,14 @@ export function DesignDiffView({
   diff,
   onSelectNode,
   identicalMessage = "No changes since the last publish.",
+  tiers = [],
 }: {
   diff: DesignDiff;
   onSelectNode?: (documentId: number, nodeId: string) => void;
   /** What to say when the two sides match — the default fits live → draft only. */
   identicalMessage?: string;
+  /** Names for `requiresTierId` so the diff reads *Access: Everyone → Tea Club*. */
+  tiers?: DiffTierName[];
 }) {
   if (diff.identical) {
     return <p className="text-sm text-muted">{identicalMessage}</p>;
@@ -136,13 +161,13 @@ export function DesignDiffView({
       {diff.tokens.length > 0 ? (
         <div>
           <p className="text-sm font-medium text-foreground">Colours and fonts</p>
-          <FieldList fields={diff.tokens} />
+          <FieldList fields={diff.tokens} tiers={tiers} />
         </div>
       ) : null}
       {diff.customCss ? <p className="text-sm text-foreground">Theme CSS changed.</p> : null}
       {diff.headCode.changed ? <p className="text-sm text-foreground">Custom scripts changed.</p> : null}
       {diff.documents.map((doc) => (
-        <DocumentBlock key={doc.id} doc={doc} onSelectNode={onSelectNode} />
+        <DocumentBlock key={doc.id} doc={doc} onSelectNode={onSelectNode} tiers={tiers} />
       ))}
     </div>
   );

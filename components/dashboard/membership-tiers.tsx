@@ -19,6 +19,20 @@ import { FieldError, Input, Label, Select } from "@/components/ui/field";
 
 type SiteOption = { id: number; name: string };
 
+function tierGatesContentMessage(err: unknown, name: string): string {
+  if (!(err instanceof ApiClientError)) return "That did not work.";
+  const details = err.details;
+  if (!details || typeof details !== "object" || Array.isArray(details)) return err.message;
+  if ((details as { reason?: string }).reason !== "tier_gates_content") return err.message;
+  const posts = Number((details as { posts?: unknown }).posts) || 0;
+  const pages = Number((details as { pages?: unknown }).pages) || 0;
+  const bits: string[] = [];
+  if (posts > 0) bits.push(`${posts} post${posts === 1 ? "" : "s"}`);
+  if (pages > 0) bits.push(`${pages} page${pages === 1 ? "" : "s"}`);
+  if (bits.length === 0) return err.message;
+  return `${name} still gates ${bits.join(" and ")}. Make them public or move them first.`;
+}
+
 export function MembershipTiers({
   tiers,
   sites,
@@ -36,14 +50,14 @@ export function MembershipTiers({
   const [name, setName] = useState("");
   const [siteId, setSiteId] = useState<number | null>(selectedSiteId ?? sites[0]?.id ?? null);
 
-  async function run(key: string, fn: () => Promise<unknown>) {
+  async function run(key: string, fn: () => Promise<unknown>, fail?: (err: unknown) => string) {
     setBusy(key);
     setError(null);
     try {
       await fn();
       router.refresh();
     } catch (err) {
-      setError(err instanceof ApiClientError ? err.message : "That did not work.");
+      setError(fail ? fail(err) : err instanceof ApiClientError ? err.message : "That did not work.");
     } finally {
       setBusy(null);
     }
@@ -55,8 +69,8 @@ export function MembershipTiers({
         <h2 className="text-base font-medium text-foreground">Tiers</h2>
         <p className="mt-1 text-sm leading-6 text-muted">
           A product can require a tier (only members may buy it) and a product can grant one
-          (buying it confers membership). Counts are current as of this page load — a membership
-          lapses by its own expiry date.
+          (buying it confers membership). Blog posts and pages can require a tier too. Counts
+          are current as of this page load — a membership lapses by its own expiry date.
         </p>
 
         {tiers.length === 0 ? (
@@ -190,8 +204,9 @@ export function MembershipTiers({
               (removing.gatedProductCount > 0
                 ? `, and ${removing.gatedProductCount} product${
                     removing.gatedProductCount === 1 ? "" : "s"
-                  } behind this tier will become visible to everyone. Nothing will error — the content simply stops being members-only.`
-                : ". No products are gated by it.")
+                  } behind this tier will become visible to everyone`
+                : ". No products are gated by it") +
+              ". Posts and pages that still require this tier stay members-only — make them public or move them first, or the delete is refused."
             : ""
         }
         confirmLabel="Delete tier"
@@ -200,7 +215,11 @@ export function MembershipTiers({
           const target = removing;
           setRemoving(null);
           if (target) {
-            void run(`delete-${target.id}`, () => deleteMembershipTier({ tierId: target.id }));
+            void run(
+              `delete-${target.id}`,
+              () => deleteMembershipTier({ tierId: target.id }),
+              (err) => tierGatesContentMessage(err, target.name),
+            );
           }
         }}
       />

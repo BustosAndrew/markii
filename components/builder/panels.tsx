@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { BlockRegistry, DesignPage, DesignTokens, PageSeo, SavedBlock, SharedDocument, ThemeId } from "@/lib/api/builder";
+import { WhoCanReadSelect, type AccessTier } from "@/components/dashboard/who-can-read-select";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/field";
 import { Toggle } from "@/components/ui/toggle";
@@ -138,9 +139,11 @@ export function PagesPanel({
   currentId,
   currentSeo,
   disabled,
+  tiers = [],
   onOpen,
   onCreate,
   onRename,
+  onSetAccess,
   onDelete,
   onRestore,
 }: {
@@ -149,9 +152,12 @@ export function PagesPanel({
   /** The open page's SEO, from its document. */
   currentSeo: PageSeo;
   disabled: boolean;
+  /** Store membership tiers for the access select. Home, templates and regions are not gated. */
+  tiers?: AccessTier[];
   onOpen: (id: number) => void;
   onCreate: (handle: string, title: string) => Promise<boolean>;
   onRename: (id: number, patch: { title?: string; seo?: PageSeo }) => void;
+  onSetAccess?: (id: number, requiresTierId: number | null) => void;
   onDelete: (id: number) => void;
   onRestore: (id: number) => void;
 }) {
@@ -170,6 +176,7 @@ export function PagesPanel({
               className={`min-w-0 flex-1 truncate rounded px-2 py-1.5 text-left text-sm ${p.id === currentId ? "bg-brand/10" : "hover:bg-hover"} ${p.deleted ? "text-muted line-through" : "text-foreground"}`}
             >
               {p.title} <span className="text-xs text-muted">{p.path}</span>
+              {p.requiresTierId != null ? <span className="ml-1 text-xs text-muted">· members only</span> : null}
               {!p.published && !p.deleted ? <span className="ml-1 text-xs text-muted">· not published</span> : null}
             </button>
             {p.handle !== "home" ? (
@@ -194,6 +201,17 @@ export function PagesPanel({
             <Label htmlFor="pg-title">Title</Label>
             <Input id="pg-title" defaultValue={current.title} key={`t-${current.id}-${current.title}`} disabled={disabled} maxLength={120} onBlur={(e) => e.target.value.trim() && e.target.value !== current.title && onRename(current.id, { title: e.target.value.trim() })} />
           </div>
+          {current.handle !== "home" && onSetAccess ? (
+            <WhoCanReadSelect
+              id="pg-access"
+              key={`a-${current.id}-${current.requiresTierId ?? "public"}`}
+              value={current.requiresTierId}
+              tiers={tiers}
+              disabled={disabled}
+              onChange={(tierId) => onSetAccess(current.id, tierId)}
+              hint="Takes effect when you publish."
+            />
+          ) : null}
           <SeoFields key={`${current.id}-${JSON.stringify(currentSeo)}`} seo={currentSeo} disabled={disabled} onSave={(seo) => onRename(current.id, { seo })} />
         </section>
       ) : null}

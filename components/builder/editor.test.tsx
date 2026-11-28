@@ -25,6 +25,7 @@ const { Inspector } = await import("./inspector");
 const { PublishDialog } = await import("./dialogs");
 const { PagesPanel } = await import("./panels");
 const { LayerTree } = await import("./layer-tree");
+const { DesignDiffView } = await import("./design-diff");
 
 const heading: BlockDescription = {
   type: "heading",
@@ -252,5 +253,85 @@ describe("the page SEO form (M5)", () => {
     render(<PagesPanel pages={[page]} currentId={5} currentSeo={{ description: "Delivery times" }} disabled={false} onOpen={noop} onCreate={async () => true} onRename={onRename} onDelete={noop} onRestore={noop} />);
     fireEvent.click(screen.getByRole("switch", { name: "Hide from search engines and AI agents" }));
     expect(onRename).toHaveBeenLastCalledWith(5, { seo: { description: "Delivery times", noindex: true } });
+  });
+
+  it("saves page access through setPageAccess, not updatePage, and hides it on home", () => {
+    const onSetAccess = vi.fn();
+    const onRename = vi.fn();
+    render(
+      <PagesPanel
+        pages={[page]}
+        currentId={5}
+        currentSeo={{}}
+        disabled={false}
+        tiers={[{ id: 7, name: "Tea Club" }]}
+        onOpen={noop}
+        onCreate={async () => true}
+        onRename={onRename}
+        onSetAccess={onSetAccess}
+        onDelete={noop}
+        onRestore={noop}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Who can read this"), { target: { value: "7" } });
+    expect(onSetAccess).toHaveBeenCalledWith(5, 7);
+    expect(onRename).not.toHaveBeenCalled();
+
+    cleanup();
+    render(
+      <PagesPanel
+        pages={[{ ...page, id: 1, handle: "home", title: "Home", path: "/" }]}
+        currentId={1}
+        currentSeo={{}}
+        disabled={false}
+        tiers={[{ id: 7, name: "Tea Club" }]}
+        onOpen={noop}
+        onCreate={async () => true}
+        onRename={onRename}
+        onSetAccess={onSetAccess}
+        onDelete={noop}
+        onRestore={noop}
+      />,
+    );
+    expect(screen.queryByLabelText("Who can read this")).toBeNull();
+  });
+});
+
+describe("the publish diff access labels", () => {
+  it("renders requiresTierId as Access: Everyone → the tier name", () => {
+    render(
+      <DesignDiffView
+        tiers={[{ id: 7, name: "Tea Club" }]}
+        diff={{
+          identical: false,
+          theme: null,
+          tokens: [],
+          customCss: null,
+          headCode: { changed: false },
+          documents: [
+            {
+              id: 5,
+              kind: "page",
+              handle: "shipping",
+              title: "Shipping",
+              change: "changed",
+              fields: [{ field: "requiresTierId", before: null, after: 7 }],
+              nodes: { added: [], removed: [], changed: [] },
+            },
+          ],
+          summary: {
+            documentsAdded: 0,
+            documentsRemoved: 0,
+            documentsChanged: 1,
+            nodesAdded: 0,
+            nodesRemoved: 0,
+            nodesChanged: 0,
+          },
+        }}
+      />,
+    );
+    expect(
+      screen.getByText((_, node) => node?.tagName === "LI" && (node.textContent ?? "").replace(/\s+/g, " ").includes("Access: Everyone → Tea Club")),
+    ).toBeTruthy();
   });
 });

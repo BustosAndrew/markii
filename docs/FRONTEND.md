@@ -555,7 +555,7 @@ the **blocklist** are customer data — gate them on `commerce.read` / `commerce
   filled from `listForms`. Publishing refuses `UNKNOWN_FORM` / `FORM_NOT_CHOSEN`.
 - Help: `lib/ops-agents/assistant/help.ts` (`site_design`) names the Forms tab.
 
-### 🆕 New 2026-11-26 — members-only posts and pages — **screens to build**
+### 🟢 New 2026-11-26 — members-only posts and pages — screens built
 
 Contract: `docs/API.md` §18.9 "Members-only posts and pages". **Migration 0054 is applied** to the shared
 database. Nothing new to flip — `BLOG_API_LIVE` and `BUILDER_API_LIVE` already cover it; the types moved.

@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input, Label } from "@/components/ui/field";
 import { LocalDateTime } from "@/components/ui/local-date";
-import { DesignDiffView } from "./design-diff";
+import { DesignDiffView, type DiffTierName } from "./design-diff";
 
 export function Modal({
   open,
@@ -89,6 +89,7 @@ type PublishProps = {
   onDiscard: () => Promise<boolean>;
   hasUnpublishedChanges: boolean;
   onSelectNode?: (documentId: number, nodeId: string) => void;
+  tiers?: DiffTierName[];
 };
 
 /** Mounted only while open, so every opening starts from fresh checks. */
@@ -96,7 +97,7 @@ export function PublishDialog(props: PublishProps) {
   return props.open ? <OpenPublishDialog {...props} /> : null;
 }
 
-function OpenPublishDialog({ open, site, onClose, onPublish, onDiscard, hasUnpublishedChanges, onSelectNode }: PublishProps) {
+function OpenPublishDialog({ open, site, onClose, onPublish, onDiscard, hasUnpublishedChanges, onSelectNode, tiers }: PublishProps) {
   const [checks, setChecks] = useState<CheckResult[] | null>(null);
   const [diff, setDiff] = useState<DesignDiff | "none" | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -134,6 +135,7 @@ function OpenPublishDialog({ open, site, onClose, onPublish, onDiscard, hasUnpub
             <h3 className="mb-2 text-sm font-medium text-foreground">What publishing will change</h3>
             <DesignDiffView
               diff={diff}
+              tiers={tiers}
               onSelectNode={
                 onSelectNode
                   ? (documentId, nodeId) => {
@@ -205,6 +207,7 @@ type HistoryProps = {
   onClose: () => void;
   onRestore: (version: number) => Promise<boolean>;
   onSelectNode?: (documentId: number, nodeId: string) => void;
+  tiers?: DiffTierName[];
 };
 
 /** Mounted only while open, so the list is fetched fresh each time. */
@@ -212,7 +215,7 @@ export function HistoryDialog(props: HistoryProps) {
   return props.open ? <OpenHistoryDialog {...props} /> : null;
 }
 
-function OpenHistoryDialog({ open, site, onClose, onRestore, onSelectNode }: HistoryProps) {
+function OpenHistoryDialog({ open, site, onClose, onRestore, onSelectNode, tiers }: HistoryProps) {
   const [items, setItems] = useState<DesignVersion[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<number | null>(null);
@@ -240,6 +243,7 @@ function OpenHistoryDialog({ open, site, onClose, onRestore, onSelectNode }: His
           </div>
           <DesignDiffView
             diff={compare.diff}
+            tiers={tiers}
             identicalMessage={`The current draft matches version ${compare.version}.`}
             onSelectNode={
               onSelectNode

@@ -1,4 +1,4 @@
-import { getMe, getSite, getSiteBlogPost } from "@/lib/api/server";
+import { getMe, getSite, getSiteBlogPost, listMembershipTiers } from "@/lib/api/server";
 import { loadOrError } from "@/lib/api/load";
 import { canWriteCms } from "@/lib/api/org";
 import { BlogPostForm } from "@/components/dashboard/blog-post-form";
@@ -9,10 +9,11 @@ import { PageHeader } from "@/components/ui/page-header";
 export default async function EditBlogPostPage({ params }: { params: Promise<{ slug: string; id: string }> }) {
   const { slug, id } = await params;
   const postId = Number(id);
-  const [siteResult, postResult, me] = await Promise.all([
+  const [siteResult, postResult, me, tiersResult] = await Promise.all([
     loadOrError(() => getSite(slug)),
     loadOrError(() => getSiteBlogPost(slug, postId)),
     loadOrError(() => getMe()),
+    loadOrError(() => listMembershipTiers()),
   ]);
 
   if (siteResult.error || !siteResult.data) {
@@ -39,7 +40,13 @@ export default async function EditBlogPostPage({ params }: { params: Promise<{ s
     <div>
       <WebsiteNav slug={site.slug} />
       <PageHeader title={post.title} description={post.path} />
-      <BlogPostForm siteId={site.id} siteSlug={site.slug} post={post} canWrite={canWriteCms(me.data?.role)} />
+      <BlogPostForm
+        siteId={site.id}
+        siteSlug={site.slug}
+        post={post}
+        canWrite={canWriteCms(me.data?.role)}
+        tiers={(tiersResult.data?.items ?? []).filter((t) => t.siteId === site.id)}
+      />
     </div>
   );
 }

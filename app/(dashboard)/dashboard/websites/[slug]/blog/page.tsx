@@ -102,7 +102,14 @@ export default async function BlogListPage({
                       <Link href={`/dashboard/websites/${site.slug}/blog/${post.id}`} className="font-medium text-foreground hover:text-brand">
                         {post.title}
                       </Link>
-                      <div className="text-xs text-muted">{post.excerpt}</div>
+                      {post.requiresTierId != null ? (
+                        <div className="mt-1">
+                          <Badge variant="info">Members only</Badge>
+                        </div>
+                      ) : null}
+                      <div className="text-xs text-muted">
+                        {post.requiresTierId != null && !post.excerpt ? "No excerpt — non-members see only the title." : post.excerpt}
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       <Badge variant={STATUS[post.status].variant}>{STATUS[post.status].label}</Badge>

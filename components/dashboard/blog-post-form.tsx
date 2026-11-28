@@ -17,6 +17,7 @@ import { ApiClientError } from "@/lib/api/types";
 import { publicErrorMessage } from "@/lib/api/public-copy";
 import type { PageSeo } from "@markii/renderer/types";
 import { UndoBar } from "@/components/dashboard/undo-bar";
+import { WhoCanReadSelect, type AccessTier } from "@/components/dashboard/who-can-read-select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -43,11 +44,13 @@ export function BlogPostForm({
   siteSlug,
   post,
   canWrite,
+  tiers,
 }: {
   siteId: number;
   siteSlug: string;
   post?: BlogPost;
   canWrite: boolean;
+  tiers: AccessTier[];
 }) {
   const router = useRouter();
   const editing = Boolean(post);
@@ -59,6 +62,7 @@ export function BlogPostForm({
   const [coverAlt, setCoverAlt] = useState(post?.coverAlt ?? "");
   const [author, setAuthor] = useState(post?.author ?? "");
   const [seo, setSeo] = useState<PageSeo>(post?.seo ?? {});
+  const [requiresTierId, setRequiresTierId] = useState<number | null>(post?.requiresTierId ?? null);
   const [redirectOldLink, setRedirectOldLink] = useState(true);
   const [scheduleAt, setScheduleAt] = useState("");
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
@@ -101,6 +105,7 @@ export function BlogPostForm({
       coverAlt: coverAlt.trim(),
       author: author.trim(),
       seo: seoPayload(seo),
+      requiresTierId: tiers.some((t) => t.id === requiresTierId) ? requiresTierId : null,
     };
   }
 
@@ -204,10 +209,26 @@ export function BlogPostForm({
             <code>&gt;</code> quotes, fenced code and <code>---</code>. Raw HTML shows as text.
           </div>
         </div>
+        <WhoCanReadSelect
+          id="post-access"
+          value={requiresTierId}
+          tiers={tiers}
+          disabled={!canWrite}
+          onChange={setRequiresTierId}
+        />
         <div>
           <Label htmlFor="post-excerpt">Excerpt</Label>
           <Textarea id="post-excerpt" rows={2} value={excerpt} disabled={!canWrite} onChange={(e) => setExcerpt(e.target.value)} />
-          <p className="mt-1 text-xs text-muted">Leave empty to use the opening words of the body.</p>
+          {requiresTierId != null ? (
+            <p className="mt-1 text-xs text-muted">
+              Members see the post; everyone else sees its title, cover and this excerpt.
+              {excerpt.trim()
+                ? null
+                : " Add one — the opening words of the body are the paid content."}
+            </p>
+          ) : (
+            <p className="mt-1 text-xs text-muted">Leave empty to use the opening words of the body.</p>
+          )}
         </div>
         <div>
           <Label htmlFor="post-author">Author</Label>
